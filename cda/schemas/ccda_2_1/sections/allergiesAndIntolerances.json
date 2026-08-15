@@ -1,0 +1,233 @@
+{
+  "key": "allergiesAndIntolerances",
+  "uscdiClass": "Allergies and Intolerances",
+  "displayName": "Allergies and Adverse Reactions",
+  "loincCode": "48765-2",
+  "templateId": "2.16.840.1.113883.10.20.22.2.6.1",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "2.16.840.1.113883.10.20.22.2.6",
+  "conformance": "SHALL",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.30",
+  "entryTemplateIdExtension": "2015-08-01",
+  "observationTemplateId": "2.16.840.1.113883.10.20.22.4.7",
+  "observationTemplateIdExtension": "2014-06-09",
+  "fields": [
+    {
+      "key": "medicationAllergyCode",
+      "uscdiElement": "Medication Allergy Intolerance",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "RxNorm",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/participant[@typeCode='CSM']/participantRole[@classCode='MANU']/playingEntity[@classCode='MMAT']/code/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/participant[@typeCode='CSM']/participantRole[@classCode='MANU']/playingEntity[@classCode='MMAT']/code/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/participant[@typeCode='CSM']/participantRole[@classCode='MANU']/playingEntity[@classCode='MMAT']/code/@codeSystem"
+    },
+    {
+      "key": "reaction",
+      "uscdiElement": "Reaction",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']/value/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']/value/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']/value/@codeSystem"
+    },
+    {
+      "key": "reactionEffectiveTime",
+      "uscdiElement": "Reaction Date",
+      "conformance": "SHOULD",
+      "dataType": "TS",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']/effectiveTime/low/@value"
+    },
+    {
+      "key": "reactionEffectiveTimeHigh",
+      "uscdiElement": "Reaction Resolution Date",
+      "conformance": "MAY",
+      "dataType": "TS",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']/effectiveTime/high/@value"
+    },
+    {
+      "key": "severity",
+      "uscdiElement": "Severity",
+      "conformance": "MAY",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.8']/value/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.8']/value/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.8']/value/@codeSystem"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Clinical Status",
+      "conformance": "SHALL",
+      "dataType": "CE",
+      "valueSet": "HITSPProblemStatus",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.28']/value/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.28']/value/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.28']/value/@codeSystem"
+    },
+    {
+      "key": "criticality",
+      "uscdiElement": "Criticality",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "valueSet": "Criticality Observation (HL7ObservationValue: CRITL/CRITH/CRITU)",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']/value/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']/value/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']/value/@codeSystem"
+    },
+    {
+      "key": "onsetDate",
+      "uscdiElement": "Onset Date",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/low/@value"
+    },
+    {
+      "key": "concernEffectiveTime",
+      "uscdiElement": "Concern Act Date",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/act/effectiveTime/low/@value"
+    },
+    {
+      "key": "resolutionDate",
+      "uscdiElement": "Resolution Date",
+      "conformance": "MAY",
+      "dataType": "TS",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/high/@value"
+    },
+    {
+      "key": "allergyTypeCode",
+      "uscdiElement": "Allergy/Intolerance Type",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "Allergy and Intolerance Type",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@codeSystem"
+    },
+    {
+      "key": "negationInd",
+      "uscdiElement": "No Known Allergy Indicator",
+      "conformance": "MAY",
+      "dataType": "BL",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/@negationInd"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Author Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Author Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Author NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Author Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/act/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/act/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/act/author/assignedAuthor/code/@codeSystem"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Author Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Author Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Author NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Author Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@codeSystem"
+    },
+    {
+      "key": "_narrativeRef",
+      "uscdiElement": "Narrative Reference (engine-populated — links the allergen code back to its own narrative table row)",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/participant[@typeCode='CSM']/participantRole[@classCode='MANU']/playingEntity[@classCode='MMAT']/code/originalText/reference/@value"
+    }
+  ],
+  "entryElementPath": "entry/act",
+  "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
+  "structuralTemplateIds": [
+    {
+      "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']",
+      "templateId": "2.16.840.1.113883.10.20.22.4.9",
+      "templateIdExtension": "2014-06-09",
+      "fixedCode": "ASSERTION",
+      "fixedCodeSystem": "2.16.840.1.113883.5.4"
+    },
+    {
+      "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.8']",
+      "templateId": "2.16.840.1.113883.10.20.22.4.8",
+      "templateIdExtension": "2014-06-09",
+      "fixedCode": "SEV",
+      "fixedCodeSystem": "2.16.840.1.113883.5.4",
+      "fixedCodeDisplay": "Severity"
+    },
+    {
+      "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.28']",
+      "templateId": "2.16.840.1.113883.10.20.22.4.28",
+      "fixedCode": "33999-4",
+      "fixedCodeSystem": "2.16.840.1.113883.6.1",
+      "fixedCodeDisplay": "Status"
+    },
+    {
+      "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']",
+      "templateId": "2.16.840.1.113883.10.20.22.4.145",
+      "fixedCode": "82606-5",
+      "fixedCodeSystem": "2.16.840.1.113883.6.1",
+      "fixedCodeDisplay": "Criticality"
+    },
+    {
+      "path": "entry/act/author",
+      "templateIdRef": "authorParticipation"
+    },
+    {
+      "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author",
+      "templateIdRef": "authorParticipation"
+    }
+  ],
+  "entryFixedCode": "CONC",
+  "entryFixedCodeSystem": "2.16.840.1.113883.5.6",
+  "entryFixedCodeDisplay": "Concern",
+  "observationFixedCode": "ASSERTION",
+  "observationFixedCodeSystem": "2.16.840.1.113883.5.4"
+}

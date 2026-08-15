@@ -1,0 +1,180 @@
+{
+  "key": "socialHistory",
+  "uscdiClass": "Social History",
+  "displayName": "Social History",
+  "loincCode": "29762-2",
+  "templateId": "2.16.840.1.113883.10.20.22.2.17",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "",
+  "conformance": "SHALL",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.38",
+  "entryTemplateIdExtension": "2015-08-01",
+  "fields": [
+    {
+      "key": "observationCode",
+      "uscdiElement": "Social History Type",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "xpath": "entry/observation/code/@code",
+      "xpathDisplay": "entry/observation/code/@displayName"
+    },
+    {
+      "key": "smokingStatus",
+      "uscdiElement": "Smoking Status",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "Tobacco Use",
+      "xpath": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/value/@code",
+      "xpathDisplay": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/value/@displayName",
+      "xpathSystem": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/value/@codeSystem"
+    },
+    {
+      "key": "smokingStatusEffectiveTime",
+      "uscdiElement": "Smoking Status Date",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/effectiveTime/low/@value"
+    },
+    {
+      "key": "smokingStatusEffectiveTimeHigh",
+      "uscdiElement": "Smoking Status End Date",
+      "conformance": "MAY",
+      "dataType": "TS",
+      "xpath": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/effectiveTime/high/@value"
+    },
+    {
+      "key": "smokingStatusCurrent",
+      "uscdiElement": "Current Smoking Status (Meaningful Use)",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "valueSet": "Current Smoking Status",
+      "xpath": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/value/@code",
+      "xpathDisplay": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/value/@displayName",
+      "xpathSystem": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/value/@codeSystem"
+    },
+    {
+      "key": "smokingStatusCurrentEffectiveTime",
+      "uscdiElement": "Current Smoking Status Observation Date",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/effectiveTime/@value"
+    },
+    {
+      "key": "smokingStatusCurrentAuthorGiven",
+      "uscdiElement": "Current Smoking Status Author Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "smokingStatusCurrentAuthorFamily",
+      "uscdiElement": "Current Smoking Status Author Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "smokingStatusCurrentAuthorNPI",
+      "uscdiElement": "Current Smoking Status Author NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "smokingStatusCurrentAuthorSpecialtyCode",
+      "uscdiElement": "Current Smoking Status Author Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author/assignedAuthor/code/@codeSystem"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Observation Date",
+      "conformance": "SHOULD",
+      "dataType": "TS",
+      "xpath": "entry/observation/effectiveTime/@value"
+    },
+    {
+      "key": "pregnancyStatus",
+      "uscdiElement": "Pregnancy Status",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "entry/observation[code/@code='82810-3']/value/@code",
+      "xpathDisplay": "entry/observation[code/@code='82810-3']/value/@displayName"
+    },
+    {
+      "key": "sexualOrientation",
+      "uscdiElement": "Sexual Orientation",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "entry/observation[code/@code='76690-7']/value/@code",
+      "xpathDisplay": "entry/observation[code/@code='76690-7']/value/@displayName"
+    },
+    {
+      "key": "genderIdentity",
+      "uscdiElement": "Gender Identity",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "entry/observation[code/@code='76691-5']/value/@code",
+      "xpathDisplay": "entry/observation[code/@code='76691-5']/value/@displayName"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Author Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Author Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Author NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Author Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author/assignedAuthor/code/@codeSystem"
+    }
+  ],
+  "entryElementPath": "entry/observation",
+  "structuralTemplateIds": [
+    {
+      "path": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']",
+      "templateId": "2.16.840.1.113883.10.20.22.4.85",
+      "templateIdExtension": "2014-06-09"
+    },
+    {
+      "path": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author",
+      "templateIdRef": "authorParticipation"
+    },
+    {
+      "path": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']",
+      "templateId": "2.16.840.1.113883.10.20.22.4.78",
+      "templateIdExtension": "2014-06-09",
+      "fixedCode": "72166-2",
+      "fixedCodeSystem": "2.16.840.1.113883.6.1",
+      "fixedCodeDisplay": "Tobacco smoking status NHIS"
+    },
+    {
+      "path": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author",
+      "templateIdRef": "authorParticipation"
+    }
+  ]
+}

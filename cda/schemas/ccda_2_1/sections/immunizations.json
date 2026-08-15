@@ -1,0 +1,163 @@
+{
+  "key": "immunizations",
+  "uscdiClass": "Immunizations",
+  "displayName": "Immunizations",
+  "loincCode": "11369-6",
+  "templateId": "2.16.840.1.113883.10.20.22.2.2.1",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "2.16.840.1.113883.10.20.22.2.2",
+  "conformance": "MAY",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.52",
+  "entryTemplateIdExtension": "2015-08-01",
+  "fields": [
+    {
+      "key": "vaccineCode",
+      "uscdiElement": "Immunizations",
+      "conformance": "SHALL",
+      "dataType": "CE",
+      "valueSet": "CVX, NDC",
+      "xpath": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@code",
+      "xpathDisplay": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@displayName",
+      "xpathSystem": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@codeSystem"
+    },
+    {
+      "key": "administrationDate",
+      "uscdiElement": "Administration Date",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/substanceAdministration/effectiveTime/@value"
+    },
+    {
+      "key": "negationInd",
+      "uscdiElement": "Immunization Refused Indicator",
+      "conformance": "SHALL",
+      "dataType": "BL",
+      "xpath": "entry/substanceAdministration/@negationInd"
+    },
+    {
+      "key": "lotNumber",
+      "uscdiElement": "Lot Number",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/substanceAdministration/consumable/manufacturedProduct/manufacturedMaterial/lotNumberText"
+    },
+    {
+      "key": "manufacturer",
+      "uscdiElement": "Vaccine Manufacturer",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/substanceAdministration/consumable/manufacturedProduct/manufacturerOrganization/name"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Immunization Status",
+      "conformance": "SHALL",
+      "dataType": "CS",
+      "xpath": "entry/substanceAdministration/statusCode/@code"
+    },
+    {
+      "key": "doseQuantity",
+      "uscdiElement": "Dose Quantity",
+      "conformance": "SHOULD",
+      "dataType": "PQ",
+      "xpath": "entry/substanceAdministration/doseQuantity/@value",
+      "xpathUnit": "entry/substanceAdministration/doseQuantity/@unit"
+    },
+    {
+      "key": "routeCode",
+      "uscdiElement": "Route",
+      "conformance": "MAY",
+      "dataType": "CE",
+      "valueSet": "SPL Drug Route of Administration Terminology",
+      "xpath": "entry/substanceAdministration/routeCode/@code",
+      "xpathDisplay": "entry/substanceAdministration/routeCode/@displayName",
+      "xpathSystem": "entry/substanceAdministration/routeCode/@codeSystem"
+    },
+    {
+      "key": "performerGiven",
+      "uscdiElement": "Immunization Performer Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/substanceAdministration/performer/assignedEntity/assignedPerson/name/given"
+    },
+    {
+      "key": "performerFamily",
+      "uscdiElement": "Immunization Performer Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/substanceAdministration/performer/assignedEntity/assignedPerson/name/family"
+    },
+    {
+      "key": "performerOrg",
+      "uscdiElement": "Immunization Performer Organization",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/substanceAdministration/performer/assignedEntity/representedOrganization/name"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Author Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/substanceAdministration/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Author Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/substanceAdministration/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Author NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/substanceAdministration/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Author Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/substanceAdministration/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/substanceAdministration/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/substanceAdministration/author/assignedAuthor/code/@codeSystem"
+    },
+    {
+      "key": "seriesSequenceNumber",
+      "uscdiElement": "Series Sequence Number (this dose's position in a multi-dose series)",
+      "conformance": "MAY",
+      "dataType": "INT",
+      "xpath": "entry/substanceAdministration/entryRelationship[@typeCode='COMP',@inversionInd='true']/sequenceNumber/@value"
+    },
+    {
+      "key": "seriesAdministrationDate",
+      "uscdiElement": "Series Administration Date (nested Substance Administered Act)",
+      "conformance": "MAY",
+      "dataType": "TS",
+      "xpath": "entry/substanceAdministration/entryRelationship[@typeCode='COMP',@inversionInd='true']/act/effectiveTime/@value"
+    }
+  ],
+  "entryElementPath": "entry/substanceAdministration",
+  "structuralTemplateIds": [
+    {
+      "path": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']",
+      "templateId": "2.16.840.1.113883.10.20.22.4.54",
+      "templateIdExtension": "2014-06-09"
+    },
+    {
+      "path": "entry/substanceAdministration/author",
+      "templateIdRef": "authorParticipation"
+    },
+    {
+      "path": "entry/substanceAdministration/entryRelationship[@typeCode='COMP',@inversionInd='true']/act",
+      "templateId": "2.16.840.1.113883.10.20.22.4.118",
+      "fixedCode": "416118004",
+      "fixedCodeSystem": "2.16.840.1.113883.6.96",
+      "fixedCodeDisplay": "Administration",
+      "fixedStatusCode": "completed"
+    }
+  ]
+}

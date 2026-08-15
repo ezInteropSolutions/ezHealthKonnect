@@ -1,0 +1,35 @@
+{
+  "key": "healthConcerns",
+  "uscdiClass": "Health Concerns",
+  "displayName": "Health Concerns",
+  "loincCode": "75310-3",
+  "templateId": "2.16.840.1.113883.10.20.22.2.58",
+  "templateIdOptional": "",
+  "conformance": "SHOULD",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.132",
+  "fields": [
+    {
+      "key": "concernCode",
+      "uscdiElement": "Health Concern",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT, ICD-10-CM",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@displayName"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Concern Status",
+      "conformance": "SHALL",
+      "dataType": "CS",
+      "xpath": "entry/act/statusCode/@code"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Concern Date",
+      "conformance": "SHOULD",
+      "dataType": "IVL_TS",
+      "xpath": "entry/act/effectiveTime/low/@value"
+    }
+  ]
+}

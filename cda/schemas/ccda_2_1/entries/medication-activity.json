@@ -1,0 +1,7 @@
+{
+  "key": "medication-activity",
+  "anchor": "root",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.16",
+  "entryTemplateIdExtension": "2014-06-09",
+  "entryElementPath": "entry/substanceAdministration"
+}

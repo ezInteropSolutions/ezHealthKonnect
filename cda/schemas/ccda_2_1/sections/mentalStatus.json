@@ -1,0 +1,73 @@
+{
+  "key": "mentalStatus",
+  "uscdiClass": "Mental Status",
+  "displayName": "Mental Status",
+  "loincCode": "10190-7",
+  "templateId": "2.16.840.1.113883.10.20.22.2.56",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.74",
+  "entryTemplateIdExtension": "2015-08-01",
+  "fields": [
+    {
+      "key": "value",
+      "uscdiElement": "Mental Status Result",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "xpath": "entry/observation/value/@code",
+      "xpathDisplay": "entry/observation/value/@displayName"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Observation Date",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/observation/effectiveTime/@value"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Author Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Author Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Author NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Author Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/observation/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/observation/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/observation/author/assignedAuthor/code/@codeSystem"
+    }
+  ],
+  "entryElementPath": "entry/observation",
+  "structuralTemplateIds": [
+    {
+      "path": "entry/observation/author",
+      "templateIdRef": "authorParticipation"
+    }
+  ],
+  "entryFixedCode": "373930000",
+  "entryFixedCodeSystem": "2.16.840.1.113883.6.96",
+  "entryFixedCodeDisplay": "Cognitive function",
+  "entryCodeTranslationCode": "75275-8",
+  "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
+  "entryCodeTranslationDisplay": "Cognitive Function"
+}

@@ -1,0 +1,29 @@
+{
+  "key": "instructions",
+  "uscdiClass": "Instructions",
+  "displayName": "Instructions",
+  "loincCode": "69730-0",
+  "templateId": "2.16.840.1.113883.10.20.22.2.45",
+  "templateIdExtension": "2014-06-09",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "entryTemplate": "instruction-v2",
+  "fields": [
+    {
+      "key": "instructionCode",
+      "uscdiElement": "Instruction Topic",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "Patient Education",
+      "xpath": "entry/act/code/@code",
+      "xpathDisplay": "entry/act/code/@displayName"
+    },
+    {
+      "key": "instructionText",
+      "uscdiElement": "Instruction Text",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/act/text"
+    }
+  ]
+}

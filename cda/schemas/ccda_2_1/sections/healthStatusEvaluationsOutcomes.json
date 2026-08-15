@@ -1,0 +1,31 @@
+{
+  "key": "healthStatusEvaluationsOutcomes",
+  "uscdiClass": "Care Plan",
+  "displayName": "Health Status Evaluations and Outcomes",
+  "loincCode": "11383-7",
+  "templateId": "2.16.840.1.113883.10.20.22.2.61",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.144",
+  "fields": [
+    {
+      "key": "outcomeCode",
+      "uscdiElement": "Outcome Code",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "LOINC",
+      "xpath": "entry/observation/code/@code",
+      "xpathDisplay": "entry/observation/code/@displayName",
+      "xpathSystem": "entry/observation/code/@codeSystem"
+    },
+    {
+      "key": "value",
+      "uscdiElement": "Outcome Value",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "entry/observation/value/@code",
+      "xpathDisplay": "entry/observation/value/@displayName"
+    }
+  ],
+  "entryElementPath": "entry/observation"
+}

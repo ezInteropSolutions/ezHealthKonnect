@@ -55,6 +55,40 @@ func (sp *sectionParser) parseSections(root *etree.Element) []CDASection {
 	return sections
 }
 
+// parseNonXMLBody looks for ClinicalDocument/component/nonXMLBody — the
+// Unstructured Document shape, mutually exclusive with structuredBody (CDA's
+// ClinicalDocument.component is a CHOICE between the two). Returns nil when
+// absent, which is the common case (every other document type uses
+// structuredBody instead) — callers should attempt this only after
+// parseSections has already found no structuredBody, mirroring the
+// mutual-exclusivity the base CDA schema itself enforces.
+func (sp *sectionParser) parseNonXMLBody(root *etree.Element) *CDAUnstructuredBody {
+	if root == nil {
+		return nil
+	}
+	for _, compEl := range root.SelectElements("component") {
+		nonXMLEl := compEl.SelectElement("nonXMLBody")
+		if nonXMLEl == nil {
+			continue
+		}
+		textEl := nonXMLEl.SelectElement("text")
+		if textEl == nil {
+			return nil
+		}
+		body := &CDAUnstructuredBody{
+			MediaType:      textEl.SelectAttrValue("mediaType", ""),
+			Representation: textEl.SelectAttrValue("representation", ""),
+		}
+		if refEl := textEl.SelectElement("reference"); refEl != nil {
+			body.ReferenceURL = refEl.SelectAttrValue("value", "")
+		} else {
+			body.Data = strings.TrimSpace(textEl.Text())
+		}
+		return body
+	}
+	return nil
+}
+
 // parseSection converts one <section> element into a CDASection.
 func (sp *sectionParser) parseSection(el *etree.Element, ep *entryParser) CDASection {
 	sec := CDASection{

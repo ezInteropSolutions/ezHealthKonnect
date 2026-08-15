@@ -1,0 +1,11 @@
+{
+  "key": "interventions",
+  "uscdiClass": "Care Plan",
+  "displayName": "Interventions",
+  "loincCode": "62387-6",
+  "templateId": "2.16.840.1.113883.10.20.21.2.3",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "fields": []
+}

@@ -1,0 +1,212 @@
+{
+  "key": "procedures",
+  "uscdiClass": "Procedures",
+  "displayName": "Procedures",
+  "loincCode": "47519-4",
+  "templateId": "2.16.840.1.113883.10.20.22.2.7.1",
+  "templateIdExtension": "2014-06-09",
+  "templateIdOptional": "2.16.840.1.113883.10.20.22.2.7",
+  "conformance": "SHOULD",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.14",
+  "entryTemplateIdExtension": "2014-06-09",
+  "fields": [
+    {
+      "key": "procedureCode",
+      "uscdiElement": "Procedures",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT, CPT, HCPCS",
+      "xpath": "entry/procedure/code/@code",
+      "xpathDisplay": "entry/procedure/code/@displayName",
+      "xpathSystem": "entry/procedure/code/@codeSystem"
+    },
+    {
+      "key": "procedureCodeOriginalText",
+      "uscdiElement": "Procedure Original Text",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/procedure/code/originalText"
+    },
+    {
+      "key": "_narrativeRef",
+      "uscdiElement": "Narrative Reference (engine-populated — links the procedure code back to its own narrative table row)",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/procedure/code/originalText/reference/@value"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Procedure Date",
+      "conformance": "SHOULD",
+      "dataType": "IVL_TS",
+      "xpath": "entry/procedure/effectiveTime/@value"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Procedure Status",
+      "conformance": "SHALL",
+      "dataType": "CS",
+      "xpath": "entry/procedure/statusCode/@code"
+    },
+    {
+      "key": "targetSiteCode",
+      "uscdiElement": "Procedure Target Site",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "valueSet": "Body Site",
+      "xpath": "entry/procedure/targetSiteCode/@code",
+      "xpathDisplay": "entry/procedure/targetSiteCode/@displayName",
+      "xpathSystem": "entry/procedure/targetSiteCode/@codeSystem"
+    },
+    {
+      "key": "performerNPI",
+      "uscdiElement": "Procedure Performer NPI",
+      "conformance": "SHALL",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/id/@extension"
+    },
+    {
+      "key": "performerStreet",
+      "uscdiElement": "Procedure Performer Street",
+      "conformance": "SHALL",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/addr/streetAddressLine"
+    },
+    {
+      "key": "performerCity",
+      "uscdiElement": "Procedure Performer City",
+      "conformance": "SHALL",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/addr/city"
+    },
+    {
+      "key": "performerState",
+      "uscdiElement": "Procedure Performer State",
+      "conformance": "SHALL",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/addr/state"
+    },
+    {
+      "key": "performerPostalCode",
+      "uscdiElement": "Procedure Performer Postal Code",
+      "conformance": "SHALL",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/addr/postalCode"
+    },
+    {
+      "key": "performerPhone",
+      "uscdiElement": "Procedure Performer Phone",
+      "conformance": "SHALL",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/telecom/@value"
+    },
+    {
+      "key": "performerGiven",
+      "uscdiElement": "Procedure Performer Given Name",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/assignedPerson/name/given"
+    },
+    {
+      "key": "performerFamily",
+      "uscdiElement": "Procedure Performer Family Name",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/assignedPerson/name/family"
+    },
+    {
+      "key": "performerOrgIdRoot",
+      "uscdiElement": "Procedure Performer Organization ID Root",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/id/@root"
+    },
+    {
+      "key": "performerOrgId",
+      "uscdiElement": "Procedure Performer Organization ID",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/id/@extension"
+    },
+    {
+      "key": "performerOrgName",
+      "uscdiElement": "Procedure Performer Organization",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/name"
+    },
+    {
+      "key": "performerOrgPhone",
+      "uscdiElement": "Procedure Performer Organization Phone",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/telecom/@value"
+    },
+    {
+      "key": "performerOrgStreet",
+      "uscdiElement": "Procedure Performer Organization Street",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/addr/streetAddressLine"
+    },
+    {
+      "key": "performerOrgCity",
+      "uscdiElement": "Procedure Performer Organization City",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/addr/city"
+    },
+    {
+      "key": "performerOrgState",
+      "uscdiElement": "Procedure Performer Organization State",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/addr/state"
+    },
+    {
+      "key": "performerOrgPostalCode",
+      "uscdiElement": "Procedure Performer Organization Postal Code",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/procedure/performer/assignedEntity/representedOrganization/addr/postalCode"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Author Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/procedure/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Author Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/procedure/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Author NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/procedure/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Author Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/procedure/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/procedure/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/procedure/author/assignedAuthor/code/@codeSystem"
+    }
+  ],
+  "entryElementPath": "entry/procedure",
+  "structuralTemplateIds": [
+    {
+      "path": "entry/procedure/author",
+      "templateIdRef": "authorParticipation"
+    }
+  ]
+}

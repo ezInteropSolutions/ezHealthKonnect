@@ -27,9 +27,29 @@ type DocumentTypeMetadata struct {
 
 // DocumentTypeSectionInfo lists which sections a document type SHALL, SHOULD, or MAY include.
 type DocumentTypeSectionInfo struct {
-	SHALL  []string `json:"SHALL"`
-	SHOULD []string `json:"SHOULD"`
-	MAY    []string `json:"MAY,omitempty"`
+	SHALL             []string                  `json:"SHALL"`
+	SHOULD            []string                  `json:"SHOULD"`
+	MAY               []string                  `json:"MAY,omitempty"`
+	ChoiceConstraints []SectionChoiceConstraint `json:"choiceConstraints,omitempty"`
+}
+
+// SectionChoiceConstraint represents a spec requirement of the form "SHALL
+// contain <Branch A>, OR <Branch B>" (e.g. Consultation Note/Referral
+// Note/Progress Note's "SHALL contain Assessment and Plan Section, OR both
+// Assessment Section and Plan of Treatment Section") — a shape the flat
+// SHALL/SHOULD/MAY lists above cannot express on their own. Satisfied if
+// ANY branch's section keys are ALL present in the document. Each branch is
+// a list of section keys that must ALL be present together for that branch
+// to count.
+//
+// Scope boundary: this only affects conformance SCORING (cda/validator).
+// The corresponding "SHALL NOT contain both branches" mutual-exclusion
+// constraint some of these sections also carry is not enforced here or at
+// build time — cda/builder trusts its canonical input same as everywhere
+// else; a caller populating more than one branch gets all of it emitted.
+type SectionChoiceConstraint struct {
+	Description string     `json:"description"`
+	Branches    [][]string `json:"branches"`
 }
 
 // CDAProfileDef is the top-level schema document (ccda_2_1.json).

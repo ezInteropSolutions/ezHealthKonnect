@@ -1,0 +1,10 @@
+{
+  "key": "procedureDescription",
+  "uscdiClass": "Operative Note",
+  "displayName": "Procedure Description",
+  "loincCode": "29554-3",
+  "templateId": "2.16.840.1.113883.10.20.22.2.27",
+  "templateIdOptional": "",
+  "conformance": "SHALL",
+  "fields": []
+}

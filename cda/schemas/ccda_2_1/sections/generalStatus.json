@@ -1,0 +1,10 @@
+{
+  "key": "generalStatus",
+  "uscdiClass": "General Status",
+  "displayName": "General Status",
+  "loincCode": "10210-3",
+  "templateId": "2.16.840.1.113883.10.20.2.5",
+  "templateIdOptional": "",
+  "conformance": "SHALL",
+  "fields": []
+}

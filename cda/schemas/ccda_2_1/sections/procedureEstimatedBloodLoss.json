@@ -1,0 +1,10 @@
+{
+  "key": "procedureEstimatedBloodLoss",
+  "uscdiClass": "Operative Note",
+  "displayName": "Procedure Estimated Blood Loss",
+  "loincCode": "59770-8",
+  "templateId": "2.16.840.1.113883.10.20.18.2.9",
+  "templateIdOptional": "",
+  "conformance": "SHALL",
+  "fields": []
+}

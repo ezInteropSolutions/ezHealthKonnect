@@ -1,0 +1,33 @@
+{
+  "key": "plannedProcedure",
+  "uscdiClass": "Operative Note",
+  "displayName": "Planned Procedure",
+  "loincCode": "59772-4",
+  "templateId": "2.16.840.1.113883.10.20.22.2.30",
+  "templateIdExtension": "2014-06-09",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.41",
+  "entryTemplateIdExtension": "2014-06-09",
+  "fields": [
+    {
+      "key": "procedureCode",
+      "uscdiElement": "Planned Procedure",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT, CPT, HCPCS",
+      "xpath": "entry/procedure/code/@code",
+      "xpathDisplay": "entry/procedure/code/@displayName",
+      "xpathSystem": "entry/procedure/code/@codeSystem"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Planned Date",
+      "conformance": "SHOULD",
+      "dataType": "TS",
+      "xpath": "entry/procedure/effectiveTime/low/@value"
+    }
+  ],
+  "entryElementPath": "entry/procedure",
+  "entryMoodCodeOverride": "RQO"
+}

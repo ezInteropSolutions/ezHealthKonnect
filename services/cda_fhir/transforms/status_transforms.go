@@ -135,6 +135,31 @@ func MedicationStatusToFHIR(statusCode string) string {
 	}
 }
 
+// MedicationAdministrationStatusToFHIR converts a CDA substanceAdministration statusCode to a
+// FHIR MedicationAdministration.status code. Valid set: in-progress, not-done, on-hold,
+// completed, entered-in-error, stopped, unknown (http://hl7.org/fhir/R4/valueset-medication-admin-status.html)
+// -- a materially different value set from MedicationStatusToFHIR/MedicationRequestStatusToFHIR
+// above (e.g. "active" -> "in-progress" not "active"; "cancelled" -> "not-done" not "stopped"),
+// so this is its own switch rather than a shared helper.
+func MedicationAdministrationStatusToFHIR(statusCode string) string {
+	switch normStatus(statusCode) {
+	case "active":
+		return "in-progress"
+	case "completed":
+		return "completed"
+	case "aborted":
+		return "stopped"
+	case "cancelled":
+		return "not-done"
+	case "nullified":
+		return "entered-in-error"
+	case "held", "suspended":
+		return "on-hold"
+	default:
+		return "unknown"
+	}
+}
+
 // ObservationStatusToFHIR converts a CDA observation statusCode to a FHIR Observation.status code.
 func ObservationStatusToFHIR(statusCode string) string {
 	switch normStatus(statusCode) {

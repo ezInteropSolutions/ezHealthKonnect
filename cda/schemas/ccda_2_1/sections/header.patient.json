@@ -1,0 +1,106 @@
+{
+  "key": "header.patient",
+  "uscdiClass": "Patient Demographics",
+  "displayName": "Patient (Header)",
+  "loincCode": "",
+  "templateId": "",
+  "templateIdOptional": "",
+  "conformance": "SHALL",
+  "isHeader": true,
+  "fields": [
+    {
+      "key": "patientId",
+      "uscdiElement": "Patient ID",
+      "conformance": "SHALL",
+      "dataType": "II",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/id/@extension"
+    },
+    {
+      "key": "patientIdRoot",
+      "uscdiElement": "Patient ID Root OID",
+      "conformance": "SHALL",
+      "dataType": "OID",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/id/@root"
+    },
+    {
+      "key": "givenName",
+      "uscdiElement": "Given Name",
+      "conformance": "SHALL",
+      "dataType": "PN",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/patient/name/given"
+    },
+    {
+      "key": "familyName",
+      "uscdiElement": "Family Name",
+      "conformance": "SHALL",
+      "dataType": "PN",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/patient/name/family"
+    },
+    {
+      "key": "birthDate",
+      "uscdiElement": "Date of Birth",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/patient/birthTime/@value"
+    },
+    {
+      "key": "gender",
+      "uscdiElement": "Administrative Sex",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/patient/administrativeGenderCode/@code",
+      "xpathDisplay": "ClinicalDocument/recordTarget/patientRole/patient/administrativeGenderCode/@displayName"
+    },
+    {
+      "key": "race",
+      "uscdiElement": "Race",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/patient/raceCode/@code",
+      "xpathDisplay": "ClinicalDocument/recordTarget/patientRole/patient/raceCode/@displayName"
+    },
+    {
+      "key": "ethnicity",
+      "uscdiElement": "Ethnicity",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/patient/ethnicGroupCode/@code",
+      "xpathDisplay": "ClinicalDocument/recordTarget/patientRole/patient/ethnicGroupCode/@displayName"
+    },
+    {
+      "key": "addressLine",
+      "uscdiElement": "Address",
+      "conformance": "SHOULD",
+      "dataType": "AD",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/addr/streetAddressLine"
+    },
+    {
+      "key": "city",
+      "uscdiElement": "City",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/addr/city"
+    },
+    {
+      "key": "state",
+      "uscdiElement": "State",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/addr/state"
+    },
+    {
+      "key": "postalCode",
+      "uscdiElement": "Postal Code",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/addr/postalCode"
+    },
+    {
+      "key": "telecom",
+      "uscdiElement": "Phone / Email",
+      "conformance": "SHOULD",
+      "dataType": "TEL",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/telecom/@value"
+    }
+  ]
+}

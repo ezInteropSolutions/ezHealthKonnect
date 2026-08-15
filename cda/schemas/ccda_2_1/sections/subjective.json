@@ -1,0 +1,10 @@
+{
+  "key": "subjective",
+  "uscdiClass": "Progress Note",
+  "displayName": "Subjective",
+  "loincCode": "61150-9",
+  "templateId": "2.16.840.1.113883.10.20.21.2.2",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "fields": []
+}

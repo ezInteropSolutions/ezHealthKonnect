@@ -168,6 +168,7 @@ func (r *DeclarativeTransformRegistry) registerBuiltins() {
 	r.register("condition_category_to_fhir", "Sets Condition.category (Problem List Item, Health Concern, or Encounter Diagnosis) based on which C-CDA section the entry came from.", declarativeConditionCategory)
 	r.register("medication_request_status_to_fhir", "Maps CDA medication order status to MedicationRequest.status.", declarativeMedicationRequestStatusToFHIR)
 	r.register("medication_status_to_fhir", "Maps CDA medication administration status to MedicationStatement.status.", declarativeMedicationStatusToFHIR)
+	r.register("medication_administration_status_to_fhir", "Maps CDA substanceAdministration status to MedicationAdministration.status.", declarativeMedicationAdministrationStatusToFHIR)
 	r.register("cda_timerange_to_period", "Converts a CDA effectiveTime low/high range into a FHIR Period (start/end).", declarativeTimeRangeToPeriod)
 	r.register("cda_time_to_fhir_datetime", "Converts a single CDA timestamp into a full FHIR dateTime.", declarativeTimeToFHIRDateTime)
 	r.register("cda_value_or_code_to_codeable_concept", "Builds a CodeableConcept from the entry's own value if present, otherwise falls back to its code, with a narrative-text fallback when neither has a display name.", declarativeValueOrCodeToCodeableConcept)
@@ -609,6 +610,11 @@ func declarativeMedicationRequestStatusToFHIR(value interface{}, _ map[string]st
 func declarativeMedicationStatusToFHIR(value interface{}, _ map[string]string) (interface{}, error) {
 	s, _ := value.(string)
 	return transforms.MedicationStatusToFHIR(s), nil
+}
+
+func declarativeMedicationAdministrationStatusToFHIR(value interface{}, _ map[string]string) (interface{}, error) {
+	s, _ := value.(string)
+	return transforms.MedicationAdministrationStatusToFHIR(s), nil
 }
 
 func declarativeTimeRangeToPeriod(value interface{}, _ map[string]string) (interface{}, error) {

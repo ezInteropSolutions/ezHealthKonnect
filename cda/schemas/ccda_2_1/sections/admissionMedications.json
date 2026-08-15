@@ -1,0 +1,40 @@
+{
+  "key": "admissionMedications",
+  "uscdiClass": "Admission Medications",
+  "displayName": "Admission Medications",
+  "loincCode": "42346-7",
+  "templateId": "2.16.840.1.113883.10.20.22.2.44",
+  "templateIdOptional": "",
+  "conformance": "SHOULD",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.36",
+  "entryTemplateIdExtension": "2014-06-09",
+  "observationTemplate": "medication-activity-wrapped",
+  "fields": [
+    {
+      "key": "drugCode",
+      "uscdiElement": "Admission Medication",
+      "conformance": "SHALL",
+      "dataType": "CE",
+      "valueSet": "RxNorm",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/consumable/manufacturedProduct/manufacturedMaterial/code/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/consumable/manufacturedProduct/manufacturedMaterial/code/@displayName"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Medication Status",
+      "conformance": "SHALL",
+      "dataType": "CS",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/statusCode/@code"
+    },
+    {
+      "key": "startDate",
+      "uscdiElement": "Start Date",
+      "conformance": "SHOULD",
+      "dataType": "IVL_TS",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/effectiveTime/low/@value"
+    }
+  ],
+  "entryElementPath": "entry/act",
+  "entryFixedCode": "42346-7",
+  "entryFixedCodeDisplay": "Medications on Admission"
+}

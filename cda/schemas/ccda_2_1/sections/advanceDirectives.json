@@ -1,0 +1,226 @@
+{
+  "key": "advanceDirectives",
+  "uscdiClass": "Advance Directives",
+  "displayName": "Advance Directives",
+  "loincCode": "42348-3",
+  "templateId": "2.16.840.1.113883.10.20.22.2.21",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "2.16.840.1.113883.10.20.22.2.21.1",
+  "conformance": "MAY",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.48",
+  "entryTemplateIdExtension": "2015-08-01",
+  "fields": [
+    {
+      "key": "directiveCode",
+      "uscdiElement": "Advance Directive Type",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "AdvanceDirectiveTypeCode",
+      "xpath": "entry/observation/code/@code",
+      "xpathDisplay": "entry/observation/code/@displayName",
+      "xpathSystem": "entry/observation/code/@codeSystem"
+    },
+    {
+      "key": "value",
+      "uscdiElement": "Directive Value",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "xpath": "entry/observation/value/@code",
+      "xpathDisplay": "entry/observation/value/@displayName"
+    },
+    {
+      "key": "effectiveTimeLow",
+      "uscdiElement": "Directive Period (start)",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/observation/effectiveTime/low/@value"
+    },
+    {
+      "key": "effectiveTimeHigh",
+      "uscdiElement": "Directive Period (end)",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/observation/effectiveTime/high/@value"
+    },
+    {
+      "key": "custodianRelationshipCode",
+      "uscdiElement": "Custodian Relationship to Patient",
+      "conformance": "MAY",
+      "dataType": "CD",
+      "valueSet": "Personal And Legal Relationship Role Type",
+      "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/code/@code",
+      "xpathDisplay": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/code/@displayName",
+      "xpathSystem": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/code/@codeSystem"
+    },
+    {
+      "key": "custodianStreet",
+      "uscdiElement": "Custodian Street",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/addr/streetAddressLine"
+    },
+    {
+      "key": "custodianCity",
+      "uscdiElement": "Custodian City",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/addr/city"
+    },
+    {
+      "key": "custodianState",
+      "uscdiElement": "Custodian State",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/addr/state"
+    },
+    {
+      "key": "custodianPostalCode",
+      "uscdiElement": "Custodian Postal Code",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/addr/postalCode"
+    },
+    {
+      "key": "custodianPhone",
+      "uscdiElement": "Custodian Phone",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/telecom/@value"
+    },
+    {
+      "key": "custodianQualifierCode",
+      "uscdiElement": "Custodian Agent Qualifier",
+      "conformance": "MAY",
+      "dataType": "CD",
+      "valueSet": "Healthcare Agent Qualifier Value Set",
+      "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/playingEntity/code/@code",
+      "xpathDisplay": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/playingEntity/code/@displayName",
+      "xpathSystem": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/playingEntity/code/@codeSystem"
+    },
+    {
+      "key": "custodianName",
+      "uscdiElement": "Document Custodian",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/participant[@typeCode='CST']/participantRole[@classCode='AGNT']/playingEntity/name"
+    },
+    {
+      "key": "verifierTime",
+      "uscdiElement": "Advance Directive Verifier Time",
+      "conformance": "SHOULD",
+      "dataType": "TS",
+      "xpath": "entry/observation/participant[@typeCode='VRF']/time/@value"
+    },
+    {
+      "key": "verifierSpecialtyCode",
+      "uscdiElement": "Advance Directive Verifier Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (HIPAA)",
+      "xpath": "entry/observation/participant[@typeCode='VRF']/participantRole/code/@code",
+      "xpathDisplay": "entry/observation/participant[@typeCode='VRF']/participantRole/code/@displayName",
+      "xpathSystem": "entry/observation/participant[@typeCode='VRF']/participantRole/code/@codeSystem"
+    },
+    {
+      "key": "verifierGiven",
+      "uscdiElement": "Advance Directive Verifier Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/participant[@typeCode='VRF']/participantRole/playingEntity/name/given"
+    },
+    {
+      "key": "verifierFamily",
+      "uscdiElement": "Advance Directive Verifier Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/participant[@typeCode='VRF']/participantRole/playingEntity/name/family"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Author Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Author Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Author NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Author Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/observation/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/observation/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/observation/author/assignedAuthor/code/@codeSystem"
+    },
+    {
+      "key": "referencedDocumentIdRoot",
+      "uscdiElement": "Advance Directive Referenced External Document ID Root (CONF:1198-8692/8693/8695 — a scanned/filed copy of the physical directive, e.g. a POLST form; genuinely optional, only present when such a document actually exists)",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/id/@root"
+    },
+    {
+      "key": "referencedDocumentIdExtension",
+      "uscdiElement": "Advance Directive Referenced External Document ID Extension",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/id/@extension"
+    },
+    {
+      "key": "referencedDocumentContent",
+      "uscdiElement": "Advance Directive Referenced External Document Content (base64-embedded — the ED datatype's OTHER representation mode, an alternative to a URL reference: the actual scanned/filed document embedded inline rather than linked. Use this OR referencedDocumentURL, whichever matches how the source system actually holds the document — both are valid ED content, not mutually required.)",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text"
+    },
+    {
+      "key": "referencedDocumentRepresentation",
+      "uscdiElement": "Advance Directive Referenced External Document Representation (ED datatype @representation — \"B64\" for base64-embedded binary content, the normal value whenever referencedDocumentContent is populated; \"TXT\" for literal inline plain text)",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/@representation"
+    },
+    {
+      "key": "referencedDocumentMediaType",
+      "uscdiElement": "Advance Directive Referenced External Document Media Type (e.g. application/pdf, image/tiff — IANA media type of the embedded/linked document)",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/@mediaType"
+    },
+    {
+      "key": "referencedDocumentURL",
+      "uscdiElement": "Advance Directive Referenced External Document URL (CONF:1198-8697/8698) — the ED datatype's pointer representation mode, an alternative to embedding referencedDocumentContent inline",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/reference/@value"
+    }
+  ],
+  "entryElementPath": "entry/observation",
+  "structuralTemplateIds": [
+    {
+      "path": "entry/observation/author",
+      "templateIdRef": "authorParticipation"
+    },
+    {
+      "path": "entry/observation/participant[@typeCode='VRF']",
+      "templateId": "2.16.840.1.113883.10.20.1.58"
+    }
+  ],
+  "entryCodeTranslationCode": "75320-2",
+  "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
+  "entryCodeTranslationDisplay": "Advance directive"
+}

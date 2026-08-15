@@ -1,0 +1,277 @@
+{
+  "key": "results",
+  "uscdiClass": "Laboratory",
+  "displayName": "Results",
+  "loincCode": "30954-2",
+  "templateId": "2.16.840.1.113883.10.20.22.2.3.1",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "2.16.840.1.113883.10.20.22.2.3",
+  "conformance": "SHALL",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.1",
+  "entryTemplateIdExtension": "2015-08-01",
+  "fields": [
+    {
+      "key": "testCode",
+      "uscdiElement": "Tests",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "LOINC",
+      "xpath": "entry/organizer/component/observation/code/@code",
+      "xpathDisplay": "entry/organizer/component/observation/code/@displayName",
+      "xpathSystem": "entry/organizer/component/observation/code/@codeSystem"
+    },
+    {
+      "key": "resultValue",
+      "uscdiElement": "Values/Results",
+      "conformance": "SHALL",
+      "dataType": "ANY",
+      "xpath": "entry/organizer/component/observation/value/@value",
+      "xpathDisplay": "entry/organizer/component/observation/value/@displayName",
+      "xpathUnit": "entry/organizer/component/observation/value/@unit"
+    },
+    {
+      "key": "resultStatus",
+      "uscdiElement": "Result Status",
+      "conformance": "SHALL",
+      "dataType": "CS",
+      "xpath": "entry/organizer/component/observation/statusCode/@code"
+    },
+    {
+      "key": "referenceRangeLow",
+      "uscdiElement": "Reference Range (Low)",
+      "conformance": "SHOULD",
+      "dataType": "PQ",
+      "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value/low/@value",
+      "xpathUnit": "entry/organizer/component/observation/referenceRange/observationRange/value/low/@unit"
+    },
+    {
+      "key": "referenceRangeLowInclusive",
+      "uscdiElement": "Reference Range (Low) Inclusive Flag (HL7 V3 IVXB_PQ @inclusive — whether the low boundary value itself counts as part of the normal range; defaults to true per the base datatype when omitted, only written when a source system actually distinguishes inclusive/exclusive boundaries)",
+      "conformance": "MAY",
+      "dataType": "BL",
+      "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value/low/@inclusive"
+    },
+    {
+      "key": "referenceRangeHigh",
+      "uscdiElement": "Reference Range (High)",
+      "conformance": "SHOULD",
+      "dataType": "PQ",
+      "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value/high/@value",
+      "xpathUnit": "entry/organizer/component/observation/referenceRange/observationRange/value/high/@unit"
+    },
+    {
+      "key": "referenceRangeHighInclusive",
+      "uscdiElement": "Reference Range (High) Inclusive Flag (HL7 V3 IVXB_PQ @inclusive — whether the high boundary value itself counts as part of the normal range)",
+      "conformance": "MAY",
+      "dataType": "BL",
+      "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value/high/@inclusive"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Performer Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/organizer/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Performer Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/organizer/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Performer NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/organizer/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Performer Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/organizer/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/organizer/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/organizer/author/assignedAuthor/code/@codeSystem"
+    },
+    {
+      "key": "panelCode",
+      "uscdiElement": "Result Panel Code",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "LOINC, SNOMED CT",
+      "xpath": "entry/organizer/code/@code",
+      "xpathDisplay": "entry/organizer/code/@displayName",
+      "xpathSystem": "entry/organizer/code/@codeSystem"
+    },
+    {
+      "key": "panelStatus",
+      "uscdiElement": "Result Panel Status",
+      "conformance": "SHALL",
+      "dataType": "CS",
+      "xpath": "entry/organizer/statusCode/@code"
+    },
+    {
+      "key": "effectiveTimeLow",
+      "uscdiElement": "Result Panel Date/Time (start)",
+      "conformance": "MAY",
+      "dataType": "TS",
+      "xpath": "entry/organizer/effectiveTime/low/@value"
+    },
+    {
+      "key": "effectiveTimeHigh",
+      "uscdiElement": "Result Panel Date/Time (end)",
+      "conformance": "MAY",
+      "dataType": "TS",
+      "xpath": "entry/organizer/effectiveTime/high/@value"
+    }
+  ],
+  "entryElementPath": "entry/organizer",
+  "structuralTemplateIds": [
+    {
+      "path": "entry/organizer/author",
+      "templateIdRef": "authorParticipation"
+    }
+  ],
+  "entryClassCodeOverride": "BATTERY",
+  "repeatingGroups": [
+    {
+      "key": "components",
+      "wrapperTag": "component",
+      "observationElementPath": "observation",
+      "templateId": "2.16.840.1.113883.10.20.22.4.2",
+      "templateIdExtension": "2015-08-01",
+      "fields": [
+        {
+          "key": "testCode",
+          "uscdiElement": "Tests",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "LOINC",
+          "xpath": "code/@code",
+          "xpathDisplay": "code/@displayName",
+          "xpathSystem": "code/@codeSystem"
+        },
+        {
+          "key": "resultValue",
+          "uscdiElement": "Values/Results",
+          "conformance": "SHALL",
+          "dataType": "ANY",
+          "xpath": "value/@value",
+          "xpathDisplay": "value/@displayName",
+          "xpathUnit": "value/@unit"
+        },
+        {
+          "key": "resultStatus",
+          "uscdiElement": "Result Status",
+          "conformance": "SHALL",
+          "dataType": "CS",
+          "xpath": "statusCode/@code"
+        },
+        {
+          "key": "componentEffectiveTime",
+          "uscdiElement": "Result Date/Time",
+          "conformance": "SHALL",
+          "dataType": "TS",
+          "xpath": "effectiveTime/@value"
+        },
+        {
+          "key": "interpretationCode",
+          "uscdiElement": "Result Interpretation",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "valueSet": "Observation Interpretation (HL7)",
+          "xpath": "interpretationCode/@code",
+          "xpathDisplay": "interpretationCode/@displayName",
+          "xpathSystem": "interpretationCode/@codeSystem"
+        },
+        {
+          "key": "methodCode",
+          "uscdiElement": "Result Method",
+          "conformance": "MAY",
+          "dataType": "CD",
+          "xpath": "methodCode/@code",
+          "xpathDisplay": "methodCode/@displayName"
+        },
+        {
+          "key": "targetSiteCode",
+          "uscdiElement": "Result Target Site",
+          "conformance": "MAY",
+          "dataType": "CD",
+          "xpath": "targetSiteCode/@code",
+          "xpathDisplay": "targetSiteCode/@displayName"
+        },
+        {
+          "key": "referenceRangeLow",
+          "uscdiElement": "Reference Range (Low)",
+          "conformance": "SHOULD",
+          "dataType": "PQ",
+          "xpath": "referenceRange/observationRange/value/low/@value",
+          "xpathUnit": "referenceRange/observationRange/value/low/@unit"
+        },
+        {
+          "key": "referenceRangeLowInclusive",
+          "uscdiElement": "Reference Range (Low) Inclusive Flag (HL7 V3 IVXB_PQ @inclusive)",
+          "conformance": "MAY",
+          "dataType": "BL",
+          "xpath": "referenceRange/observationRange/value/low/@inclusive"
+        },
+        {
+          "key": "referenceRangeHigh",
+          "uscdiElement": "Reference Range (High)",
+          "conformance": "SHOULD",
+          "dataType": "PQ",
+          "xpath": "referenceRange/observationRange/value/high/@value",
+          "xpathUnit": "referenceRange/observationRange/value/high/@unit"
+        },
+        {
+          "key": "referenceRangeHighInclusive",
+          "uscdiElement": "Reference Range (High) Inclusive Flag (HL7 V3 IVXB_PQ @inclusive)",
+          "conformance": "MAY",
+          "dataType": "BL",
+          "xpath": "referenceRange/observationRange/value/high/@inclusive"
+        },
+        {
+          "key": "authorGiven",
+          "uscdiElement": "Performer Given Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "author/assignedAuthor/assignedPerson/name/given"
+        },
+        {
+          "key": "authorFamily",
+          "uscdiElement": "Performer Family Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "author/assignedAuthor/assignedPerson/name/family"
+        },
+        {
+          "key": "authorNPI",
+          "uscdiElement": "Performer NPI",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Performer Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "author/assignedAuthor/code/@code",
+          "xpathDisplay": "author/assignedAuthor/code/@displayName",
+          "xpathSystem": "author/assignedAuthor/code/@codeSystem"
+        }
+      ],
+      "anchorRoot": "root",
+      "requiredPaths": [
+        "testCode",
+        "resultValue"
+      ],
+      "authorTemplateId": "2.16.840.1.113883.10.20.22.4.119"
+    }
+  ]
+}

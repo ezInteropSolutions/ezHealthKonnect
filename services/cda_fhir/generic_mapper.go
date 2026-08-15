@@ -629,9 +629,9 @@ func (m *GenericCDAFHIRMapper) writeTransformAuditLog(
 
 	_, err = m.db.ExecContext(ctx, `
 		INSERT INTO audit_logs
-		    (user_id, user_email, action, entity_type, entity_id, metadata, created_at)
+		    (user_id, action, entity_type, entity_id, metadata, created_at)
 		VALUES
-		    (NULL, 'system', 'cda_fhir_transform', 'interface', $1, $2::jsonb, NOW())
+		    (NULL, 'cda_fhir_transform', 'interface', $1, $2::jsonb, NOW())
 	`, entityID, string(metaJSON))
 	if err != nil {
 		log.Printf("[cda.to_fhir] audit write error: %v", err)

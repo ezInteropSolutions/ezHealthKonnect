@@ -422,6 +422,983 @@ func TestBuildDocument_OmitsOptionalHeaderElementsWhenAbsent(t *testing.T) {
 	}
 }
 
+// carePlanCanonicalDoc supplies one entry each for Care Plan's 2 SHALL
+// sections (healthConcerns, goals — both already registered/reused by CCD),
+// using the exact field.Key/+Display convention fullCanonicalDoc() follows.
+func carePlanCanonicalDoc() map[string]interface{} {
+	return map[string]interface{}{
+		"header": map[string]interface{}{
+			"patient": map[string]interface{}{
+				"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "19800101",
+				"sex": "F", "sexDisplay": "Female",
+				"ids": []interface{}{map[string]interface{}{"root": "2.16.840.1.113883.4.1", "extension": "PAT-001"}},
+			},
+			"author": map[string]interface{}{"given": "John", "family": "Smith", "npi": "1234567890"},
+		},
+		"sections": map[string]interface{}{
+			"healthConcerns": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"concernCode": "44054006", "concernCodeDisplay": "Diabetes mellitus type 2",
+					"status": "active", "effectiveTime": "20240101",
+				},
+			}},
+			"goals": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"goalCode": "182840001", "goalCodeDisplay": "Drug therapy",
+					"value": "162673000", "valueDisplay": "General examination of patient",
+					"targetDate": "20240601",
+					"achievementStatus": "390855002", "achievementStatusDisplay": "In progress",
+				},
+			}},
+		},
+	}
+}
+
+// TestBuildDocument_CarePlan_ShallSectionsAlwaysEmitted mirrors
+// TestBuildDocument_EmptyShallSection_StillEmitted for Care Plan's own SHALL
+// sections — an empty SHALL section must still be emitted (narrative only),
+// never silently dropped.
+func TestBuildDocument_CarePlan_ShallSectionsAlwaysEmitted(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := carePlanCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["goals"] = map[string]interface{}{"entries": []interface{}{}}
+
+	xml, err := BuildDocument(loader, doc, "Care Plan", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, "75310-3") { // Health Concerns section LOINC code
+		t.Error("expected Health Concerns SHALL section to be emitted with an entry")
+	}
+	if !strings.Contains(xml, "61146-5") { // Goals section LOINC code
+		t.Error("expected empty SHALL section (Goals) to still be emitted with its templateId/code")
+	}
+}
+
+// transferSummaryCanonicalDoc supplies one entry each for Transfer
+// Summary's 6 SHALL sections — all already registered/reused by other
+// document types (allergiesAndIntolerances, medications, problems, results,
+// vitalSigns from fullCanonicalDoc()'s own convention; reasonForReferral
+// per its own field catalog: referralCode/referralText/effectiveTime).
+func transferSummaryCanonicalDoc() map[string]interface{} {
+	return map[string]interface{}{
+		"header": map[string]interface{}{
+			"patient": map[string]interface{}{
+				"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "19800101",
+				"sex": "F", "sexDisplay": "Female",
+				"ids": []interface{}{map[string]interface{}{"root": "2.16.840.1.113883.4.1", "extension": "PAT-001"}},
+			},
+			"author": map[string]interface{}{"given": "John", "family": "Smith", "npi": "1234567890"},
+		},
+		"sections": map[string]interface{}{
+			"allergiesAndIntolerances": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"medicationAllergyCode": "7980", "medicationAllergyCodeDisplay": "Penicillin",
+					"medicationAllergyCodeSystem": "2.16.840.1.113883.6.88",
+					"reaction":                    "247472004", "reactionDisplay": "Hives",
+					"severity": "moderate", "status": "Active", "onsetDate": "20100101",
+				},
+			}},
+			"medications": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"drugCode": "197361", "drugCodeDisplay": "Lisinopril 10mg",
+					"doseQuantity": "10", "doseQuantityUnit": "mg",
+					"routeCode": "C38288", "routeCodeDisplay": "Oral",
+					"status": "active", "startDate": "20200101",
+				},
+			}},
+			"problems": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"conditionCode": "44054006", "conditionCodeDisplay": "Diabetes mellitus type 2",
+					"conditionCodeSystem": "2.16.840.1.113883.6.96",
+					"status":              "55561003", "onsetDate": "20190601",
+				},
+			}},
+			"results": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"testCode": "2345-7", "testCodeDisplay": "Glucose",
+					"resultValue": "95", "resultValueUnit": "mg/dL", "resultStatus": "completed",
+					"effectiveTime": "20240101120000",
+				},
+			}},
+			"vitalSigns": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"vitalCode": "8480-6", "vitalCodeDisplay": "Systolic BP",
+					"value": "120", "valueUnit": "mm[Hg]", "effectiveTime": "20240101120000",
+				},
+			}},
+			"reasonForReferral": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"referralCode": "3457005", "referralCodeDisplay": "Patient referral",
+					"referralText": "Transfer to skilled nursing facility for continued rehabilitation.",
+					"effectiveTime": "20240101",
+				},
+			}},
+		},
+	}
+}
+
+// TestBuildDocument_TransferSummary_ShallSectionsAlwaysEmitted mirrors the
+// Care Plan version above for Transfer Summary's 6 SHALL sections.
+func TestBuildDocument_TransferSummary_ShallSectionsAlwaysEmitted(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := transferSummaryCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["results"] = map[string]interface{}{"entries": []interface{}{}}
+
+	xml, err := BuildDocument(loader, doc, "Transfer Summary", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, "30954-2") { // Results section LOINC code
+		t.Error("expected empty SHALL section (Results) to still be emitted with its templateId/code")
+	}
+	if !strings.Contains(xml, "42349-1") { // Reason for Referral section LOINC code
+		t.Error("expected Reason for Referral SHALL section to be emitted with an entry")
+	}
+}
+
+// TestBuildDocument_TransferSummary_RoundTripsThroughParserAndValidator is
+// the same pattern as the CCD/Care Plan round-trip tests above, scaled to
+// Transfer Summary's 6-section SHALL list.
+func TestBuildDocument_TransferSummary_RoundTripsThroughParserAndValidator(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, transferSummaryCanonicalDoc(), "Transfer Summary", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.1.13"`) || !strings.Contains(xml, `extension="2015-08-01"`) {
+		t.Errorf("expected the document-level templateId to be Transfer Summary's own (.1.13, 2015-08-01)\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	doc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+
+	v := validator.NewCDAConformanceValidator(loader)
+	report := v.Validate(doc)
+
+	for _, sr := range report.SectionReports {
+		if sr.Conformance == "SHALL" && sr.Status == "missing" {
+			t.Errorf("SHALL section %q is missing after round-trip (xml below)\n--- XML ---\n%s", sr.SectionKey, xml)
+		}
+	}
+	if report.ShallScore != 1.0 {
+		t.Errorf("ShallScore = %v, want 1.0 (all 6 SHALL sections present)", report.ShallScore)
+	}
+}
+
+// diagnosticImagingReportCanonicalDoc supplies only header data — Findings
+// Section (DIR), Diagnostic Imaging Report's one SHALL section, is
+// narrative-only (fields: [], no entryElementPath, same shape as
+// hospitalCourse) so it needs no canonical section entries at all; it must
+// still be auto-emitted with its templateId/boilerplate narrative per SHALL
+// conformance, the same "empty SHALL section still emitted" guarantee
+// TestBuildDocument_EmptyShallSection_StillEmitted locks in for structured
+// sections.
+func diagnosticImagingReportCanonicalDoc() map[string]interface{} {
+	return map[string]interface{}{
+		"header": map[string]interface{}{
+			"patient": map[string]interface{}{
+				"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "19800101",
+				"sex": "F", "sexDisplay": "Female",
+				"ids": []interface{}{map[string]interface{}{"root": "2.16.840.1.113883.4.1", "extension": "PAT-001"}},
+			},
+			"author": map[string]interface{}{"given": "John", "family": "Smith", "npi": "1234567890"},
+		},
+		"sections": map[string]interface{}{},
+	}
+}
+
+// TestBuildDocument_DiagnosticImagingReport_FindingsSectionAlwaysEmitted
+// confirms the one SHALL section (Findings Section (DIR)) is emitted even
+// though DIR is the only document type in this schema whose SHALL section
+// has no canonical entry data path at all — the narrative-only shape must
+// still satisfy SHALL conformance on its own.
+func TestBuildDocument_DiagnosticImagingReport_FindingsSectionAlwaysEmitted(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, diagnosticImagingReportCanonicalDoc(), "Diagnostic Imaging Report", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, "2.16.840.1.113883.10.20.6.1.2") { // Findings Section (DIR) templateId
+		t.Error("expected Findings Section (DIR) to be emitted with its templateId even with no canonical entry data")
+	}
+}
+
+// TestBuildDocument_DiagnosticImagingReport_RoundTripsThroughParserAndValidator
+// mirrors the Care Plan/Transfer Summary round-trip tests above.
+func TestBuildDocument_DiagnosticImagingReport_RoundTripsThroughParserAndValidator(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, diagnosticImagingReportCanonicalDoc(), "Diagnostic Imaging Report", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.1.5"`) || !strings.Contains(xml, `extension="2015-08-01"`) {
+		t.Errorf("expected the document-level templateId to be Diagnostic Imaging Report's own (.1.5, 2015-08-01)\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	doc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+
+	v := validator.NewCDAConformanceValidator(loader)
+	report := v.Validate(doc)
+
+	for _, sr := range report.SectionReports {
+		if sr.Conformance == "SHALL" && sr.Status == "missing" {
+			t.Errorf("SHALL section %q is missing after round-trip (xml below)\n--- XML ---\n%s", sr.SectionKey, xml)
+		}
+	}
+	if report.ShallScore != 1.0 {
+		t.Errorf("ShallScore = %v, want 1.0 (the one SHALL section present)", report.ShallScore)
+	}
+}
+
+// operativeNoteCanonicalDoc and procedureNoteCanonicalDoc supply only header
+// data — every SHALL section registered for these two document types is
+// narrative-only (fields: [], no entryElementPath) for this first pass, per
+// the plan's own explicit v1 scoping (structured entries are real, named
+// follow-on work, not silently dropped — see the plan file's "Coverage-
+// Audit-visible-but-unmapped" trade-off). Every one of these sections'
+// spec-verified constraints table shows entries as 0..* MAY or 0..1 SHOULD,
+// never 1..1 SHALL, so a narrative-only implementation is spec-conformant
+// on its own, same as Diagnostic Imaging Report's Findings Section (DIR)
+// above.
+func operativeNoteCanonicalDoc() map[string]interface{} {
+	return map[string]interface{}{
+		"header": map[string]interface{}{
+			"patient": map[string]interface{}{
+				"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "19800101",
+				"sex": "F", "sexDisplay": "Female",
+				"ids": []interface{}{map[string]interface{}{"root": "2.16.840.1.113883.4.1", "extension": "PAT-001"}},
+			},
+			"author": map[string]interface{}{"given": "John", "family": "Smith", "npi": "1234567890"},
+		},
+		"sections": map[string]interface{}{},
+	}
+}
+
+func procedureNoteCanonicalDoc() map[string]interface{} {
+	return operativeNoteCanonicalDoc()
+}
+
+// TestBuildDocument_OperativeNote_ShallSectionsAlwaysEmitted confirms all 8
+// SHALL sections (anesthesia, complications, preoperativeDiagnosis,
+// procedureEstimatedBloodLoss, procedureFindings, procedureSpecimensTaken,
+// procedureDescription, postoperativeDiagnosis) are emitted even with no
+// canonical section data.
+func TestBuildDocument_OperativeNote_ShallSectionsAlwaysEmitted(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, operativeNoteCanonicalDoc(), "Operative Note", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	shallTemplateIDs := map[string]string{
+		"anesthesia":                  "2.16.840.1.113883.10.20.22.2.25",
+		"complications":               "2.16.840.1.113883.10.20.22.2.37",
+		"preoperativeDiagnosis":       "2.16.840.1.113883.10.20.22.2.34",
+		"procedureEstimatedBloodLoss": "2.16.840.1.113883.10.20.18.2.9",
+		"procedureFindings":           "2.16.840.1.113883.10.20.22.2.28",
+		"procedureSpecimensTaken":     "2.16.840.1.113883.10.20.22.2.31",
+		"procedureDescription":        "2.16.840.1.113883.10.20.22.2.27",
+		"postoperativeDiagnosis":      "2.16.840.1.113883.10.20.22.2.35",
+	}
+	for key, templateID := range shallTemplateIDs {
+		if !strings.Contains(xml, templateID) {
+			t.Errorf("expected SHALL section %q (templateId %s) to be emitted with no canonical entry data", key, templateID)
+		}
+	}
+}
+
+// TestBuildDocument_OperativeNote_RoundTripsThroughParserAndValidator
+// mirrors the round-trip tests above for Operative Note's larger 8-section
+// SHALL list.
+func TestBuildDocument_OperativeNote_RoundTripsThroughParserAndValidator(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, operativeNoteCanonicalDoc(), "Operative Note", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.1.7"`) || !strings.Contains(xml, `extension="2015-08-01"`) {
+		t.Errorf("expected the document-level templateId to be Operative Note's own (.1.7, 2015-08-01)\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	doc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+
+	v := validator.NewCDAConformanceValidator(loader)
+	report := v.Validate(doc)
+
+	for _, sr := range report.SectionReports {
+		if sr.Conformance == "SHALL" && sr.Status == "missing" {
+			t.Errorf("SHALL section %q is missing after round-trip (xml below)\n--- XML ---\n%s", sr.SectionKey, xml)
+		}
+	}
+	if report.ShallScore != 1.0 {
+		t.Errorf("ShallScore = %v, want 1.0 (all 8 SHALL sections present)", report.ShallScore)
+	}
+}
+
+// TestBuildDocument_ProcedureNote_ShallSectionsAlwaysEmitted confirms all 4
+// SHALL sections (complications, procedureDescription, procedureIndications,
+// postprocedureDiagnosis) are emitted even with no canonical section data.
+func TestBuildDocument_ProcedureNote_ShallSectionsAlwaysEmitted(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, procedureNoteCanonicalDoc(), "Procedure Note", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	shallTemplateIDs := map[string]string{
+		"complications":          "2.16.840.1.113883.10.20.22.2.37",
+		"procedureDescription":   "2.16.840.1.113883.10.20.22.2.27",
+		"procedureIndications":   "2.16.840.1.113883.10.20.22.2.29",
+		"postprocedureDiagnosis": "2.16.840.1.113883.10.20.22.2.36",
+	}
+	for key, templateID := range shallTemplateIDs {
+		if !strings.Contains(xml, templateID) {
+			t.Errorf("expected SHALL section %q (templateId %s) to be emitted with no canonical entry data", key, templateID)
+		}
+	}
+}
+
+// TestBuildDocument_ProcedureNote_RoundTripsThroughParserAndValidator
+// mirrors the round-trip tests above for Procedure Note.
+func TestBuildDocument_ProcedureNote_RoundTripsThroughParserAndValidator(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, procedureNoteCanonicalDoc(), "Procedure Note", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.1.6"`) || !strings.Contains(xml, `extension="2015-08-01"`) {
+		t.Errorf("expected the document-level templateId to be Procedure Note's own (.1.6, 2015-08-01)\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	doc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+
+	v := validator.NewCDAConformanceValidator(loader)
+	report := v.Validate(doc)
+
+	for _, sr := range report.SectionReports {
+		if sr.Conformance == "SHALL" && sr.Status == "missing" {
+			t.Errorf("SHALL section %q is missing after round-trip (xml below)\n--- XML ---\n%s", sr.SectionKey, xml)
+		}
+	}
+	if report.ShallScore != 1.0 {
+		t.Errorf("ShallScore = %v, want 1.0 (all 4 SHALL sections present)", report.ShallScore)
+	}
+}
+
+// TestBuildDocument_ProcedureNote_NewOptionalSections covers the 5 sections
+// verified and added in the "boost to 100%" follow-on pass: reasonForVisit,
+// chiefComplaintAndReasonForVisit, medicalGeneralHistory (all narrative-only
+// per their own spec constraints tables — no entry row at all), plus
+// medicationsAdministered, which DOES have a spec-defined entry (0..* MAY
+// substanceAdministration reusing Medication Activity (V2), same shape as
+// anesthesia) and physicalExamination, which reuses the H&P section verbatim
+// (byte-for-byte same templateId/extension/LOINC — confirmed against Vol 2
+// §2.47, not a new section).
+func TestBuildDocument_ProcedureNote_NewOptionalSections(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := procedureNoteCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["reasonForVisit"] = map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}}
+	sections["chiefComplaintAndReasonForVisit"] = map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}}
+	sections["medicalGeneralHistory"] = map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}}
+	sections["physicalExamination"] = map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}}
+	sections["medicationsAdministered"] = map[string]interface{}{"entries": []interface{}{
+		map[string]interface{}{
+			"drugCode": "387458008", "drugCodeDisplay": "Isotonic saline", "drugCodeSystem": "2.16.840.1.113883.6.96",
+			"routeCode": "C38276", "routeCodeDisplay": "Intravenous", "status": "completed",
+		},
+	}}
+
+	xml, err := BuildDocument(loader, doc, "Procedure Note", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	narrativeTemplateIDs := map[string]string{
+		"reasonForVisit":                  "2.16.840.1.113883.10.20.22.2.12",
+		"chiefComplaintAndReasonForVisit": "2.16.840.1.113883.10.20.22.2.13",
+		"medicalGeneralHistory":           "2.16.840.1.113883.10.20.22.2.39",
+		"physicalExamination":             "2.16.840.1.113883.10.20.2.10",
+	}
+	for key, templateID := range narrativeTemplateIDs {
+		if !strings.Contains(xml, templateID) {
+			t.Errorf("expected section %q (templateId %s) to be emitted", key, templateID)
+		}
+	}
+	if !strings.Contains(xml, "29549-3") { // Medications Administered Section (V2) LOINC
+		t.Error("expected Medications Administered Section's LOINC code to be emitted")
+	}
+	if !strings.Contains(xml, `<substanceAdministration classCode="SBADM" moodCode="EVN">`) {
+		t.Errorf("expected Medications Administered's entry to be a substanceAdministration (Medication Activity V2)\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	parsedDoc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+	sec, ok := parsedDoc.SectionsByKey["medicationsAdministered"]
+	if !ok || len(sec.Entries) != 1 {
+		t.Fatalf("expected medicationsAdministered to survive round-trip with 1 entry, got %+v", sec)
+	}
+}
+
+// TestBuildDocument_CarePlan_NewOptionalSections covers Health Status
+// Evaluations and Outcomes Section (structured — Outcome Observation
+// .4.144, a free-form LOINC code per its own SHALL constraint, unlike most
+// reused-observation sections which have a fixed code) and Interventions
+// Section (V3) (narrative-only v1 — its own entries are all 0..* SHOULD,
+// never required, and Intervention Act (V2) wraps 11 possible nested
+// activity types per its own contexts table, too polymorphic for a v1 pass).
+func TestBuildDocument_CarePlan_NewOptionalSections(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := carePlanCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["healthStatusEvaluationsOutcomes"] = map[string]interface{}{"entries": []interface{}{
+		map[string]interface{}{
+			"outcomeCode": "59408-5", "outcomeCodeDisplay": "Oxygen saturation in Arterial blood",
+			"value": "95", "valueDisplay": "95%",
+		},
+	}}
+	sections["interventions"] = map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}}
+
+	xml, err := BuildDocument(loader, doc, "Care Plan", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, "11383-7") { // Health Status Evaluations and Outcomes Section LOINC
+		t.Error("expected Health Status Evaluations and Outcomes Section to be emitted")
+	}
+	if !strings.Contains(xml, "59408-5") {
+		t.Error("expected Outcome Observation's free-form code to be emitted (not a fixed discriminator)")
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.21.2.3" extension="2015-08-01"`) {
+		t.Errorf("expected Interventions Section (V3)'s templateId with its extension\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	parsedDoc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+	sec, ok := parsedDoc.SectionsByKey["healthStatusEvaluationsOutcomes"]
+	if !ok || len(sec.Entries) != 1 {
+		t.Fatalf("expected healthStatusEvaluationsOutcomes to survive round-trip with 1 entry, got %+v", sec)
+	}
+	if sec.Entries[0].Value == nil || sec.Entries[0].Value.Code == nil || sec.Entries[0].Value.Code.Code != "95" {
+		t.Errorf("expected Outcome Observation's value code to survive round-trip, got %+v", sec.Entries[0].Value)
+	}
+}
+
+// TestBuildDocument_TransferSummary_CourseOfCareAndGeneralStatus_NarrativeOnly
+// covers the 2 sections added in the "boost to 100%" follow-on pass — both
+// confirmed narrative-only against Vol 2 (Course of Care §2.11, General
+// Status §2.21: SHALL lists show only templateId/code/title/text, no entry
+// row at all).
+func TestBuildDocument_TransferSummary_CourseOfCareAndGeneralStatus_NarrativeOnly(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := transferSummaryCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["courseOfCare"] = map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}}
+	sections["generalStatus"] = map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}}
+
+	xml, err := BuildDocument(loader, doc, "Transfer Summary", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.2.64"`) {
+		t.Error("expected Course of Care Section's templateId")
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.2.5"`) {
+		t.Error("expected General Status Section's templateId (legacy non-C-CDA OID root)")
+	}
+}
+
+// TestBuildDocument_HistoryAndPhysical_CorrectedShallSections proves the fix
+// for a pre-existing bug: documentTypeSections["History and Physical"] used
+// 3 optional sections as SHALL and was missing 8 of the 10 truly required
+// sections per Vol 2 §1.1.12 Table 39 / Companion Guide §3.3.6 Table 21
+// (both agree). All 10 corrected SHALL sections are already-registered keys
+// reused from CCD/Discharge Summary/etc. — this is a pure documentTypeSections
+// data fix, not a new section.
+func TestBuildDocument_HistoryAndPhysical_CorrectedShallSections(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := transferSummaryCanonicalDoc() // reuse: has allergiesAndIntolerances/medications/problems/results/vitalSigns entries
+	sections := doc["sections"].(map[string]interface{})
+	sections["pastMedicalHistory"] = map[string]interface{}{"entries": []interface{}{
+		map[string]interface{}{"conditionCode": "44054006", "conditionCodeDisplay": "Diabetes mellitus type 2"},
+	}}
+	sections["socialHistory"] = map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}}
+	sections["familyHistory"] = map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}}
+	sections["reviewOfSystems"] = map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}}
+	sections["generalStatus"] = map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}}
+	sections["physicalExamination"] = map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}}
+
+	xml, err := BuildDocument(loader, doc, "History and Physical", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	parsedDoc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+	v := validator.NewCDAConformanceValidator(loader)
+	report := v.Validate(parsedDoc)
+	for _, sr := range report.SectionReports {
+		if sr.Conformance == "SHALL" && sr.Status == "missing" {
+			t.Errorf("SHALL section %q is missing after round-trip (xml below)\n--- XML ---\n%s", sr.SectionKey, xml)
+		}
+	}
+	if report.ShallScore != 1.0 {
+		t.Errorf("ShallScore = %v, want 1.0 (all 10 corrected SHALL sections present)", report.ShallScore)
+	}
+	// chiefComplaint/historyOfPresentIllness/assessment must NOT be reported
+	// as missing SHALL sections anymore — they moved to MAY.
+	for _, sr := range report.SectionReports {
+		if (sr.SectionKey == "chiefComplaint" || sr.SectionKey == "historyOfPresentIllness" || sr.SectionKey == "assessment") && sr.Conformance == "SHALL" {
+			t.Errorf("section %q should no longer be SHALL for History and Physical", sr.SectionKey)
+		}
+	}
+}
+
+// dischargeSummaryCanonicalDoc supplies one entry each for Discharge
+// Summary's corrected 4 SHALL sections (allergiesAndIntolerances,
+// hospitalCourse, dischargeDiagnosis, planOfTreatment — corrected against
+// Vol2 Table 36 / Companion Guide Table 20: the previous list had
+// dischargeMedications/problems wrongly SHALL and planOfTreatment missing
+// entirely).
+func dischargeSummaryCanonicalDoc() map[string]interface{} {
+	return map[string]interface{}{
+		"header": map[string]interface{}{
+			"patient": map[string]interface{}{
+				"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "19800101",
+				"sex": "F", "sexDisplay": "Female",
+				"ids": []interface{}{map[string]interface{}{"root": "2.16.840.1.113883.4.1", "extension": "PAT-001"}},
+			},
+			"author": map[string]interface{}{"given": "John", "family": "Smith", "npi": "1234567890"},
+		},
+		"sections": map[string]interface{}{
+			"allergiesAndIntolerances": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"medicationAllergyCode": "7980", "medicationAllergyCodeDisplay": "Penicillin",
+					"medicationAllergyCodeSystem": "2.16.840.1.113883.6.88",
+					"reaction":                    "247472004", "reactionDisplay": "Hives",
+					"severity": "moderate", "status": "Active", "onsetDate": "20100101",
+				},
+			}},
+			"hospitalCourse": map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}},
+			"dischargeDiagnosis": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{"conditionCode": "44054006", "conditionCodeDisplay": "Diabetes mellitus type 2"},
+			}},
+			"planOfTreatment": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"activityCode": "182836005", "activityCodeDisplay": "Review of medication",
+					"effectiveTime": "20240201", "status": "INT",
+				},
+			}},
+		},
+	}
+}
+
+func TestBuildDocument_DischargeSummary_ShallSectionsAlwaysEmitted(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := dischargeSummaryCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["hospitalCourse"] = map[string]interface{}{"entries": []interface{}{}}
+
+	xml, err := BuildDocument(loader, doc, "Discharge Summary", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, "8648-8") { // Hospital Course Section LOINC
+		t.Error("expected empty SHALL section (Hospital Course) to still be emitted with its templateId/code")
+	}
+	if !strings.Contains(xml, "44054006") { // dischargeDiagnosis's real condition code, non-empty SHALL section
+		t.Error("expected the non-empty SHALL section (dischargeDiagnosis) entry data to be emitted")
+	}
+}
+
+func TestBuildDocument_DischargeSummary_RoundTripsThroughParserAndValidator(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, dischargeSummaryCanonicalDoc(), "Discharge Summary", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.1.8"`) || !strings.Contains(xml, `extension="2015-08-01"`) {
+		t.Errorf("expected the document-level templateId to be Discharge Summary's own (.1.8, 2015-08-01)\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	doc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+
+	v := validator.NewCDAConformanceValidator(loader)
+	report := v.Validate(doc)
+
+	for _, sr := range report.SectionReports {
+		if sr.Conformance == "SHALL" && sr.Status == "missing" {
+			t.Errorf("SHALL section %q is missing after round-trip (xml below)\n--- XML ---\n%s", sr.SectionKey, xml)
+		}
+	}
+	if report.ShallScore != 1.0 {
+		t.Errorf("ShallScore = %v, want 1.0 (all 4 corrected SHALL sections present)", report.ShallScore)
+	}
+}
+
+// referralNoteCanonicalDoc supplies Referral Note's 4 SHALL sections plus
+// assessmentAndPlan to satisfy the document type's choice constraint
+// ("SHALL contain Assessment and Plan Section, OR both Assessment Section
+// and Plan of Treatment Section").
+func referralNoteCanonicalDoc() map[string]interface{} {
+	return map[string]interface{}{
+		"header": map[string]interface{}{
+			"patient": map[string]interface{}{
+				"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "19800101",
+				"sex": "F", "sexDisplay": "Female",
+				"ids": []interface{}{map[string]interface{}{"root": "2.16.840.1.113883.4.1", "extension": "PAT-001"}},
+			},
+			"author": map[string]interface{}{"given": "John", "family": "Smith", "npi": "1234567890"},
+		},
+		"sections": map[string]interface{}{
+			"reasonForReferral": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"referralCode": "3457005", "referralCodeDisplay": "Patient referral",
+					"referralText": "Transfer to skilled nursing facility for continued rehabilitation.",
+					"effectiveTime": "20240101",
+				},
+			}},
+			"problems": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"conditionCode": "44054006", "conditionCodeDisplay": "Diabetes mellitus type 2",
+					"conditionCodeSystem": "2.16.840.1.113883.6.96",
+					"status":              "55561003", "onsetDate": "20190601",
+				},
+			}},
+			"medications": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"drugCode": "197361", "drugCodeDisplay": "Lisinopril 10mg",
+					"doseQuantity": "10", "doseQuantityUnit": "mg",
+					"routeCode": "C38288", "routeCodeDisplay": "Oral",
+					"status": "active", "startDate": "20200101",
+				},
+			}},
+			"allergiesAndIntolerances": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"medicationAllergyCode": "7980", "medicationAllergyCodeDisplay": "Penicillin",
+					"medicationAllergyCodeSystem": "2.16.840.1.113883.6.88",
+					"reaction":                    "247472004", "reactionDisplay": "Hives",
+					"severity": "moderate", "status": "Active", "onsetDate": "20100101",
+				},
+			}},
+			"assessmentAndPlan": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"activityCode": "384821006", "activityCodeDisplay": "Follow up",
+					"effectiveTime": "20240101", "status": "active",
+				},
+			}},
+		},
+	}
+}
+
+func TestBuildDocument_ReferralNote_RoundTripsThroughParserAndValidator(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, referralNoteCanonicalDoc(), "Referral Note", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.1.14"`) || !strings.Contains(xml, `extension="2015-08-01"`) {
+		t.Errorf("expected the document-level templateId to be Referral Note's own (.1.14, 2015-08-01)\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	doc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+
+	v := validator.NewCDAConformanceValidator(loader)
+	report := v.Validate(doc)
+
+	for _, sr := range report.SectionReports {
+		if sr.Conformance == "SHALL" && sr.Status == "missing" {
+			t.Errorf("SHALL section %q is missing after round-trip (xml below)\n--- XML ---\n%s", sr.SectionKey, xml)
+		}
+	}
+	if len(report.ChoiceConstraintReports) != 1 || !report.ChoiceConstraintReports[0].Satisfied {
+		t.Errorf("expected the assessmentAndPlan/assessment+planOfTreatment choice constraint to be satisfied, got %+v", report.ChoiceConstraintReports)
+	}
+	if report.ShallScore != 1.0 {
+		t.Errorf("ShallScore = %v, want 1.0 (4 SHALL sections + satisfied choice constraint)", report.ShallScore)
+	}
+}
+
+// consultationNoteCanonicalDoc supplies Consultation Note's 3 SHALL sections
+// (historyOfPresentIllness is narrative-only) plus assessmentAndPlan to
+// satisfy the same choice constraint as Referral Note.
+func consultationNoteCanonicalDoc() map[string]interface{} {
+	return map[string]interface{}{
+		"header": map[string]interface{}{
+			"patient": map[string]interface{}{
+				"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "19800101",
+				"sex": "F", "sexDisplay": "Female",
+				"ids": []interface{}{map[string]interface{}{"root": "2.16.840.1.113883.4.1", "extension": "PAT-001"}},
+			},
+			"author": map[string]interface{}{"given": "John", "family": "Smith", "npi": "1234567890"},
+		},
+		"sections": map[string]interface{}{
+			"historyOfPresentIllness": map[string]interface{}{"entries": []interface{}{map[string]interface{}{}}},
+			"allergiesAndIntolerances": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"medicationAllergyCode": "7980", "medicationAllergyCodeDisplay": "Penicillin",
+					"medicationAllergyCodeSystem": "2.16.840.1.113883.6.88",
+					"reaction":                    "247472004", "reactionDisplay": "Hives",
+					"severity": "moderate", "status": "Active", "onsetDate": "20100101",
+				},
+			}},
+			"problems": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"conditionCode": "44054006", "conditionCodeDisplay": "Diabetes mellitus type 2",
+					"conditionCodeSystem": "2.16.840.1.113883.6.96",
+					"status":              "55561003", "onsetDate": "20190601",
+				},
+			}},
+			"assessmentAndPlan": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"activityCode": "384821006", "activityCodeDisplay": "Follow up",
+					"effectiveTime": "20240101", "status": "active",
+				},
+			}},
+		},
+	}
+}
+
+func TestBuildDocument_ConsultationNote_RoundTripsThroughParserAndValidator(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, consultationNoteCanonicalDoc(), "Consultation Note", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.1.4"`) || !strings.Contains(xml, `extension="2015-08-01"`) {
+		t.Errorf("expected the document-level templateId to be Consultation Note's own (.1.4, 2015-08-01)\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	doc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+
+	v := validator.NewCDAConformanceValidator(loader)
+	report := v.Validate(doc)
+
+	for _, sr := range report.SectionReports {
+		if sr.Conformance == "SHALL" && sr.Status == "missing" {
+			t.Errorf("SHALL section %q is missing after round-trip (xml below)\n--- XML ---\n%s", sr.SectionKey, xml)
+		}
+	}
+	if len(report.ChoiceConstraintReports) != 1 || !report.ChoiceConstraintReports[0].Satisfied {
+		t.Errorf("expected the assessmentAndPlan/assessment+planOfTreatment choice constraint to be satisfied, got %+v", report.ChoiceConstraintReports)
+	}
+	if report.ShallScore != 1.0 {
+		t.Errorf("ShallScore = %v, want 1.0 (3 SHALL sections + satisfied choice constraint)", report.ShallScore)
+	}
+}
+
+// progressNoteCanonicalDoc supplies ONLY assessmentAndPlan — Progress Note's
+// SHALL list is genuinely empty per spec (Companion Guide Table 24's
+// Required Sections column is blank), the choice constraint is the sole
+// SHALL-level requirement.
+func progressNoteCanonicalDoc() map[string]interface{} {
+	return map[string]interface{}{
+		"header": map[string]interface{}{
+			"patient": map[string]interface{}{
+				"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "19800101",
+				"sex": "F", "sexDisplay": "Female",
+				"ids": []interface{}{map[string]interface{}{"root": "2.16.840.1.113883.4.1", "extension": "PAT-001"}},
+			},
+			"author": map[string]interface{}{"given": "John", "family": "Smith", "npi": "1234567890"},
+		},
+		"sections": map[string]interface{}{
+			"assessmentAndPlan": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"activityCode": "384821006", "activityCodeDisplay": "Follow up",
+					"effectiveTime": "20240101", "status": "active",
+				},
+			}},
+		},
+	}
+}
+
+func TestBuildDocument_ProgressNote_RoundTripsThroughParserAndValidator(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, progressNoteCanonicalDoc(), "Progress Note", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.1.9"`) || !strings.Contains(xml, `extension="2015-08-01"`) {
+		t.Errorf("expected the document-level templateId to be Progress Note's own (.1.9, 2015-08-01)\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	doc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+
+	v := validator.NewCDAConformanceValidator(loader)
+	report := v.Validate(doc)
+
+	for _, sr := range report.SectionReports {
+		if sr.Conformance == "SHALL" && sr.Status == "missing" {
+			t.Errorf("SHALL section %q is missing after round-trip (xml below)\n--- XML ---\n%s", sr.SectionKey, xml)
+		}
+	}
+	if len(report.ChoiceConstraintReports) != 1 || !report.ChoiceConstraintReports[0].Satisfied {
+		t.Errorf("expected the assessmentAndPlan/assessment+planOfTreatment choice constraint to be satisfied, got %+v", report.ChoiceConstraintReports)
+	}
+	// Progress Note's SHALL list is empty per spec — ShallScore must be
+	// achievable (1.0) purely via the satisfied choice constraint, with
+	// zero individually-SHALL sections contributing to the score.
+	if report.ShallScore != 1.0 {
+		t.Errorf("ShallScore = %v, want 1.0 (empty SHALL list + satisfied choice constraint)", report.ShallScore)
+	}
+	shallSectionCount := 0
+	for _, sr := range report.SectionReports {
+		if sr.Conformance == "SHALL" {
+			shallSectionCount++
+		}
+	}
+	if shallSectionCount != 0 {
+		t.Errorf("expected 0 individually-SHALL sections for Progress Note, got %d", shallSectionCount)
+	}
+}
+
+// TestBuildDocument_OperativeNote_StructuredEntries_RoundTrip covers the 6
+// sections that DO have a spec-defined structured entry (Anesthesia,
+// Complications, Preoperative Diagnosis via act+SUBJ+Problem Observation,
+// Procedure Findings, Procedure Indications, Planned Procedure) — every
+// templateId/fixed-code value here was verified directly against the C-CDA
+// R2.1 Volume 2 spec's own entry-level template chapters (3.44 Indication
+// (V2), 3.72 Postprocedure Diagnosis (V3), 3.75 Preoperative Diagnosis
+// (V3)), not guessed. Confirms real canonical entry data produces the
+// correct nested XML shape and survives a full build -> re-parse round
+// trip into typed CDAEntry structs.
+func TestBuildDocument_OperativeNote_StructuredEntries_RoundTrip(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := operativeNoteCanonicalDoc()
+	sections := doc["sections"].(map[string]interface{})
+	sections["anesthesia"] = map[string]interface{}{"entries": []interface{}{
+		map[string]interface{}{
+			"drugCode": "372733002", "drugCodeDisplay": "Sevoflurane", "drugCodeSystem": "2.16.840.1.113883.6.96",
+			"routeCode": "C38216", "routeCodeDisplay": "Inhalation", "status": "completed",
+		},
+	}}
+	sections["complications"] = map[string]interface{}{"entries": []interface{}{
+		map[string]interface{}{
+			"complicationCode": "110466006", "complicationCodeDisplay": "Postoperative hemorrhage",
+			"complicationCodeSystem": "2.16.840.1.113883.6.96",
+		},
+	}}
+	sections["preoperativeDiagnosis"] = map[string]interface{}{"entries": []interface{}{
+		map[string]interface{}{
+			"conditionCode": "74400008", "conditionCodeDisplay": "Appendicitis",
+			"conditionCodeSystem": "2.16.840.1.113883.6.96",
+		},
+	}}
+	sections["procedureFindings"] = map[string]interface{}{"entries": []interface{}{
+		map[string]interface{}{
+			"findingCode": "247472004", "findingCodeDisplay": "Inflamed appendix",
+			"findingCodeSystem": "2.16.840.1.113883.6.96",
+		},
+	}}
+	sections["procedureIndications"] = map[string]interface{}{"entries": []interface{}{
+		map[string]interface{}{
+			"indicationCode": "74400008", "indicationCodeDisplay": "Appendicitis",
+			"indicationCodeSystem": "2.16.840.1.113883.6.96",
+		},
+	}}
+	sections["plannedProcedure"] = map[string]interface{}{"entries": []interface{}{
+		map[string]interface{}{
+			"procedureCode": "80146002", "procedureCodeDisplay": "Appendectomy",
+			"procedureCodeSystem": "2.16.840.1.113883.6.96",
+		},
+	}}
+
+	xml, err := BuildDocument(loader, doc, "Operative Note", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	// Spot-check the shapes the spec's own worked examples showed.
+	if !strings.Contains(xml, `<substanceAdministration classCode="SBADM" moodCode="EVN">`) {
+		t.Errorf("expected Anesthesia's entry to be a substanceAdministration (Medication Activity V2)\n--- XML ---\n%s", xml)
+	}
+	if !strings.Contains(xml, "2.16.840.1.113883.10.20.22.4.65") {
+		t.Errorf("expected Preoperative Diagnosis's own act templateId (.4.65) in output\n--- XML ---\n%s", xml)
+	}
+	if !strings.Contains(xml, `code="ASSERTION" codeSystem="2.16.840.1.113883.5.4"`) {
+		t.Errorf("expected Procedure Indications' fixed ASSERTION discriminator code\n--- XML ---\n%s", xml)
+	}
+	if !strings.Contains(xml, `moodCode="RQO"`) {
+		t.Errorf("expected Planned Procedure's entry moodCode override to RQO (per spec Figure 101)\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	parsedDoc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+
+	wantEntries := map[string]int{
+		"anesthesia":            1,
+		"complications":         1,
+		"preoperativeDiagnosis": 1,
+		"procedureFindings":     1,
+		"procedureIndications":  1,
+		"plannedProcedure":      1,
+	}
+	for key, want := range wantEntries {
+		sec, ok := parsedDoc.SectionsByKey[key]
+		if !ok {
+			t.Errorf("section %q missing from re-parsed document", key)
+			continue
+		}
+		if got := len(sec.Entries); got != want {
+			t.Errorf("section %q: got %d entries after round-trip, want %d", key, got, want)
+		}
+	}
+	// Preoperative Diagnosis's own Problem Observation must survive the
+	// act -> entryRelationship[SUBJ] -> observation nesting round-trip.
+	if preop, ok := parsedDoc.SectionsByKey["preoperativeDiagnosis"]; ok && len(preop.Entries) == 1 {
+		entry := preop.Entries[0]
+		if entry.EntryType != "act" {
+			t.Errorf("Preoperative Diagnosis entry type = %q, want \"act\"", entry.EntryType)
+		}
+		if len(entry.EntryRelationships) != 1 || entry.EntryRelationships[0].Entry.Value == nil || entry.EntryRelationships[0].Entry.Value.Code == nil || entry.EntryRelationships[0].Entry.Value.Code.Code != "74400008" {
+			t.Errorf("expected Preoperative Diagnosis's nested Problem Observation value code 74400008 to survive round-trip, got %+v", entry.EntryRelationships)
+		}
+	}
+}
+
 func TestBuildDocument_RoundTripsThroughParserAndValidator(t *testing.T) {
 	loader := loadTestSchema(t)
 	xml, err := BuildDocument(loader, fullCanonicalDoc(), "CCD", BuildOptions{OrgName: "Test Health System"})
@@ -448,10 +1425,12 @@ func TestBuildDocument_RoundTripsThroughParserAndValidator(t *testing.T) {
 	}
 
 	// fullCanonicalDoc() supplies at least one entry for every one of CCD's
-	// 17 real sections (7 SHALL + 2 SHOULD + 8 MAY, per the C-CDA 2.1 IG's
-	// Table 30, 2018 errata) — confirm every one of them actually made it
-	// into the built document as "present" or "present_empty", not just the
-	// SHALL subset checked above.
+	// 17 real sections (6 SHALL + 2 SHOULD + 9 MAY, corrected against Vol2
+	// Table 30 + Companion Guide Table 18 — planOfTreatment moved SHALL→SHOULD
+	// and payersInsurance moved SHOULD→MAY from an earlier, uncorrected pass)
+	// — confirm every one of them actually made it into the built document
+	// as "present" or "present_empty", not just the SHALL subset checked
+	// above.
 	allCCDSections := []string{
 		"allergiesAndIntolerances", "medications", "problems", "results", "planOfTreatment", "socialHistory", "vitalSigns",
 		"procedures", "payersInsurance",
@@ -475,6 +1454,40 @@ func TestBuildDocument_RoundTripsThroughParserAndValidator(t *testing.T) {
 	}
 	if doc.Header.EncompassingEncounter == nil || doc.Header.EncompassingEncounter.Id.Extension != "ENC-001" {
 		t.Error("expected the built <componentOf><encompassingEncounter> to re-parse back with id ENC-001")
+	}
+}
+
+// TestBuildDocument_CarePlan_RoundTripsThroughParserAndValidator is the
+// same pattern as the CCD round-trip test above, scaled to Care Plan's
+// smaller 2-section SHALL list (healthConcerns, goals) — confirms the new
+// document type resolves correctly end-to-end: build -> re-parse ->
+// validate, with both SHALL sections reporting present, not missing.
+func TestBuildDocument_CarePlan_RoundTripsThroughParserAndValidator(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, carePlanCanonicalDoc(), "Care Plan", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.1.15"`) || !strings.Contains(xml, `extension="2015-08-01"`) {
+		t.Errorf("expected the document-level templateId to be Care Plan's own (.1.15, 2015-08-01)\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	doc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+
+	v := validator.NewCDAConformanceValidator(loader)
+	report := v.Validate(doc)
+
+	for _, sr := range report.SectionReports {
+		if sr.Conformance == "SHALL" && sr.Status == "missing" {
+			t.Errorf("SHALL section %q is missing after round-trip (xml below)\n--- XML ---\n%s", sr.SectionKey, xml)
+		}
+	}
+	if report.ShallScore != 1.0 {
+		t.Errorf("ShallScore = %v, want 1.0 (both SHALL sections present)", report.ShallScore)
 	}
 }
 
@@ -515,6 +1528,96 @@ func TestBuildDocument_UnknownDocumentType_Errors(t *testing.T) {
 	_, err := BuildDocument(loader, fullCanonicalDoc(), "Not A Real Document Type", BuildOptions{})
 	if err == nil {
 		t.Fatal("expected an error for an unknown document type")
+	}
+}
+
+// unstructuredDocCanonicalDoc supplies header data plus an
+// "unstructuredContent" block — the canonical shape BuildDocument checks
+// for to decide between emitting <structuredBody> (every other document
+// type) and <nonXMLBody> (Unstructured Document only, per CDA's own
+// ClinicalDocument.component CHOICE).
+func unstructuredDocCanonicalDoc() map[string]interface{} {
+	return map[string]interface{}{
+		"header": map[string]interface{}{
+			"patient": map[string]interface{}{
+				"firstName": "Jane", "lastName": "Doe", "dateOfBirth": "19800101",
+				"sex": "F", "sexDisplay": "Female",
+				"ids": []interface{}{map[string]interface{}{"root": "2.16.840.1.113883.4.1", "extension": "PAT-001"}},
+			},
+			"author": map[string]interface{}{"given": "John", "family": "Smith", "npi": "1234567890"},
+		},
+		"unstructuredContent": map[string]interface{}{
+			"mediaType":     "application/pdf",
+			"data":          "JVBERi0xLjQK",
+			"documentCode":  "34108-1",
+			"documentTitle": "Outpatient Note",
+		},
+	}
+}
+
+// TestBuildDocument_UnstructuredDocument_EmitsNonXMLBody confirms
+// BuildDocument emits <component><nonXMLBody> instead of <structuredBody>
+// for Unstructured Document, using the canonical data's own documentCode/
+// documentTitle to override the document-level <code> (this is the one
+// document type with no fixed LOINC per the IG — its code is selected
+// per-document from whatever content is actually embedded).
+func TestBuildDocument_UnstructuredDocument_EmitsNonXMLBody(t *testing.T) {
+	loader := loadTestSchema(t)
+	xml, err := BuildDocument(loader, unstructuredDocCanonicalDoc(), "Unstructured Document", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if strings.Contains(xml, "<structuredBody>") {
+		t.Errorf("expected NO <structuredBody> for Unstructured Document\n--- XML ---\n%s", xml)
+	}
+	if !strings.Contains(xml, "<nonXMLBody>") {
+		t.Errorf("expected <nonXMLBody> to be emitted\n--- XML ---\n%s", xml)
+	}
+	if !strings.Contains(xml, `mediaType="application/pdf"`) || !strings.Contains(xml, `representation="B64"`) || !strings.Contains(xml, "JVBERi0xLjQK") {
+		t.Errorf("expected the nonXMLBody's text to carry the configured mediaType/representation/inline data\n--- XML ---\n%s", xml)
+	}
+	if !strings.Contains(xml, `code="34108-1"`) {
+		t.Errorf("expected the document-level code to be overridden by the canonical documentCode\n--- XML ---\n%s", xml)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.1.10"`) {
+		t.Errorf("expected the document-level templateId to be Unstructured Document's own (.1.10)\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	doc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+	if doc.UnstructuredBody == nil {
+		t.Fatal("expected the re-parsed document to have UnstructuredBody populated")
+	}
+	if doc.UnstructuredBody.Data != "JVBERi0xLjQK" {
+		t.Errorf("UnstructuredBody.Data = %q, want the round-tripped base64 content", doc.UnstructuredBody.Data)
+	}
+	if len(doc.Sections) != 0 {
+		t.Errorf("expected zero sections for Unstructured Document, got %d", len(doc.Sections))
+	}
+}
+
+// TestBuildDocument_UnstructuredDocument_ExternalReference covers the
+// referenceUrl shape (an external file reference instead of inline base64
+// content) — CDA's ED datatype allows either, never both.
+func TestBuildDocument_UnstructuredDocument_ExternalReference(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := unstructuredDocCanonicalDoc()
+	doc["unstructuredContent"] = map[string]interface{}{
+		"mediaType":    "application/pdf",
+		"referenceUrl": "https://example.org/docs/doc-1.pdf",
+	}
+	xml, err := BuildDocument(loader, doc, "Unstructured Document", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `<reference value="https://example.org/docs/doc-1.pdf"/>`) {
+		t.Errorf("expected a <reference> element with the configured URL\n--- XML ---\n%s", xml)
+	}
+	if strings.Contains(xml, `representation="B64"`) {
+		t.Error("expected no representation=\"B64\" attribute for a reference-shaped body")
 	}
 }
 

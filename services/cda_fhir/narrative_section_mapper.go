@@ -116,3 +116,88 @@ func (m *GenericCDAFHIRMapper) buildNarrativeDocRef(
 
 	return docRef
 }
+
+// buildUnstructuredDocRef is buildNarrativeDocRef's document-level
+// counterpart for CDA's Unstructured Document type — called once per
+// document (never per-section, since an Unstructured Document has no
+// sections at all) from DeclarativeMapDocument, gated on
+// doc.UnstructuredBody != nil. Same DocumentReference shape as
+// buildNarrativeDocRef; content comes from the document header's own
+// DocumentCode/Title (cda/builder's own DocumentCode/documentTitle override
+// on the outbound side already resolves these the same way) instead of a
+// section's LoincCode/Title, and from UnstructuredBody's inline
+// base64 data or external reference instead of a section's NarrativeText.
+func (m *GenericCDAFHIRMapper) buildUnstructuredDocRef(
+	doc *cdadocument.CDADocument,
+	patientRef string,
+) map[string]interface{} {
+	body := doc.UnstructuredBody
+	if body == nil {
+		return nil
+	}
+
+	loinc := doc.Header.DocumentCode.Code
+	display := doc.Header.DocumentCode.DisplayName
+	if display == "" {
+		display = doc.Header.Title
+	}
+	if loinc == "" {
+		loinc = genericNoteLoincCode
+	}
+	if display == "" {
+		display = genericNoteDisplayName
+	}
+
+	mediaType := body.MediaType
+	if mediaType == "" {
+		mediaType = "application/octet-stream"
+	}
+	attachment := map[string]interface{}{"contentType": mediaType}
+	// ReferenceURL and Data are mutually exclusive per CDA's own ED
+	// (Encapsulated Data) datatype (see CDAUnstructuredBody's own doc
+	// comment) — FHIR Attachment mirrors that same choice between url and
+	// data.
+	if body.ReferenceURL != "" {
+		attachment["url"] = body.ReferenceURL
+	} else if body.Data != "" {
+		attachment["data"] = body.Data // already base64 in the raw CDA — passed through verbatim
+	}
+
+	docRef := map[string]interface{}{
+		"resourceType": "DocumentReference",
+		"status":       "current",
+		"type": map[string]interface{}{
+			"coding": []interface{}{
+				map[string]interface{}{
+					"system":  "http://loinc.org",
+					"code":    loinc,
+					"display": display,
+				},
+			},
+			"text": display,
+		},
+		"category": []interface{}{
+			map[string]interface{}{
+				"coding": []interface{}{
+					map[string]interface{}{
+						"system":  "http://hl7.org/fhir/us/core/CodeSystem/us-core-documentreference-category",
+						"code":    "clinical-note",
+						"display": "Clinical Note",
+					},
+				},
+			},
+		},
+		"content": []interface{}{
+			map[string]interface{}{"attachment": attachment},
+		},
+	}
+
+	if patientRef != "" {
+		docRef["subject"] = map[string]interface{}{"reference": patientRef}
+	}
+	if doc.Header.Title != "" {
+		docRef["description"] = doc.Header.Title
+	}
+
+	return docRef
+}

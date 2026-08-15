@@ -1,0 +1,35 @@
+{
+  "key": "assessmentAndPlan",
+  "uscdiClass": "Assessment and Plan",
+  "displayName": "Assessment and Plan",
+  "loincCode": "51847-2",
+  "templateId": "2.16.840.1.113883.10.20.22.2.9.1",
+  "templateIdOptional": "2.16.840.1.113883.10.20.22.2.9",
+  "conformance": "SHOULD",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.146",
+  "fields": [
+    {
+      "key": "activityCode",
+      "uscdiElement": "Assessment or Plan Activity",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "xpath": "entry/observation/code/@code",
+      "xpathDisplay": "entry/observation/code/@displayName"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Activity Date",
+      "conformance": "SHOULD",
+      "dataType": "IVL_TS",
+      "xpath": "entry/observation/effectiveTime/@value"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Activity Status",
+      "conformance": "SHOULD",
+      "dataType": "CS",
+      "xpath": "entry/observation/statusCode/@code"
+    }
+  ],
+  "entryElementPath": "entry/observation"
+}

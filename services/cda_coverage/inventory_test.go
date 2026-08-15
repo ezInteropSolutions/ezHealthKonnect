@@ -577,3 +577,46 @@ func TestBuildInventoryWithGranularity_HeaderUntrackedGroups_AlwaysGap(t *testin
 		}
 	}
 }
+
+// TestBuildInventory_NonXMLBody_ProducesPseudoItem covers Phase 5
+// (Unstructured Document): a document with no structuredBody at all — its
+// own <component> is a <nonXMLBody> instead — must still produce a real
+// InventoryItem (SectionKey "document.unstructuredBody"), not silently
+// zero items, which would read identically to "nothing was found" even
+// though this is the correct, expected shape for this document type.
+func TestBuildInventory_NonXMLBody_ProducesPseudoItem(t *testing.T) {
+	loader := testSchemaLoader(t)
+	mirror := map[string]interface{}{
+		"component": map[string]interface{}{
+			"nonXMLBody": map[string]interface{}{
+				"text": map[string]interface{}{
+					"@mediaType": "application/pdf",
+				},
+			},
+		},
+	}
+
+	items := BuildInventory(mirror, loader)
+	if len(items) != 1 {
+		t.Fatalf("got %d items, want 1 (the nonXMLBody pseudo-item)", len(items))
+	}
+	item := items[0]
+	if item.SectionKey != "document.unstructuredBody" {
+		t.Errorf("SectionKey = %q, want %q", item.SectionKey, "document.unstructuredBody")
+	}
+	if item.TrackingKey() != "document.unstructuredBody#0" {
+		t.Errorf("TrackingKey() = %q, want %q", item.TrackingKey(), "document.unstructuredBody#0")
+	}
+}
+
+// TestBuildInventory_NoStructuredBodyNoNonXMLBody_ProducesNoPseudoItem is a
+// regression guard: an empty/malformed mirror (neither structuredBody nor
+// nonXMLBody present) must NOT fabricate a pseudo-item — that would be
+// inventing ground truth, not reporting it.
+func TestBuildInventory_NoStructuredBodyNoNonXMLBody_ProducesNoPseudoItem(t *testing.T) {
+	loader := testSchemaLoader(t)
+	items := BuildInventory(map[string]interface{}{}, loader)
+	if len(items) != 0 {
+		t.Errorf("got %d items, want 0 for a mirror with neither structuredBody nor nonXMLBody -- %+v", len(items), items)
+	}
+}

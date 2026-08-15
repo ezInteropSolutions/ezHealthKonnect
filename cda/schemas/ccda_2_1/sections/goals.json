@@ -1,0 +1,43 @@
+{
+  "key": "goals",
+  "uscdiClass": "Goals",
+  "displayName": "Goals",
+  "loincCode": "61146-5",
+  "templateId": "2.16.840.1.113883.10.20.22.2.60",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.121",
+  "fields": [
+    {
+      "key": "goalCode",
+      "uscdiElement": "Goal Description",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "xpath": "entry/observation/code/@code",
+      "xpathDisplay": "entry/observation/code/@displayName"
+    },
+    {
+      "key": "value",
+      "uscdiElement": "Goal Target",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "entry/observation/value/@code",
+      "xpathDisplay": "entry/observation/value/@displayName"
+    },
+    {
+      "key": "targetDate",
+      "uscdiElement": "Target Date",
+      "conformance": "SHOULD",
+      "dataType": "IVL_TS",
+      "xpath": "entry/observation/effectiveTime/high/@value"
+    },
+    {
+      "key": "achievementStatus",
+      "uscdiElement": "Achievement Status",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "entry/observation/entryRelationship[@typeCode='REFR']/observation/value/@code",
+      "xpathDisplay": "entry/observation/entryRelationship[@typeCode='REFR']/observation/value/@displayName"
+    }
+  ]
+}

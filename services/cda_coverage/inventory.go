@@ -98,6 +98,18 @@ func BuildInventoryWithGranularity(xmlMirror map[string]interface{}, schemaLoade
 	sectionNodes := executors.ResolveCDAPaths(xmlMirror, "component.structuredBody.component[*].section", true)
 
 	var items []InventoryItem
+
+	// Unstructured Document has no structuredBody at all (see
+	// buildNonXMLBodyInventoryItem's own doc comment) — without this, such a
+	// document would produce zero sectionNodes above and read identically to
+	// "nothing was found" in the report, rather than the correct, expected
+	// shape for this document type.
+	if len(sectionNodes) == 0 {
+		if item := buildNonXMLBodyInventoryItem(xmlMirror); item != nil {
+			items = append(items, *item)
+		}
+	}
+
 	for _, sn := range sectionNodes {
 		sectionMap, ok := sn.(map[string]interface{})
 		if !ok {
@@ -133,6 +145,31 @@ func BuildInventoryWithGranularity(xmlMirror map[string]interface{}, schemaLoade
 	}
 	items = append(items, buildHeaderInventory(xmlMirror, elementLevel)...)
 	return items
+}
+
+// buildNonXMLBodyInventoryItem reports a document with no structuredBody at
+// all — CDA's Unstructured Document type, whose <component> is a
+// <nonXMLBody> instead (see cda/document/types.go's CDAUnstructuredBody) —
+// as its own single pseudo-item, under the SAME "document.unstructuredBody"
+// key services/cda_fhir/declarative_document_mapper.go's own
+// CoverageTracker.Record call uses. Without this, such a document
+// legitimately produces zero real sections (there are none — not a parsing
+// failure) and would read identically to "nothing was found" in the report,
+// when it's actually the correct, expected shape for this document type.
+// Returns nil when component.nonXMLBody isn't present at all (every other
+// document type, or a genuinely empty/malformed structuredBody document —
+// this function only ever fires something real, never guesses).
+func buildNonXMLBodyInventoryItem(xmlMirror map[string]interface{}) *InventoryItem {
+	nodes := executors.ResolveCDAPaths(xmlMirror, "component.nonXMLBody", true)
+	if len(nodes) == 0 {
+		return nil
+	}
+	return &InventoryItem{
+		Category:     headerCategory,
+		SectionKey:   "document.unstructuredBody",
+		SectionTitle: "Unstructured Content",
+		EntryIndex:   0,
+	}
 }
 
 // headerCategory groups every document-header InventoryItem in the report

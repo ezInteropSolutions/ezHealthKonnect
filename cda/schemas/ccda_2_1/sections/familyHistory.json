@@ -1,0 +1,65 @@
+{
+  "key": "familyHistory",
+  "uscdiClass": "Family History",
+  "displayName": "Family History",
+  "loincCode": "10157-6",
+  "templateId": "2.16.840.1.113883.10.20.22.2.15",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.45",
+  "entryTemplateIdExtension": "2015-08-01",
+  "fields": [
+    {
+      "key": "relationship",
+      "uscdiElement": "Family Member Relationship",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "Family Member Value",
+      "xpath": "entry/organizer/subject/relatedSubject/code/@code",
+      "xpathDisplay": "entry/organizer/subject/relatedSubject/code/@displayName"
+    },
+    {
+      "key": "conditionCode",
+      "uscdiElement": "Family History Condition",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT, ICD-10-CM",
+      "xpath": "entry/organizer/component/observation/value/@code",
+      "xpathDisplay": "entry/organizer/component/observation/value/@displayName",
+      "xpathSystem": "entry/organizer/component/observation/value/@codeSystem"
+    },
+    {
+      "key": "conditionStatus",
+      "uscdiElement": "Family History Condition Status",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "entry/organizer/component/observation/entryRelationship/observation/value/@code"
+    },
+    {
+      "key": "onsetAge",
+      "uscdiElement": "Age of Onset",
+      "conformance": "MAY",
+      "dataType": "PQ",
+      "xpath": "entry/organizer/component/observation/entryRelationship[@typeCode='SUBJ']/observation/value/@value",
+      "xpathUnit": "entry/organizer/component/observation/entryRelationship[@typeCode='SUBJ']/observation/value/@unit"
+    },
+    {
+      "key": "relatedSubjectGender",
+      "uscdiElement": "Family Member Sex",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "Administrative Gender (HL7 V3)",
+      "xpath": "entry/organizer/subject/relatedSubject/subject/administrativeGenderCode/@code"
+    },
+    {
+      "key": "relatedSubjectBirthTime",
+      "uscdiElement": "Family Member Date of Birth",
+      "conformance": "SHOULD",
+      "dataType": "TS",
+      "xpath": "entry/organizer/subject/relatedSubject/subject/birthTime/@value"
+    }
+  ],
+  "entryElementPath": "entry/organizer",
+  "observationElementPath": "entry/organizer/component/observation"
+}

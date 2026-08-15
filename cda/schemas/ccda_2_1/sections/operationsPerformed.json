@@ -1,0 +1,10 @@
+{
+  "key": "operationsPerformed",
+  "uscdiClass": "Operative Note",
+  "displayName": "Operative Note Surgical Procedure",
+  "loincCode": "10223-6",
+  "templateId": "2.16.840.1.113883.10.20.7.14",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "fields": []
+}

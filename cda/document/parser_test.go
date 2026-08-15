@@ -1242,3 +1242,67 @@ func TestIsEmptyCDAValue(t *testing.T) {
 	n := 0
 	assert.False(t, isEmptyCDAValue(&CDAValue{Type: "INT", Integer: &n}), "an explicit zero is still a real value, not empty")
 }
+
+// ========================
+// Unstructured Document (nonXMLBody)
+// ========================
+
+// TestParseUnstructuredDocument_InlineBase64 covers the inline-content shape
+// of CDA's Unstructured Document: <component><nonXMLBody><text
+// mediaType="..." representation="B64">...base64...</text></nonXMLBody>
+// </component>, mutually exclusive with structuredBody. Before this,
+// parseSections' own "no structuredBody found" fallthrough silently dropped
+// the ENTIRE document.
+func TestParseUnstructuredDocument_InlineBase64(t *testing.T) {
+	p := newParser(t)
+	raw := `<ClinicalDocument xmlns="urn:hl7-org:v3">
+		<id root="1.2.3" extension="doc-1"/>
+		<title>Scanned Referral Letter</title>
+		<component>
+			<nonXMLBody>
+				<text mediaType="application/pdf" representation="B64">JVBERi0xLjQK</text>
+			</nonXMLBody>
+		</component>
+	</ClinicalDocument>`
+
+	doc, err := p.ParseFromRawXML(raw)
+	require.NoError(t, err)
+	require.NotNil(t, doc.UnstructuredBody, "expected UnstructuredBody to be populated for a nonXMLBody document")
+	assert.Empty(t, doc.Sections, "an Unstructured Document has no sections")
+	assert.Equal(t, "application/pdf", doc.UnstructuredBody.MediaType)
+	assert.Equal(t, "B64", doc.UnstructuredBody.Representation)
+	assert.Equal(t, "JVBERi0xLjQK", doc.UnstructuredBody.Data)
+	assert.Empty(t, doc.UnstructuredBody.ReferenceURL)
+}
+
+// TestParseUnstructuredDocument_ExternalReference covers the other ED
+// (Encapsulated Data) shape: a <reference value="..."/> instead of inline
+// content — CDA's nonXMLBody permits either, never both.
+func TestParseUnstructuredDocument_ExternalReference(t *testing.T) {
+	p := newParser(t)
+	raw := `<ClinicalDocument xmlns="urn:hl7-org:v3">
+		<id root="1.2.3" extension="doc-2"/>
+		<component>
+			<nonXMLBody>
+				<text mediaType="application/pdf"><reference value="https://example.org/docs/doc-2.pdf"/></text>
+			</nonXMLBody>
+		</component>
+	</ClinicalDocument>`
+
+	doc, err := p.ParseFromRawXML(raw)
+	require.NoError(t, err)
+	require.NotNil(t, doc.UnstructuredBody)
+	assert.Equal(t, "https://example.org/docs/doc-2.pdf", doc.UnstructuredBody.ReferenceURL)
+	assert.Empty(t, doc.UnstructuredBody.Data, "a reference-shaped body has no inline data")
+}
+
+// TestParseStructuredDocument_UnstructuredBodyStaysNil confirms a normal
+// structuredBody document never populates UnstructuredBody — the two are
+// mutually exclusive, and parseNonXMLBody is only ever attempted when
+// parseSections found nothing.
+func TestParseStructuredDocument_UnstructuredBodyStaysNil(t *testing.T) {
+	_, root := loadXML(t, "minimal_ccd.xml")
+	p := newParser(t)
+	doc := p.ParseDocument(root, "")
+	assert.Nil(t, doc.UnstructuredBody)
+}

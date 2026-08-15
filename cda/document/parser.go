@@ -56,6 +56,17 @@ func (p *CDAParser) ParseDocument(root *etree.Element, raw string) *CDADocument 
 		}
 	}
 
+	// Unstructured Document has no structuredBody at all — before this,
+	// parseSections' own "no structuredBody found" fallthrough returned nil
+	// silently and the ENTIRE document (title, embedded content, mediaType)
+	// was dropped with zero error and zero downstream visibility. Only
+	// attempted when no sections were found, mirroring the mutual
+	// exclusivity CDA's own schema enforces between structuredBody and
+	// nonXMLBody.
+	if len(doc.Sections) == 0 {
+		doc.UnstructuredBody = sp.parseNonXMLBody(root)
+	}
+
 	return doc
 }
 

@@ -1,0 +1,139 @@
+{
+  "key": "encounters",
+  "uscdiClass": "Encounters",
+  "displayName": "Encounters",
+  "loincCode": "46240-8",
+  "templateId": "2.16.840.1.113883.10.20.22.2.22",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "2.16.840.1.113883.10.20.22.2.22.1",
+  "conformance": "MAY",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.49",
+  "entryTemplateIdExtension": "2015-08-01",
+  "fields": [
+    {
+      "key": "encounterCode",
+      "uscdiElement": "Encounter Type",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "xpath": "entry/encounter/code/@code",
+      "xpathDisplay": "entry/encounter/code/@displayName"
+    },
+    {
+      "key": "_narrativeRef",
+      "uscdiElement": "Narrative Reference (engine-populated — links the encounter code back to its own narrative table row)",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/encounter/code/originalText/reference/@value"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Encounter Date",
+      "conformance": "SHALL",
+      "dataType": "IVL_TS",
+      "xpath": "entry/encounter/effectiveTime/@value"
+    },
+    {
+      "key": "performerGiven",
+      "uscdiElement": "Encounter Provider Given Name",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/encounter/performer/assignedEntity/assignedPerson/name/given"
+    },
+    {
+      "key": "performerFamily",
+      "uscdiElement": "Encounter Provider Family Name",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/encounter/performer/assignedEntity/assignedPerson/name/family"
+    },
+    {
+      "key": "performerNPI",
+      "uscdiElement": "Encounter Provider NPI",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/encounter/performer/assignedEntity/id/@extension"
+    },
+    {
+      "key": "performerOrgName",
+      "uscdiElement": "Encounter Provider Organization",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/encounter/performer/assignedEntity/representedOrganization/name"
+    },
+    {
+      "key": "dischargeDispositionCode",
+      "uscdiElement": "Encounter Discharge Disposition",
+      "conformance": "MAY",
+      "dataType": "CD",
+      "xpath": "entry/encounter/dischargeDispositionCode/@code"
+    },
+    {
+      "key": "performerSpecialtyCode",
+      "uscdiElement": "Encounter Provider Specialty",
+      "conformance": "MAY",
+      "dataType": "CD",
+      "xpath": "entry/encounter/performer/assignedEntity/code/@code",
+      "xpathDisplay": "entry/encounter/performer/assignedEntity/code/@displayName",
+      "xpathSystem": "entry/encounter/performer/assignedEntity/code/@codeSystem"
+    },
+    {
+      "key": "locationCode",
+      "uscdiElement": "Encounter Location Type",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "HealthcareServiceLocation",
+      "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/code/@code",
+      "xpathDisplay": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/code/@displayName",
+      "xpathSystem": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/code/@codeSystem"
+    },
+    {
+      "key": "locationStreet",
+      "uscdiElement": "Encounter Location Street",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/addr/streetAddressLine"
+    },
+    {
+      "key": "locationCity",
+      "uscdiElement": "Encounter Location City",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/addr/city"
+    },
+    {
+      "key": "locationState",
+      "uscdiElement": "Encounter Location State",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/addr/state"
+    },
+    {
+      "key": "locationPostalCode",
+      "uscdiElement": "Encounter Location Postal Code",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/addr/postalCode"
+    },
+    {
+      "key": "locationPhone",
+      "uscdiElement": "Encounter Location Phone",
+      "conformance": "MAY",
+      "dataType": "TEL",
+      "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/telecom/@value"
+    },
+    {
+      "key": "locationName",
+      "uscdiElement": "Encounter Location Name",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/playingEntity[@classCode='PLC']/name"
+    }
+  ],
+  "entryElementPath": "entry/encounter",
+  "structuralTemplateIds": [
+    {
+      "path": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']",
+      "templateId": "2.16.840.1.113883.10.20.22.4.32"
+    }
+  ]
+}

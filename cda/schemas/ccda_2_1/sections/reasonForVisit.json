@@ -1,0 +1,10 @@
+{
+  "key": "reasonForVisit",
+  "uscdiClass": "Reason for Visit",
+  "displayName": "Reason for Visit",
+  "loincCode": "29299-5",
+  "templateId": "2.16.840.1.113883.10.20.22.2.12",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "fields": []
+}

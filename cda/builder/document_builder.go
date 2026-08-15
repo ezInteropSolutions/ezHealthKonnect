@@ -108,7 +108,33 @@ func BuildDocument(loader *cdaSchema.CDASchemaLoader, canonicalDoc map[string]in
 	root.CreateAttr("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
 	root.CreateAttr("xsi:schemaLocation", "urn:hl7-org:v3 CDA.xsd")
 
-	writeDocumentBoilerplate(root, docMeta, opts)
+	// Unstructured Document has no fixed document-level LOINC (unlike every
+	// other type) — per the IG, its <code> is selected per-document from
+	// whatever content is actually embedded, not a constant. documentCode/
+	// documentTitle in the canonical unstructuredContent map override
+	// docMeta's own (empty) loincCode/title; a generic Note fallback applies
+	// if neither the canonical data nor docMeta supplies one, mirroring
+	// services/cda_fhir/narrative_section_mapper.go's own genericNoteLoincCode
+	// fallback for the identical "nothing more specific is known" case.
+	effectiveMeta := docMeta
+	if unstructuredData, ok := canonicalDoc["unstructuredContent"].(map[string]interface{}); ok && docMeta != nil {
+		m := *docMeta
+		if code, ok := stringValue(unstructuredData["documentCode"]); ok {
+			m.LOINCCode = code
+		}
+		if title, ok := stringValue(unstructuredData["documentTitle"]); ok {
+			m.Title = title
+		}
+		if m.LOINCCode == "" {
+			m.LOINCCode = unstructuredDocumentFallbackCode
+		}
+		if m.Title == "" {
+			m.Title = unstructuredDocumentFallbackTitle
+		}
+		effectiveMeta = &m
+	}
+
+	writeDocumentBoilerplate(root, effectiveMeta, opts)
 
 	headerMap, _ := canonicalDoc["header"].(map[string]interface{})
 	writePatientHeader(root, headerMap)
@@ -119,33 +145,42 @@ func BuildDocument(loader *cdaSchema.CDASchemaLoader, canonicalDoc map[string]in
 	writeDocumentationOfHeader(root, headerMap)
 	writeEncompassingEncounterHeader(root, headerMap)
 
-	structuredBody := root.CreateElement("component").CreateElement("structuredBody")
+	// Unstructured Document has no sections at all — its <component> is a
+	// <nonXMLBody> (embedded/referenced content), never a <structuredBody>,
+	// per CDA's own ClinicalDocument.component CHOICE. Every other document
+	// type takes the structuredBody path below unconditionally, matching
+	// prior behavior exactly.
+	if unstructuredData, ok := canonicalDoc["unstructuredContent"].(map[string]interface{}); ok {
+		buildNonXMLBody(root.CreateElement("component"), unstructuredData)
+	} else {
+		structuredBody := root.CreateElement("component").CreateElement("structuredBody")
 
-	sectionsMap, _ := canonicalDoc["sections"].(map[string]interface{})
-	sectionKeys := append(append(append([]string{}, sectionInfo.SHALL...), sectionInfo.SHOULD...), sectionInfo.MAY...)
-	for _, key := range sectionKeys {
-		sec := loader.GetSection(key)
-		if sec == nil {
-			continue
-		}
-		secData, _ := sectionsMap[key].(map[string]interface{})
-		entries := extractSubEntries(secData, "entries")
-
-		altEntries := make([][]map[string]interface{}, len(sec.AlternateArchetypes))
-		hasAltEntries := false
-		for i, alt := range sec.AlternateArchetypes {
-			altEntries[i] = extractSubEntries(secData, alt.EntriesKey)
-			if len(altEntries[i]) > 0 {
-				hasAltEntries = true
+		sectionsMap, _ := canonicalDoc["sections"].(map[string]interface{})
+		sectionKeys := append(append(append([]string{}, sectionInfo.SHALL...), sectionInfo.SHOULD...), sectionInfo.MAY...)
+		for _, key := range sectionKeys {
+			sec := loader.GetSection(key)
+			if sec == nil {
+				continue
 			}
-		}
+			secData, _ := sectionsMap[key].(map[string]interface{})
+			entries := extractSubEntries(secData, "entries")
 
-		isShall := containsString(sectionInfo.SHALL, key)
-		if len(entries) == 0 && !hasAltEntries && !isShall {
-			continue
+			altEntries := make([][]map[string]interface{}, len(sec.AlternateArchetypes))
+			hasAltEntries := false
+			for i, alt := range sec.AlternateArchetypes {
+				altEntries[i] = extractSubEntries(secData, alt.EntriesKey)
+				if len(altEntries[i]) > 0 {
+					hasAltEntries = true
+				}
+			}
+
+			isShall := containsString(sectionInfo.SHALL, key)
+			if len(entries) == 0 && !hasAltEntries && !isShall {
+				continue
+			}
+			component := structuredBody.CreateElement("component")
+			component.AddChild(buildSectionElement(sec, entries, altEntries))
 		}
-		component := structuredBody.CreateElement("component")
-		component.AddChild(buildSectionElement(sec, entries, altEntries))
 	}
 
 	ensureIntervalEffectiveTimeXsiType(root)
@@ -247,6 +282,42 @@ func ensureIntervalEffectiveTimeXsiType(root *etree.Element) {
 		if et.SelectElement("low") != nil || et.SelectElement("high") != nil {
 			et.CreateAttr("xsi:type", "IVL_TS")
 		}
+	}
+}
+
+// unstructuredDocumentFallbackCode/Title are the last-resort values used
+// when an Unstructured Document's canonical data supplies neither its own
+// documentCode nor a registered docMeta.LOINCCode — the same "34109-9 Note"
+// generic-clinical-note code services/cda_fhir/narrative_section_mapper.go's
+// own genericNoteLoincCode already uses for the identical "nothing more
+// specific is known" case on the parse/mapping side.
+const (
+	unstructuredDocumentFallbackCode  = "34109-9"
+	unstructuredDocumentFallbackTitle = "Note"
+)
+
+// buildNonXMLBody builds <nonXMLBody><text .../></nonXMLBody> under
+// component — the Unstructured Document shape, mutually exclusive with
+// <structuredBody> per CDA's own ClinicalDocument.component CHOICE. data's
+// "referenceUrl" key (an external file reference) and "data" key (inline
+// base64 content) are themselves mutually exclusive per CDA's ED
+// (Encapsulated Data) datatype; referenceUrl wins if both are somehow
+// present, since a reference is the more explicit statement of intent.
+func buildNonXMLBody(component *etree.Element, data map[string]interface{}) {
+	nonXMLBody := component.CreateElement("nonXMLBody")
+	text := nonXMLBody.CreateElement("text")
+
+	if mediaType, ok := stringValue(data["mediaType"]); ok {
+		text.CreateAttr("mediaType", mediaType)
+	}
+
+	if refURL, ok := stringValue(data["referenceUrl"]); ok {
+		text.CreateElement("reference").CreateAttr("value", refURL)
+		return
+	}
+	if b64, ok := stringValue(data["data"]); ok {
+		text.CreateAttr("representation", "B64")
+		text.SetText(b64)
 	}
 }
 

@@ -40,6 +40,12 @@ class CdaParseStepBuilder {
             { value: 'H&P',               label: 'History & Physical' },
             { value: 'Consultation',      label: 'Consultation Note' },
             { value: 'Progress Note',     label: 'Progress Note' },
+            { value: 'Care Plan',         label: 'Care Plan' },
+            { value: 'Transfer Summary',  label: 'Transfer Summary' },
+            { value: 'Diagnostic Imaging Report', label: 'Diagnostic Imaging Report' },
+            { value: 'Operative Note',    label: 'Operative Note' },
+            { value: 'Procedure Note',    label: 'Procedure Note' },
+            { value: 'Unstructured Document', label: 'Unstructured Document' },
         ].map(o => `<option value="${esc(o.value)}" ${o.value === docTypeHint ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
 
         return `
@@ -360,6 +366,12 @@ class CdaToFhirStepBuilder {
             { v: 'H&P',                l: 'History & Physical' },
             { v: 'Consultation',       l: 'Consultation Note' },
             { v: 'Progress Note',      l: 'Progress Note' },
+            { v: 'Care Plan',          l: 'Care Plan' },
+            { v: 'Transfer Summary',   l: 'Transfer Summary' },
+            { v: 'Diagnostic Imaging Report', l: 'Diagnostic Imaging Report' },
+            { v: 'Operative Note',     l: 'Operative Note' },
+            { v: 'Procedure Note',     l: 'Procedure Note' },
+            { v: 'Unstructured Document', l: 'Unstructured Document' },
         ].map(o => `<option value="${o.v}" ${cfg.documentType === o.v ? 'selected' : ''}>${o.l}</option>`).join('');
 
         const lbl = `font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;
@@ -3831,6 +3843,8 @@ class CDABuildStepBuilder {
         const docTypeOptions = [
             'CCD', 'Discharge Summary', 'Referral Note',
             'History and Physical', 'Consultation Note', 'Progress Note',
+            'Care Plan', 'Transfer Summary', 'Diagnostic Imaging Report',
+            'Operative Note', 'Procedure Note', 'Unstructured Document',
         ].map(dt => `<option value="${esc(dt)}" ${documentType === dt ? 'selected' : ''}>${esc(dt)}</option>`).join('');
 
         return `

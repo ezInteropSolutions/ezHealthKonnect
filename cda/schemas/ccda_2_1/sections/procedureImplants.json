@@ -1,0 +1,10 @@
+{
+  "key": "procedureImplants",
+  "uscdiClass": "Operative Note",
+  "displayName": "Procedure Implants",
+  "loincCode": "59771-6",
+  "templateId": "2.16.840.1.113883.10.20.22.2.40",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "fields": []
+}

@@ -1,0 +1,10 @@
+{
+  "key": "procedureSpecimensTaken",
+  "uscdiClass": "Operative Note",
+  "displayName": "Procedure Specimens Taken",
+  "loincCode": "59773-2",
+  "templateId": "2.16.840.1.113883.10.20.22.2.31",
+  "templateIdOptional": "",
+  "conformance": "SHALL",
+  "fields": []
+}

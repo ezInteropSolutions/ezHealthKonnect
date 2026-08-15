@@ -146,10 +146,13 @@ func TestNISTFullCCD_ShallScoreReflectsRealSections(t *testing.T) {
 
 	report := v.Validate(doc)
 
-	const expected = 6.0 / 7.0
-	const eps = 0.001
-	if report.ShallScore < expected-eps || report.ShallScore > expected+eps {
-		t.Errorf("expected ShallScore≈%.4f (6/7 — fixture lacks Plan of Treatment), got %.4f", expected, report.ShallScore)
+	// planOfTreatment moved SHALL→SHOULD (corrected against Vol2 Table 30 +
+	// Companion Guide Table 18 — it was never actually required). CCD's real
+	// 6 SHALL sections (allergiesAndIntolerances, medications, problems,
+	// results, socialHistory, vitalSigns) are all present in this fixture,
+	// so ShallScore should now be a clean 1.0 with nothing missing.
+	if report.ShallScore != 1.0 {
+		t.Errorf("expected ShallScore=1.0 (all 6 real SHALL sections present), got %.4f", report.ShallScore)
 	}
 
 	var missing []string
@@ -158,8 +161,8 @@ func TestNISTFullCCD_ShallScoreReflectsRealSections(t *testing.T) {
 			missing = append(missing, sr.SectionKey)
 		}
 	}
-	if len(missing) != 1 || missing[0] != "planOfTreatment" {
-		t.Errorf("expected exactly 1 missing SHALL section (planOfTreatment), got %v", missing)
+	if len(missing) != 0 {
+		t.Errorf("expected no missing SHALL sections, got %v", missing)
 	}
 }
 
@@ -176,7 +179,7 @@ func TestNISTFullCCD_DocumentTypeIsCCD(t *testing.T) {
 	}
 }
 
-// TestCCDShallSectionCount verifies the validator generates exactly 7 SHALL entries for a CCD.
+// TestCCDShallSectionCount verifies the validator generates exactly 6 SHALL entries for a CCD.
 func TestCCDShallSectionCount(t *testing.T) {
 	raw := loadXML(t, "full_ccd_nist.xml")
 	doc := parseCDA(t, raw)
@@ -190,20 +193,21 @@ func TestCCDShallSectionCount(t *testing.T) {
 			shallRules++
 		}
 	}
-	// CCD SHALL (C-CDA 2.1 IG Table 30, 2018 errata): allergiesAndIntolerances,
-	//            medications, problems, results, planOfTreatment,
-	//            socialHistory, vitalSigns = 7
-	if shallRules != 7 {
-		t.Errorf("expected 7 CCD SHALL section rules, got %d", shallRules)
+	// CCD SHALL (Vol2 Table 30 + Companion Guide Table 18, corrected —
+	// planOfTreatment moved SHALL→SHOULD, it was never actually required):
+	// allergiesAndIntolerances, medications, problems, results,
+	// socialHistory, vitalSigns = 6
+	if shallRules != 6 {
+		t.Errorf("expected 6 CCD SHALL section rules, got %d", shallRules)
 	}
 }
 
-// TestStrippedCCD_MissingAllergy_TwoShallViolations removes the
+// TestStrippedCCD_MissingAllergy_OneShallViolation removes the
 // allergiesAndIntolerances section from the NIST reference CCD and verifies
-// exactly two SHALL violations are reported: the section just stripped, plus
-// planOfTreatment, which this fixture never had to begin with (see
-// TestNISTFullCCD_ShallScoreReflectsRealSections).
-func TestStrippedCCD_MissingAllergy_TwoShallViolations(t *testing.T) {
+// exactly one SHALL violation is reported. planOfTreatment moved SHALL→SHOULD
+// (corrected — it was never actually required), so it no longer contributes
+// a permanent baseline violation the way it used to.
+func TestStrippedCCD_MissingAllergy_OneShallViolation(t *testing.T) {
 	raw := loadXML(t, "full_ccd_nist.xml")
 	raw = stripComponentByTemplateID(raw, "2.16.840.1.113883.10.20.22.2.6.1")
 
@@ -222,21 +226,15 @@ func TestStrippedCCD_MissingAllergy_TwoShallViolations(t *testing.T) {
 			missing = append(missing, sr.SectionKey)
 		}
 	}
-	if len(missing) != 2 {
-		t.Errorf("expected exactly 2 missing SHALL sections (allergiesAndIntolerances, planOfTreatment), got %d: %v", len(missing), missing)
-	}
-	wantMissing := map[string]bool{"allergiesAndIntolerances": true, "planOfTreatment": true}
-	for _, key := range missing {
-		if !wantMissing[key] {
-			t.Errorf("unexpected missing SHALL section %q", key)
-		}
+	if len(missing) != 1 || missing[0] != "allergiesAndIntolerances" {
+		t.Errorf("expected exactly 1 missing SHALL section (allergiesAndIntolerances), got %d: %v", len(missing), missing)
 	}
 }
 
-// TestStrippedCCD_ShallScoreIs5of7 verifies the score numerics after
-// stripping one section from a base that was already 6/7 (missing
-// planOfTreatment — see TestNISTFullCCD_ShallScoreReflectsRealSections).
-func TestStrippedCCD_ShallScoreIs5of7(t *testing.T) {
+// TestStrippedCCD_ShallScoreIs5of6 verifies the score numerics after
+// stripping one section from a base that was a clean 6/6 (see
+// TestNISTFullCCD_ShallScoreReflectsRealSections).
+func TestStrippedCCD_ShallScoreIs5of6(t *testing.T) {
 	raw := loadXML(t, "full_ccd_nist.xml")
 	raw = stripComponentByTemplateID(raw, "2.16.840.1.113883.10.20.22.2.6.1")
 
@@ -245,10 +243,10 @@ func TestStrippedCCD_ShallScoreIs5of7(t *testing.T) {
 
 	report := v.Validate(doc)
 
-	const expected = 5.0 / 7.0
+	const expected = 5.0 / 6.0
 	const eps = 0.001
 	if report.ShallScore < expected-eps || report.ShallScore > expected+eps {
-		t.Errorf("expected ShallScore≈%.4f (5/7) after stripping allergy, got %.4f", expected, report.ShallScore)
+		t.Errorf("expected ShallScore≈%.4f (5/6) after stripping allergy, got %.4f", expected, report.ShallScore)
 	}
 }
 
@@ -295,9 +293,49 @@ func TestDetectDocumentType_FallbackToCCD(t *testing.T) {
 
 func TestDetectDocumentType_DischargeSummary(t *testing.T) {
 	v := newValidator(t)
-	raw := `<ClinicalDocument><templateId root="2.16.840.1.113883.10.20.22.1.7"/></ClinicalDocument>`
+	raw := `<ClinicalDocument><templateId root="2.16.840.1.113883.10.20.22.1.8"/></ClinicalDocument>`
 	if got := v.DetectDocumentType(raw); got != "Discharge Summary" {
 		t.Errorf("expected Discharge Summary, got %q", got)
+	}
+}
+
+func TestDetectDocumentType_CarePlan(t *testing.T) {
+	v := newValidator(t)
+	raw := `<ClinicalDocument><templateId root="2.16.840.1.113883.10.20.22.1.15"/></ClinicalDocument>`
+	if got := v.DetectDocumentType(raw); got != "Care Plan" {
+		t.Errorf("expected Care Plan, got %q", got)
+	}
+}
+
+func TestDetectDocumentType_TransferSummary(t *testing.T) {
+	v := newValidator(t)
+	raw := `<ClinicalDocument><templateId root="2.16.840.1.113883.10.20.22.1.13"/></ClinicalDocument>`
+	if got := v.DetectDocumentType(raw); got != "Transfer Summary" {
+		t.Errorf("expected Transfer Summary, got %q", got)
+	}
+}
+
+func TestDetectDocumentType_DiagnosticImagingReport(t *testing.T) {
+	v := newValidator(t)
+	raw := `<ClinicalDocument><templateId root="2.16.840.1.113883.10.20.22.1.5"/></ClinicalDocument>`
+	if got := v.DetectDocumentType(raw); got != "Diagnostic Imaging Report" {
+		t.Errorf("expected Diagnostic Imaging Report, got %q", got)
+	}
+}
+
+func TestDetectDocumentType_OperativeNote(t *testing.T) {
+	v := newValidator(t)
+	raw := `<ClinicalDocument><templateId root="2.16.840.1.113883.10.20.22.1.7"/></ClinicalDocument>`
+	if got := v.DetectDocumentType(raw); got != "Operative Note" {
+		t.Errorf("expected Operative Note, got %q", got)
+	}
+}
+
+func TestDetectDocumentType_ProcedureNote(t *testing.T) {
+	v := newValidator(t)
+	raw := `<ClinicalDocument><templateId root="2.16.840.1.113883.10.20.22.1.6"/></ClinicalDocument>`
+	if got := v.DetectDocumentType(raw); got != "Procedure Note" {
+		t.Errorf("expected Procedure Note, got %q", got)
 	}
 }
 

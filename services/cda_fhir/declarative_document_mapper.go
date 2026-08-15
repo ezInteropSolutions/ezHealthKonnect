@@ -67,6 +67,15 @@ func buildDeclarativeSectionRuleGroups() map[string][]MappingRule {
 	all = append(all, CoverageMappingRules()...)
 	all = append(all, FamilyMemberHistoryMappingRules()...)
 	all = append(all, DeviceMappingRules()...)
+	all = append(all, HealthStatusEvaluationsOutcomesMappingRules()...)
+	all = append(all, ComplicationsMappingRules()...)
+	all = append(all, PreoperativeDiagnosisMappingRules()...)
+	all = append(all, PostprocedureDiagnosisMappingRules()...)
+	all = append(all, ProcedureFindingsMappingRules()...)
+	all = append(all, ProcedureIndicationsMappingRules()...)
+	all = append(all, PlannedProcedureMappingRules()...)
+	all = append(all, AnesthesiaMappingRules()...)
+	all = append(all, MedicationsAdministeredMappingRules()...)
 
 	groups := make(map[string][]MappingRule)
 	for _, rule := range all {
@@ -769,6 +778,24 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 		if docRef != nil {
 			allResources = append(allResources, docRef)
 			successSects = append(successSects, sectionKey+"/narrative")
+		}
+	}
+
+	// ── Document-level Unstructured Body ─────────────────────────────────────
+	// Only ever set for the "Unstructured Document" type (see
+	// CDADocument.UnstructuredBody's own doc comment) — no sections exist to
+	// dispatch through or run the narrative pass above over, so this is a
+	// single document-level DocumentReference instead. CoverageTracker.Record
+	// mirrors services/cda_coverage/inventory.go's own "document.
+	// unstructuredBody" pseudo-item key exactly (see that file's
+	// buildNonXMLBodyInventoryItem) — without this, a document with no
+	// structuredBody at all would always read as a 100% gap even when this
+	// pass successfully captures its one piece of content.
+	if doc.UnstructuredBody != nil {
+		if docRef := m.buildUnstructuredDocRef(doc, patientRef); docRef != nil {
+			allResources = append(allResources, docRef)
+			successSects = append(successSects, "unstructuredBody")
+			engine.CoverageTracker.Record(executors.CDAEntryKey("document.unstructuredBody", 0))
 		}
 	}
 

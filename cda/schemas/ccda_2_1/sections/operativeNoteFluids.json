@@ -1,0 +1,10 @@
+{
+  "key": "operativeNoteFluids",
+  "uscdiClass": "Operative Note",
+  "displayName": "Operative Note Fluids",
+  "loincCode": "10216-0",
+  "templateId": "2.16.840.1.113883.10.20.7.12",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "fields": []
+}

@@ -2245,6 +2245,415 @@ func ProcedureMappingRules() []MappingRule {
 }
 
 // =========================================================
+// Operative Note / Procedure Note / Care Plan -- 9 structured sections that
+// parsed and Coverage-Audited correctly but produced no FHIR resource,
+// closed in one slice (see cda/schemas/ccda_2_1.json's documentTypeSections
+// for which document types carry which of these).
+//
+// complications/preoperativeDiagnosis/postprocedureDiagnosis/
+// procedureFindings all reuse the Problem Observation template (.4.4, fixed
+// code 55607006 "Problem" -- confirmed in cda/schemas/ccda_2_1.json against
+// each section's own entryFixedCode/observationFixedCode) -- the same shape
+// ProblemsMappingRules already targets, but NOT all four are safe to reuse
+// conditionRule/conditionFields for verbatim:
+//   - preoperativeDiagnosis/postprocedureDiagnosis wrap the Problem
+//     Observation in an outer act (entry/act ->
+//     entryRelationship[SUBJ]/observation) -- byte-identical to Problems'
+//     own Concern-Act-wraps-Problem-Observation shape, which is exactly what
+//     conditionFields' problemObsScope (SUBJ, falling back to REFR, falling
+//     back to self) already resolves. conditionRule() reuse is correct here.
+//   - complications/procedureFindings are the Problem Observation directly
+//     (entry/observation, no wrapping act). Reusing conditionRule() here was
+//     WRONG, confirmed against real data (HL7's official C-CDA-Examples
+//     Operative_Note.xml, downloaded and run through DeclarativeMapDocument
+//     during this session): conditionFields()'s top-level rows (code,
+//     clinicalStatus, onsetDateTime, etc.) scope via problemObsScope
+//     ("entryRelationships[typeCode=SUBJ].entry", falling back to REFR, then
+//     "" self) -- correct for an ACT whose one meaningful SUBJ child is the
+//     real nested Problem Observation, but WRONG when the matched entry is
+//     ALREADY the Problem Observation: the sample's "complications" entry
+//     (Pneumonia) carries its own genuine SUBJ-typed child, an Age At Onset
+//     sub-observation (.4.31, inversionInd="true", PQ value "57 a") --
+//     problemObsScope's primary tier has no code-filter, so it blindly
+//     resolved to Age At Onset INSTEAD of falling through to self, and
+//     Condition.code came out as a bare Quantity ({code:"a",unit:"a",
+//     value:57}) instead of Pneumonia's CodeableConcept -- invalid FHIR, not
+//     just a wrong value. See directProblemObsFields for the fix.
+// Category "encounter-diagnosis" (not "problem-list-item"): all four are
+// procedure/encounter-scoped diagnoses, not persistent problem-list items --
+// "encounter-diagnosis" is already a real branch in
+// declarativeConditionCategory, semantically the correct fit.
+func ComplicationsMappingRules() []MappingRule {
+	return []MappingRule{directProblemObservationRule("complications", "encounter-diagnosis")}
+}
+
+func PreoperativeDiagnosisMappingRules() []MappingRule {
+	return []MappingRule{conditionRule("preoperativeDiagnosis", "encounter-diagnosis")}
+}
+
+func PostprocedureDiagnosisMappingRules() []MappingRule {
+	return []MappingRule{conditionRule("postprocedureDiagnosis", "encounter-diagnosis")}
+}
+
+func ProcedureFindingsMappingRules() []MappingRule {
+	return []MappingRule{directProblemObservationRule("procedureFindings", "encounter-diagnosis")}
+}
+
+// directProblemObservationRule is conditionRule()'s counterpart for sections
+// whose matched entry IS the Problem Observation itself -- see
+// directProblemObsFields' own doc comment for why conditionFields() isn't
+// reused here.
+func directProblemObservationRule(sectionKey, categoryCode string) MappingRule {
+	return MappingRule{
+		SectionKey:     sectionKey,
+		FHIRResource:   "Condition",
+		PatientRefPath: []string{"subject"},
+		Fields:         directProblemObsFields(categoryCode),
+	}
+}
+
+// directProblemObsFields mirrors conditionFields(), corrected for sections
+// whose matched entry is ALREADY the Problem Observation (entry/observation,
+// no wrapping Concern Act) -- complications and procedureFindings. Every row
+// that conditionFields() scopes via problemObsScope/problemObsScopeFallbacks
+// (an ACT-relative "find my one real nested Problem Observation" path) is
+// rewritten here to resolve relative to the matched entry directly instead
+// -- Scope simply omitted (declarative_engine.go's resolveScope treats a
+// zero-value Scope as "self", the same "" problemObsScopeFallbacks' own last
+// tier already relies on).
+//
+// severity and the new onsetAge row use the ONE-HOP nested paths
+// (entryRelationships[typeCode=SUBJ].entry[code=...]) directly as their
+// PRIMARY (only) tier -- conditionFields()'s own two-hop-then-one-hop-
+// fallback design already proves the one-hop form is exactly what a
+// Problem-Observation-as-matched-entry needs (it's the LAST fallback tier
+// conditionFields()'s severity row falls back to today, just never promoted
+// to primary since conditionFields() is only ever used where the matched
+// entry is an act). onsetAge previously had NO one-hop tier at all in
+// conditionFields() (only two two-hop ones), so Age At Onset data on a
+// direct Problem Observation was silently dropped -- confirmed via the same
+// real Operative_Note.xml sample: the Pneumonia entry's Age At Onset (57
+// years) is now correctly captured as onsetAge instead of leaking into code.
+func directProblemObsFields(categoryCode string) []MappingRow {
+	return []MappingRow{
+		{
+			// Corrected from problemObsScope: no outer act to hop through,
+			// so no fallback is needed at all -- the entry's own value/code
+			// (via cda_value_or_code_to_codeable_concept) is always the
+			// right answer.
+			Transform:   "cda_value_or_code_to_codeable_concept",
+			TargetPath:  "code",
+			Required:    true,
+			Conformance: "SHALL",
+		},
+		{
+			SourcePath:  "statusCode",
+			Transform:   "condition_status_to_fhir",
+			TargetPath:  "clinicalStatus",
+			Required:    true,
+			Conformance: "SHALL",
+		},
+		{
+			// Corrected from conditionFields(): dropped the WhenPaths tier
+			// (entryRelationships[typeCode=SUBJ/REFR].entry.negationInd) --
+			// those would check whatever unrelated SUBJ-typed detail
+			// sub-observation (Age At Onset, Severity) happens to exist,
+			// not a second legitimate negation source the way they are for
+			// the ACT-wrapped case. The matched entry's own negationInd is
+			// the only correct source here.
+			LiteralValue: "confirmed",
+			Transform:    "condition_verification_status_to_fhir",
+			TargetPath:   "verificationStatus",
+			Condition: &RowCondition{
+				WhenPath:         "negationInd",
+				Equals:           "true",
+				ThenLiteralValue: "refuted",
+			},
+		},
+		{
+			// Corrected: one-hop only (see doc comment above).
+			Scope:      "entryRelationships[typeCode=SUBJ].entry[code=SEV]",
+			SourcePath: "value.code",
+			Transform:  "cda_code_to_codeable_concept",
+			TargetPath: "severity",
+		},
+		{
+			LiteralValue: categoryCode,
+			Transform:    "condition_category_to_fhir",
+			TargetPath:   "category[0]",
+		},
+		{
+			SourcePath: "effectiveTime",
+			Transform:  "cda_timerange_to_onset",
+			TargetPath: "onsetDateTime",
+		},
+		{
+			SourcePath: "effectiveTime.high",
+			Transform:  "cda_time_to_fhir_datetime",
+			TargetPath: "abatementDateTime",
+		},
+		assignedEntityRoleRow("authors[0].assignedAuthor", "recorder"),
+		func() MappingRow {
+			row := barePractitionerRow("authors[0].assignedAuthor", "recorder")
+			row.SkipIfResourceHasAnyOf = []string{"recorder"}
+			return row
+		}(),
+		{
+			SourcePath: "authors[0].time",
+			Transform:  "cda_time_to_fhir_datetime",
+			TargetPath: "recordedDate",
+		},
+		{
+			// Already self-relative in conditionFields() too -- Note
+			// Activity attaches as a COMP sibling of the matched entry
+			// either way, act-wrapped or not.
+			Scope:      "entryRelationships[typeCode=COMP].entry[templateId=" + noteActivityTemplateID + "]",
+			SourcePath: "text",
+			TargetPath: "note[0].text",
+		},
+		assignedEntityRoleRow("performers[0].assignedEntity", "asserter"),
+		func() MappingRow {
+			row := barePractitionerRow("performers[0].assignedEntity", "asserter")
+			row.SkipIfResourceHasAnyOf = []string{"asserter"}
+			return row
+		}(),
+		{
+			// New: conditionFields() has no one-hop tier for this at all
+			// (see doc comment above) -- Age At Onset data on a direct
+			// Problem Observation was previously silently dropped.
+			Scope:      "entryRelationships[typeCode=SUBJ,inversionInd=true].entry[code=445518008]",
+			SourcePath: "value",
+			Transform:  "cda_value_to_fhir",
+			TargetPath: "onsetAge",
+		},
+	}
+}
+
+// ProcedureIndicationsMappingRules returns the OOB declarative rule for the
+// "procedureIndications" section (Operative Note SHALL / Procedure Note
+// SHALL). Deliberately NOT conditionFields() reuse, unlike the four rules
+// above: this section's entry is Indication (V2) (.4.19), fixed code
+// "ASSERTION"/2.16.840.1.113883.5.4 -- a different template from the Problem
+// Observation (.4.4) the other four sections share, with no statusCode/
+// severity/recorder/asserter data modeled in this section at all (its own
+// cda/schemas/ccda_2_1.json fields list has exactly two entries:
+// indicationCode and effectiveTime, both SHOULD). Reusing conditionFields()
+// wholesale would mark clinicalStatus/code Required=true/SHALL against data
+// this section's real shape doesn't carry.
+//
+// code reads SourcePath="value" (the Indication observation's real SNOMED
+// content) via cda_value_to_fhir, which -- unlike
+// cda_value_or_code_to_codeable_concept -- deliberately never falls back to
+// the entry's own "code": that fixed code is the literal string "ASSERTION",
+// a discriminator placeholder, not a diagnosis; falling back to it would
+// surface "ASSERTION" as if it were the indication. Same SourcePath="value"
+// + cda_value_to_fhir idiom V160's familyHistory condition-code row already
+// uses for an analogous "read only the value, not a code fallback" case.
+//
+// clinicalStatus/verificationStatus are literals ("active"/"confirmed"), not
+// data-derived: an Indication (V2) entry is inherently a present-tense
+// assertion (moodCode=EVN, no negation concept in this template), so there's
+// no source field to read a status FROM -- passing the literal string into
+// the same condition_status_to_fhir/condition_verification_status_to_fhir
+// transforms conditionFields() already uses keeps the resulting CodeableConcept
+// shape identical to every other Condition this engine produces.
+func ProcedureIndicationsMappingRules() []MappingRule {
+	return []MappingRule{
+		{
+			SectionKey:     "procedureIndications",
+			FHIRResource:   "Condition",
+			PatientRefPath: []string{"subject"},
+			Fields: []MappingRow{
+				{
+					SourcePath:  "value",
+					Transform:   "cda_value_to_fhir",
+					TargetPath:  "code",
+					Conformance: "SHOULD",
+				},
+				{
+					SourcePath: "effectiveTime",
+					Transform:  "cda_timerange_to_onset",
+					TargetPath: "onsetDateTime",
+				},
+				{
+					LiteralValue: "active",
+					Transform:    "condition_status_to_fhir",
+					TargetPath:   "clinicalStatus",
+				},
+				{
+					LiteralValue: "confirmed",
+					Transform:    "condition_verification_status_to_fhir",
+					TargetPath:   "verificationStatus",
+				},
+				{
+					LiteralValue: "encounter-diagnosis",
+					Transform:    "condition_category_to_fhir",
+					TargetPath:   "category[0]",
+				},
+			},
+		},
+	}
+}
+
+// HealthStatusEvaluationsOutcomesMappingRules returns the OOB declarative
+// rule for the "healthStatusEvaluationsOutcomes" section (Care Plan MAY).
+// Direct entry/observation, free-form LOINC outcomeCode + a coded value --
+// exactly the shape observationRule() already handles (its
+// observationValueXDispatchRows() polymorphic value[x] dispatch covers the
+// CD-typed value this section's own schema field declares), so the field
+// list is direct reuse, not new field logic. Category "survey": the closest
+// US Core Observation category fit for an outcome-measure-style assessment,
+// same precedent healthConcernAssessmentScaleRule already set for PHQ-9/
+// PHQ-2 and similar patient-outcome instruments.
+//
+// EntryMatch="entryType=observation" is patched on AFTER observationRule()
+// returns (same "clone a shared literal, override one field" idiom
+// applyPlanOfCareEncounterTarget uses) -- observationRule() itself sets no
+// EntryMatch, and confirmed against real data (HL7's official
+// C-CDA-Examples CarePlan sample) that this section can carry a SECOND kind
+// of entry alongside the real Outcome Observation: an <act> "External
+// Document Reference" (code="DOCCLIN", pointing at a related Discharge
+// Summary via a REFR-typed reference, no value at all). Without this guard,
+// that act was ALSO claimed by the Observation rule and forced through the
+// same field list, producing a near-empty junk Observation (code="clinical
+// document", dataAbsentReason=unknown) alongside the real one. Scoped to
+// this rule alone, not a fix to observationRule() itself -- that function is
+// shared by 5 other already-corpus-validated sections (VitalSigns, Results
+// x2, SocialHistory, FunctionalStatus, MentalStatus) with no evidence any of
+// them hit this same shape; changing their shared behavior on the strength
+// of one new section's sample data risks an unrelated regression for zero
+// benefit to them.
+func HealthStatusEvaluationsOutcomesMappingRules() []MappingRule {
+	rule := observationRule("healthStatusEvaluationsOutcomes", "survey")
+	rule.EntryMatch = "entryType=observation"
+	return []MappingRule{rule}
+}
+
+// medicationAdministrationFields returns the MedicationAdministration field
+// rows shared by AnesthesiaMappingRules and
+// MedicationsAdministeredMappingRules -- both sections reuse the exact
+// Medication Activity V2 CDA shape (.4.16) the "medications" section's own
+// medicationCommonRows() targets, but medicationCommonRows() isn't reused
+// here: MedicationAdministration.dosage is a SINGULAR object (dosage.route/
+// dosage.dose/dosage.text), not the dosage[]/dosageInstruction[] ARRAY
+// medicationCommonRows() is dosagePrefix-parameterized for, and
+// MedicationAdministration has no timing/patientInstruction concept at all
+// (both Request/Statement-only Dosage features), so the PIVL-timing and
+// Instruction(V2) rows medicationCommonRows() carries don't apply here.
+//
+// FHIRResource="MedicationAdministration" (not MedicationStatement, despite
+// the identical source shape): user-confirmed choice -- these two sections
+// record medication ALREADY administered during a procedure, which is
+// exactly what MedicationAdministration models (MedicationStatement carries
+// a patient-reported-history connotation that doesn't fit an
+// anesthesiologist's own procedure documentation). The declarative engine
+// builds every resource as a generic map[string]interface{}{"resourceType":
+// rule.FHIRResource} (declarative_engine.go) -- introducing a
+// not-yet-used-elsewhere resource type string costs nothing at the engine
+// level.
+func medicationAdministrationFields() []MappingRow {
+	return []MappingRow{
+		{
+			// Same CollectAll+Scope idiom as medicationCommonRows' own
+			// identifier row.
+			Scope:      "id[*]",
+			CollectAll: true,
+			Transform:  "cda_ii_to_identifier",
+			TargetPath: "identifier",
+		},
+		{
+			SourcePath:  "statusCode",
+			Transform:   "medication_administration_status_to_fhir",
+			TargetPath:  "status",
+			Required:    true,
+			Conformance: "SHALL",
+		},
+		{
+			SourcePath: "consumable.manufacturedProduct.manufacturedMaterial.code",
+			Transform:  "cda_code_to_codeable_concept",
+			TargetPath: "medicationCodeableConcept",
+		},
+		{
+			// MedicationAdministration.effective[x] is 1..1 required --
+			// period preferred, single-datetime fallback, same
+			// SkipIfResourceHasAnyOf idiom medicationStatementRule() uses
+			// for its own effectivePeriod/effectiveDateTime pair.
+			SourcePath: "effectiveTime",
+			Transform:  "cda_timerange_to_period",
+			TargetPath: "effectivePeriod",
+		},
+		{
+			SourcePath:             "effectiveTime",
+			Transform:              "cda_timerange_to_onset",
+			TargetPath:             "effectiveDateTime",
+			SkipIfResourceHasAnyOf: []string{"effectivePeriod"},
+		},
+		{
+			SourcePath: "routeCode",
+			Transform:  "cda_code_to_codeable_concept",
+			TargetPath: "dosage.route",
+		},
+		{
+			SourcePath: "doseQuantity",
+			Transform:  "cda_quantity_to_fhir",
+			TargetPath: "dosage.dose",
+		},
+		{
+			// Free Text Sig -- same COMP+templateId scope as
+			// medicationCommonRows' own Free Text Sig row.
+			Scope:      "entryRelationships[typeCode=COMP].entry[templateId=" + medicationFreeTextSigTemplateID + "]",
+			SourcePath: "text",
+			TargetPath: "dosage.text",
+		},
+		{
+			// Same RSON scope/transform as medicationCommonRows' reasonCode
+			// row.
+			Scope:      "entryRelationships[typeCode=RSON].entry",
+			Transform:  "cda_value_or_code_to_codeable_concept",
+			CollectAll: true,
+			TargetPath: "reasonCode",
+		},
+		{
+			// Same Comment Activity scope as medicationCommonRows' note row.
+			Scope:      "entryRelationships[typeCode=COMP].entry[templateId=" + commentActivityTemplateID + "]",
+			SourcePath: "text",
+			TargetPath: "note[0].text",
+		},
+		// MedicationAdministration.performer[0].actor -- same two-tier
+		// PractitionerRole/Practitioner idiom as Condition.recorder/asserter
+		// and Medication.requester (assignedEntityRoleRow first, bare
+		// Practitioner fallback when there's no representedOrganization).
+		assignedEntityRoleRow("performers[0].assignedEntity", "performer[0].actor"),
+		func() MappingRow {
+			row := barePractitionerRow("performers[0].assignedEntity", "performer[0].actor")
+			row.SkipIfResourceHasAnyOf = []string{"performer"}
+			return row
+		}(),
+	}
+}
+
+func medicationAdministrationRule(sectionKey string) MappingRule {
+	return MappingRule{
+		SectionKey:     sectionKey,
+		FHIRResource:   "MedicationAdministration",
+		PatientRefPath: []string{"subject"},
+		Fields:         medicationAdministrationFields(),
+	}
+}
+
+// AnesthesiaMappingRules returns the OOB declarative rule for the
+// "anesthesia" section (Operative Note SHALL, Procedure Note SHALL).
+func AnesthesiaMappingRules() []MappingRule {
+	return []MappingRule{medicationAdministrationRule("anesthesia")}
+}
+
+// MedicationsAdministeredMappingRules returns the OOB declarative rule for
+// the "medicationsAdministered" section (Procedure Note MAY).
+func MedicationsAdministeredMappingRules() []MappingRule {
+	return []MappingRule{medicationAdministrationRule("medicationsAdministered")}
+}
+
+// =========================================================
 // CarePlan / Goal (Plan of Care)
 // =========================================================
 //
@@ -2510,84 +2919,119 @@ func planOfCareRulesForSectionKey(sectionKey string) []MappingRule {
 			EntryMatch:        "entryType=procedure|observation|act",
 			FlattenOrganizers: true,
 			PatientRefPath:    []string{"subject"}, // plan_of_care_mapper.go:95: r["subject"] = ref(patientRef)
-			Fields: []MappingRow{
-				{SourcePath: "statusCode", Transform: "service_request_status_to_fhir", TargetPath: "status"},
-				{SourcePath: "moodCode", Transform: "service_request_intent_from_mood", TargetPath: "intent"},
-				{SourcePath: "code", Transform: "cda_code_to_codeable_concept", TargetPath: "code"},
-				{
-					// Real gap found auditing 3 independently-sourced real CCDs
-					// (Marshfield Clinic, Dignity Health -- neither the 99397
-					// Epic sample nor Ascension's, both already covered above):
-					// a Planned Act (.4.39) entry whose own <code> is a bare
-					// nullFlavor="UNK" with NO <originalText> child at all --
-					// unlike the Health Maintenance Observation (.4.44) shape
-					// elsewhere in this same section, where the reference lives
-					// INSIDE code's own originalText and so already resolves via
-					// parseCD/resolveCodeRef before this engine ever sees it.
-					// Here the resolved content is the entry's own sibling
-					// <text><reference value="#id"/></text> instead -- e.g.
-					// "Return to Clinic - Endocrinology 6/17/26" or a full
-					// office-visit note -- which the row above never reads
-					// (SourcePath="code" only), so every one of these fell
-					// through to the generic "Unknown" placeholder below,
-					// discarding real, often substantial narrative content.
-					// Mirrors the entry.text-to-code.text override row already
-					// proven in observationRule()/ClinicalNoteMappingRules().
-					SourcePath: "text",
-					TargetPath: "code.text",
-				},
-				{
-					// us-core-servicerequest requires code (1..1) — same
-					// SkipIfResourceHasAnyOf placeholder idiom as Goal's
-					// description above.
-					LiteralValue:           map[string]interface{}{"text": "Unknown"},
-					TargetPath:             "code",
-					SkipIfResourceHasAnyOf: []string{"code"},
-				},
-				{SourcePath: "effectiveTime", Transform: "cda_timerange_to_period", TargetPath: "occurrencePeriod"},
-				{
-					SourcePath:             "effectiveTime",
-					Transform:              "cda_timerange_to_onset",
-					TargetPath:             "occurrenceDateTime",
-					SkipIfResourceHasAnyOf: []string{"occurrencePeriod"},
-				},
-				{
-					// plan_of_care_mapper.go:113-120 — first matching RSON
-					// only (Go's loop breaks after the first, even if that
-					// one's code is empty); the non-CollectAll Scope's own
-					// scopedNodes[0]-only semantics already match this.
-					//
-					// Reads the RSON entry's OWN value first, code as fallback
-					// (cda_value_or_code_to_codeable_concept) -- NOT just
-					// ".code" like Go's original implementation did. Real
-					// corpus evidence (this EPIC-sourced document) shows why
-					// that was wrong: the RSON-linked observation is a Problem
-					// Observation (.4.19, the SAME template Condition's own
-					// code row reads), whose "code" is the IG-fixed wrapper
-					// code (29308-4 "Diagnosis" -- a label, not a diagnosis)
-					// and whose "value" carries the real SNOMED diagnosis
-					// (e.g. 305058001 "Screening for malignant neoplasm of
-					// cervix"). Go's own behavior here predates Condition's
-					// value-preferred row and was never reconciled with it --
-					// this fix brings ServiceRequest.reasonCode in line with
-					// the same idiom every other RSON/value-or-code row in
-					// this file already uses.
-					Scope:      "entryRelationships[typeCode=RSON].entry",
-					Transform:  "cda_value_or_code_to_codeable_concept",
-					TargetPath: "reasonCode[0]",
-				},
-				{
-					// ServiceRequest.requester -- the ordering provider's
-					// <author> (NPI, name, address, telecom,
-					// representedOrganization -- real, rich data in this
-					// corpus) was never read by plan_of_care_mapper.go at all;
-					// same documented-gap shape as Medication's analogous
-					// requester row, reused here via the identical transform.
-					Scope:      "authors[0].assignedAuthor.assignedPerson.names[0]",
-					Transform:  "cda_name_or_literal_to_display_ref",
-					TargetPath: "requester",
-				},
-			},
+			Fields:            serviceRequestFields(),
+		},
+	}
+}
+
+// serviceRequestFields returns the ServiceRequest field rows shared by
+// planOfCareRulesForSectionKey's entryType=procedure|observation|act branch
+// (plan_of_care_mapper.go:78-79,87-124) and PlannedProcedureMappingRules'
+// standalone "plannedProcedure" rule (Operative Note) -- the same "requested,
+// not-yet-performed" procedure/observation/act shape either way, just
+// reached via a different SectionKey. moodCode drives .intent generically
+// (service_request_intent_from_mood), so plannedProcedure's real inbound
+// moodCode="RQO" (cda/schemas/ccda_2_1.json's entryMoodCodeOverride, an
+// outbound-build-only field -- inbound documents carry the real attribute)
+// resolves correctly with no plannedProcedure-specific code.
+func serviceRequestFields() []MappingRow {
+	return []MappingRow{
+		{SourcePath: "statusCode", Transform: "service_request_status_to_fhir", TargetPath: "status"},
+		{SourcePath: "moodCode", Transform: "service_request_intent_from_mood", TargetPath: "intent"},
+		{SourcePath: "code", Transform: "cda_code_to_codeable_concept", TargetPath: "code"},
+		{
+			// Real gap found auditing 3 independently-sourced real CCDs
+			// (Marshfield Clinic, Dignity Health -- neither the 99397
+			// Epic sample nor Ascension's, both already covered above):
+			// a Planned Act (.4.39) entry whose own <code> is a bare
+			// nullFlavor="UNK" with NO <originalText> child at all --
+			// unlike the Health Maintenance Observation (.4.44) shape
+			// elsewhere in this same section, where the reference lives
+			// INSIDE code's own originalText and so already resolves via
+			// parseCD/resolveCodeRef before this engine ever sees it.
+			// Here the resolved content is the entry's own sibling
+			// <text><reference value="#id"/></text> instead -- e.g.
+			// "Return to Clinic - Endocrinology 6/17/26" or a full
+			// office-visit note -- which the row above never reads
+			// (SourcePath="code" only), so every one of these fell
+			// through to the generic "Unknown" placeholder below,
+			// discarding real, often substantial narrative content.
+			// Mirrors the entry.text-to-code.text override row already
+			// proven in observationRule()/ClinicalNoteMappingRules().
+			SourcePath: "text",
+			TargetPath: "code.text",
+		},
+		{
+			// us-core-servicerequest requires code (1..1) — same
+			// SkipIfResourceHasAnyOf placeholder idiom as Goal's
+			// description above.
+			LiteralValue:           map[string]interface{}{"text": "Unknown"},
+			TargetPath:             "code",
+			SkipIfResourceHasAnyOf: []string{"code"},
+		},
+		{SourcePath: "effectiveTime", Transform: "cda_timerange_to_period", TargetPath: "occurrencePeriod"},
+		{
+			SourcePath:             "effectiveTime",
+			Transform:              "cda_timerange_to_onset",
+			TargetPath:             "occurrenceDateTime",
+			SkipIfResourceHasAnyOf: []string{"occurrencePeriod"},
+		},
+		{
+			// plan_of_care_mapper.go:113-120 — first matching RSON
+			// only (Go's loop breaks after the first, even if that
+			// one's code is empty); the non-CollectAll Scope's own
+			// scopedNodes[0]-only semantics already match this.
+			//
+			// Reads the RSON entry's OWN value first, code as fallback
+			// (cda_value_or_code_to_codeable_concept) -- NOT just
+			// ".code" like Go's original implementation did. Real
+			// corpus evidence (this EPIC-sourced document) shows why
+			// that was wrong: the RSON-linked observation is a Problem
+			// Observation (.4.19, the SAME template Condition's own
+			// code row reads), whose "code" is the IG-fixed wrapper
+			// code (29308-4 "Diagnosis" -- a label, not a diagnosis)
+			// and whose "value" carries the real SNOMED diagnosis
+			// (e.g. 305058001 "Screening for malignant neoplasm of
+			// cervix"). Go's own behavior here predates Condition's
+			// value-preferred row and was never reconciled with it --
+			// this fix brings ServiceRequest.reasonCode in line with
+			// the same idiom every other RSON/value-or-code row in
+			// this file already uses.
+			Scope:      "entryRelationships[typeCode=RSON].entry",
+			Transform:  "cda_value_or_code_to_codeable_concept",
+			TargetPath: "reasonCode[0]",
+		},
+		{
+			// ServiceRequest.requester -- the ordering provider's
+			// <author> (NPI, name, address, telecom,
+			// representedOrganization -- real, rich data in this
+			// corpus) was never read by plan_of_care_mapper.go at all;
+			// same documented-gap shape as Medication's analogous
+			// requester row, reused here via the identical transform.
+			Scope:      "authors[0].assignedAuthor.assignedPerson.names[0]",
+			Transform:  "cda_name_or_literal_to_display_ref",
+			TargetPath: "requester",
+		},
+	}
+}
+
+// PlannedProcedureMappingRules returns the OOB declarative rule for the
+// "plannedProcedure" section (Operative Note, MAY) -- entry/procedure with
+// entryMoodCodeOverride="RQO" (cda/schemas/ccda_2_1.json), i.e. a procedure
+// that has been requested/planned but not yet performed. Reuses
+// serviceRequestFields() rather than ProcedureMappingRules' Fields: a
+// not-yet-performed procedure is a request/order (FHIR ServiceRequest), not
+// a completed event (FHIR Procedure) -- the same EVN-vs-RQO distinction
+// planOfCareRulesForSectionKey's own entryType=procedure branch already
+// draws for Plan-of-Care's mixed-mood entries, just applied here to a
+// section whose entries are always mood=RQO.
+func PlannedProcedureMappingRules() []MappingRule {
+	return []MappingRule{
+		{
+			SectionKey:     "plannedProcedure",
+			FHIRResource:   "ServiceRequest",
+			PatientRefPath: []string{"subject"}, // plan_of_care_mapper.go:95: r["subject"] = ref(patientRef)
+			Fields:         serviceRequestFields(),
 		},
 	}
 }

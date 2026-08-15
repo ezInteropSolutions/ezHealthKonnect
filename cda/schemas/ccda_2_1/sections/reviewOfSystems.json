@@ -1,0 +1,10 @@
+{
+  "key": "reviewOfSystems",
+  "uscdiClass": "Review of Systems",
+  "displayName": "Review of Systems",
+  "loincCode": "10187-3",
+  "templateId": "1.3.6.1.4.1.19376.1.5.3.1.3.18",
+  "templateIdOptional": "",
+  "conformance": "SHOULD",
+  "fields": []
+}

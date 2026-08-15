@@ -1060,3 +1060,109 @@ _stepOutput.section_stats.<sectionKey>.cross_message_suppressed → [{identity_k
 - Per-message lineage endpoint: `controllers/MessageController.js` (`getDedupeSuppressions`), `routes/messageRoutes.js` (`GET /:messageId/dedupe-suppressions`)
 - Per-message lineage UI (Journey tab "Dedup Suppressions" step): `public/js/messages.js` (`loadDataLineage`, `renderDataLineage`)
 
+## C-CDA R2.1 Document-Type Coverage — 12 of 12 Types, One Documented Gap (August 2026)
+
+### Status
+All 12 official HL7 C-CDA R2.1 document-level templates are now registered in `cda/schemas/ccda_2_1.json` and supported end-to-end (inbound parse → FHIR mapping → Coverage Audit, outbound `cda.build`): CCD, Discharge Summary, Referral Note, History and Physical, Consultation Note, Progress Note, Care Plan, Diagnostic Imaging Report, Operative Note, Procedure Note, Transfer Summary, Unstructured Document. Both `cda/builder` (outbound) and `cda/document`/`services/cda_fhir`/`services/cda_coverage` (inbound) are schema-driven and document-type-blind — adding a document type whose sections already exist is a pure JSON edit; only Unstructured Document needed new Go (different body shape, no `structuredBody`).
+
+### Permanent gap: DICOM Object Catalog Section (Diagnostic Imaging Report)
+Not built, and not planned under the current architecture. Its own spec constraints (Vol 2 §2.12, templateId `2.16.840.1.113883.10.20.6.1.1`, DCM code `121181`) conflict with 3 assumptions baked into the generic section/entry engine:
+1. **No `title`/`text` at all** — the section's SHALL list omits both; `document_builder.go`'s section loop unconditionally writes `<title>` for every section.
+2. **Genuine 3-level polymorphic nesting** — Study Act → Series Act (`entryRelationship[@typeCode='COMP']`) → N SOP-Instance observations (`classCode="DGIMG"`, another `COMP` level), three distinct templated entity types. `CDASectionDef` only supports 2 levels (`EntryElementPath` + one `ObservationElementPath`, or `RepeatingGroups` for N repeats of *one* item type) — there's no 3-tier parent/child/grandchild shape.
+3. **A positional constraint** — "SHALL be first section in the document if present" — the section-emission loop (SHALL+SHOULD+MAY concatenation) has no ordering concept beyond list order.
+
+Decision (2026-08-09, user-confirmed): document as a permanent, spec-acknowledged limitation rather than build new engine capability or ship a non-conformant stub. Diagnostic Imaging Report's `findingsDIR` section (its one true SHALL section, narrative-only) works today; documents containing DICOM image references will not get a catalog on outbound build, and inbound documents with one will Coverage-Audit as present-but-unmapped rather than error.
+
+### History and Physical SHALL-list correction
+`documentTypeSections["History and Physical"]` was wrong since the original 6-type build — it used 3 optional sections (`chiefComplaint`, `historyOfPresentIllness`, `assessment`) as SHALL and was missing 8 of the real 10 required sections. Corrected against Vol 2 §1.1.12 Table 39 + Companion Guide §3.3.6 Table 21 (both agree): SHALL = `reviewOfSystems, generalStatus, medications, results, pastMedicalHistory, vitalSigns, physicalExamination, socialHistory, familyHistory, allergiesAndIntolerances`. The 3 previously-SHALL sections moved to MAY (spec marks them optional, no SHOULD tier exists for this document type in either source). Not yet added: **Instructions Section (V2)** (`2.16.840.1.113883.10.20.22.2.45:2014-06-09`) — a genuinely new, unverified section also listed as optional for H&P; deliberately left out of this batch pending its own entry-level spec verification.
+
+### New sections added this round
+- **Care Plan** (MAY): `healthStatusEvaluationsOutcomes` (structured — Outcome Observation `.4.144`, free-form LOINC code, no fixed code unlike most reused-observation sections), `interventions` (narrative-only v1 — Intervention Act `.4.131` wraps 11 possible nested activity types per its own contexts table; entries are 0..* SHOULD so narrative-only is spec-conformant, not a scope reduction).
+- **Transfer Summary** (MAY): `courseOfCare`, `generalStatus` — both narrative-only.
+- **Procedure Note** (MAY): `reasonForVisit`, `chiefComplaintAndReasonForVisit`, `medicalGeneralHistory` (narrative-only), `medicationsAdministered` (structured — substanceAdministration reusing Medication Activity V2 `.4.16:2014-06-09`, same shape as `anesthesia`), `physicalExamination` (reused — Procedure Note's "Physical Exam Section (V3)" is byte-for-byte the same templateId/ext/LOINC as the already-registered key, not a new section).
+- **`courseOfCare`/`hospitalCourse` share LOINC `8648-8`** ("Hospital Course Narrative") — confirmed directly against both sections' own spec tables, not a data-entry error. `resolveKey`'s templateId tier (checked first, always populated for these sections) resolves both correctly; only a malformed document missing templateId but present LOINC could hit the map collision in `sectionByLOINC`, same latent class of risk as any other schema with reused codes.
+
+### FHIR mapping follow-on (not yet done)
+None of the 8 new sections have dedicated `MappingRule`s — narrative-only ones ride the existing section-level narrative pass for a `DocumentReference` for free; the 2 structured ones (`healthStatusEvaluationsOutcomes`, `medicationsAdministered`) are Coverage-Audit-visible-but-unmapped until their own rules are written (same trade-off precedent as `header.legalAuthenticator`).
+
+## Document-Type Section-List Audit — CCD, Discharge Summary, Referral Note, Consultation Note, Progress Note (August 2026)
+
+### Why this happened
+The original 6-document-type build (pre-dating this session) never rigorously audited any document type's own document-level constraints table (Vol2 §1.1.x) — every `documentTypeSections` SHALL/SHOULD/MAY list was written once and never independently re-verified. History and Physical's audit (above) found a real bug; the same audit was then run against the other 5 "original" types and found real defects in all 5, ranging from minor (CCD) to severe (Progress Note's SHALL list was entirely wrong).
+
+### Corrected section lists
+All 5 are now corrected in `cda/schemas/ccda_2_1.json`'s `documentTypeSections`, each independently verified against two primary sources (Vol2's own per-section narrative constraint list — the `i., ii., iii...` items — plus the Companion Guide's required/optional table):
+- **CCD**: `planOfTreatment` SHALL→SHOULD, `payersInsurance` SHOULD→MAY.
+- **Discharge Summary**: `dischargeMedications` SHALL→SHOULD, `problems` SHALL→MAY, `planOfTreatment` added to SHALL (was entirely unregistered), 5 sections SHOULD→MAY, `results` removed entirely (not a valid section for this type), 9 valid-but-unregistered sections added to MAY, 2 new sections registered (`hospitalConsultations`, `hospitalDischargeStudiesSummary`, both narrative-only).
+- **Referral Note**: `encounters` removed (invalid section), 2 sections SHOULD→MAY, 4 valid-but-unregistered sections added to SHOULD, 9 added to MAY, plus a choice constraint (below).
+- **Consultation Note**: `historyOfPresentIllness` added to SHALL (was entirely unregistered), `assessment`/`chiefComplaint`/`medications` removed from SHALL (assessment's real requirement moved to the choice constraint, chiefComplaint→MAY, medications→SHOULD), `encounters` removed, `physicalExamination` added to SHOULD, large MAY expansion, plus the same choice constraint.
+- **Progress Note**: SHALL list is now genuinely empty — Companion Guide Table 24's Required Sections column is blank; there is no individually-required section for this document type, only the choice constraint. `socialHistory`/`immunizations` removed (invalid sections), 3 sections SHOULD→MAY, 2 new sections registered (`objective`, `subjective`, both narrative-only), plus `instructions` (below) added to MAY.
+
+### Instructions Section (V2) — a genuinely mandatory entry, not narrative-only
+Unlike nearly every other section added this session, Instructions Section (V2) (`instructions` key, templateId `2.16.840.1.113883.10.20.22.2.45` ext `2014-06-09`, LOINC `69730-0`) has `entry 1..* SHALL` when the section is present — narrative-only would not be spec-conformant. Its entry references the **Instruction (V2)** act template (`2.16.840.1.113883.10.20.22.4.20:2014-06-09`, `classCode="ACT" moodCode="INT" statusCode="completed"`). Registered as MAY for History and Physical and Progress Note only — the only two document types whose own Contains: table references it (confirmed via full-file grep, not assumption).
+
+### `dischargeInstructions` — pre-existing enhancement beyond its own section's spec (documented, not changed)
+`dischargeInstructions` (Discharge Summary, templateId `2.16.840.1.113883.10.20.22.2.41`, LOINC `8653-8`, "Hospital Discharge Instructions Section") already emits a structured `<entry><act>` using the same Instruction (V2) template as `instructions` above — but Hospital Discharge Instructions Section's own Vol2 chapter (§2.28, Table 122) defines **no entry at all** (templateId→code→title→text only). Not a bug: C-CDA sections are open templates, so the extra structured content is valid, just not spec-*mandated* for this particular section. Left as-is — real, working capability, not silently removed.
+
+### Choice constraints — a requirement shape flat SHALL/SHOULD/MAY lists can't express
+Consultation Note, Referral Note, and Progress Note each carry a real spec requirement of the form *"SHALL contain Assessment and Plan Section (V2), OR both Assessment Section and Plan of Treatment Section (V2)"* (Vol2 CONF:1198-29102/9501/30657 — same boilerplate text reused across the IG). A flat per-section SHALL/SHOULD/MAY list has no way to express "at least one of these branches."
+
+**New schema construct** (`cda/schema_types.go`): `DocumentTypeSectionInfo.ChoiceConstraints []SectionChoiceConstraint`, where `SectionChoiceConstraint{Description string, Branches [][]string}` — satisfied if every section key in ANY ONE branch is present. Assessment/AssessmentAndPlan/PlanOfTreatment keep their own individually-correct tier (usually MAY) in the flat lists; the compound SHALL-level requirement lives entirely in `choiceConstraints`, not as an inflated tier on any one section.
+
+**Validator integration** (`cda/validator/validator.go`'s `Validate()`): each `ChoiceConstraint` contributes one unit to `shallTotal`/`shallPresent` (satisfied or not), producing a `ChoiceConstraintReport` in the new `ComplianceReport.ChoiceConstraintReports` field. This is how Progress Note — with a genuinely empty SHALL list — can still reach `ShallScore == 1.0` purely via a satisfied choice constraint.
+
+**Scope boundary**: this only affects conformance *scoring*. The matching mutual-exclusion half of the same spec text ("SHALL NOT contain both branches") is **not** enforced — `cda/builder` trusts its canonical input same as everywhere else in the engine; a caller populating more than one branch gets all of it emitted. Real, deliberate, named scope boundary (user-confirmed 2026-08-10) — not an oversight.
+
+### Key Files
+- Schema data: `cda/schemas/ccda_2_1.json` (`documentTypeSections`, 5 new section defs) — **superseded**: see "CDA Schema 3-Tier Restructuring" below; the same data now lives in `cda/schemas/ccda_2_1/manifest.json`'s `documentTypeSections`.
+- Choice-constraint type: `cda/schema_types.go` (`SectionChoiceConstraint`)
+- Choice-constraint scoring: `cda/validator/validator.go` (`validateChoiceConstraint`), `cda/validator/compliance_report.go` (`ChoiceConstraintReport`)
+- Tests: `cda/builder/document_builder_test.go` (canonical docs + round-trip tests for all 4 previously-untested document types), `cda/validator/choice_constraints_test.go`
+
+## CDA Schema 3-Tier Restructuring — `ccda_2_1.json` → Directory Tree (August 2026)
+
+### Why
+`cda/schemas/ccda_2_1.json` had grown to 4,118 lines (69 sections, 12 document types) and kept growing every time a document type was touched — a real "Modular, not monolithic" violation, unlike `hl7/`/`fhir/` (one file per message/resource type) and unlike `cda/builder` itself (already a generic, schema-driven engine — this file was the same anti-pattern one layer up, in the schema data rather than the Go code). A naive 1-file-per-section split wasn't safe on its own: several entry-level archetypes (Problem Observation, Medication Activity, Author Participation) are structurally reused across sections, and a mechanical split would have copy-pasted that duplication into 69 files instead of removing it.
+
+### New layout
+```
+cda/schemas/ccda_2_1/
+  manifest.json          # Tier 1: profile/documentTemplates/documentTypeMetadata/documentTypeSections/sectionOrder
+  sections/<key>.json    # Tier 2: 69 files, one per section (dots kept literally, e.g. header.patient.json)
+  entries/
+    _constants.json      # flat OID constants for shape-less repeated anchors (Author Participation, Medication Information)
+    problem-observation-bare.json        # root-anchor template — pastMedicalHistory, procedureFindings, complications
+    problem-observation-wrapped.json     # observation-anchor template — problems, dischargeDiagnosis, admissionDiagnosis, preoperativeDiagnosis, postprocedureDiagnosis
+    medication-activity.json             # root-anchor template — medications, anesthesia, medicationsAdministered
+    medication-activity-wrapped.json     # observation-anchor template — dischargeMedications, admissionMedications
+    instruction-v2.json                  # root-anchor template — dischargeInstructions, instructions
+```
+`c32_mapping.json` and `uscdi_v3.json` are unrelated, untouched siblings.
+
+### The "wrapped" vs "root" anchor distinction (a correction made mid-implementation)
+An initial design had both "wrapped" templates (Problem/Medication Observation nested inside a wrapping Act) own `entryTemplateId`/`entryElementPath` like the "bare"/root templates do. Reading every member section directly disproved that: `problems`/`dischargeDiagnosis`/`admissionDiagnosis`/`preoperativeDiagnosis`/`postprocedureDiagnosis` each cite their OWN distinct wrapping-act template (Problem Concern Act `.4.3` vs. Discharge Diagnosis Act `.4.33` vs. Admission Diagnosis Act `.4.34` vs. `.4.65` vs. `.4.51`) with their own distinct `entryFixedCode`. Only the *nested* Problem/Medication Observation is genuinely identical across each cluster. So the two "wrapped" templates are **observation-anchor-only** (`anchor: "observation"` in the on-disk template — supplies only `observationTemplateId`/`observationElementPathSuffix`/`observationFixedCode*`/`obsCodeTranslation*`); `entryTemplateId`/`entryElementPath`/`entryFixedCode*` stay section-owned. This is the reason `onDiskEntryTemplate` has two anchor modes rather than one.
+
+### Load-time resolution mechanism
+`cda/schema_disk_types.go` (new file, package `cda`) defines the on-disk-only types (`onDiskManifest`, `onDiskSectionDef`, `onDiskEntryTemplate`, `onDiskStructuralTemplateAnchor`, `onDiskTemplateConstant`) and `resolveSection`/`resolveXPath`/`resolveAnchor`, which `cda/schema_loader.go`'s rewritten `loadProfile()` calls to assemble the exact same in-memory `*CDAProfileDef`/`*CDASectionDef` shape `cda/schema_types.go` has always defined — **zero changes** to `CDASectionDef`, `CDAFieldDef`, `CDAProfileDef`, or `buildIndexes()`. `NewCDASchemaLoader(schemaDir string)`'s signature is unchanged (24+ call sites across `main.go`, executors, and test files all still pass a single directory path — only the internal join target moved from `<schemaDir>/ccda_2_1.json` to `<schemaDir>/ccda_2_1/manifest.json` + `sections/` + `entries/`).
+
+`resolveXPath(anchor, raw)` treats `raw` as already-absolute (passthrough, unchanged) whenever it starts with `"entry/"` **or** the section has no anchor at all (`anchor == ""` — the 4 header pseudo-sections, whose fields target `ClinicalDocument/...` paths, not `entry/...`). This anchor-less case was a real bug the golden-file regression test caught before it shipped (an earlier version of `resolveXPath` unconditionally prefixed non-`entry/`-prefixed paths, corrupting every header field's xpath with a stray leading `/`). Field xpaths themselves were deliberately left absolute (not converted to anchor-relative form) even for the 15 sections that adopted a template — `problems` has fields relative to BOTH its `EntryElementPath` and `ObservationElementPath` within the same section, and the on-disk schema has no per-field anchor selector, so a blanket "strip the anchor prefix" conversion would have been unsafe for that section specifically. The relative-xpath resolution path exists and is unit-tested but isn't currently exercised by real schema data — see `TestResolveXPath` in `cda/schema_disk_types_test.go`.
+
+### Migration was two separate passes
+**Phase 1** (mechanical, zero behavior risk): a one-time, self-deleting test (`cda/tools_migration_test.go`, since removed) unmarshalled the monolith straight into the existing `CDAProfileDef`/`CDASectionDef` Go types and re-marshalled each section to its own file — no template indirection yet, `entries/` empty. **Phase 2** (hand-curated): added the 5 templates + `_constants.json`, migrated 21 of 69 section files (15 to `entryTemplate`/`observationTemplate`, 19 `structuralTemplateIds[]` anchors to `templateIdRef` — 16 Author Participation + 3 Medication Information), the other 48 untouched.
+
+### 3 pre-existing gaps found and fixed during Phase 2 (named, not silent)
+Making `problem-observation-wrapped`/`problem-observation-bare` the single source of truth for their fixed-code/translation fields surfaced — and fixed — 3 real inconsistencies among structural siblings that predate this restructuring:
+- `dischargeDiagnosis` and `admissionDiagnosis` were missing `observationFixedCode: "55607006"` (SNOMED "Problem") + `obsCodeTranslationCode: "75325-1"` (LOINC "Problem") that `preoperativeDiagnosis`/`postprocedureDiagnosis` already had.
+- `pastMedicalHistory` was missing the entry-level equivalent (`entryFixedCode`/`entryCodeTranslationCode`) that `procedureFindings`/`complications` already had.
+
+**Explicitly NOT touched**: `dischargeMedications` has `entryStatusCodeOverride: "completed"`; `admissionMedications` (its structural sibling) doesn't. Left as a section-owned override — the schema alone doesn't say whether this is a real IG distinction or a 4th gap; would need direct IG-text confirmation before normalizing either way.
+
+### Regression proof
+`cda/schema_loader_test.go`'s `TestSchemaLoaderResolvesGoldenSnapshot` snapshots `AllSections()`/`AllDocumentTypes()`/`GetDocumentTypeSections`/`GetDocumentTypeMetadata`/`DocumentTemplates` (via testify `assert.Equal` + a checked-in `cda/testdata/schema_snapshot_golden.json`, refreshed only via `-update`). Captured against the *original* monolithic loader before any restructuring code existed; after Phase 1 it was byte-for-byte zero-diff; after Phase 2 the diff was exactly the 6 named fields above on exactly the 3 named sections, nothing else. `cda/schema_disk_types_test.go` adds 15 focused unit tests for the new resolution logic (`resolveXPath` table test, root/observation template merging, fail-fast on unknown `entryTemplate`/`observationTemplate`/`templateIdRef`/duplicate `sectionOrder`/section-key mismatch). Verified via `/go-build-check` (full `docker-compose build app`) plus a live runtime check against the rebuilt app container (`/api/cda/document-types`, `/api/cda/schema/sections`, `/api/cda/canonical-fields/section/problems` all correct).
+
+### Key Files
+- Loader rewrite: `cda/schema_loader.go` (`loadProfile()`), new `cda/schema_disk_types.go`
+- Schema data: `cda/schemas/ccda_2_1/{manifest.json,sections/*.json,entries/*.json}`
+- Tests: `cda/schema_loader_test.go` (golden snapshot), `cda/schema_disk_types_test.go` (resolution unit tests), `cda/testdata/schema_snapshot_golden.json` (fixture)
+- Unchanged (verified, not just assumed): `cda/schema_types.go`, `cda/builder/entry_archetypes.go`, `cda/document/section_parser.go`, `services/cda_fhir/`, `services/cda_coverage/`, `controllers/cda_schema_controller.go`
+

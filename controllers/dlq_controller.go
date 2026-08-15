@@ -238,14 +238,13 @@ func (dc *DLQController) writeAudit(c *gin.Context, dlqRowID, action, detail str
 		return
 	}
 	userID, _ := c.Get("userId")
-	userEmail, _ := c.Get("userEmail")
 	meta := fmt.Sprintf(`{"dlq_row_id":"%s","detail":"%s"}`, dlqRowID, detail)
 	_, err := dc.db.ExecContext(c.Request.Context(), `
 		INSERT INTO audit_logs
-		    (user_id, user_email, action, entity_type, entity_id, metadata, dlq_row_id, created_at)
+		    (user_id, action, entity_type, entity_id, metadata, dlq_row_id, created_at)
 		VALUES
-		    ($1, $2, $3, 'dlq_row', $4, $5::jsonb, $6::uuid, NOW())`,
-		userID, userEmail, action, dlqRowID, meta, dlqRowID,
+		    ($1, $2, 'dlq_row', $3, $4::jsonb, $5::uuid, NOW())`,
+		userID, action, dlqRowID, meta, dlqRowID,
 	)
 	if err != nil {
 		fmt.Printf("[dlq audit] write failed: %v\n", err)

@@ -1,0 +1,59 @@
+{
+  "key": "dischargeMedications",
+  "uscdiClass": "Discharge Medications",
+  "displayName": "Discharge Medications",
+  "loincCode": "10183-2",
+  "templateId": "2.16.840.1.113883.10.20.22.2.11.1",
+  "templateIdOptional": "2.16.840.1.113883.10.20.22.2.11",
+  "conformance": "SHALL",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.35",
+  "entryTemplateIdExtension": "2016-03-01",
+  "observationTemplate": "medication-activity-wrapped",
+  "fields": [
+    {
+      "key": "drugCode",
+      "uscdiElement": "Discharge Medication",
+      "conformance": "SHALL",
+      "dataType": "CE",
+      "valueSet": "RxNorm",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/consumable/manufacturedProduct/manufacturedMaterial/code/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/consumable/manufacturedProduct/manufacturedMaterial/code/@displayName"
+    },
+    {
+      "key": "doseQuantity",
+      "uscdiElement": "Dose Quantity",
+      "conformance": "SHOULD",
+      "dataType": "PQ",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/doseQuantity/@value",
+      "xpathUnit": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/doseQuantity/@unit"
+    },
+    {
+      "key": "routeCode",
+      "uscdiElement": "Route",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "SPL Drug Route of Administration Terminology",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/routeCode/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/routeCode/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/routeCode/@codeSystem"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Medication Status",
+      "conformance": "SHALL",
+      "dataType": "CS",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/statusCode/@code"
+    },
+    {
+      "key": "startDate",
+      "uscdiElement": "Start Date",
+      "conformance": "SHOULD",
+      "dataType": "IVL_TS",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/effectiveTime/low/@value"
+    }
+  ],
+  "entryElementPath": "entry/act",
+  "entryStatusCodeOverride": "completed",
+  "entryFixedCode": "10183-2",
+  "entryFixedCodeDisplay": "Discharge medication"
+}

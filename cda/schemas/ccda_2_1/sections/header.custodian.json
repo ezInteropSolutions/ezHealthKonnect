@@ -1,0 +1,33 @@
+{
+  "key": "header.custodian",
+  "uscdiClass": "Custodian",
+  "displayName": "Document Custodian (Header)",
+  "loincCode": "",
+  "templateId": "",
+  "templateIdOptional": "",
+  "conformance": "SHALL",
+  "isHeader": true,
+  "fields": [
+    {
+      "key": "custodianOrgName",
+      "uscdiElement": "Custodian Organization Name",
+      "conformance": "SHALL",
+      "dataType": "ON",
+      "xpath": "ClinicalDocument/custodian/assignedCustodian/representedCustodianOrganization/name"
+    },
+    {
+      "key": "custodianId",
+      "uscdiElement": "Custodian Organization ID",
+      "conformance": "SHOULD",
+      "dataType": "II",
+      "xpath": "ClinicalDocument/custodian/assignedCustodian/representedCustodianOrganization/id/@extension"
+    },
+    {
+      "key": "custodianIdRoot",
+      "uscdiElement": "Custodian OID",
+      "conformance": "SHOULD",
+      "dataType": "OID",
+      "xpath": "ClinicalDocument/custodian/assignedCustodian/representedCustodianOrganization/id/@root"
+    }
+  ]
+}

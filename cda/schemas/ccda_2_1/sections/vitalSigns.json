@@ -1,0 +1,180 @@
+{
+  "key": "vitalSigns",
+  "uscdiClass": "Vital Signs",
+  "displayName": "Vital Signs",
+  "loincCode": "8716-3",
+  "templateId": "2.16.840.1.113883.10.20.22.2.4.1",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "2.16.840.1.113883.10.20.22.2.4",
+  "conformance": "SHALL",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.26",
+  "entryTemplateIdExtension": "2015-08-01",
+  "fields": [
+    {
+      "key": "vitalCode",
+      "uscdiElement": "Vital Sign Code",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "LOINC",
+      "xpath": "entry/organizer/component/observation/code/@code",
+      "xpathDisplay": "entry/organizer/component/observation/code/@displayName",
+      "xpathSystem": "entry/organizer/component/observation/code/@codeSystem"
+    },
+    {
+      "key": "value",
+      "uscdiElement": "Vital Sign Value",
+      "conformance": "SHALL",
+      "dataType": "PQ",
+      "xpath": "entry/organizer/component/observation/value/@value",
+      "xpathUnit": "entry/organizer/component/observation/value/@unit"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Observation Date",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/organizer/effectiveTime/@value"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Author Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/organizer/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Author Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/organizer/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Author NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/organizer/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Author Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/organizer/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/organizer/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/organizer/author/assignedAuthor/code/@codeSystem"
+    }
+  ],
+  "entryElementPath": "entry/organizer",
+  "structuralTemplateIds": [
+    {
+      "path": "entry/organizer/author",
+      "templateIdRef": "authorParticipation"
+    }
+  ],
+  "entryFixedCode": "46680005",
+  "entryFixedCodeSystem": "2.16.840.1.113883.6.96",
+  "entryFixedCodeDisplay": "Vital Signs",
+  "entryCodeTranslationCode": "74728-7",
+  "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
+  "entryCodeTranslationDisplay": "Vital signs, weight, height, head circumference, oximetry, BMI, and BSA panel",
+  "repeatingGroups": [
+    {
+      "key": "components",
+      "wrapperTag": "component",
+      "observationElementPath": "observation",
+      "templateId": "2.16.840.1.113883.10.20.22.4.27",
+      "templateIdExtension": "2014-06-09",
+      "fields": [
+        {
+          "key": "vitalCode",
+          "uscdiElement": "Vital Sign Code",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "LOINC",
+          "xpath": "code/@code",
+          "xpathDisplay": "code/@displayName",
+          "xpathSystem": "code/@codeSystem"
+        },
+        {
+          "key": "value",
+          "uscdiElement": "Vital Sign Value",
+          "conformance": "SHALL",
+          "dataType": "PQ",
+          "xpath": "value/@value",
+          "xpathUnit": "value/@unit"
+        },
+        {
+          "key": "componentEffectiveTime",
+          "uscdiElement": "Vital Sign Observation Date",
+          "conformance": "SHALL",
+          "dataType": "TS",
+          "xpath": "effectiveTime/@value"
+        },
+        {
+          "key": "interpretationCode",
+          "uscdiElement": "Vital Sign Interpretation",
+          "conformance": "MAY",
+          "dataType": "CD",
+          "xpath": "interpretationCode/@code",
+          "xpathDisplay": "interpretationCode/@displayName"
+        },
+        {
+          "key": "methodCode",
+          "uscdiElement": "Vital Sign Method",
+          "conformance": "MAY",
+          "dataType": "CD",
+          "xpath": "methodCode/@code",
+          "xpathDisplay": "methodCode/@displayName"
+        },
+        {
+          "key": "targetSiteCode",
+          "uscdiElement": "Vital Sign Target Site",
+          "conformance": "MAY",
+          "dataType": "CD",
+          "xpath": "targetSiteCode/@code",
+          "xpathDisplay": "targetSiteCode/@displayName"
+        },
+        {
+          "key": "authorGiven",
+          "uscdiElement": "Author Given Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "author/assignedAuthor/assignedPerson/name/given"
+        },
+        {
+          "key": "authorFamily",
+          "uscdiElement": "Author Family Name",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "author/assignedAuthor/assignedPerson/name/family"
+        },
+        {
+          "key": "authorNPI",
+          "uscdiElement": "Author NPI",
+          "conformance": "MAY",
+          "dataType": "ST",
+          "xpath": "author/assignedAuthor/id/@extension"
+        },
+        {
+          "key": "authorSpecialtyCode",
+          "uscdiElement": "Author Specialty",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+          "xpath": "author/assignedAuthor/code/@code",
+          "xpathDisplay": "author/assignedAuthor/code/@displayName",
+          "xpathSystem": "author/assignedAuthor/code/@codeSystem"
+        }
+      ],
+      "anchorRoot": "root",
+      "requiredPaths": [
+        "vitalCode",
+        "value"
+      ],
+      "authorTemplateId": "2.16.840.1.113883.10.20.22.4.119"
+    }
+  ]
+}

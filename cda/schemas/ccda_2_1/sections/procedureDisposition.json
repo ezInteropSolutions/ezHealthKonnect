@@ -1,0 +1,10 @@
+{
+  "key": "procedureDisposition",
+  "uscdiClass": "Operative Note",
+  "displayName": "Procedure Disposition",
+  "loincCode": "59775-7",
+  "templateId": "2.16.840.1.113883.10.20.18.2.12",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "fields": []
+}

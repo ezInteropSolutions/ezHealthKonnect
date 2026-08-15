@@ -1,58 +1,439 @@
 {
-  "profile": "C-CDA 2.1",
-  "version": "2.1",
-  "hl7Version": "2015AUG with December 2018 errata",
-  "documentTemplates": {
+  "DocumentTemplates": {
     "2.16.840.1.113883.10.20.22.1.1": "US Realm Header",
+    "2.16.840.1.113883.10.20.22.1.10": "Unstructured Document",
+    "2.16.840.1.113883.10.20.22.1.13": "Transfer Summary",
+    "2.16.840.1.113883.10.20.22.1.14": "Referral Note",
+    "2.16.840.1.113883.10.20.22.1.15": "Care Plan",
     "2.16.840.1.113883.10.20.22.1.2": "Continuity of Care Document (CCD)",
     "2.16.840.1.113883.10.20.22.1.3": "History and Physical",
     "2.16.840.1.113883.10.20.22.1.4": "Consultation Note",
+    "2.16.840.1.113883.10.20.22.1.5": "Diagnostic Imaging Report",
     "2.16.840.1.113883.10.20.22.1.6": "Procedure Note",
-    "2.16.840.1.113883.10.20.22.1.7": "Discharge Summary",
-    "2.16.840.1.113883.10.20.22.1.9": "Progress Note",
-    "2.16.840.1.113883.10.20.22.1.14": "Referral Note"
+    "2.16.840.1.113883.10.20.22.1.7": "Operative Note",
+    "2.16.840.1.113883.10.20.22.1.8": "Discharge Summary",
+    "2.16.840.1.113883.10.20.22.1.9": "Progress Note"
   },
-  "documentTypeMetadata": {
-    "CCD": {"templateId": "2.16.840.1.113883.10.20.22.1.2", "templateIdExtension": "2015-08-01", "loincCode": "34133-9", "title": "Continuity of Care Document"},
-    "History and Physical": {"templateId": "2.16.840.1.113883.10.20.22.1.3", "templateIdExtension": "2015-08-01", "loincCode": "34117-2", "title": "History and Physical"},
-    "Consultation Note": {"templateId": "2.16.840.1.113883.10.20.22.1.4", "templateIdExtension": "2015-08-01", "loincCode": "11488-4", "title": "Consultation Note"},
-    "Discharge Summary": {"templateId": "2.16.840.1.113883.10.20.22.1.7", "templateIdExtension": "2015-08-01", "loincCode": "18842-5", "title": "Discharge Summary"},
-    "Progress Note": {"templateId": "2.16.840.1.113883.10.20.22.1.9", "templateIdExtension": "2015-08-01", "loincCode": "11506-3", "title": "Progress Note"},
-    "Referral Note": {"templateId": "2.16.840.1.113883.10.20.22.1.14", "templateIdExtension": "2015-08-01", "loincCode": "57133-1", "title": "Referral Note"}
-  },
-  "documentTypeSections": {
+  "DocumentTypeMetadata": {
     "CCD": {
-      "SHALL": ["allergiesAndIntolerances", "medications", "problems", "results", "planOfTreatment", "socialHistory", "vitalSigns"],
-      "SHOULD": ["procedures", "payersInsurance"],
-      "MAY": ["advanceDirectives", "encounters", "familyHistory", "functionalStatus", "immunizations", "medicalEquipment", "mentalStatus", "nutrition"]
+      "templateId": "2.16.840.1.113883.10.20.22.1.2",
+      "templateIdExtension": "2015-08-01",
+      "loincCode": "34133-9",
+      "title": "Continuity of Care Document"
     },
-    "Discharge Summary": {
-      "SHALL": ["dischargeDiagnosis", "dischargeMedications", "hospitalCourse", "allergiesAndIntolerances", "problems"],
-      "SHOULD": ["admissionDiagnosis", "admissionMedications", "procedures", "vitalSigns", "dischargeInstructions"],
-      "MAY": ["results", "socialHistory", "dischargePhysical", "immunizations"]
-    },
-    "Referral Note": {
-      "SHALL": ["reasonForReferral", "problems", "medications", "allergiesAndIntolerances"],
-      "SHOULD": ["encounters", "results", "procedures", "socialHistory"],
-      "MAY": ["vitalSigns", "immunizations", "familyHistory"]
-    },
-    "History and Physical": {
-      "SHALL": ["chiefComplaint", "historyOfPresentIllness", "physicalExamination", "assessment"],
-      "SHOULD": ["pastMedicalHistory", "reviewOfSystems", "medications", "allergiesAndIntolerances", "vitalSigns"],
-      "MAY": ["problems", "results", "immunizations", "socialHistory"]
+    "Care Plan": {
+      "templateId": "2.16.840.1.113883.10.20.22.1.15",
+      "templateIdExtension": "2015-08-01",
+      "loincCode": "52521-2",
+      "title": "Overall Plan of Care/Advance Care Directives"
     },
     "Consultation Note": {
-      "SHALL": ["assessment", "chiefComplaint", "medications", "allergiesAndIntolerances", "problems"],
-      "SHOULD": ["encounters", "procedures", "results", "vitalSigns"],
-      "MAY": ["immunizations", "socialHistory", "familyHistory"]
+      "templateId": "2.16.840.1.113883.10.20.22.1.4",
+      "templateIdExtension": "2015-08-01",
+      "loincCode": "11488-4",
+      "title": "Consultation Note"
+    },
+    "Diagnostic Imaging Report": {
+      "templateId": "2.16.840.1.113883.10.20.22.1.5",
+      "templateIdExtension": "2015-08-01",
+      "loincCode": "18748-4",
+      "title": "Diagnostic Imaging Report"
+    },
+    "Discharge Summary": {
+      "templateId": "2.16.840.1.113883.10.20.22.1.8",
+      "templateIdExtension": "2015-08-01",
+      "loincCode": "18842-5",
+      "title": "Discharge Summary"
+    },
+    "History and Physical": {
+      "templateId": "2.16.840.1.113883.10.20.22.1.3",
+      "templateIdExtension": "2015-08-01",
+      "loincCode": "34117-2",
+      "title": "History and Physical"
+    },
+    "Operative Note": {
+      "templateId": "2.16.840.1.113883.10.20.22.1.7",
+      "templateIdExtension": "2015-08-01",
+      "loincCode": "11504-8",
+      "title": "Surgical operation note"
+    },
+    "Procedure Note": {
+      "templateId": "2.16.840.1.113883.10.20.22.1.6",
+      "templateIdExtension": "2015-08-01",
+      "loincCode": "28570-0",
+      "title": "Procedure note"
     },
     "Progress Note": {
-      "SHALL": ["assessment", "problems"],
-      "SHOULD": ["medications", "vitalSigns", "results"],
-      "MAY": ["socialHistory", "immunizations"]
+      "templateId": "2.16.840.1.113883.10.20.22.1.9",
+      "templateIdExtension": "2015-08-01",
+      "loincCode": "11506-3",
+      "title": "Progress Note"
+    },
+    "Referral Note": {
+      "templateId": "2.16.840.1.113883.10.20.22.1.14",
+      "templateIdExtension": "2015-08-01",
+      "loincCode": "57133-1",
+      "title": "Referral Note"
+    },
+    "Transfer Summary": {
+      "templateId": "2.16.840.1.113883.10.20.22.1.13",
+      "templateIdExtension": "2015-08-01",
+      "loincCode": "18761-7",
+      "title": "Transfer summary note"
+    },
+    "Unstructured Document": {
+      "templateId": "2.16.840.1.113883.10.20.22.1.10",
+      "templateIdExtension": "2015-08-01",
+      "loincCode": "",
+      "title": "Unstructured Document"
     }
   },
-  "sections": [
+  "DocumentTypeSections": {
+    "CCD": {
+      "SHALL": [
+        "allergiesAndIntolerances",
+        "medications",
+        "problems",
+        "results",
+        "socialHistory",
+        "vitalSigns"
+      ],
+      "SHOULD": [
+        "procedures",
+        "planOfTreatment"
+      ],
+      "MAY": [
+        "advanceDirectives",
+        "encounters",
+        "familyHistory",
+        "functionalStatus",
+        "immunizations",
+        "medicalEquipment",
+        "mentalStatus",
+        "nutrition",
+        "payersInsurance"
+      ]
+    },
+    "Care Plan": {
+      "SHALL": [
+        "healthConcerns",
+        "goals"
+      ],
+      "SHOULD": [],
+      "MAY": [
+        "healthStatusEvaluationsOutcomes",
+        "interventions"
+      ]
+    },
+    "Consultation Note": {
+      "SHALL": [
+        "historyOfPresentIllness",
+        "allergiesAndIntolerances",
+        "problems"
+      ],
+      "SHOULD": [
+        "physicalExamination",
+        "medications",
+        "results"
+      ],
+      "MAY": [
+        "assessment",
+        "assessmentAndPlan",
+        "planOfTreatment",
+        "reasonForVisit",
+        "chiefComplaint",
+        "chiefComplaintAndReasonForVisit",
+        "familyHistory",
+        "generalStatus",
+        "pastMedicalHistory",
+        "immunizations",
+        "procedures",
+        "socialHistory",
+        "vitalSigns",
+        "advanceDirectives",
+        "functionalStatus",
+        "reviewOfSystems",
+        "medicalEquipment",
+        "mentalStatus",
+        "nutrition"
+      ],
+      "choiceConstraints": [
+        {
+          "description": "SHALL contain Assessment and Plan Section (V2), OR both Assessment Section and Plan of Treatment Section (V2)",
+          "branches": [
+            [
+              "assessmentAndPlan"
+            ],
+            [
+              "assessment",
+              "planOfTreatment"
+            ]
+          ]
+        }
+      ]
+    },
+    "Diagnostic Imaging Report": {
+      "SHALL": [
+        "findingsDIR"
+      ],
+      "SHOULD": []
+    },
+    "Discharge Summary": {
+      "SHALL": [
+        "allergiesAndIntolerances",
+        "hospitalCourse",
+        "dischargeDiagnosis",
+        "planOfTreatment"
+      ],
+      "SHOULD": [
+        "dischargeMedications"
+      ],
+      "MAY": [
+        "chiefComplaint",
+        "chiefComplaintAndReasonForVisit",
+        "nutrition",
+        "familyHistory",
+        "functionalStatus",
+        "pastMedicalHistory",
+        "historyOfPresentIllness",
+        "admissionDiagnosis",
+        "admissionMedications",
+        "dischargeInstructions",
+        "dischargePhysical",
+        "immunizations",
+        "problems",
+        "procedures",
+        "reasonForVisit",
+        "reviewOfSystems",
+        "socialHistory",
+        "vitalSigns",
+        "hospitalConsultations",
+        "hospitalDischargeStudiesSummary"
+      ]
+    },
+    "History and Physical": {
+      "SHALL": [
+        "reviewOfSystems",
+        "generalStatus",
+        "medications",
+        "results",
+        "pastMedicalHistory",
+        "vitalSigns",
+        "physicalExamination",
+        "socialHistory",
+        "familyHistory",
+        "allergiesAndIntolerances"
+      ],
+      "SHOULD": [],
+      "MAY": [
+        "assessment",
+        "planOfTreatment",
+        "assessmentAndPlan",
+        "chiefComplaint",
+        "chiefComplaintAndReasonForVisit",
+        "historyOfPresentIllness",
+        "immunizations",
+        "problems",
+        "procedures",
+        "reasonForVisit",
+        "instructions"
+      ]
+    },
+    "Operative Note": {
+      "SHALL": [
+        "anesthesia",
+        "complications",
+        "preoperativeDiagnosis",
+        "procedureEstimatedBloodLoss",
+        "procedureFindings",
+        "procedureSpecimensTaken",
+        "procedureDescription",
+        "postoperativeDiagnosis"
+      ],
+      "SHOULD": [],
+      "MAY": [
+        "procedureImplants",
+        "operativeNoteFluids",
+        "operationsPerformed",
+        "planOfTreatment",
+        "plannedProcedure",
+        "procedureDisposition",
+        "procedureIndications",
+        "surgicalDrains"
+      ]
+    },
+    "Procedure Note": {
+      "SHALL": [
+        "complications",
+        "procedureDescription",
+        "procedureIndications",
+        "postprocedureDiagnosis"
+      ],
+      "SHOULD": [],
+      "MAY": [
+        "assessment",
+        "assessmentAndPlan",
+        "planOfTreatment",
+        "allergiesAndIntolerances",
+        "anesthesia",
+        "chiefComplaint",
+        "chiefComplaintAndReasonForVisit",
+        "familyHistory",
+        "pastMedicalHistory",
+        "historyOfPresentIllness",
+        "medicalGeneralHistory",
+        "medications",
+        "medicationsAdministered",
+        "physicalExamination",
+        "plannedProcedure",
+        "procedureDisposition",
+        "procedureEstimatedBloodLoss",
+        "procedureFindings",
+        "procedureImplants",
+        "procedureSpecimensTaken",
+        "procedures",
+        "reasonForVisit",
+        "reviewOfSystems",
+        "socialHistory"
+      ]
+    },
+    "Progress Note": {
+      "SHALL": [],
+      "SHOULD": [],
+      "MAY": [
+        "assessment",
+        "planOfTreatment",
+        "assessmentAndPlan",
+        "allergiesAndIntolerances",
+        "chiefComplaint",
+        "interventions",
+        "instructions",
+        "medications",
+        "objective",
+        "physicalExamination",
+        "problems",
+        "results",
+        "reviewOfSystems",
+        "subjective",
+        "vitalSigns",
+        "nutrition"
+      ],
+      "choiceConstraints": [
+        {
+          "description": "SHALL contain Assessment and Plan Section (V2), OR both Assessment Section and Plan of Treatment Section (V2)",
+          "branches": [
+            [
+              "assessmentAndPlan"
+            ],
+            [
+              "assessment",
+              "planOfTreatment"
+            ]
+          ]
+        }
+      ]
+    },
+    "Referral Note": {
+      "SHALL": [
+        "reasonForReferral",
+        "problems",
+        "medications",
+        "allergiesAndIntolerances"
+      ],
+      "SHOULD": [
+        "planOfTreatment",
+        "results",
+        "functionalStatus",
+        "nutrition",
+        "mentalStatus"
+      ],
+      "MAY": [
+        "advanceDirectives",
+        "historyOfPresentIllness",
+        "familyHistory",
+        "immunizations",
+        "procedures",
+        "reviewOfSystems",
+        "socialHistory",
+        "vitalSigns",
+        "physicalExamination",
+        "medicalEquipment",
+        "assessment",
+        "assessmentAndPlan",
+        "pastMedicalHistory",
+        "generalStatus"
+      ],
+      "choiceConstraints": [
+        {
+          "description": "SHALL contain Assessment and Plan Section (V2), OR both Assessment Section and Plan of Treatment Section (V2)",
+          "branches": [
+            [
+              "assessmentAndPlan"
+            ],
+            [
+              "assessment",
+              "planOfTreatment"
+            ]
+          ]
+        }
+      ]
+    },
+    "Transfer Summary": {
+      "SHALL": [
+        "allergiesAndIntolerances",
+        "medications",
+        "problems",
+        "results",
+        "vitalSigns",
+        "reasonForReferral"
+      ],
+      "SHOULD": [],
+      "MAY": [
+        "physicalExamination",
+        "encounters",
+        "familyHistory",
+        "functionalStatus",
+        "dischargeDiagnosis",
+        "immunizations",
+        "medicalEquipment",
+        "payersInsurance",
+        "planOfTreatment",
+        "procedures",
+        "socialHistory",
+        "mentalStatus",
+        "reviewOfSystems",
+        "nutrition",
+        "pastMedicalHistory",
+        "historyOfPresentIllness",
+        "assessmentAndPlan",
+        "assessment",
+        "admissionMedications",
+        "admissionDiagnosis",
+        "advanceDirectives",
+        "courseOfCare",
+        "generalStatus"
+      ]
+    },
+    "Unstructured Document": {
+      "SHALL": [],
+      "SHOULD": []
+    }
+  },
+  "DocumentTypes": [
+    "CCD",
+    "Care Plan",
+    "Consultation Note",
+    "Diagnostic Imaging Report",
+    "Discharge Summary",
+    "History and Physical",
+    "Operative Note",
+    "Procedure Note",
+    "Progress Note",
+    "Referral Note",
+    "Transfer Summary",
+    "Unstructured Document"
+  ],
+  "Sections": [
     {
       "key": "allergiesAndIntolerances",
       "uscdiClass": "Allergies and Intolerances",
@@ -64,54 +445,8 @@
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.30",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryFixedCode": "CONC",
-      "entryFixedCodeSystem": "2.16.840.1.113883.5.6",
-      "entryFixedCodeDisplay": "Concern",
       "observationTemplateId": "2.16.840.1.113883.10.20.22.4.7",
       "observationTemplateIdExtension": "2014-06-09",
-      "observationFixedCode": "ASSERTION",
-      "observationFixedCodeSystem": "2.16.840.1.113883.5.4",
-      "entryElementPath": "entry/act",
-      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']",
-          "templateId": "2.16.840.1.113883.10.20.22.4.9",
-          "templateIdExtension": "2014-06-09",
-          "fixedCode": "ASSERTION",
-          "fixedCodeSystem": "2.16.840.1.113883.5.4"
-        },
-        {
-          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.8']",
-          "templateId": "2.16.840.1.113883.10.20.22.4.8",
-          "templateIdExtension": "2014-06-09",
-          "fixedCode": "SEV",
-          "fixedCodeSystem": "2.16.840.1.113883.5.4",
-          "fixedCodeDisplay": "Severity"
-        },
-        {
-          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.28']",
-          "templateId": "2.16.840.1.113883.10.20.22.4.28",
-          "fixedCode": "33999-4",
-          "fixedCodeSystem": "2.16.840.1.113883.6.1",
-          "fixedCodeDisplay": "Status"
-        },
-        {
-          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']",
-          "templateId": "2.16.840.1.113883.10.20.22.4.145",
-          "fixedCode": "82606-5",
-          "fixedCodeSystem": "2.16.840.1.113883.6.1",
-          "fixedCodeDisplay": "Criticality"
-        },
-        {
-          "path": "entry/act/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        },
-        {
-          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        }
-      ],
       "fields": [
         {
           "key": "medicationAllergyCode",
@@ -284,7 +619,53 @@
           "dataType": "ST",
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/participant[@typeCode='CSM']/participantRole[@classCode='MANU']/playingEntity[@classCode='MMAT']/code/originalText/reference/@value"
         }
-      ]
+      ],
+      "entryElementPath": "entry/act",
+      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='MFST',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.9']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.9",
+          "templateIdExtension": "2014-06-09",
+          "fixedCode": "ASSERTION",
+          "fixedCodeSystem": "2.16.840.1.113883.5.4"
+        },
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.8']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.8",
+          "templateIdExtension": "2014-06-09",
+          "fixedCode": "SEV",
+          "fixedCodeSystem": "2.16.840.1.113883.5.4",
+          "fixedCodeDisplay": "Severity"
+        },
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.28']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.28",
+          "fixedCode": "33999-4",
+          "fixedCodeSystem": "2.16.840.1.113883.6.1",
+          "fixedCodeDisplay": "Status"
+        },
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.145']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.145",
+          "fixedCode": "82606-5",
+          "fixedCodeSystem": "2.16.840.1.113883.6.1",
+          "fixedCodeDisplay": "Criticality"
+        },
+        {
+          "path": "entry/act/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        },
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        }
+      ],
+      "entryFixedCode": "CONC",
+      "entryFixedCodeSystem": "2.16.840.1.113883.5.6",
+      "entryFixedCodeDisplay": "Concern",
+      "observationFixedCode": "ASSERTION",
+      "observationFixedCodeSystem": "2.16.840.1.113883.5.4"
     },
     {
       "key": "medications",
@@ -297,18 +678,6 @@
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.16",
       "entryTemplateIdExtension": "2014-06-09",
-      "entryElementPath": "entry/substanceAdministration",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/substanceAdministration/consumable/manufacturedProduct",
-          "templateId": "2.16.840.1.113883.10.20.22.4.23",
-          "templateIdExtension": "2014-06-09"
-        },
-        {
-          "path": "entry/substanceAdministration/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        }
-      ],
       "fields": [
         {
           "key": "drugCode",
@@ -399,6 +768,18 @@
           "xpathSystem": "entry/substanceAdministration/author/assignedAuthor/code/@codeSystem"
         }
       ],
+      "entryElementPath": "entry/substanceAdministration",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/substanceAdministration/consumable/manufacturedProduct",
+          "templateId": "2.16.840.1.113883.10.20.22.4.23",
+          "templateIdExtension": "2014-06-09"
+        },
+        {
+          "path": "entry/substanceAdministration/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        }
+      ],
       "repeatingGroups": [
         {
           "key": "indications",
@@ -408,9 +789,6 @@
           "observationElementPath": "observation",
           "templateId": "2.16.840.1.113883.10.20.22.4.19",
           "templateIdExtension": "2014-06-09",
-          "anchorRoot": "root",
-          "fixedCode": "ASSERTION",
-          "fixedCodeSystem": "2.16.840.1.113883.5.4",
           "fields": [
             {
               "key": "indicationCode",
@@ -429,7 +807,10 @@
               "dataType": "TS",
               "xpath": "effectiveTime/@value"
             }
-          ]
+          ],
+          "fixedCode": "ASSERTION",
+          "fixedCodeSystem": "2.16.840.1.113883.5.4",
+          "anchorRoot": "root"
         }
       ]
     },
@@ -444,57 +825,8 @@
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.3",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryFixedCode": "CONC",
-      "entryFixedCodeSystem": "2.16.840.1.113883.5.6",
-      "entryFixedCodeDisplay": "Concern",
       "observationTemplateId": "2.16.840.1.113883.10.20.22.4.4",
       "observationTemplateIdExtension": "2015-08-01",
-      "entryElementPath": "entry/act",
-      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
-      "observationFixedCode": "55607006",
-      "observationFixedCodeSystem": "2.16.840.1.113883.6.96",
-      "observationFixedCodeDisplay": "Problem",
-      "obsCodeTranslationCode": "75325-1",
-      "obsCodeTranslationSystem": "2.16.840.1.113883.6.1",
-      "obsCodeTranslationDisplay": "Problem",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.31']",
-          "templateId": "2.16.840.1.113883.10.20.22.4.31",
-          "fixedCode": "445518008",
-          "fixedCodeSystem": "2.16.840.1.113883.6.96",
-          "fixedCodeDisplay": "Age At Onset"
-        },
-        {
-          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']",
-          "templateId": "2.16.840.1.113883.10.20.22.4.6",
-          "fixedCode": "33999-4",
-          "fixedCodeSystem": "2.16.840.1.113883.6.1",
-          "fixedCodeDisplay": "Status"
-        },
-        {
-          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.113']",
-          "templateId": "2.16.840.1.113883.10.20.22.4.113",
-          "fixedCode": "75328-5",
-          "fixedCodeSystem": "2.16.840.1.113883.6.1",
-          "fixedCodeDisplay": "Prognosis"
-        },
-        {
-          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.143']",
-          "templateId": "2.16.840.1.113883.10.20.22.4.143",
-          "fixedCode": "225773000",
-          "fixedCodeSystem": "2.16.840.1.113883.6.96",
-          "fixedCodeDisplay": "Preference"
-        },
-        {
-          "path": "entry/act/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        },
-        {
-          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        }
-      ],
       "fields": [
         {
           "key": "conditionCode",
@@ -654,7 +986,56 @@
           "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@displayName",
           "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@codeSystem"
         }
-      ]
+      ],
+      "entryElementPath": "entry/act",
+      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.31']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.31",
+          "fixedCode": "445518008",
+          "fixedCodeSystem": "2.16.840.1.113883.6.96",
+          "fixedCodeDisplay": "Age At Onset"
+        },
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.6",
+          "fixedCode": "33999-4",
+          "fixedCodeSystem": "2.16.840.1.113883.6.1",
+          "fixedCodeDisplay": "Status"
+        },
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.113']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.113",
+          "fixedCode": "75328-5",
+          "fixedCodeSystem": "2.16.840.1.113883.6.1",
+          "fixedCodeDisplay": "Prognosis"
+        },
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.143']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.143",
+          "fixedCode": "225773000",
+          "fixedCodeSystem": "2.16.840.1.113883.6.96",
+          "fixedCodeDisplay": "Preference"
+        },
+        {
+          "path": "entry/act/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        },
+        {
+          "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        }
+      ],
+      "entryFixedCode": "CONC",
+      "entryFixedCodeSystem": "2.16.840.1.113883.5.6",
+      "entryFixedCodeDisplay": "Concern",
+      "obsCodeTranslationCode": "75325-1",
+      "obsCodeTranslationSystem": "2.16.840.1.113883.6.1",
+      "obsCodeTranslationDisplay": "Problem",
+      "observationFixedCode": "55607006",
+      "observationFixedCodeSystem": "2.16.840.1.113883.6.96",
+      "observationFixedCodeDisplay": "Problem"
     },
     {
       "key": "vitalSigns",
@@ -667,19 +1048,6 @@
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.26",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryElementPath": "entry/organizer",
-      "entryFixedCode": "46680005",
-      "entryFixedCodeSystem": "2.16.840.1.113883.6.96",
-      "entryFixedCodeDisplay": "Vital Signs",
-      "entryCodeTranslationCode": "74728-7",
-      "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
-      "entryCodeTranslationDisplay": "Vital signs, weight, height, head circumference, oximetry, BMI, and BSA panel",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/organizer/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        }
-      ],
       "fields": [
         {
           "key": "vitalCode",
@@ -738,6 +1106,19 @@
           "xpathSystem": "entry/organizer/author/assignedAuthor/code/@codeSystem"
         }
       ],
+      "entryElementPath": "entry/organizer",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/organizer/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        }
+      ],
+      "entryFixedCode": "46680005",
+      "entryFixedCodeSystem": "2.16.840.1.113883.6.96",
+      "entryFixedCodeDisplay": "Vital Signs",
+      "entryCodeTranslationCode": "74728-7",
+      "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
+      "entryCodeTranslationDisplay": "Vital signs, weight, height, head circumference, oximetry, BMI, and BSA panel",
       "repeatingGroups": [
         {
           "key": "components",
@@ -745,9 +1126,6 @@
           "observationElementPath": "observation",
           "templateId": "2.16.840.1.113883.10.20.22.4.27",
           "templateIdExtension": "2014-06-09",
-          "anchorRoot": "root",
-          "requiredPaths": ["vitalCode", "value"],
-          "authorTemplateId": "2.16.840.1.113883.10.20.22.4.119",
           "fields": [
             {
               "key": "vitalCode",
@@ -829,7 +1207,13 @@
               "xpathDisplay": "author/assignedAuthor/code/@displayName",
               "xpathSystem": "author/assignedAuthor/code/@codeSystem"
             }
-          ]
+          ],
+          "anchorRoot": "root",
+          "requiredPaths": [
+            "vitalCode",
+            "value"
+          ],
+          "authorTemplateId": "2.16.840.1.113883.10.20.22.4.119"
         }
       ]
     },
@@ -844,14 +1228,6 @@
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.1",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryClassCodeOverride": "BATTERY",
-      "entryElementPath": "entry/organizer",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/organizer/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        }
-      ],
       "fields": [
         {
           "key": "testCode",
@@ -972,6 +1348,14 @@
           "xpath": "entry/organizer/effectiveTime/high/@value"
         }
       ],
+      "entryElementPath": "entry/organizer",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/organizer/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        }
+      ],
+      "entryClassCodeOverride": "BATTERY",
       "repeatingGroups": [
         {
           "key": "components",
@@ -979,9 +1363,6 @@
           "observationElementPath": "observation",
           "templateId": "2.16.840.1.113883.10.20.22.4.2",
           "templateIdExtension": "2015-08-01",
-          "anchorRoot": "root",
-          "requiredPaths": ["testCode", "resultValue"],
-          "authorTemplateId": "2.16.840.1.113883.10.20.22.4.119",
           "fields": [
             {
               "key": "testCode",
@@ -1103,7 +1484,13 @@
               "xpathDisplay": "author/assignedAuthor/code/@displayName",
               "xpathSystem": "author/assignedAuthor/code/@codeSystem"
             }
-          ]
+          ],
+          "anchorRoot": "root",
+          "requiredPaths": [
+            "testCode",
+            "resultValue"
+          ],
+          "authorTemplateId": "2.16.840.1.113883.10.20.22.4.119"
         }
       ]
     },
@@ -1118,13 +1505,6 @@
       "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.49",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryElementPath": "entry/encounter",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']",
-          "templateId": "2.16.840.1.113883.10.20.22.4.32"
-        }
-      ],
       "fields": [
         {
           "key": "encounterCode",
@@ -1244,6 +1624,13 @@
           "dataType": "ST",
           "xpath": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']/playingEntity[@classCode='PLC']/name"
         }
+      ],
+      "entryElementPath": "entry/encounter",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/encounter/participant[@typeCode='LOC']/participantRole[@classCode='SDLOC']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.32"
+        }
       ]
     },
     {
@@ -1257,13 +1644,6 @@
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.14",
       "entryTemplateIdExtension": "2014-06-09",
-      "entryElementPath": "entry/procedure",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/procedure/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        }
-      ],
       "fields": [
         {
           "key": "procedureCode",
@@ -1456,6 +1836,13 @@
           "xpathDisplay": "entry/procedure/author/assignedAuthor/code/@displayName",
           "xpathSystem": "entry/procedure/author/assignedAuthor/code/@codeSystem"
         }
+      ],
+      "entryElementPath": "entry/procedure",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/procedure/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        }
       ]
     },
     {
@@ -1469,26 +1856,6 @@
       "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.52",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryElementPath": "entry/substanceAdministration",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']",
-          "templateId": "2.16.840.1.113883.10.20.22.4.54",
-          "templateIdExtension": "2014-06-09"
-        },
-        {
-          "path": "entry/substanceAdministration/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        },
-        {
-          "path": "entry/substanceAdministration/entryRelationship[@typeCode='COMP',@inversionInd='true']/act",
-          "templateId": "2.16.840.1.113883.10.20.22.4.118",
-          "fixedCode": "416118004",
-          "fixedCodeSystem": "2.16.840.1.113883.6.96",
-          "fixedCodeDisplay": "Administration",
-          "fixedStatusCode": "completed"
-        }
-      ],
       "fields": [
         {
           "key": "vaccineCode",
@@ -1619,6 +1986,26 @@
           "dataType": "TS",
           "xpath": "entry/substanceAdministration/entryRelationship[@typeCode='COMP',@inversionInd='true']/act/effectiveTime/@value"
         }
+      ],
+      "entryElementPath": "entry/substanceAdministration",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.54",
+          "templateIdExtension": "2014-06-09"
+        },
+        {
+          "path": "entry/substanceAdministration/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        },
+        {
+          "path": "entry/substanceAdministration/entryRelationship[@typeCode='COMP',@inversionInd='true']/act",
+          "templateId": "2.16.840.1.113883.10.20.22.4.118",
+          "fixedCode": "416118004",
+          "fixedCodeSystem": "2.16.840.1.113883.6.96",
+          "fixedCodeDisplay": "Administration",
+          "fixedStatusCode": "completed"
+        }
       ]
     },
     {
@@ -1628,33 +2015,10 @@
       "loincCode": "29762-2",
       "templateId": "2.16.840.1.113883.10.20.22.2.17",
       "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "",
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.38",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryElementPath": "entry/observation",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']",
-          "templateId": "2.16.840.1.113883.10.20.22.4.85",
-          "templateIdExtension": "2014-06-09"
-        },
-        {
-          "path": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        },
-        {
-          "path": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']",
-          "templateId": "2.16.840.1.113883.10.20.22.4.78",
-          "templateIdExtension": "2014-06-09",
-          "fixedCode": "72166-2",
-          "fixedCodeSystem": "2.16.840.1.113883.6.1",
-          "fixedCodeDisplay": "Tobacco smoking status NHIS"
-        },
-        {
-          "path": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        }
-      ],
       "fields": [
         {
           "key": "observationCode",
@@ -1798,9 +2162,32 @@
           "xpathDisplay": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author/assignedAuthor/code/@displayName",
           "xpathSystem": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author/assignedAuthor/code/@codeSystem"
         }
+      ],
+      "entryElementPath": "entry/observation",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.85",
+          "templateIdExtension": "2014-06-09"
+        },
+        {
+          "path": "entry/observation[code/@code='11367-0',code/@codeSystem='2.16.840.1.113883.6.1']/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        },
+        {
+          "path": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.78",
+          "templateIdExtension": "2014-06-09",
+          "fixedCode": "72166-2",
+          "fixedCodeSystem": "2.16.840.1.113883.6.1",
+          "fixedCodeDisplay": "Tobacco smoking status NHIS"
+        },
+        {
+          "path": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        }
       ]
     },
-
     {
       "key": "functionalStatus",
       "uscdiClass": "Functional Status",
@@ -1812,15 +2199,6 @@
       "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.67",
       "entryTemplateIdExtension": "2014-06-09",
-      "entryFixedCode": "54522-8",
-      "entryFixedCodeDisplay": "Functional status",
-      "entryElementPath": "entry/observation",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/observation/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        }
-      ],
       "fields": [
         {
           "key": "value",
@@ -1868,7 +2246,16 @@
           "xpathDisplay": "entry/observation/author/assignedAuthor/code/@displayName",
           "xpathSystem": "entry/observation/author/assignedAuthor/code/@codeSystem"
         }
-      ]
+      ],
+      "entryElementPath": "entry/observation",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/observation/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        }
+      ],
+      "entryFixedCode": "54522-8",
+      "entryFixedCodeDisplay": "Functional status"
     },
     {
       "key": "mentalStatus",
@@ -1877,22 +2264,10 @@
       "loincCode": "10190-7",
       "templateId": "2.16.840.1.113883.10.20.22.2.56",
       "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "",
       "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.74",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryFixedCode": "373930000",
-      "entryFixedCodeSystem": "2.16.840.1.113883.6.96",
-      "entryFixedCodeDisplay": "Cognitive function",
-      "entryCodeTranslationCode": "75275-8",
-      "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
-      "entryCodeTranslationDisplay": "Cognitive Function",
-      "entryElementPath": "entry/observation",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/observation/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        }
-      ],
       "fields": [
         {
           "key": "value",
@@ -1940,7 +2315,20 @@
           "xpathDisplay": "entry/observation/author/assignedAuthor/code/@displayName",
           "xpathSystem": "entry/observation/author/assignedAuthor/code/@codeSystem"
         }
-      ]
+      ],
+      "entryElementPath": "entry/observation",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/observation/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        }
+      ],
+      "entryFixedCode": "373930000",
+      "entryFixedCodeSystem": "2.16.840.1.113883.6.96",
+      "entryFixedCodeDisplay": "Cognitive function",
+      "entryCodeTranslationCode": "75275-8",
+      "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
+      "entryCodeTranslationDisplay": "Cognitive Function"
     },
     {
       "key": "familyHistory",
@@ -1949,11 +2337,10 @@
       "loincCode": "10157-6",
       "templateId": "2.16.840.1.113883.10.20.22.2.15",
       "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "",
       "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.45",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryElementPath": "entry/organizer",
-      "observationElementPath": "entry/organizer/component/observation",
       "fields": [
         {
           "key": "relationship",
@@ -2004,7 +2391,9 @@
           "dataType": "TS",
           "xpath": "entry/organizer/subject/relatedSubject/subject/birthTime/@value"
         }
-      ]
+      ],
+      "entryElementPath": "entry/organizer",
+      "observationElementPath": "entry/organizer/component/observation"
     },
     {
       "key": "assessmentAndPlan",
@@ -2015,7 +2404,6 @@
       "templateIdOptional": "2.16.840.1.113883.10.20.22.2.9",
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.146",
-      "entryElementPath": "entry/observation",
       "fields": [
         {
           "key": "activityCode",
@@ -2039,7 +2427,8 @@
           "dataType": "CS",
           "xpath": "entry/observation/statusCode/@code"
         }
-      ]
+      ],
+      "entryElementPath": "entry/observation"
     },
     {
       "key": "planOfTreatment",
@@ -2048,17 +2437,10 @@
       "loincCode": "18776-5",
       "templateId": "2.16.840.1.113883.10.20.22.2.10",
       "templateIdExtension": "2014-06-09",
+      "templateIdOptional": "",
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.44",
       "entryTemplateIdExtension": "2014-06-09",
-      "entryStatusCodeOverride": "active",
-      "entryElementPath": "entry/observation",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/observation/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        }
-      ],
       "fields": [
         {
           "key": "activityCode",
@@ -2131,7 +2513,15 @@
           "xpathDisplay": "entry/observation/author/assignedAuthor/code/@displayName",
           "xpathSystem": "entry/observation/author/assignedAuthor/code/@codeSystem"
         }
-      ]
+      ],
+      "entryElementPath": "entry/observation",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/observation/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        }
+      ],
+      "entryStatusCodeOverride": "active"
     },
     {
       "key": "medicalEquipment",
@@ -2144,7 +2534,6 @@
       "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.50",
       "entryTemplateIdExtension": "2014-06-09",
-      "entryElementPath": "entry/supply",
       "fields": [
         {
           "key": "equipmentCode",
@@ -2183,6 +2572,7 @@
           "xpath": "entry/supply/statusCode/@code"
         }
       ],
+      "entryElementPath": "entry/supply",
       "alternateArchetypes": [
         {
           "entriesKey": "procedureEntries",
@@ -2394,20 +2784,6 @@
       "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.48",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryElementPath": "entry/observation",
-      "entryCodeTranslationCode": "75320-2",
-      "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
-      "entryCodeTranslationDisplay": "Advance directive",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/observation/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        },
-        {
-          "path": "entry/observation/participant[@typeCode='VRF']",
-          "templateId": "2.16.840.1.113883.10.20.1.58"
-        }
-      ],
       "fields": [
         {
           "key": "directiveCode",
@@ -2607,7 +2983,21 @@
           "dataType": "ST",
           "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/reference/@value"
         }
-      ]
+      ],
+      "entryElementPath": "entry/observation",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/observation/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        },
+        {
+          "path": "entry/observation/participant[@typeCode='VRF']",
+          "templateId": "2.16.840.1.113883.10.20.1.58"
+        }
+      ],
+      "entryCodeTranslationCode": "75320-2",
+      "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
+      "entryCodeTranslationDisplay": "Advance directive"
     },
     {
       "key": "healthConcerns",
@@ -2615,6 +3005,7 @@
       "displayName": "Health Concerns",
       "loincCode": "75310-3",
       "templateId": "2.16.840.1.113883.10.20.22.2.58",
+      "templateIdOptional": "",
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.132",
       "fields": [
@@ -2649,6 +3040,7 @@
       "displayName": "Goals",
       "loincCode": "61146-5",
       "templateId": "2.16.840.1.113883.10.20.22.2.60",
+      "templateIdOptional": "",
       "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.121",
       "fields": [
@@ -2692,16 +3084,12 @@
       "loincCode": "48768-6",
       "templateId": "2.16.840.1.113883.10.20.22.2.18",
       "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "",
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.60",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryStatusCodeOverride": "completed",
-      "entryFixedCode": "48768-6",
-      "entryFixedCodeDisplay": "Payment sources",
       "observationTemplateId": "2.16.840.1.113883.10.20.22.4.61",
       "observationTemplateIdExtension": "2015-08-01",
-      "entryElementPath": "entry/act",
-      "observationElementPath": "entry/act/entryRelationship[@typeCode='COMP']/act",
       "fields": [
         {
           "key": "coverageType",
@@ -2739,7 +3127,12 @@
           "dataType": "ST",
           "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='HLD']/participantRole/playingEntity/name/given"
         }
-      ]
+      ],
+      "entryElementPath": "entry/act",
+      "observationElementPath": "entry/act/entryRelationship[@typeCode='COMP']/act",
+      "entryStatusCodeOverride": "completed",
+      "entryFixedCode": "48768-6",
+      "entryFixedCodeDisplay": "Payment sources"
     },
     {
       "key": "nutrition",
@@ -2747,22 +3140,10 @@
       "displayName": "Diet and Nutrition",
       "loincCode": "61144-2",
       "templateId": "2.16.840.1.113883.10.20.22.2.57",
+      "templateIdOptional": "",
       "conformance": "MAY",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.124",
-      "entryFixedCode": "75305-3",
-      "entryFixedCodeDisplay": "Nutrition status",
       "observationTemplateId": "2.16.840.1.113883.10.20.22.4.138",
-      "observationFixedCode": "75303-8",
-      "observationFixedCodeSystem": "2.16.840.1.113883.6.1",
-      "observationFixedCodeDisplay": "Nutrition assessment",
-      "entryElementPath": "entry/observation",
-      "observationElementPath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation",
-      "structuralTemplateIds": [
-        {
-          "path": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author",
-          "templateId": "2.16.840.1.113883.10.20.22.4.119"
-        }
-      ],
       "fields": [
         {
           "key": "nutritionalStatusValue",
@@ -2825,24 +3206,33 @@
           "xpathDisplay": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@displayName",
           "xpathSystem": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@codeSystem"
         }
-      ]
+      ],
+      "entryElementPath": "entry/observation",
+      "observationElementPath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author",
+          "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        }
+      ],
+      "entryFixedCode": "75305-3",
+      "entryFixedCodeDisplay": "Nutrition status",
+      "observationFixedCode": "75303-8",
+      "observationFixedCodeSystem": "2.16.840.1.113883.6.1",
+      "observationFixedCodeDisplay": "Nutrition assessment"
     },
-
     {
       "key": "dischargeDiagnosis",
       "uscdiClass": "Discharge Diagnosis",
       "displayName": "Discharge Diagnosis",
       "loincCode": "11535-2",
       "templateId": "2.16.840.1.113883.10.20.22.2.24",
+      "templateIdOptional": "",
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.33",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryFixedCode": "11535-2",
-      "entryFixedCodeDisplay": "Hospital discharge diagnosis",
       "observationTemplateId": "2.16.840.1.113883.10.20.22.4.4",
       "observationTemplateIdExtension": "2015-08-01",
-      "entryElementPath": "entry/act",
-      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
       "fields": [
         {
           "key": "conditionCode",
@@ -2868,7 +3258,17 @@
           "dataType": "TS",
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/low/@value"
         }
-      ]
+      ],
+      "entryElementPath": "entry/act",
+      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
+      "entryFixedCode": "11535-2",
+      "entryFixedCodeDisplay": "Hospital discharge diagnosis",
+      "obsCodeTranslationCode": "75325-1",
+      "obsCodeTranslationSystem": "2.16.840.1.113883.6.1",
+      "obsCodeTranslationDisplay": "Problem",
+      "observationFixedCode": "55607006",
+      "observationFixedCodeSystem": "2.16.840.1.113883.6.96",
+      "observationFixedCodeDisplay": "Problem"
     },
     {
       "key": "dischargeMedications",
@@ -2880,13 +3280,8 @@
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.35",
       "entryTemplateIdExtension": "2016-03-01",
-      "entryStatusCodeOverride": "completed",
-      "entryFixedCode": "10183-2",
-      "entryFixedCodeDisplay": "Discharge medication",
       "observationTemplateId": "2.16.840.1.113883.10.20.22.4.16",
       "observationTemplateIdExtension": "2014-06-09",
-      "entryElementPath": "entry/act",
-      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration",
       "fields": [
         {
           "key": "drugCode",
@@ -2929,7 +3324,12 @@
           "dataType": "IVL_TS",
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/effectiveTime/low/@value"
         }
-      ]
+      ],
+      "entryElementPath": "entry/act",
+      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration",
+      "entryStatusCodeOverride": "completed",
+      "entryFixedCode": "10183-2",
+      "entryFixedCodeDisplay": "Discharge medication"
     },
     {
       "key": "admissionDiagnosis",
@@ -2937,15 +3337,12 @@
       "displayName": "Hospital Admission Diagnosis",
       "loincCode": "46241-6",
       "templateId": "2.16.840.1.113883.10.20.22.2.43",
+      "templateIdOptional": "",
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.34",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryFixedCode": "46241-6",
-      "entryFixedCodeDisplay": "Admission diagnosis",
       "observationTemplateId": "2.16.840.1.113883.10.20.22.4.4",
       "observationTemplateIdExtension": "2015-08-01",
-      "entryElementPath": "entry/act",
-      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
       "fields": [
         {
           "key": "conditionCode",
@@ -2964,7 +3361,17 @@
           "dataType": "TS",
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/low/@value"
         }
-      ]
+      ],
+      "entryElementPath": "entry/act",
+      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
+      "entryFixedCode": "46241-6",
+      "entryFixedCodeDisplay": "Admission diagnosis",
+      "obsCodeTranslationCode": "75325-1",
+      "obsCodeTranslationSystem": "2.16.840.1.113883.6.1",
+      "obsCodeTranslationDisplay": "Problem",
+      "observationFixedCode": "55607006",
+      "observationFixedCodeSystem": "2.16.840.1.113883.6.96",
+      "observationFixedCodeDisplay": "Problem"
     },
     {
       "key": "admissionMedications",
@@ -2972,15 +3379,12 @@
       "displayName": "Admission Medications",
       "loincCode": "42346-7",
       "templateId": "2.16.840.1.113883.10.20.22.2.44",
+      "templateIdOptional": "",
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.36",
       "entryTemplateIdExtension": "2014-06-09",
-      "entryFixedCode": "42346-7",
-      "entryFixedCodeDisplay": "Medications on Admission",
       "observationTemplateId": "2.16.840.1.113883.10.20.22.4.16",
       "observationTemplateIdExtension": "2014-06-09",
-      "entryElementPath": "entry/act",
-      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration",
       "fields": [
         {
           "key": "drugCode",
@@ -3005,7 +3409,11 @@
           "dataType": "IVL_TS",
           "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration/effectiveTime/low/@value"
         }
-      ]
+      ],
+      "entryElementPath": "entry/act",
+      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/substanceAdministration",
+      "entryFixedCode": "42346-7",
+      "entryFixedCodeDisplay": "Medications on Admission"
     },
     {
       "key": "hospitalCourse",
@@ -3013,6 +3421,7 @@
       "displayName": "Hospital Course",
       "loincCode": "8648-8",
       "templateId": "1.3.6.1.4.1.19376.1.5.3.1.3.5",
+      "templateIdOptional": "",
       "conformance": "SHALL",
       "fields": []
     },
@@ -3022,11 +3431,10 @@
       "displayName": "Discharge Instructions",
       "loincCode": "8653-8",
       "templateId": "2.16.840.1.113883.10.20.22.2.41",
+      "templateIdOptional": "",
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.20",
       "entryTemplateIdExtension": "2014-06-09",
-      "entryMoodCodeOverride": "INT",
-      "entryElementPath": "entry/act",
       "fields": [
         {
           "key": "instructionCode",
@@ -3043,7 +3451,9 @@
           "dataType": "ST",
           "xpath": "entry/act/text"
         }
-      ]
+      ],
+      "entryElementPath": "entry/act",
+      "entryMoodCodeOverride": "INT"
     },
     {
       "key": "dischargePhysical",
@@ -3051,16 +3461,17 @@
       "displayName": "Discharge Physical Examination",
       "loincCode": "10184-0",
       "templateId": "1.3.6.1.4.1.19376.1.5.3.1.3.26",
+      "templateIdOptional": "",
       "conformance": "MAY",
       "fields": []
     },
-
     {
       "key": "chiefComplaint",
       "uscdiClass": "Chief Complaint",
       "displayName": "Chief Complaint",
       "loincCode": "10154-3",
       "templateId": "1.3.6.1.4.1.19376.1.5.3.1.1.13.2.1",
+      "templateIdOptional": "",
       "conformance": "SHALL",
       "fields": []
     },
@@ -3070,6 +3481,7 @@
       "displayName": "History of Present Illness",
       "loincCode": "10164-2",
       "templateId": "1.3.6.1.4.1.19376.1.5.3.1.3.4",
+      "templateIdOptional": "",
       "conformance": "SHALL",
       "fields": []
     },
@@ -3080,10 +3492,10 @@
       "loincCode": "11348-0",
       "templateId": "2.16.840.1.113883.10.20.22.2.20",
       "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "",
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.4",
       "entryTemplateIdExtension": "2015-08-01",
-      "entryElementPath": "entry/observation",
       "fields": [
         {
           "key": "conditionCode",
@@ -3109,7 +3521,14 @@
           "dataType": "TS",
           "xpath": "entry/observation/effectiveTime/high/@value"
         }
-      ]
+      ],
+      "entryElementPath": "entry/observation",
+      "entryFixedCode": "55607006",
+      "entryFixedCodeSystem": "2.16.840.1.113883.6.96",
+      "entryFixedCodeDisplay": "Problem",
+      "entryCodeTranslationCode": "75325-1",
+      "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
+      "entryCodeTranslationDisplay": "Problem"
     },
     {
       "key": "reviewOfSystems",
@@ -3117,6 +3536,7 @@
       "displayName": "Review of Systems",
       "loincCode": "10187-3",
       "templateId": "1.3.6.1.4.1.19376.1.5.3.1.3.18",
+      "templateIdOptional": "",
       "conformance": "SHOULD",
       "fields": []
     },
@@ -3127,6 +3547,7 @@
       "loincCode": "29545-1",
       "templateId": "2.16.840.1.113883.10.20.2.10",
       "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "",
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.2",
       "fields": [
@@ -3163,6 +3584,7 @@
       "displayName": "Assessment",
       "loincCode": "51848-0",
       "templateId": "2.16.840.1.113883.10.20.22.2.8",
+      "templateIdOptional": "",
       "conformance": "SHOULD",
       "fields": []
     },
@@ -3173,10 +3595,9 @@
       "loincCode": "42349-1",
       "templateId": "1.3.6.1.4.1.19376.1.5.3.1.3.1",
       "templateIdExtension": "2014-06-09",
+      "templateIdOptional": "",
       "conformance": "SHALL",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.140",
-      "entryClassCodeOverride": "PCPR",
-      "entryElementPath": "entry/act",
       "fields": [
         {
           "key": "referralCode",
@@ -3201,15 +3622,17 @@
           "dataType": "IVL_TS",
           "xpath": "entry/act/effectiveTime/low/@value"
         }
-      ]
+      ],
+      "entryElementPath": "entry/act",
+      "entryClassCodeOverride": "PCPR"
     },
-
     {
       "key": "careTeam",
       "uscdiClass": "Care Team Members",
       "displayName": "Care Team",
       "loincCode": "85847-2",
       "templateId": "2.16.840.1.113883.10.20.22.2.500",
+      "templateIdOptional": "",
       "conformance": "SHOULD",
       "entryTemplateId": "2.16.840.1.113883.10.20.22.4.500",
       "fields": [
@@ -3236,13 +3659,13 @@
         }
       ]
     },
-
     {
       "key": "header.patient",
       "uscdiClass": "Patient Demographics",
       "displayName": "Patient (Header)",
       "loincCode": "",
       "templateId": "",
+      "templateIdOptional": "",
       "conformance": "SHALL",
       "isHeader": true,
       "fields": [
@@ -3348,6 +3771,7 @@
       "displayName": "Document Author (Header)",
       "loincCode": "",
       "templateId": "",
+      "templateIdOptional": "",
       "conformance": "SHALL",
       "isHeader": true,
       "fields": [
@@ -3394,6 +3818,7 @@
       "displayName": "Document Custodian (Header)",
       "loincCode": "",
       "templateId": "",
+      "templateIdOptional": "",
       "conformance": "SHALL",
       "isHeader": true,
       "fields": [
@@ -3426,6 +3851,7 @@
       "displayName": "Legal Authenticator (Header)",
       "loincCode": "",
       "templateId": "",
+      "templateIdOptional": "",
       "conformance": "SHOULD",
       "isHeader": true,
       "fields": [
@@ -3486,6 +3912,613 @@
           "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/telecom/@value"
         }
       ]
+    },
+    {
+      "key": "findingsDIR",
+      "uscdiClass": "Diagnostic Imaging Findings",
+      "displayName": "Findings",
+      "loincCode": "",
+      "templateId": "2.16.840.1.113883.10.20.6.1.2",
+      "templateIdOptional": "",
+      "conformance": "SHALL",
+      "fields": []
+    },
+    {
+      "key": "anesthesia",
+      "uscdiClass": "Operative Note",
+      "displayName": "Anesthesia",
+      "loincCode": "59774-0",
+      "templateId": "2.16.840.1.113883.10.20.22.2.25",
+      "templateIdExtension": "2014-06-09",
+      "templateIdOptional": "",
+      "conformance": "SHALL",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.16",
+      "entryTemplateIdExtension": "2014-06-09",
+      "fields": [
+        {
+          "key": "drugCode",
+          "uscdiElement": "Anesthesia Medication",
+          "conformance": "SHALL",
+          "dataType": "CE",
+          "valueSet": "RxNorm",
+          "xpath": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@code",
+          "xpathDisplay": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@displayName",
+          "xpathSystem": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@codeSystem"
+        },
+        {
+          "key": "routeCode",
+          "uscdiElement": "Route",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "SPL Drug Route of Administration Terminology",
+          "xpath": "entry/substanceAdministration/routeCode/@code",
+          "xpathDisplay": "entry/substanceAdministration/routeCode/@displayName",
+          "xpathSystem": "entry/substanceAdministration/routeCode/@codeSystem"
+        },
+        {
+          "key": "status",
+          "uscdiElement": "Anesthesia Status",
+          "conformance": "SHALL",
+          "dataType": "CS",
+          "xpath": "entry/substanceAdministration/statusCode/@code"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Anesthesia Administration Time",
+          "conformance": "SHOULD",
+          "dataType": "IVL_TS",
+          "xpath": "entry/substanceAdministration/effectiveTime/low/@value"
+        }
+      ],
+      "entryElementPath": "entry/substanceAdministration",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/substanceAdministration/consumable/manufacturedProduct",
+          "templateId": "2.16.840.1.113883.10.20.22.4.23",
+          "templateIdExtension": "2014-06-09"
+        }
+      ]
+    },
+    {
+      "key": "procedureDescription",
+      "uscdiClass": "Operative Note",
+      "displayName": "Procedure Description",
+      "loincCode": "29554-3",
+      "templateId": "2.16.840.1.113883.10.20.22.2.27",
+      "templateIdOptional": "",
+      "conformance": "SHALL",
+      "fields": []
+    },
+    {
+      "key": "procedureEstimatedBloodLoss",
+      "uscdiClass": "Operative Note",
+      "displayName": "Procedure Estimated Blood Loss",
+      "loincCode": "59770-8",
+      "templateId": "2.16.840.1.113883.10.20.18.2.9",
+      "templateIdOptional": "",
+      "conformance": "SHALL",
+      "fields": []
+    },
+    {
+      "key": "procedureDisposition",
+      "uscdiClass": "Operative Note",
+      "displayName": "Procedure Disposition",
+      "loincCode": "59775-7",
+      "templateId": "2.16.840.1.113883.10.20.18.2.12",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "procedureFindings",
+      "uscdiClass": "Operative Note",
+      "displayName": "Procedure Findings",
+      "loincCode": "59776-5",
+      "templateId": "2.16.840.1.113883.10.20.22.2.28",
+      "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "",
+      "conformance": "SHALL",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.4",
+      "entryTemplateIdExtension": "2015-08-01",
+      "fields": [
+        {
+          "key": "findingCode",
+          "uscdiElement": "Procedure Finding",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "SNOMED CT, ICD-10-CM",
+          "xpath": "entry/observation/value/@code",
+          "xpathDisplay": "entry/observation/value/@displayName",
+          "xpathSystem": "entry/observation/value/@codeSystem"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Finding Date",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "entry/observation/effectiveTime/low/@value"
+        }
+      ],
+      "entryElementPath": "entry/observation",
+      "entryFixedCode": "55607006",
+      "entryFixedCodeSystem": "2.16.840.1.113883.6.96",
+      "entryFixedCodeDisplay": "Problem",
+      "entryCodeTranslationCode": "75325-1",
+      "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
+      "entryCodeTranslationDisplay": "Problem"
+    },
+    {
+      "key": "procedureIndications",
+      "uscdiClass": "Operative Note",
+      "displayName": "Procedure Indications",
+      "loincCode": "59768-2",
+      "templateId": "2.16.840.1.113883.10.20.22.2.29",
+      "templateIdExtension": "2014-06-09",
+      "templateIdOptional": "",
+      "conformance": "SHALL",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.19",
+      "entryTemplateIdExtension": "2014-06-09",
+      "fields": [
+        {
+          "key": "indicationCode",
+          "uscdiElement": "Indication",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "valueSet": "SNOMED CT",
+          "xpath": "entry/observation/value/@code",
+          "xpathDisplay": "entry/observation/value/@displayName",
+          "xpathSystem": "entry/observation/value/@codeSystem"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Indication Date",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "entry/observation/effectiveTime/low/@value"
+        }
+      ],
+      "entryElementPath": "entry/observation",
+      "entryFixedCode": "ASSERTION",
+      "entryFixedCodeSystem": "2.16.840.1.113883.5.4"
+    },
+    {
+      "key": "procedureImplants",
+      "uscdiClass": "Operative Note",
+      "displayName": "Procedure Implants",
+      "loincCode": "59771-6",
+      "templateId": "2.16.840.1.113883.10.20.22.2.40",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "procedureSpecimensTaken",
+      "uscdiClass": "Operative Note",
+      "displayName": "Procedure Specimens Taken",
+      "loincCode": "59773-2",
+      "templateId": "2.16.840.1.113883.10.20.22.2.31",
+      "templateIdOptional": "",
+      "conformance": "SHALL",
+      "fields": []
+    },
+    {
+      "key": "preoperativeDiagnosis",
+      "uscdiClass": "Operative Note",
+      "displayName": "Preoperative Diagnosis",
+      "loincCode": "10219-4",
+      "templateId": "2.16.840.1.113883.10.20.22.2.34",
+      "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "",
+      "conformance": "SHALL",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.65",
+      "entryTemplateIdExtension": "2015-08-01",
+      "observationTemplateId": "2.16.840.1.113883.10.20.22.4.4",
+      "observationTemplateIdExtension": "2015-08-01",
+      "fields": [
+        {
+          "key": "conditionCode",
+          "uscdiElement": "Preoperative Diagnosis",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "SNOMED CT, ICD-10-CM",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@displayName",
+          "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@codeSystem"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Diagnosis Date",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/low/@value"
+        }
+      ],
+      "entryElementPath": "entry/act",
+      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
+      "entryFixedCode": "10219-4",
+      "entryFixedCodeSystem": "2.16.840.1.113883.6.1",
+      "entryFixedCodeDisplay": "Preoperative Diagnosis",
+      "obsCodeTranslationCode": "75325-1",
+      "obsCodeTranslationSystem": "2.16.840.1.113883.6.1",
+      "obsCodeTranslationDisplay": "Problem",
+      "observationFixedCode": "55607006",
+      "observationFixedCodeSystem": "2.16.840.1.113883.6.96",
+      "observationFixedCodeDisplay": "Problem"
+    },
+    {
+      "key": "postoperativeDiagnosis",
+      "uscdiClass": "Operative Note",
+      "displayName": "Postoperative Diagnosis",
+      "loincCode": "10218-6",
+      "templateId": "2.16.840.1.113883.10.20.22.2.35",
+      "templateIdOptional": "",
+      "conformance": "SHALL",
+      "fields": []
+    },
+    {
+      "key": "postprocedureDiagnosis",
+      "uscdiClass": "Procedure Note",
+      "displayName": "Postprocedure Diagnosis",
+      "loincCode": "59769-0",
+      "templateId": "2.16.840.1.113883.10.20.22.2.36",
+      "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "",
+      "conformance": "SHALL",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.51",
+      "entryTemplateIdExtension": "2015-08-01",
+      "observationTemplateId": "2.16.840.1.113883.10.20.22.4.4",
+      "observationTemplateIdExtension": "2015-08-01",
+      "fields": [
+        {
+          "key": "conditionCode",
+          "uscdiElement": "Postprocedure Diagnosis",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "SNOMED CT, ICD-10-CM",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@displayName",
+          "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@codeSystem"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Diagnosis Date",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/low/@value"
+        }
+      ],
+      "entryElementPath": "entry/act",
+      "observationElementPath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation",
+      "entryFixedCode": "59769-0",
+      "entryFixedCodeSystem": "2.16.840.1.113883.6.1",
+      "entryFixedCodeDisplay": "Postprocedure diagnosis",
+      "obsCodeTranslationCode": "75325-1",
+      "obsCodeTranslationSystem": "2.16.840.1.113883.6.1",
+      "obsCodeTranslationDisplay": "Problem",
+      "observationFixedCode": "55607006",
+      "observationFixedCodeSystem": "2.16.840.1.113883.6.96",
+      "observationFixedCodeDisplay": "Problem"
+    },
+    {
+      "key": "complications",
+      "uscdiClass": "Operative Note",
+      "displayName": "Complications",
+      "loincCode": "55109-3",
+      "templateId": "2.16.840.1.113883.10.20.22.2.37",
+      "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "",
+      "conformance": "SHALL",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.4",
+      "entryTemplateIdExtension": "2015-08-01",
+      "fields": [
+        {
+          "key": "complicationCode",
+          "uscdiElement": "Complication",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "SNOMED CT, ICD-10-CM",
+          "xpath": "entry/observation/value/@code",
+          "xpathDisplay": "entry/observation/value/@displayName",
+          "xpathSystem": "entry/observation/value/@codeSystem"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Complication Date",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "entry/observation/effectiveTime/low/@value"
+        }
+      ],
+      "entryElementPath": "entry/observation",
+      "entryFixedCode": "55607006",
+      "entryFixedCodeSystem": "2.16.840.1.113883.6.96",
+      "entryFixedCodeDisplay": "Problem",
+      "entryCodeTranslationCode": "75325-1",
+      "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
+      "entryCodeTranslationDisplay": "Problem"
+    },
+    {
+      "key": "operativeNoteFluids",
+      "uscdiClass": "Operative Note",
+      "displayName": "Operative Note Fluids",
+      "loincCode": "10216-0",
+      "templateId": "2.16.840.1.113883.10.20.7.12",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "operationsPerformed",
+      "uscdiClass": "Operative Note",
+      "displayName": "Operative Note Surgical Procedure",
+      "loincCode": "10223-6",
+      "templateId": "2.16.840.1.113883.10.20.7.14",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "plannedProcedure",
+      "uscdiClass": "Operative Note",
+      "displayName": "Planned Procedure",
+      "loincCode": "59772-4",
+      "templateId": "2.16.840.1.113883.10.20.22.2.30",
+      "templateIdExtension": "2014-06-09",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.41",
+      "entryTemplateIdExtension": "2014-06-09",
+      "fields": [
+        {
+          "key": "procedureCode",
+          "uscdiElement": "Planned Procedure",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "SNOMED CT, CPT, HCPCS",
+          "xpath": "entry/procedure/code/@code",
+          "xpathDisplay": "entry/procedure/code/@displayName",
+          "xpathSystem": "entry/procedure/code/@codeSystem"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Planned Date",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "entry/procedure/effectiveTime/low/@value"
+        }
+      ],
+      "entryElementPath": "entry/procedure",
+      "entryMoodCodeOverride": "RQO"
+    },
+    {
+      "key": "surgicalDrains",
+      "uscdiClass": "Operative Note",
+      "displayName": "Surgical Drains",
+      "loincCode": "11537-8",
+      "templateId": "2.16.840.1.113883.10.20.7.13",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "healthStatusEvaluationsOutcomes",
+      "uscdiClass": "Care Plan",
+      "displayName": "Health Status Evaluations and Outcomes",
+      "loincCode": "11383-7",
+      "templateId": "2.16.840.1.113883.10.20.22.2.61",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.144",
+      "fields": [
+        {
+          "key": "outcomeCode",
+          "uscdiElement": "Outcome Code",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "LOINC",
+          "xpath": "entry/observation/code/@code",
+          "xpathDisplay": "entry/observation/code/@displayName",
+          "xpathSystem": "entry/observation/code/@codeSystem"
+        },
+        {
+          "key": "value",
+          "uscdiElement": "Outcome Value",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "xpath": "entry/observation/value/@code",
+          "xpathDisplay": "entry/observation/value/@displayName"
+        }
+      ],
+      "entryElementPath": "entry/observation"
+    },
+    {
+      "key": "interventions",
+      "uscdiClass": "Care Plan",
+      "displayName": "Interventions",
+      "loincCode": "62387-6",
+      "templateId": "2.16.840.1.113883.10.20.21.2.3",
+      "templateIdExtension": "2015-08-01",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "courseOfCare",
+      "uscdiClass": "Transfer Summary",
+      "displayName": "Course of Care",
+      "loincCode": "8648-8",
+      "templateId": "2.16.840.1.113883.10.20.22.2.64",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "generalStatus",
+      "uscdiClass": "General Status",
+      "displayName": "General Status",
+      "loincCode": "10210-3",
+      "templateId": "2.16.840.1.113883.10.20.2.5",
+      "templateIdOptional": "",
+      "conformance": "SHALL",
+      "fields": []
+    },
+    {
+      "key": "reasonForVisit",
+      "uscdiClass": "Reason for Visit",
+      "displayName": "Reason for Visit",
+      "loincCode": "29299-5",
+      "templateId": "2.16.840.1.113883.10.20.22.2.12",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "chiefComplaintAndReasonForVisit",
+      "uscdiClass": "Chief Complaint and Reason for Visit",
+      "displayName": "Chief Complaint and Reason for Visit",
+      "loincCode": "46239-0",
+      "templateId": "2.16.840.1.113883.10.20.22.2.13",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "medicalGeneralHistory",
+      "uscdiClass": "Medical General History",
+      "displayName": "Medical (General) History",
+      "loincCode": "11329-0",
+      "templateId": "2.16.840.1.113883.10.20.22.2.39",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "medicationsAdministered",
+      "uscdiClass": "Medications Administered",
+      "displayName": "Medications Administered",
+      "loincCode": "29549-3",
+      "templateId": "2.16.840.1.113883.10.20.22.2.38",
+      "templateIdExtension": "2014-06-09",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.16",
+      "entryTemplateIdExtension": "2014-06-09",
+      "fields": [
+        {
+          "key": "drugCode",
+          "uscdiElement": "Medication Administered",
+          "conformance": "SHALL",
+          "dataType": "CE",
+          "valueSet": "RxNorm",
+          "xpath": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@code",
+          "xpathDisplay": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@displayName",
+          "xpathSystem": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@codeSystem"
+        },
+        {
+          "key": "routeCode",
+          "uscdiElement": "Route",
+          "conformance": "SHOULD",
+          "dataType": "CE",
+          "valueSet": "SPL Drug Route of Administration Terminology",
+          "xpath": "entry/substanceAdministration/routeCode/@code",
+          "xpathDisplay": "entry/substanceAdministration/routeCode/@displayName",
+          "xpathSystem": "entry/substanceAdministration/routeCode/@codeSystem"
+        },
+        {
+          "key": "status",
+          "uscdiElement": "Status",
+          "conformance": "SHALL",
+          "dataType": "CS",
+          "xpath": "entry/substanceAdministration/statusCode/@code"
+        },
+        {
+          "key": "effectiveTime",
+          "uscdiElement": "Administration Time",
+          "conformance": "SHOULD",
+          "dataType": "IVL_TS",
+          "xpath": "entry/substanceAdministration/effectiveTime/low/@value"
+        }
+      ],
+      "entryElementPath": "entry/substanceAdministration",
+      "structuralTemplateIds": [
+        {
+          "path": "entry/substanceAdministration/consumable/manufacturedProduct",
+          "templateId": "2.16.840.1.113883.10.20.22.4.23",
+          "templateIdExtension": "2014-06-09"
+        }
+      ]
+    },
+    {
+      "key": "objective",
+      "uscdiClass": "Progress Note",
+      "displayName": "Objective",
+      "loincCode": "61149-1",
+      "templateId": "2.16.840.1.113883.10.20.21.2.1",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "subjective",
+      "uscdiClass": "Progress Note",
+      "displayName": "Subjective",
+      "loincCode": "61150-9",
+      "templateId": "2.16.840.1.113883.10.20.21.2.2",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "hospitalConsultations",
+      "uscdiClass": "Discharge Summary",
+      "displayName": "Hospital Consultations",
+      "loincCode": "18841-7",
+      "templateId": "2.16.840.1.113883.10.20.22.2.42",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "hospitalDischargeStudiesSummary",
+      "uscdiClass": "Discharge Summary",
+      "displayName": "Hospital Discharge Studies Summary",
+      "loincCode": "11493-4",
+      "templateId": "2.16.840.1.113883.10.20.22.2.16",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "fields": []
+    },
+    {
+      "key": "instructions",
+      "uscdiClass": "Instructions",
+      "displayName": "Instructions",
+      "loincCode": "69730-0",
+      "templateId": "2.16.840.1.113883.10.20.22.2.45",
+      "templateIdExtension": "2014-06-09",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "entryTemplateId": "2.16.840.1.113883.10.20.22.4.20",
+      "entryTemplateIdExtension": "2014-06-09",
+      "fields": [
+        {
+          "key": "instructionCode",
+          "uscdiElement": "Instruction Topic",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "Patient Education",
+          "xpath": "entry/act/code/@code",
+          "xpathDisplay": "entry/act/code/@displayName"
+        },
+        {
+          "key": "instructionText",
+          "uscdiElement": "Instruction Text",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/act/text"
+        }
+      ],
+      "entryElementPath": "entry/act",
+      "entryMoodCodeOverride": "INT"
     }
   ]
 }

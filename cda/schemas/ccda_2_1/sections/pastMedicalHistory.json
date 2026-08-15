@@ -1,0 +1,37 @@
+{
+  "key": "pastMedicalHistory",
+  "uscdiClass": "Past Medical History",
+  "displayName": "Past Medical History",
+  "loincCode": "11348-0",
+  "templateId": "2.16.840.1.113883.10.20.22.2.20",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "",
+  "conformance": "SHOULD",
+  "entryTemplate": "problem-observation-bare",
+  "fields": [
+    {
+      "key": "conditionCode",
+      "uscdiElement": "Past Condition",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT, ICD-10-CM",
+      "xpath": "entry/observation/value/@code",
+      "xpathDisplay": "entry/observation/value/@displayName",
+      "xpathSystem": "entry/observation/value/@codeSystem"
+    },
+    {
+      "key": "onsetDate",
+      "uscdiElement": "Onset Date",
+      "conformance": "SHOULD",
+      "dataType": "TS",
+      "xpath": "entry/observation/effectiveTime/low/@value"
+    },
+    {
+      "key": "resolutionDate",
+      "uscdiElement": "Resolution Date",
+      "conformance": "MAY",
+      "dataType": "TS",
+      "xpath": "entry/observation/effectiveTime/high/@value"
+    }
+  ]
+}

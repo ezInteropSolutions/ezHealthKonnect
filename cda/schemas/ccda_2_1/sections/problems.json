@@ -1,0 +1,215 @@
+{
+  "key": "problems",
+  "uscdiClass": "Problems",
+  "displayName": "Problem List",
+  "loincCode": "11450-4",
+  "templateId": "2.16.840.1.113883.10.20.22.2.5.1",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "2.16.840.1.113883.10.20.22.2.5",
+  "conformance": "SHALL",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.3",
+  "entryTemplateIdExtension": "2015-08-01",
+  "observationTemplate": "problem-observation-wrapped",
+  "fields": [
+    {
+      "key": "conditionCode",
+      "uscdiElement": "Problems",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT, ICD-10-CM",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@codeSystem"
+    },
+    {
+      "key": "negationInd",
+      "uscdiElement": "No Known Problems Indicator",
+      "conformance": "MAY",
+      "dataType": "BL",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/@negationInd"
+    },
+    {
+      "key": "prognosisCode",
+      "uscdiElement": "Prognosis",
+      "conformance": "MAY",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.113']/value/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.113']/value/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.113']/value/@codeSystem"
+    },
+    {
+      "key": "prognosisDate",
+      "uscdiElement": "Prognosis Date",
+      "conformance": "MAY",
+      "dataType": "TS",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.113']/effectiveTime/low/@value"
+    },
+    {
+      "key": "priorityCode",
+      "uscdiElement": "Priority Preference",
+      "conformance": "MAY",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT (Priority Level)",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.143']/value/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.143']/value/@displayName"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Problem Status",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "HITSPProblemStatus",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']/value/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']/value/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']/value/@codeSystem"
+    },
+    {
+      "key": "statusText",
+      "uscdiElement": "Problem Status Text",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']/text"
+    },
+    {
+      "key": "_narrativeRef",
+      "uscdiElement": "Narrative Reference (engine-populated — links the Problem Status observation's text back to its own narrative table row)",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']/text/reference/@value"
+    },
+    {
+      "key": "ageAtOnset",
+      "uscdiElement": "Age at Onset",
+      "conformance": "MAY",
+      "dataType": "PQ",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.31']/value/@value",
+      "xpathUnit": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.31']/value/@unit"
+    },
+    {
+      "key": "onsetDate",
+      "uscdiElement": "Date of Diagnosis",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/low/@value"
+    },
+    {
+      "key": "concernEffectiveTime",
+      "uscdiElement": "Concern Act Date",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/act/effectiveTime/low/@value"
+    },
+    {
+      "key": "resolutionDate",
+      "uscdiElement": "Date of Resolution",
+      "conformance": "MAY",
+      "dataType": "TS",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/high/@value"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Recorder Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Recorder Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Recorder NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Recorder Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/act/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/act/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/act/author/assignedAuthor/code/@codeSystem"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Recorder Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Recorder Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Recorder NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Recorder Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@codeSystem"
+    }
+  ],
+  "entryElementPath": "entry/act",
+  "structuralTemplateIds": [
+    {
+      "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.31']",
+      "templateId": "2.16.840.1.113883.10.20.22.4.31",
+      "fixedCode": "445518008",
+      "fixedCodeSystem": "2.16.840.1.113883.6.96",
+      "fixedCodeDisplay": "Age At Onset"
+    },
+    {
+      "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']",
+      "templateId": "2.16.840.1.113883.10.20.22.4.6",
+      "fixedCode": "33999-4",
+      "fixedCodeSystem": "2.16.840.1.113883.6.1",
+      "fixedCodeDisplay": "Status"
+    },
+    {
+      "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.113']",
+      "templateId": "2.16.840.1.113883.10.20.22.4.113",
+      "fixedCode": "75328-5",
+      "fixedCodeSystem": "2.16.840.1.113883.6.1",
+      "fixedCodeDisplay": "Prognosis"
+    },
+    {
+      "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.143']",
+      "templateId": "2.16.840.1.113883.10.20.22.4.143",
+      "fixedCode": "225773000",
+      "fixedCodeSystem": "2.16.840.1.113883.6.96",
+      "fixedCodeDisplay": "Preference"
+    },
+    {
+      "path": "entry/act/author",
+      "templateIdRef": "authorParticipation"
+    },
+    {
+      "path": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/author",
+      "templateIdRef": "authorParticipation"
+    }
+  ],
+  "entryFixedCode": "CONC",
+  "entryFixedCodeSystem": "2.16.840.1.113883.5.6",
+  "entryFixedCodeDisplay": "Concern"
+}

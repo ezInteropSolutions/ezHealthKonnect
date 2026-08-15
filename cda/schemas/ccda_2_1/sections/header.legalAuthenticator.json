@@ -1,0 +1,68 @@
+{
+  "key": "header.legalAuthenticator",
+  "uscdiClass": "LegalAuthenticator",
+  "displayName": "Legal Authenticator (Header)",
+  "loincCode": "",
+  "templateId": "",
+  "templateIdOptional": "",
+  "conformance": "SHOULD",
+  "isHeader": true,
+  "fields": [
+    {
+      "key": "legalAuthenticatorGiven",
+      "uscdiElement": "Legal Authenticator Given Name",
+      "conformance": "SHALL",
+      "dataType": "PN",
+      "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/assignedPerson/name/given"
+    },
+    {
+      "key": "legalAuthenticatorFamily",
+      "uscdiElement": "Legal Authenticator Family Name",
+      "conformance": "SHALL",
+      "dataType": "PN",
+      "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/assignedPerson/name/family"
+    },
+    {
+      "key": "legalAuthenticatorNPI",
+      "uscdiElement": "Legal Authenticator NPI",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/id/@extension"
+    },
+    {
+      "key": "legalAuthenticatorAddressLine",
+      "uscdiElement": "Legal Authenticator Street",
+      "conformance": "SHALL",
+      "dataType": "ST",
+      "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/addr/streetAddressLine"
+    },
+    {
+      "key": "legalAuthenticatorCity",
+      "uscdiElement": "Legal Authenticator City",
+      "conformance": "SHALL",
+      "dataType": "ST",
+      "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/addr/city"
+    },
+    {
+      "key": "legalAuthenticatorState",
+      "uscdiElement": "Legal Authenticator State",
+      "conformance": "SHALL",
+      "dataType": "ST",
+      "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/addr/state"
+    },
+    {
+      "key": "legalAuthenticatorPostalCode",
+      "uscdiElement": "Legal Authenticator Postal Code",
+      "conformance": "SHALL",
+      "dataType": "ST",
+      "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/addr/postalCode"
+    },
+    {
+      "key": "legalAuthenticatorTelecom",
+      "uscdiElement": "Legal Authenticator Phone",
+      "conformance": "SHALL",
+      "dataType": "TEL",
+      "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/telecom/@value"
+    }
+  ]
+}

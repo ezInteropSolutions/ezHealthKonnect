@@ -1,0 +1,38 @@
+{
+  "key": "physicalExamination",
+  "uscdiClass": "Physical Examination",
+  "displayName": "Physical Examination",
+  "loincCode": "29545-1",
+  "templateId": "2.16.840.1.113883.10.20.2.10",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "",
+  "conformance": "SHOULD",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.2",
+  "fields": [
+    {
+      "key": "observationCode",
+      "uscdiElement": "Physical Exam Finding",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT, LOINC",
+      "xpath": "entry/observation/code/@code",
+      "xpathDisplay": "entry/observation/code/@displayName"
+    },
+    {
+      "key": "value",
+      "uscdiElement": "Finding Value",
+      "conformance": "SHALL",
+      "dataType": "ANY",
+      "xpath": "entry/observation/value/@value",
+      "xpathDisplay": "entry/observation/value/@displayName",
+      "xpathUnit": "entry/observation/value/@unit"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Examination Date",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/observation/effectiveTime/@value"
+    }
+  ]
+}

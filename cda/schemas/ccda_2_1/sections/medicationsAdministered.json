@@ -1,0 +1,53 @@
+{
+  "key": "medicationsAdministered",
+  "uscdiClass": "Medications Administered",
+  "displayName": "Medications Administered",
+  "loincCode": "29549-3",
+  "templateId": "2.16.840.1.113883.10.20.22.2.38",
+  "templateIdExtension": "2014-06-09",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "entryTemplate": "medication-activity",
+  "fields": [
+    {
+      "key": "drugCode",
+      "uscdiElement": "Medication Administered",
+      "conformance": "SHALL",
+      "dataType": "CE",
+      "valueSet": "RxNorm",
+      "xpath": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@code",
+      "xpathDisplay": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@displayName",
+      "xpathSystem": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@codeSystem"
+    },
+    {
+      "key": "routeCode",
+      "uscdiElement": "Route",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "SPL Drug Route of Administration Terminology",
+      "xpath": "entry/substanceAdministration/routeCode/@code",
+      "xpathDisplay": "entry/substanceAdministration/routeCode/@displayName",
+      "xpathSystem": "entry/substanceAdministration/routeCode/@codeSystem"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Status",
+      "conformance": "SHALL",
+      "dataType": "CS",
+      "xpath": "entry/substanceAdministration/statusCode/@code"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Administration Time",
+      "conformance": "SHOULD",
+      "dataType": "IVL_TS",
+      "xpath": "entry/substanceAdministration/effectiveTime/low/@value"
+    }
+  ],
+  "structuralTemplateIds": [
+    {
+      "path": "entry/substanceAdministration/consumable/manufacturedProduct",
+      "templateIdRef": "medicationInformation"
+    }
+  ]
+}

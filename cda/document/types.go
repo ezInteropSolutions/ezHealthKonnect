@@ -9,6 +9,29 @@ type CDADocument struct {
 	Sections      []CDASection           `json:"sections,omitempty"`      // ordered as they appear in the document
 	SectionsByKey map[string]*CDASection `json:"sectionsByKey,omitempty"` // keyed by section key from ccda_2_1.json
 	Raw           string                 `json:"raw,omitempty"`           // original XML preserved verbatim
+
+	// UnstructuredBody is set instead of Sections/SectionsByKey when the
+	// document's own <component> is a <nonXMLBody> rather than a
+	// <structuredBody> (CDA's Unstructured Document type — the ONE document
+	// type in this schema with no sections at all). nil for every other
+	// document type. ClinicalDocument.component is a CHOICE between the two
+	// shapes, never both, so this and Sections are mutually exclusive in
+	// practice, not just by convention.
+	UnstructuredBody *CDAUnstructuredBody `json:"unstructuredBody,omitempty"`
+}
+
+// CDAUnstructuredBody represents a CDA Unstructured Document's
+// <component><nonXMLBody> — embedded non-XML content (e.g. a scanned PDF,
+// an image, or an external file reference) in place of discrete <section>
+// elements. Exactly one of Data (inline, when Representation=="B64") or
+// ReferenceURL (an external <reference value="..."/>) is populated, per
+// CDA's own ED (Encapsulated Data) datatype, which is itself a choice
+// between inline content and a reference — never both.
+type CDAUnstructuredBody struct {
+	MediaType      string `json:"mediaType,omitempty"`
+	Representation string `json:"representation,omitempty"` // "B64" for inline base64 content
+	Data           string `json:"data,omitempty"`           // inline content, verbatim (already base64 in the raw CDA)
+	ReferenceURL   string `json:"referenceUrl,omitempty"`   // external reference (text/reference/@value)
 }
 
 // CDAHeader contains all clinical document header elements.

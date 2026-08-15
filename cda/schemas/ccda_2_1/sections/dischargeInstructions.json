@@ -1,0 +1,27 @@
+{
+  "key": "dischargeInstructions",
+  "uscdiClass": "Discharge Instructions",
+  "displayName": "Discharge Instructions",
+  "loincCode": "8653-8",
+  "templateId": "2.16.840.1.113883.10.20.22.2.41",
+  "templateIdOptional": "",
+  "conformance": "SHOULD",
+  "entryTemplate": "instruction-v2",
+  "fields": [
+    {
+      "key": "instructionCode",
+      "uscdiElement": "Instruction Topic",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "xpath": "entry/act/code/@code",
+      "xpathDisplay": "entry/act/code/@displayName"
+    },
+    {
+      "key": "instructionText",
+      "uscdiElement": "Instruction Text",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/act/text"
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "key": "planOfTreatment",
+  "uscdiClass": "Plan of Treatment",
+  "displayName": "Plan of Treatment",
+  "loincCode": "18776-5",
+  "templateId": "2.16.840.1.113883.10.20.22.2.10",
+  "templateIdExtension": "2014-06-09",
+  "templateIdOptional": "",
+  "conformance": "SHALL",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.44",
+  "entryTemplateIdExtension": "2014-06-09",
+  "fields": [
+    {
+      "key": "activityCode",
+      "uscdiElement": "Planned Activity",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT, CPT",
+      "xpath": "entry/observation/code/@code",
+      "xpathDisplay": "entry/observation/code/@displayName",
+      "xpathSystem": "entry/observation/code/@codeSystem"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Planned Date",
+      "conformance": "SHOULD",
+      "dataType": "IVL_TS",
+      "xpath": "entry/observation/effectiveTime/low/@value"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Activity Intent",
+      "conformance": "SHALL",
+      "dataType": "CS",
+      "xpath": "entry/observation/@moodCode"
+    },
+    {
+      "key": "plannedValue",
+      "uscdiElement": "Planned Observation Value",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "entry/observation/value/@code",
+      "xpathDisplay": "entry/observation/value/@displayName"
+    },
+    {
+      "key": "targetSiteCode",
+      "uscdiElement": "Planned Observation Target Site",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "entry/observation/targetSiteCode/@code",
+      "xpathDisplay": "entry/observation/targetSiteCode/@displayName"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Author Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Author Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Author NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Author Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/observation/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/observation/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/observation/author/assignedAuthor/code/@codeSystem"
+    }
+  ],
+  "entryElementPath": "entry/observation",
+  "structuralTemplateIds": [
+    {
+      "path": "entry/observation/author",
+      "templateIdRef": "authorParticipation"
+    }
+  ],
+  "entryStatusCodeOverride": "active"
+}

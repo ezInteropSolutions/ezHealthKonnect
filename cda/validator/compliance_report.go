@@ -13,13 +13,23 @@ import "time"
 // ComplianceReport is the root output of a CDA conformance validation run.
 // Scores are normalised to [0.0, 1.0]: 1.0 means fully conformant at that level.
 type ComplianceReport struct {
-	DocumentId     string          `json:"documentId"`
-	DocumentType   string          `json:"documentType"`
-	OverallScore   float64         `json:"overallScore"`  // SHALL*0.7 + SHOULD*0.3
-	ShallScore     float64         `json:"shallScore"`    // present SHALL / total SHALL
-	ShouldScore    float64         `json:"shouldScore"`   // present SHOULD / total SHOULD
-	SectionReports []SectionReport `json:"sectionReports"`
-	GeneratedAt    time.Time       `json:"generatedAt"`
+	DocumentId              string                   `json:"documentId"`
+	DocumentType            string                   `json:"documentType"`
+	OverallScore            float64                  `json:"overallScore"` // SHALL*0.7 + SHOULD*0.3
+	ShallScore              float64                  `json:"shallScore"`   // present SHALL / total SHALL (each ChoiceConstraint counts as one SHALL unit)
+	ShouldScore             float64                  `json:"shouldScore"`  // present SHOULD / total SHOULD
+	SectionReports          []SectionReport          `json:"sectionReports"`
+	ChoiceConstraintReports []ChoiceConstraintReport `json:"choiceConstraintReports,omitempty"`
+	GeneratedAt             time.Time                `json:"generatedAt"`
+}
+
+// ChoiceConstraintReport captures conformance status for one
+// SectionChoiceConstraint (e.g. "Assessment and Plan Section OR both
+// Assessment Section and Plan of Treatment Section") in the document.
+type ChoiceConstraintReport struct {
+	Description     string   `json:"description"`
+	Satisfied       bool     `json:"satisfied"`
+	SatisfiedBranch []string `json:"satisfiedBranch,omitempty"` // which branch's section keys satisfied it, if any
 }
 
 // SectionReport captures conformance status for one CDA section in the document.

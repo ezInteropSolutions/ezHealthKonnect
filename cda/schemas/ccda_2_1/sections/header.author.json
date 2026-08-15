@@ -1,0 +1,47 @@
+{
+  "key": "header.author",
+  "uscdiClass": "Author",
+  "displayName": "Document Author (Header)",
+  "loincCode": "",
+  "templateId": "",
+  "templateIdOptional": "",
+  "conformance": "SHALL",
+  "isHeader": true,
+  "fields": [
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Author NPI",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "ClinicalDocument/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Author Given Name",
+      "conformance": "SHALL",
+      "dataType": "PN",
+      "xpath": "ClinicalDocument/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Author Family Name",
+      "conformance": "SHALL",
+      "dataType": "PN",
+      "xpath": "ClinicalDocument/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorOrgName",
+      "uscdiElement": "Author Organization",
+      "conformance": "SHOULD",
+      "dataType": "ON",
+      "xpath": "ClinicalDocument/author/assignedAuthor/representedOrganization/name"
+    },
+    {
+      "key": "authorTime",
+      "uscdiElement": "Authoring Time",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "ClinicalDocument/author/time/@value"
+    }
+  ]
+}

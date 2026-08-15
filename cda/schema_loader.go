@@ -166,18 +166,69 @@ func (l *CDASchemaLoader) C32MappingCount() int {
 // Internal loading
 // =====================================
 
+// loadProfile reads the ccda_2_1/ directory tree (manifest.json +
+// sections/*.json + entries/*.json) and resolves it into the same
+// *CDAProfileDef shape a single ccda_2_1.json file used to produce directly —
+// see cda/schema_disk_types.go for the on-disk types and resolution logic.
+// buildIndexes() below is unaware this ever changed: it only ever reads
+// l.profile.Sections []*CDASectionDef, exactly what this function still
+// produces.
 func (l *CDASchemaLoader) loadProfile() error {
-	path := filepath.Join(l.schemaDir, "ccda_2_1.json")
-	data, err := os.ReadFile(path)
+	root := filepath.Join(l.schemaDir, "ccda_2_1")
+
+	manifest, err := readManifest(filepath.Join(root, "manifest.json"))
 	if err != nil {
-		return fmt.Errorf("cda: cannot read ccda_2_1.json from %s: %w", l.schemaDir, err)
+		return fmt.Errorf("cda: %w", err)
 	}
 
-	var profile CDAProfileDef
-	if err := json.Unmarshal(data, &profile); err != nil {
-		return fmt.Errorf("cda: cannot parse ccda_2_1.json: %w", err)
+	constants, err := readTemplateConstants(filepath.Join(root, "entries", "_constants.json"))
+	if err != nil {
+		return fmt.Errorf("cda: %w", err)
 	}
-	l.profile = &profile
+
+	templates, err := readEntryTemplates(filepath.Join(root, "entries"))
+	if err != nil {
+		return fmt.Errorf("cda: %w", err)
+	}
+
+	sections := make([]*CDASectionDef, 0, len(manifest.SectionOrder))
+	seen := make(map[string]bool, len(manifest.SectionOrder))
+	for _, key := range manifest.SectionOrder {
+		if seen[key] {
+			return fmt.Errorf("cda: duplicate section key %q in manifest.sectionOrder", key)
+		}
+		seen[key] = true
+
+		path := filepath.Join(root, "sections", key+".json")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("cda: cannot read section %q (%s): %w", key, path, err)
+		}
+
+		var disk onDiskSectionDef
+		if err := json.Unmarshal(data, &disk); err != nil {
+			return fmt.Errorf("cda: cannot parse section %q (%s): %w", key, path, err)
+		}
+		if disk.Key != key {
+			return fmt.Errorf("cda: section file %s declares key %q, manifest.sectionOrder expects %q", path, disk.Key, key)
+		}
+
+		resolved, err := resolveSection(&disk, templates, constants)
+		if err != nil {
+			return fmt.Errorf("cda: section %q: %w", key, err)
+		}
+		sections = append(sections, resolved)
+	}
+
+	l.profile = &CDAProfileDef{
+		Profile:              manifest.Profile,
+		Version:              manifest.Version,
+		HL7Version:           manifest.HL7Version,
+		DocumentTemplates:    manifest.DocumentTemplates,
+		DocumentTypeMetadata: manifest.DocumentTypeMetadata,
+		DocumentTypeSections: manifest.DocumentTypeSections,
+		Sections:             sections,
+	}
 	return nil
 }
 

@@ -1,0 +1,57 @@
+{
+  "key": "payersInsurance",
+  "uscdiClass": "Insurance",
+  "displayName": "Payers",
+  "loincCode": "48768-6",
+  "templateId": "2.16.840.1.113883.10.20.22.2.18",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "",
+  "conformance": "SHOULD",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.60",
+  "entryTemplateIdExtension": "2015-08-01",
+  "observationTemplateId": "2.16.840.1.113883.10.20.22.4.61",
+  "observationTemplateIdExtension": "2015-08-01",
+  "fields": [
+    {
+      "key": "coverageType",
+      "uscdiElement": "Insurance Type",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/code/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='COMP']/act/code/@displayName"
+    },
+    {
+      "key": "payerName",
+      "uscdiElement": "Payer Name",
+      "conformance": "SHALL",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/performer/assignedEntity/representedOrganization/name"
+    },
+    {
+      "key": "memberId",
+      "uscdiElement": "Member ID",
+      "conformance": "SHALL",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='COV']/participantRole/id/@extension"
+    },
+    {
+      "key": "groupNumber",
+      "uscdiElement": "Group Number",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='HLD']/participantRole/id/@extension"
+    },
+    {
+      "key": "subscriberName",
+      "uscdiElement": "Subscriber Name",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='HLD']/participantRole/playingEntity/name/given"
+    }
+  ],
+  "entryElementPath": "entry/act",
+  "observationElementPath": "entry/act/entryRelationship[@typeCode='COMP']/act",
+  "entryStatusCodeOverride": "completed",
+  "entryFixedCode": "48768-6",
+  "entryFixedCodeDisplay": "Payment sources"
+}

@@ -1,0 +1,10 @@
+{
+  "key": "medicalGeneralHistory",
+  "uscdiClass": "Medical General History",
+  "displayName": "Medical (General) History",
+  "loincCode": "11329-0",
+  "templateId": "2.16.840.1.113883.10.20.22.2.39",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "fields": []
+}

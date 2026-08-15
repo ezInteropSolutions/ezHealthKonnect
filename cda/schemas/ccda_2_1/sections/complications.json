@@ -1,0 +1,30 @@
+{
+  "key": "complications",
+  "uscdiClass": "Operative Note",
+  "displayName": "Complications",
+  "loincCode": "55109-3",
+  "templateId": "2.16.840.1.113883.10.20.22.2.37",
+  "templateIdExtension": "2015-08-01",
+  "templateIdOptional": "",
+  "conformance": "SHALL",
+  "entryTemplate": "problem-observation-bare",
+  "fields": [
+    {
+      "key": "complicationCode",
+      "uscdiElement": "Complication",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "SNOMED CT, ICD-10-CM",
+      "xpath": "entry/observation/value/@code",
+      "xpathDisplay": "entry/observation/value/@displayName",
+      "xpathSystem": "entry/observation/value/@codeSystem"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Complication Date",
+      "conformance": "SHOULD",
+      "dataType": "TS",
+      "xpath": "entry/observation/effectiveTime/low/@value"
+    }
+  ]
+}

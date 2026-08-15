@@ -119,13 +119,19 @@ var corpusExpectedShapes = map[string]corpusExpectedShape{
 		// run (see TestDeclarativeMapDocument_Corpus_MatchesKnownShape's doc
 		// comment); cerner_sample.xml is unaffected (no qualifying sections)
 		// and was left untouched as proof of zero drift elsewhere.
+		//
+		// +1 MedicationAdministration (V209: MedicationsAdministeredMappingRules
+		// -- kareo_sample.xml has a real "medicationsAdministered" section that
+		// previously parsed and Coverage-Audited but produced no resource at
+		// all; genuinely new functionality, not a regression, same category as
+		// LegalAuthenticator/CareTeam's PractitionerRole above).
 		resourceCounts: map[string]int{
 			"AllergyIntolerance": 1, "Condition": 2, "DocumentReference": 3, "Encounter": 1, "Immunization": 1,
-			"MedicationStatement": 2, "Observation": 6, "Organization": 1, "Patient": 1,
+			"MedicationAdministration": 1, "MedicationStatement": 2, "Observation": 6, "Organization": 1, "Patient": 1,
 			"Practitioner": 1, "Procedure": 1,
 		},
-		resourcesProduced: 20,
-		successfulCount:   12,
+		resourcesProduced: 21,
+		successfulCount:   13,
 	},
 	"mtuitive_sample.xml": {
 		// +5 DocumentReference (assistants/dateOfSurgery/operationsPerformed/
@@ -133,11 +139,18 @@ var corpusExpectedShapes = map[string]corpusExpectedShape{
 		// dispatch broadening as kareo_sample.xml above -- mtuitive_sample.xml
 		// has no entry-bearing sections at all, so every one of its 5
 		// narrative sections now qualifies.
+		//
+		// +1 Condition (V209: PreoperativeDiagnosisMappingRules --
+		// mtuitive_sample.xml has a real "preoperativeDiagnosis" section
+		// (previously the last entry-bearing section left with no
+		// MappingRule at all, hence "no entry-bearing sections" above being
+		// stale as of this update); genuinely new functionality, not a
+		// regression.
 		resourceCounts: map[string]int{
-			"DocumentReference": 5, "Organization": 1, "Patient": 1, "Practitioner": 1,
+			"Condition": 1, "DocumentReference": 5, "Organization": 1, "Patient": 1, "Practitioner": 1,
 		},
-		resourcesProduced: 8,
-		successfulCount:   5,
+		resourcesProduced: 9,
+		successfulCount:   6,
 	},
 	"practicefusion_sample.xml": {
 		// +5 DocumentReference (assessmentAndPlan/chiefComplaint/
@@ -1669,5 +1682,76 @@ func TestDeclarativeMapDocument_CoverageTracker_Header_EncompassingEncounterShar
 	}
 	if !foundLocationField {
 		t.Errorf("no recorded key matches the nested Location's healthCareFacility code under the shared prefix -- got %v", snapshot)
+	}
+}
+
+// TestDeclarativeMapDocument_UnstructuredBody_ProducesDocumentReference is
+// the Phase 5 (Unstructured Document) proof: a document with UnstructuredBody
+// set (no sections at all — CDA's ClinicalDocument.component CHOICE between
+// structuredBody and nonXMLBody) must still produce a real FHIR
+// DocumentReference from its embedded content, and CoverageTracker must
+// record "document.unstructuredBody#0" — the same key
+// services/cda_coverage/inventory.go's own buildNonXMLBodyInventoryItem
+// uses, so Coverage Audit correctly shows this as found, not a 100% gap.
+func TestDeclarativeMapDocument_UnstructuredBody_ProducesDocumentReference(t *testing.T) {
+	prevOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(prevOutput)
+
+	cdaDoc := &cdadocument.CDADocument{
+		Header: cdadocument.CDAHeader{
+			Title:        "Scanned Referral Letter",
+			DocumentCode: cdadocument.CDACode{Code: "34108-1", DisplayName: "Outpatient Note"},
+		},
+		UnstructuredBody: &cdadocument.CDAUnstructuredBody{
+			MediaType:      "application/pdf",
+			Representation: "B64",
+			Data:           "JVBERi0xLjQK",
+		},
+	}
+
+	tracker := executors.NewCDACoverageTracker()
+	mapper := cdafhir.NewGenericCDAFHIRMapper(nil, nil)
+	output, err := mapper.DeclarativeMapDocument(context.Background(), cdaDoc, cdafhir.CDAToFHIRConfig{CoverageTracker: tracker})
+	if err != nil {
+		t.Fatalf("DeclarativeMapDocument: %v", err)
+	}
+
+	if !tracker.Touched(executors.CDAEntryKey("document.unstructuredBody", 0)) {
+		t.Errorf("document.unstructuredBody#0 not recorded -- got %v", tracker.Snapshot())
+	}
+
+	entries, _ := output.FHIRBundle["entry"].([]interface{})
+	var docRef map[string]interface{}
+	for _, e := range entries {
+		entryMap, ok := e.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		res, ok := entryMap["resource"].(map[string]interface{})
+		if ok && res["resourceType"] == "DocumentReference" {
+			docRef = res
+			break
+		}
+	}
+	if docRef == nil {
+		t.Fatalf("expected a DocumentReference resource in the FHIR bundle, got entries: %+v", entries)
+	}
+
+	typeCoding, _ := docRef["type"].(map[string]interface{})["coding"].([]interface{})
+	if len(typeCoding) == 0 || typeCoding[0].(map[string]interface{})["code"] != "34108-1" {
+		t.Errorf("expected type.coding[0].code = 34108-1 (from Header.DocumentCode), got %+v", typeCoding)
+	}
+
+	content, _ := docRef["content"].([]interface{})
+	if len(content) == 0 {
+		t.Fatal("expected content[0].attachment on the DocumentReference")
+	}
+	attachment, _ := content[0].(map[string]interface{})["attachment"].(map[string]interface{})
+	if attachment["contentType"] != "application/pdf" {
+		t.Errorf("attachment.contentType = %v, want application/pdf", attachment["contentType"])
+	}
+	if attachment["data"] != "JVBERi0xLjQK" {
+		t.Errorf("attachment.data = %v, want the round-tripped base64 content", attachment["data"])
 	}
 }

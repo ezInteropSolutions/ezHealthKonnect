@@ -21,11 +21,13 @@ func TestGetDocumentTypeRequirements_CCD(t *testing.T) {
 			shallCount++
 		}
 	}
-	// CCD has 7 SHALL sections per the C-CDA 2.1 IG (2018 errata) — see
-	// document_builder_test.go's TestBuildDocument_RoundTripsThroughParserAndValidator
-	// for the same count derived independently via the round-trip validator.
-	if shallCount != 7 {
-		t.Errorf("SHALL section count = %d, want 7", shallCount)
+	// CCD has 6 SHALL sections per Vol2 Table 30 + Companion Guide Table 18
+	// (corrected from an earlier, uncorrected 7 — planOfTreatment was wrongly
+	// SHALL, actually SHOULD) — see document_builder_test.go's
+	// TestBuildDocument_RoundTripsThroughParserAndValidator for the same
+	// count derived independently via the round-trip validator.
+	if shallCount != 6 {
+		t.Errorf("SHALL section count = %d, want 6", shallCount)
 	}
 
 	for _, group := range []string{"patient", "author", "custodian"} {

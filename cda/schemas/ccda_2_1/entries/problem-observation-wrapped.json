@@ -1,0 +1,13 @@
+{
+  "key": "problem-observation-wrapped",
+  "anchor": "observation",
+  "observationTemplateId": "2.16.840.1.113883.10.20.22.4.4",
+  "observationTemplateIdExtension": "2015-08-01",
+  "observationElementPathSuffix": "entryRelationship[@typeCode='SUBJ']/observation",
+  "observationFixedCode": "55607006",
+  "observationFixedCodeSystem": "2.16.840.1.113883.6.96",
+  "observationFixedCodeDisplay": "Problem",
+  "obsCodeTranslationCode": "75325-1",
+  "obsCodeTranslationSystem": "2.16.840.1.113883.6.1",
+  "obsCodeTranslationDisplay": "Problem"
+}

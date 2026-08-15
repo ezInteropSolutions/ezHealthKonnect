@@ -1,0 +1,41 @@
+{
+  "key": "dischargeDiagnosis",
+  "uscdiClass": "Discharge Diagnosis",
+  "displayName": "Discharge Diagnosis",
+  "loincCode": "11535-2",
+  "templateId": "2.16.840.1.113883.10.20.22.2.24",
+  "templateIdOptional": "",
+  "conformance": "SHALL",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.33",
+  "entryTemplateIdExtension": "2015-08-01",
+  "observationTemplate": "problem-observation-wrapped",
+  "fields": [
+    {
+      "key": "conditionCode",
+      "uscdiElement": "Discharge Diagnosis",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "ICD-10-CM, SNOMED CT",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@displayName",
+      "xpathSystem": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/value/@codeSystem"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Diagnosis Status",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/entryRelationship[@typeCode='REFR']/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.6']/value/@code"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Diagnosis Date",
+      "conformance": "SHOULD",
+      "dataType": "TS",
+      "xpath": "entry/act/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/low/@value"
+    }
+  ],
+  "entryElementPath": "entry/act",
+  "entryFixedCode": "11535-2",
+  "entryFixedCodeDisplay": "Hospital discharge diagnosis"
+}

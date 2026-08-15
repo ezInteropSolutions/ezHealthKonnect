@@ -1,0 +1,10 @@
+{
+  "key": "objective",
+  "uscdiClass": "Progress Note",
+  "displayName": "Objective",
+  "loincCode": "61149-1",
+  "templateId": "2.16.840.1.113883.10.20.21.2.1",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "fields": []
+}

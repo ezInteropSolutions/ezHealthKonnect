@@ -1,0 +1,144 @@
+{
+  "key": "medications",
+  "uscdiClass": "Medications",
+  "displayName": "Medications",
+  "loincCode": "10160-0",
+  "templateId": "2.16.840.1.113883.10.20.22.2.1.1",
+  "templateIdExtension": "2014-06-09",
+  "templateIdOptional": "2.16.840.1.113883.10.20.22.2.1",
+  "conformance": "SHALL",
+  "entryTemplate": "medication-activity",
+  "fields": [
+    {
+      "key": "drugCode",
+      "uscdiElement": "Drug Code",
+      "conformance": "SHALL",
+      "dataType": "CE",
+      "valueSet": "RxNorm",
+      "xpath": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@code",
+      "xpathDisplay": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@displayName",
+      "xpathSystem": "entry/substanceAdministration/consumable/manufacturedProduct[@classCode='MANU']/manufacturedMaterial/code/@codeSystem"
+    },
+    {
+      "key": "doseQuantity",
+      "uscdiElement": "Dose Quantity",
+      "conformance": "SHOULD",
+      "dataType": "PQ",
+      "xpath": "entry/substanceAdministration/doseQuantity/@value",
+      "xpathUnit": "entry/substanceAdministration/doseQuantity/@unit"
+    },
+    {
+      "key": "routeCode",
+      "uscdiElement": "Route",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "SPL Drug Route of Administration Terminology",
+      "xpath": "entry/substanceAdministration/routeCode/@code",
+      "xpathDisplay": "entry/substanceAdministration/routeCode/@displayName",
+      "xpathSystem": "entry/substanceAdministration/routeCode/@codeSystem"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Medication Status",
+      "conformance": "SHALL",
+      "dataType": "CS",
+      "xpath": "entry/substanceAdministration/statusCode/@code"
+    },
+    {
+      "key": "startDate",
+      "uscdiElement": "Start Date",
+      "conformance": "SHOULD",
+      "dataType": "IVL_TS",
+      "xpath": "entry/substanceAdministration/effectiveTime/low/@value"
+    },
+    {
+      "key": "stopDate",
+      "uscdiElement": "Stop Date",
+      "conformance": "MAY",
+      "dataType": "IVL_TS",
+      "xpath": "entry/substanceAdministration/effectiveTime/high/@value"
+    },
+    {
+      "key": "doseFrequencyValue",
+      "uscdiElement": "Dose Frequency (period)",
+      "conformance": "SHOULD",
+      "dataType": "PQ",
+      "xpath": "entry/substanceAdministration/effectiveTime[2]/period/@value",
+      "xpathUnit": "entry/substanceAdministration/effectiveTime[2]/period/@unit"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Information Source Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/substanceAdministration/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Information Source Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/substanceAdministration/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Information Source NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/substanceAdministration/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Information Source Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/substanceAdministration/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/substanceAdministration/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/substanceAdministration/author/assignedAuthor/code/@codeSystem"
+    }
+  ],
+  "structuralTemplateIds": [
+    {
+      "path": "entry/substanceAdministration/consumable/manufacturedProduct",
+      "templateIdRef": "medicationInformation"
+    },
+    {
+      "path": "entry/substanceAdministration/author",
+      "templateIdRef": "authorParticipation"
+    }
+  ],
+  "repeatingGroups": [
+    {
+      "key": "indications",
+      "wrapperTag": "entryRelationship",
+      "wrapperAttr": "typeCode",
+      "wrapperAttrValue": "RSON",
+      "observationElementPath": "observation",
+      "templateId": "2.16.840.1.113883.10.20.22.4.19",
+      "templateIdExtension": "2014-06-09",
+      "fields": [
+        {
+          "key": "indicationCode",
+          "uscdiElement": "Indication (Reason for Medication)",
+          "conformance": "MAY",
+          "dataType": "CD",
+          "valueSet": "Problem",
+          "xpath": "value/@code",
+          "xpathDisplay": "value/@displayName",
+          "xpathSystem": "value/@codeSystem"
+        },
+        {
+          "key": "indicationEffectiveTime",
+          "uscdiElement": "Indication Date",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "effectiveTime/@value"
+        }
+      ],
+      "fixedCode": "ASSERTION",
+      "fixedCodeSystem": "2.16.840.1.113883.5.4",
+      "anchorRoot": "root"
+    }
+  ]
+}

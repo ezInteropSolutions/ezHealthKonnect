@@ -1,0 +1,87 @@
+{
+  "key": "nutrition",
+  "uscdiClass": "Nutrition",
+  "displayName": "Diet and Nutrition",
+  "loincCode": "61144-2",
+  "templateId": "2.16.840.1.113883.10.20.22.2.57",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.124",
+  "observationTemplateId": "2.16.840.1.113883.10.20.22.4.138",
+  "fields": [
+    {
+      "key": "nutritionalStatusValue",
+      "uscdiElement": "Nutritional Status Finding",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "xpath": "entry/observation/value/@code",
+      "xpathDisplay": "entry/observation/value/@displayName"
+    },
+    {
+      "key": "status",
+      "uscdiElement": "Nutritional Assessment Finding",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/value/@code",
+      "xpathDisplay": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/value/@displayName"
+    },
+    {
+      "key": "nutritionAssessmentEffectiveTime",
+      "uscdiElement": "Nutrition Assessment Date",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/effectiveTime/@value"
+    },
+    {
+      "key": "effectiveTime",
+      "uscdiElement": "Observation Date",
+      "conformance": "SHALL",
+      "dataType": "TS",
+      "xpath": "entry/observation/effectiveTime/@value"
+    },
+    {
+      "key": "authorGiven",
+      "uscdiElement": "Author Given Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/assignedPerson/name/given"
+    },
+    {
+      "key": "authorFamily",
+      "uscdiElement": "Author Family Name",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/assignedPerson/name/family"
+    },
+    {
+      "key": "authorNPI",
+      "uscdiElement": "Author NPI",
+      "conformance": "MAY",
+      "dataType": "ST",
+      "xpath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/id/@extension"
+    },
+    {
+      "key": "authorSpecialtyCode",
+      "uscdiElement": "Author Specialty",
+      "conformance": "SHOULD",
+      "dataType": "CE",
+      "valueSet": "Healthcare Provider Taxonomy (NUCC)",
+      "xpath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@code",
+      "xpathDisplay": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@displayName",
+      "xpathSystem": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author/assignedAuthor/code/@codeSystem"
+    }
+  ],
+  "entryElementPath": "entry/observation",
+  "observationElementPath": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation",
+  "structuralTemplateIds": [
+    {
+      "path": "entry/observation/entryRelationship[@typeCode='SUBJ']/observation/author",
+      "templateIdRef": "authorParticipation"
+    }
+  ],
+  "entryFixedCode": "75305-3",
+  "entryFixedCodeDisplay": "Nutrition status",
+  "observationFixedCode": "75303-8",
+  "observationFixedCodeSystem": "2.16.840.1.113883.6.1",
+  "observationFixedCodeDisplay": "Nutrition assessment"
+}

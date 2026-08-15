@@ -1,0 +1,13 @@
+{
+  "key": "problem-observation-bare",
+  "anchor": "root",
+  "entryTemplateId": "2.16.840.1.113883.10.20.22.4.4",
+  "entryTemplateIdExtension": "2015-08-01",
+  "entryElementPath": "entry/observation",
+  "entryFixedCode": "55607006",
+  "entryFixedCodeSystem": "2.16.840.1.113883.6.96",
+  "entryFixedCodeDisplay": "Problem",
+  "entryCodeTranslationCode": "75325-1",
+  "entryCodeTranslationSystem": "2.16.840.1.113883.6.1",
+  "entryCodeTranslationDisplay": "Problem"
+}
