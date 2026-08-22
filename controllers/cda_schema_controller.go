@@ -26,9 +26,10 @@ import (
 
 	cdaSchema "ezhealthkonnect/cda"
 	cdaBuilder "ezhealthkonnect/cda/builder"
-	"ezhealthkonnect/fhir"
+	"ezhealthkonnect/fhir/r4"
 	cdafhir "ezhealthkonnect/services/cda_fhir"
 	cdaTransform "ezhealthkonnect/services/executors/transform"
+	"ezhealthkonnect/uscdi"
 
 	"github.com/gin-gonic/gin"
 )
@@ -49,22 +50,25 @@ type CDASchemaController struct {
 	// unresolvable config for most type pairs — see
 	// DeclarativeTransformRegistry.InferTransform's own doc comment.
 	declarativeTransformReg *cdafhir.DeclarativeTransformRegistry
-	// fhirSchemaLoader gives GetResourceFields access to real FHIR R4
-	// StructureDefinition-derived data (name/description/dataType per
-	// property) — used by the Add Field modal's "what to capture" search,
-	// which needs official clinical-language descriptions the much thinner
-	// USCDI vocabulary (uscdi/vocabulary.go, ~36 elements, no Medications
-	// coverage at all) can't provide.
-	fhirSchemaLoader *fhir.FHIRSchemaLoader
+	// vocabulary is the real, ONC-verified USCDI v3 dataset — bridged into
+	// GetDocumentTypeRequirements' SectionRequirement/HeaderFieldRequirement
+	// USCDIClasses fields. May be nil (constructor-injected like db/loader/
+	// mapper, not a global-singleton-getter — matches CLAUDE.md's DI
+	// mandate); cda/builder.GetDocumentTypeRequirements degrades gracefully
+	// (every USCDIClasses field simply comes back nil) rather than failing
+	// the whole request, same as Coverage Audit's own worker_pool.go.
+	vocabulary *uscdi.USCDIVocabulary
 }
 
 // NewCDASchemaController constructs the controller.
 // schemaLoader may be nil when the schema file is unavailable — schema endpoints
 // will return 503 in that case. mapper is used for merged mapping resolution.
+// vocabulary may be nil (see the struct field's own doc comment).
 func NewCDASchemaController(
 	db *sql.DB,
 	loader *cdaSchema.CDASchemaLoader,
 	mapper *cdafhir.GenericCDAFHIRMapper,
+	vocabulary *uscdi.USCDIVocabulary,
 ) *CDASchemaController {
 	return &CDASchemaController{
 		db:                      db,
@@ -72,7 +76,7 @@ func NewCDASchemaController(
 		mapper:                  mapper,
 		transformReg:            cdafhir.NewCDATransformRegistry(),
 		declarativeTransformReg: cdafhir.NewDeclarativeTransformRegistry(),
-		fhirSchemaLoader:        fhir.GetFHIRSchemaLoader(),
+		vocabulary:              vocabulary,
 	}
 }
 
@@ -334,7 +338,7 @@ func (cc *CDASchemaController) GetDocumentTypeRequirements(c *gin.Context) {
 	}
 
 	documentType := c.Param("documentType")
-	requirements := cdaBuilder.GetDocumentTypeRequirements(cc.schemaLoader, documentType)
+	requirements := cdaBuilder.GetDocumentTypeRequirements(cc.schemaLoader, cc.vocabulary, documentType)
 	if requirements == nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
@@ -571,7 +575,7 @@ func (cc *CDASchemaController) GetSectionFields(c *gin.Context) {
 // =========================================================
 
 // resourceFieldResponse is one property of a FHIR resource type, sourced from
-// a real R4 StructureDefinition (via fhir.FHIRSchemaLoader) — official name/
+// a real R4 StructureDefinition (via r4.GetRegistry()) — official name/
 // description/dataType text, not the much thinner USCDI vocabulary used by
 // /api/fhir/field-search elsewhere in the app (uscdi/vocabulary.go covers
 // ~36 hand-picked elements total with zero Medications coverage; this
@@ -600,19 +604,20 @@ type resourceFieldResponse struct {
 func (cc *CDASchemaController) GetResourceFields(c *gin.Context) {
 	resourceType := c.Param("resourceType")
 
-	if cc.fhirSchemaLoader == nil {
+	reg := r4.GetRegistry()
+	if reg == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"success": false,
-			"error":   "FHIR schema loader not initialised",
+			"error":   "FHIR schema registry not initialised",
 		})
 		return
 	}
 
-	schema, err := cc.fhirSchemaLoader.LoadFHIRSchema(resourceType, "us-core", "R4")
-	if err != nil {
-		schema, err = cc.fhirSchemaLoader.LoadFHIRSchema(resourceType, "base", "R4")
+	schema, ok := reg.Get("R4", resourceType, "us-core")
+	if !ok {
+		schema, ok = reg.Get("R4", resourceType, "base")
 	}
-	if err != nil {
+	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"error":   fmt.Sprintf("no FHIR R4 schema found for resource type %q", resourceType),
@@ -620,16 +625,17 @@ func (cc *CDASchemaController) GetResourceFields(c *gin.Context) {
 		return
 	}
 
-	elements := make([]resourceFieldResponse, 0, len(schema.Elements))
-	for _, el := range schema.Elements {
+	elements := make([]resourceFieldResponse, 0, len(schema.MinCard))
+	for path := range schema.MinCard {
+		valueSet, _, _ := schema.Binding(path)
 		elements = append(elements, resourceFieldResponse{
-			Path:        el.Path,
-			Name:        el.Name,
-			Description: el.Description,
-			DataType:    el.DataType,
-			Cardinality: el.Cardinality,
-			Required:    el.Required,
-			ValueSet:    el.ValueSet,
+			Path:        path,
+			Name:        schema.ElementNames[path],
+			Description: schema.ElementDescriptions[path],
+			DataType:    schema.DataTypes[path],
+			Cardinality: schema.Cardinality(path),
+			Required:    schema.Required[path],
+			ValueSet:    valueSet,
 		})
 	}
 	sort.Slice(elements, func(i, j int) bool { return elements[i].Path < elements[j].Path })

@@ -1,0 +1,36 @@
+{
+  "key": "header.relatedPerson",
+  "uscdiClass": "Related Person",
+  "displayName": "Related Person (Header)",
+  "loincCode": "",
+  "templateId": "2.16.840.1.113883.10.20.22.5.8",
+  "templateIdExtension": "2023-05-01",
+  "templateIdOptional": "",
+  "conformance": "MAY",
+  "isHeader": true,
+  "fields": [
+    {
+      "key": "relationshipCode",
+      "uscdiElement": "Related Person's Relationship",
+      "conformance": "SHALL",
+      "dataType": "CD",
+      "valueSet": "Personal And Legal Relationship Role Type",
+      "xpath": "ClinicalDocument/participant[@typeCode='IND']/associatedEntity/code/@code",
+      "xpathDisplay": "ClinicalDocument/participant[@typeCode='IND']/associatedEntity/code/@displayName"
+    },
+    {
+      "key": "relatedPersonGiven",
+      "uscdiElement": "Related Person's Name",
+      "conformance": "SHALL",
+      "dataType": "PN",
+      "xpath": "ClinicalDocument/participant[@typeCode='IND']/associatedEntity/associatedPerson/name/given"
+    },
+    {
+      "key": "relatedPersonFamily",
+      "uscdiElement": "Related Person's Name",
+      "conformance": "SHALL",
+      "dataType": "PN",
+      "xpath": "ClinicalDocument/participant[@typeCode='IND']/associatedEntity/associatedPerson/name/family"
+    }
+  ]
+}

@@ -45,6 +45,14 @@
       "conformance": "SHALL",
       "dataType": "CS",
       "xpath": "entry/supply/statusCode/@code"
+    },
+    {
+      "key": "deviceIdentifier",
+      "uscdiElement": "Unique Device Identifier (UDI)",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/supply/participant[@typeCode='PRD']/participantRole/id/@extension",
+      "xpathSystem": "entry/supply/participant[@typeCode='PRD']/participantRole/id/@root"
     }
   ],
   "entryElementPath": "entry/supply",
@@ -243,6 +251,278 @@
         {
           "path": "entry/procedure/author",
           "templateIdRef": "authorParticipation"
+        }
+      ],
+      "componentGroups": [
+        {
+          "key": "udiOrganizer",
+          "wrapperTag": "entryRelationship",
+          "wrapperAttr": "typeCode",
+          "wrapperAttrValue": "COMP",
+          "organizerTag": "organizer",
+          "organizerTemplateId": "2.16.840.1.113883.10.20.22.4.311",
+          "organizerTemplateIdExtension": "2019-06-21",
+          "organizerFixedCode": "74711-3",
+          "organizerFixedCodeSystem": "2.16.840.1.113883.6.1",
+          "organizerFixedCodeDisplay": "Unique Device Identifier",
+          "organizerIdField": "deviceIdentifier",
+          "organizerIdSystemField": "deviceIdentifierSystem",
+          "components": [
+            {
+              "key": "deviceIdentifier",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.304",
+              "templateIdExtension": "2022-06-01",
+              "fixedCode": "C101722",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "Primary DI Number",
+              "fields": [
+                {
+                  "key": "deviceIdentifier",
+                  "uscdiElement": "Unique Device Identifier (UDI)",
+                  "conformance": "SHALL",
+                  "dataType": "II",
+                  "xpath": "value/@extension",
+                  "xpathSystem": "value/@root"
+                }
+              ]
+            },
+            {
+              "key": "lotOrBatchNumber",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.315",
+              "templateIdExtension": "2019-06-21",
+              "fixedCode": "C101672",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "Lot or Batch Number",
+              "fields": [
+                {
+                  "key": "lotOrBatchNumber",
+                  "uscdiElement": "Lot or Batch Number",
+                  "conformance": "SHOULD",
+                  "dataType": "ED",
+                  "xpath": "value"
+                }
+              ]
+            },
+            {
+              "key": "serialNumber",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.319",
+              "templateIdExtension": "2019-06-21",
+              "fixedCode": "C101671",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "Serial Number",
+              "fields": [
+                {
+                  "key": "serialNumber",
+                  "uscdiElement": "Serial Number",
+                  "conformance": "SHOULD",
+                  "dataType": "ED",
+                  "xpath": "value"
+                }
+              ]
+            },
+            {
+              "key": "manufacturingDate",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.316",
+              "templateIdExtension": "2019-06-21",
+              "fixedCode": "C101669",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "Manufacturing Date",
+              "fields": [
+                {
+                  "key": "manufacturingDate",
+                  "uscdiElement": "Manufacturing Date",
+                  "conformance": "SHOULD",
+                  "dataType": "TS",
+                  "xpath": "value/@value"
+                }
+              ]
+            },
+            {
+              "key": "expirationDate",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.309",
+              "templateIdExtension": "2019-06-21",
+              "fixedCode": "C101670",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "Expiration Date",
+              "fields": [
+                {
+                  "key": "expirationDate",
+                  "uscdiElement": "Expiration Date",
+                  "conformance": "SHOULD",
+                  "dataType": "TS",
+                  "xpath": "value/@value"
+                }
+              ]
+            },
+            {
+              "key": "distinctIdentificationCode",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.308",
+              "templateIdExtension": "2019-06-21",
+              "fixedCode": "C113843",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "Distinct Identification Code",
+              "fields": [
+                {
+                  "key": "distinctIdentificationCode",
+                  "uscdiElement": "Distinct Identification Code",
+                  "conformance": "SHOULD",
+                  "dataType": "ED",
+                  "xpath": "value"
+                }
+              ]
+            },
+            {
+              "key": "brandName",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.301",
+              "templateIdExtension": "2019-06-21",
+              "fixedCode": "C71898",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "Brand Name",
+              "fields": [
+                {
+                  "key": "brandName",
+                  "uscdiElement": "Brand Name",
+                  "conformance": "MAY",
+                  "dataType": "ED",
+                  "xpath": "value"
+                }
+              ]
+            },
+            {
+              "key": "modelNumber",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.317",
+              "templateIdExtension": "2019-06-21",
+              "fixedCode": "C99285",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "Model Number",
+              "fields": [
+                {
+                  "key": "modelNumber",
+                  "uscdiElement": "Model Number",
+                  "conformance": "MAY",
+                  "dataType": "ED",
+                  "xpath": "value"
+                }
+              ]
+            },
+            {
+              "key": "catalogNumber",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.302",
+              "templateIdExtension": "2019-06-21",
+              "fixedCode": "C99286",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "Catalog Number",
+              "fields": [
+                {
+                  "key": "catalogNumber",
+                  "uscdiElement": "Catalog Number",
+                  "conformance": "MAY",
+                  "dataType": "ED",
+                  "xpath": "value"
+                }
+              ]
+            },
+            {
+              "key": "companyName",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.303",
+              "templateIdExtension": "2019-06-21",
+              "fixedCode": "C54131",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "Company Name",
+              "fields": [
+                {
+                  "key": "companyName",
+                  "uscdiElement": "Company Name",
+                  "conformance": "MAY",
+                  "dataType": "ED",
+                  "xpath": "value"
+                }
+              ]
+            },
+            {
+              "key": "mriSafety",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.318",
+              "templateIdExtension": "2019-06-21",
+              "fixedCode": "C106044",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "MRI Safety",
+              "fields": [
+                {
+                  "key": "mriSafety",
+                  "uscdiElement": "MRI Safety",
+                  "conformance": "MAY",
+                  "dataType": "CD",
+                  "valueSet": "Device Magnetic resonance (MR) Safety",
+                  "xpath": "value/@code",
+                  "xpathSystem": "value/@codeSystem"
+                }
+              ]
+            },
+            {
+              "key": "latexSafety",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.314",
+              "templateIdExtension": "2019-06-21",
+              "fixedCode": "C160938",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "Latex Safety Status",
+              "fields": [
+                {
+                  "key": "latexSafety",
+                  "uscdiElement": "Latex Safety",
+                  "conformance": "MAY",
+                  "dataType": "CD",
+                  "valueSet": "Device Latex Safety",
+                  "xpath": "value/@code",
+                  "xpathSystem": "value/@codeSystem"
+                }
+              ]
+            },
+            {
+              "key": "implantableDeviceStatus",
+              "componentTag": "component",
+              "obsElementPath": "observation",
+              "templateId": "2.16.840.1.113883.10.20.22.4.305",
+              "templateIdExtension": "2019-06-21",
+              "fixedCode": "C160939",
+              "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+              "fixedCodeDisplay": "Implantable Device Status",
+              "fields": [
+                {
+                  "key": "implantableDeviceStatus",
+                  "uscdiElement": "Implantable Device Status",
+                  "conformance": "MAY",
+                  "dataType": "CD",
+                  "valueSet": "Implantable Device Status",
+                  "xpath": "value/@code",
+                  "xpathSystem": "value/@codeSystem"
+                }
+              ]
+            }
+          ]
         }
       ]
     }

@@ -132,6 +132,54 @@ const CDARequirementsHelper = {
     },
 
     /**
+     * Summarizes USCDI v3 class coverage across a document type's
+     * requirements catalog — every section's own `uscdiClasses` plus every
+     * header field's own `uscdiClasses` (cda/builder/requirements_catalog.go
+     * and header_requirements.go, bridged from the real, ONC-verified
+     * cda/schemas/uscdi_v3.json), deduped/sorted. Some sections/fields will
+     * have none — a section not yet bridged into uscdi_v3.json — which is
+     * honest, not a bug; never fabricated to look more complete than it is.
+     *
+     * @param {object|null} requirements
+     * @returns {{classes: string[]}}
+     */
+    summarizeUSCDICoverage(requirements) {
+        const classes = new Set();
+        if (!requirements) return { classes: [] };
+
+        (requirements.sections || []).forEach(sec => {
+            (sec.uscdiClasses || []).forEach(c => classes.add(c));
+        });
+        const headerGroups = requirements.headerGroups || {};
+        Object.keys(headerGroups).forEach(group => {
+            (headerGroups[group] || []).forEach(field => {
+                (field.uscdiClasses || []).forEach(c => classes.add(c));
+            });
+        });
+
+        return { classes: Array.from(classes).sort() };
+    },
+
+    /**
+     * Renders a small "USCDI v3 classes represented" summary — additive to
+     * renderCompletenessBanner, never a replacement for the existing
+     * SHALL/SHOULD/MAY banner. Returns '' when there's nothing to show (no
+     * requirements loaded yet, or zero classes bridged for this document
+     * type so far).
+     */
+    renderUSCDISummary(requirements) {
+        const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const { classes } = this.summarizeUSCDICoverage(requirements);
+        if (classes.length === 0) return '';
+
+        return `
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.5rem 0.75rem;margin-bottom:0.75rem;font-size:0.75rem;color:#1e40af;">
+            <i class="fas fa-clipboard-check" style="margin-right:0.35rem;"></i>
+            <strong>USCDI v3:</strong> represents ${classes.length} class${classes.length === 1 ? '' : 'es'} — ${classes.map(esc).join(', ')}
+        </div>`;
+    },
+
+    /**
      * Renders the red/amber/green completeness banner shown above both
      * guided UIs. `missing` is computeMissingShall's return value.
      */

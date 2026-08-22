@@ -37,6 +37,13 @@
       "xpath": "ClinicalDocument/recordTarget/patientRole/patient/name/family"
     },
     {
+      "key": "nameSuffix",
+      "uscdiElement": "Name Suffix",
+      "conformance": "MAY",
+      "dataType": "PN",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/patient/name/suffix"
+    },
+    {
       "key": "birthDate",
       "uscdiElement": "Date of Birth",
       "conformance": "SHALL",
@@ -50,6 +57,20 @@
       "dataType": "CD",
       "xpath": "ClinicalDocument/recordTarget/patientRole/patient/administrativeGenderCode/@code",
       "xpathDisplay": "ClinicalDocument/recordTarget/patientRole/patient/administrativeGenderCode/@displayName"
+    },
+    {
+      "key": "deceasedInd",
+      "uscdiElement": "Date of Death (deceased indicator)",
+      "conformance": "MAY",
+      "dataType": "BL",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/patient/sdtc:deceasedInd/@value"
+    },
+    {
+      "key": "deceasedTime",
+      "uscdiElement": "Date of Death",
+      "conformance": "MAY",
+      "dataType": "TS",
+      "xpath": "ClinicalDocument/recordTarget/patientRole/patient/sdtc:deceasedTime/@value"
     },
     {
       "key": "race",

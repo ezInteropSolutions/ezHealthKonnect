@@ -30,6 +30,7 @@ import (
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/executors"
 	"ezhealthkonnect/services/storage"
+	"ezhealthkonnect/uscdi"
 )
 
 const (
@@ -45,6 +46,7 @@ type WorkerPool struct {
 	db              *sql.DB
 	objStorage      *storage.ObjectStorageService
 	schemaLoader    *cdaSchema.CDASchemaLoader
+	vocabulary      *uscdi.USCDIVocabulary
 	notificationSvc *services.AlertNotificationService
 	jobs            chan models.CoverageAuditJob
 }
@@ -52,12 +54,20 @@ type WorkerPool struct {
 // NewWorkerPool constructs and starts the pool. objStorage is where parsed
 // CDA content (ParsedJSON, including the "xml" fidelity mirror) is fetched
 // from at report-build time — the same store/lookup message_content_controller.go's
-// GetParsedContent handler already uses, not a new persistence path.
-func NewWorkerPool(db *sql.DB, objStorage *storage.ObjectStorageService, schemaLoader *cdaSchema.CDASchemaLoader) *WorkerPool {
+// GetParsedContent handler already uses, not a new persistence path. vocabulary
+// resolves each report category's real USCDI v3 class set (uscdi_v3.json,
+// section-level only — see inventory.go's uscdiClassesForSection) — constructor-
+// injected like schemaLoader, not a package-level singleton, matching this
+// codebase's established per-consumer construction pattern
+// (cdaparser.NewFromSchemaDir already builds its own vocabulary instance the
+// same way; nothing here shares that one, and that's fine — uscdi_v3.json is
+// small and read-only after load).
+func NewWorkerPool(db *sql.DB, objStorage *storage.ObjectStorageService, schemaLoader *cdaSchema.CDASchemaLoader, vocabulary *uscdi.USCDIVocabulary) *WorkerPool {
 	p := &WorkerPool{
 		db:           db,
 		objStorage:   objStorage,
 		schemaLoader: schemaLoader,
+		vocabulary:   vocabulary,
 		jobs:         make(chan models.CoverageAuditJob, resolveQueueSize()),
 	}
 	for i := 0; i < resolveWorkerCount(); i++ {
@@ -120,7 +130,7 @@ func (p *WorkerPool) process(job models.CoverageAuditJob) {
 	}
 
 	elementLevel := p.resolveElementGranularity(ctx, job.InterfaceID)
-	inventory := BuildInventoryWithGranularity(xmlMirror, p.schemaLoader, elementLevel)
+	inventory := BuildInventoryWithGranularity(xmlMirror, p.schemaLoader, p.vocabulary, elementLevel)
 	report := BuildReport(inventory, tracker.Snapshot())
 
 	if err := SaveReport(ctx, p.db, job, report); err != nil {

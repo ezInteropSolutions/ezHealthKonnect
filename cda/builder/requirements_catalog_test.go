@@ -1,10 +1,27 @@
 package builder
 
-import "testing"
+import (
+	"testing"
+
+	"ezhealthkonnect/uscdi"
+)
+
+// loadTestVocabulary mirrors loadTestSchema's own "../schemas"-relative
+// loading convention (document_builder_test.go), for the one real USCDI
+// dataset (cda/schemas/uscdi_v3.json) this file's tests bridge into.
+func loadTestVocabulary(t *testing.T) *uscdi.USCDIVocabulary {
+	t.Helper()
+	vocab, err := uscdi.NewUSCDIVocabulary("../schemas/uscdi_v3.json")
+	if err != nil {
+		t.Fatalf("failed to load USCDI vocabulary: %v", err)
+	}
+	return vocab
+}
 
 func TestGetDocumentTypeRequirements_CCD(t *testing.T) {
 	loader := loadTestSchema(t)
-	reqs := GetDocumentTypeRequirements(loader, "CCD")
+	vocab := loadTestVocabulary(t)
+	reqs := GetDocumentTypeRequirements(loader, vocab, "CCD")
 	if reqs == nil {
 		t.Fatal("expected non-nil requirements for CCD")
 	}
@@ -38,17 +55,81 @@ func TestGetDocumentTypeRequirements_CCD(t *testing.T) {
 	}
 }
 
+// TestGetDocumentTypeRequirements_USCDIClasses_BridgedOntoSections is the
+// Phase C proof: SectionRequirement.USCDIClasses resolves from the real,
+// ONC-verified uscdi_v3.json dataset — same additive, honestly-absent-when-
+// unknown principle Coverage Audit's own CategoryStat.USCDIClasses already
+// established (services/cda_coverage). "problems" is a clean single-class
+// section (Problems); "results" is the known multi-class case (Diagnostic
+// Imaging + Laboratory) — the regression guard for a naive "one class per
+// section" bridge silently dropping one.
+func TestGetDocumentTypeRequirements_USCDIClasses_BridgedOntoSections(t *testing.T) {
+	loader := loadTestSchema(t)
+	vocab := loadTestVocabulary(t)
+	reqs := GetDocumentTypeRequirements(loader, vocab, "CCD")
+	if reqs == nil {
+		t.Fatal("expected non-nil requirements for CCD")
+	}
+
+	byKey := make(map[string]SectionRequirement, len(reqs.Sections))
+	for _, s := range reqs.Sections {
+		byKey[s.Key] = s
+	}
+
+	problems, ok := byKey["problems"]
+	if !ok {
+		t.Fatal("expected a \"problems\" section in CCD's requirements")
+	}
+	if !containsString(problems.USCDIClasses, "Problems") {
+		t.Errorf("expected problems.USCDIClasses to include \"Problems\", got %v", problems.USCDIClasses)
+	}
+
+	// "results" is the known multi-class case: Laboratory (its original
+	// mapping) plus Clinical Tests (added later — the Results Section's own
+	// scope statement is explicit it isn't lab-only, "laboratories, imaging
+	// and other procedures"; Diagnostic Imaging itself maps to the separate
+	// "findingsDIR" section instead, not "results").
+	results, ok := byKey["results"]
+	if !ok {
+		t.Fatal("expected a \"results\" section in CCD's requirements")
+	}
+	for _, want := range []string{"Clinical Tests", "Laboratory"} {
+		if !containsString(results.USCDIClasses, want) {
+			t.Errorf("expected results.USCDIClasses to include %q, got %v", want, results.USCDIClasses)
+		}
+	}
+}
+
+// TestGetDocumentTypeRequirements_NilVocabulary_LeavesUSCDIClassesNil is the
+// graceful-degradation guard — a nil vocabulary (e.g. uscdi_v3.json failed to
+// load) must not panic or fabricate classes, matching how every other
+// USCDIClasses bridge in this codebase degrades.
+func TestGetDocumentTypeRequirements_NilVocabulary_LeavesUSCDIClassesNil(t *testing.T) {
+	loader := loadTestSchema(t)
+	reqs := GetDocumentTypeRequirements(loader, nil, "CCD")
+	if reqs == nil {
+		t.Fatal("expected non-nil requirements even with a nil vocabulary")
+	}
+	for _, s := range reqs.Sections {
+		if s.USCDIClasses != nil {
+			t.Errorf("expected nil USCDIClasses with a nil vocabulary, section %q got %v", s.Key, s.USCDIClasses)
+		}
+	}
+}
+
 func TestGetDocumentTypeRequirements_UnknownType_ReturnsNil(t *testing.T) {
 	loader := loadTestSchema(t)
-	if reqs := GetDocumentTypeRequirements(loader, "Not A Real Document Type"); reqs != nil {
+	vocab := loadTestVocabulary(t)
+	if reqs := GetDocumentTypeRequirements(loader, vocab, "Not A Real Document Type"); reqs != nil {
 		t.Errorf("expected nil for unknown document type, got: %+v", reqs)
 	}
 }
 
 func TestGetDocumentTypeRequirements_DifferentDocTypesHaveDifferentSHALLSets(t *testing.T) {
 	loader := loadTestSchema(t)
-	ccd := GetDocumentTypeRequirements(loader, "CCD")
-	discharge := GetDocumentTypeRequirements(loader, "Discharge Summary")
+	vocab := loadTestVocabulary(t)
+	ccd := GetDocumentTypeRequirements(loader, vocab, "CCD")
+	discharge := GetDocumentTypeRequirements(loader, vocab, "Discharge Summary")
 	if ccd == nil || discharge == nil {
 		t.Fatal("expected requirements for both CCD and Discharge Summary")
 	}
@@ -82,7 +163,8 @@ func TestGetDocumentTypeRequirements_DifferentDocTypesHaveDifferentSHALLSets(t *
 
 func TestHeaderRequirementsCatalog_PatientSHALLFields(t *testing.T) {
 	loader := loadTestSchema(t)
-	fields := HeaderRequirementsCatalog(loader, "patient")
+	vocab := loadTestVocabulary(t)
+	fields := HeaderRequirementsCatalog(loader, vocab, "patient")
 	if len(fields) == 0 {
 		t.Fatal("expected non-empty patient header requirements")
 	}
@@ -113,9 +195,42 @@ func TestHeaderRequirementsCatalog_PatientSHALLFields(t *testing.T) {
 	}
 }
 
+// TestHeaderRequirementsCatalog_USCDIClasses_BridgedOntoPatientFields is the
+// Phase C header-field proof, incl. the dotted-canonicalKey wrinkle
+// classesForHeaderField exists for: uscdi_v3.json's own header.patient entry
+// for address uses the coarser bare "address" cdaField, but
+// header_requirements.go's own translation table splits it into 4 UI-facing
+// rows (address.street/.city/.state/.postalCode) — all 4 must still resolve.
+func TestHeaderRequirementsCatalog_USCDIClasses_BridgedOntoPatientFields(t *testing.T) {
+	loader := loadTestSchema(t)
+	vocab := loadTestVocabulary(t)
+	fields := HeaderRequirementsCatalog(loader, vocab, "patient")
+	byKey := make(map[string]HeaderFieldRequirement, len(fields))
+	for _, f := range fields {
+		byKey[f.Key] = f
+	}
+
+	f, ok := byKey["firstName"]
+	if !ok {
+		t.Fatal("expected a \"firstName\" patient requirement")
+	}
+	if !containsString(f.USCDIClasses, "Patient Demographics/Information") {
+		t.Errorf("expected firstName.USCDIClasses to include \"Patient Demographics/Information\", got %v", f.USCDIClasses)
+	}
+
+	street, ok := byKey["address.street"]
+	if !ok {
+		t.Fatal("expected an \"address.street\" patient requirement")
+	}
+	if !containsString(street.USCDIClasses, "Patient Demographics/Information") {
+		t.Errorf("expected address.street.USCDIClasses to resolve via the coarser bare \"address\" cdaField, got %v", street.USCDIClasses)
+	}
+}
+
 func TestHeaderRequirementsCatalog_AuthorExcludesAlwaysWrittenFields(t *testing.T) {
 	loader := loadTestSchema(t)
-	fields := HeaderRequirementsCatalog(loader, "author")
+	vocab := loadTestVocabulary(t)
+	fields := HeaderRequirementsCatalog(loader, vocab, "author")
 	for _, f := range fields {
 		if f.Key == "orgName" || f.Key == "time" {
 			t.Errorf("expected author requirements to exclude always-written fields (orgName/time), found key %q", f.Key)
@@ -135,7 +250,8 @@ func TestHeaderRequirementsCatalog_AuthorExcludesAlwaysWrittenFields(t *testing.
 
 func TestHeaderRequirementsCatalog_CustodianHasNoAddressOrPhoneRequirement(t *testing.T) {
 	loader := loadTestSchema(t)
-	fields := HeaderRequirementsCatalog(loader, "custodian")
+	vocab := loadTestVocabulary(t)
+	fields := HeaderRequirementsCatalog(loader, vocab, "custodian")
 	byKey := make(map[string]HeaderFieldRequirement, len(fields))
 	for _, f := range fields {
 		byKey[f.Key] = f
@@ -156,7 +272,24 @@ func TestHeaderRequirementsCatalog_CustodianHasNoAddressOrPhoneRequirement(t *te
 
 func TestHeaderRequirementsCatalog_UnknownGroup_ReturnsNil(t *testing.T) {
 	loader := loadTestSchema(t)
-	if fields := HeaderRequirementsCatalog(loader, "not-a-group"); fields != nil {
+	vocab := loadTestVocabulary(t)
+	if fields := HeaderRequirementsCatalog(loader, vocab, "not-a-group"); fields != nil {
 		t.Errorf("expected nil for unknown group, got: %+v", fields)
+	}
+}
+
+// TestHeaderRequirementsCatalog_NilVocabulary_LeavesUSCDIClassesNil is the
+// graceful-degradation guard, header-field counterpart to
+// TestGetDocumentTypeRequirements_NilVocabulary_LeavesUSCDIClassesNil.
+func TestHeaderRequirementsCatalog_NilVocabulary_LeavesUSCDIClassesNil(t *testing.T) {
+	loader := loadTestSchema(t)
+	fields := HeaderRequirementsCatalog(loader, nil, "patient")
+	if len(fields) == 0 {
+		t.Fatal("expected non-empty patient header requirements even with a nil vocabulary")
+	}
+	for _, f := range fields {
+		if f.USCDIClasses != nil {
+			t.Errorf("expected nil USCDIClasses with a nil vocabulary, key %q got %v", f.Key, f.USCDIClasses)
+		}
 	}
 }

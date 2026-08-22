@@ -90,108 +90,14 @@ func buildConstraintRegistry() *ConstraintRegistry {
 
 	// ── Observation ───────────────────────────────────────────────────────────
 
-	r.add("Observation",
-		// obs-6: dataAbsentReason only when value[x] is absent
-		// Source: https://hl7.org/fhir/R4/observation.html#invs
-		constraint("obs-6", "error",
-			"dataAbsentReason SHALL only be present if Observation.value[x] is not present",
-			func(res map[string]interface{}) bool {
-				_, hasAbsent := res["dataAbsentReason"]
-				if !hasAbsent {
-					return true // no dataAbsentReason → always satisfied
-				}
-				return !hasValueX(res)
-			},
-		),
-		// obs-7: if Observation.code is the same as a component.code then value[x] must be present
-		// We check the simpler rule: if components exist, each must have a code.
-		constraint("obs-7", "warning",
-			"If Observation.code is same as component.code the value SHALL be present",
-			func(res map[string]interface{}) bool {
-				comps, ok := toSlice(res["component"])
-				if !ok || len(comps) == 0 {
-					return true
-				}
-				for _, raw := range comps {
-					comp, ok := raw.(map[string]interface{})
-					if !ok {
-						continue
-					}
-					if comp["code"] == nil {
-						return false
-					}
-				}
-				return true
-			},
-		),
-	)
+	// obs-6, obs-7: now covered generically by real spec data — see
+	// compileSpecConstraints (fhir/r4/compiler.go) and fhir/r4/fhirpath.
+	// Retired here after cross-checking both produce the same verdicts on
+	// the same fixtures (fhir/r4/fhirpath/spec_rules_test.go).
 
 	// ── Bundle ────────────────────────────────────────────────────────────────
 
 	r.add("Bundle",
-		// bun-1: total only when type is searchset or history
-		// Source: https://hl7.org/fhir/R4/bundle.html#invs
-		constraint("bun-1", "error",
-			"total only when a search or history",
-			func(res map[string]interface{}) bool {
-				_, hasTotal := res["total"]
-				if !hasTotal {
-					return true
-				}
-				t, _ := res["type"].(string)
-				return t == "searchset" || t == "history"
-			},
-		),
-		// bun-2: entry.search only when type is searchset
-		constraint("bun-2", "error",
-			"entry.search only when a search",
-			func(res map[string]interface{}) bool {
-				entries, ok := toSlice(res["entry"])
-				if !ok {
-					return true
-				}
-				t, _ := res["type"].(string)
-				if t == "searchset" {
-					return true
-				}
-				for _, raw := range entries {
-					e, ok := raw.(map[string]interface{})
-					if !ok {
-						continue
-					}
-					if e["search"] != nil {
-						return false
-					}
-				}
-				return true
-			},
-		),
-		// bun-3: entry.request only for batch/transaction/history
-		constraint("bun-3", "error",
-			"entry.request mandatory for batch/transaction, forbidden otherwise",
-			func(res map[string]interface{}) bool {
-				entries, ok := toSlice(res["entry"])
-				if !ok {
-					return true
-				}
-				t, _ := res["type"].(string)
-				needsReq := t == "batch" || t == "transaction" || t == "history"
-				for _, raw := range entries {
-					e, ok := raw.(map[string]interface{})
-					if !ok {
-						continue
-					}
-					hasReq := e["request"] != nil
-					if needsReq && !hasReq {
-						return false
-					}
-					if !needsReq && hasReq {
-						return false
-					}
-				}
-				return true
-			},
-		),
 		// bun-7: FullUrl must be unique in a bundle, or else entries with the same
 		// fullUrl must have different meta.versionId (history bundles).
 		// Simplified: fullUrl values must be unique when type != "history".
@@ -333,37 +239,15 @@ func buildConstraintRegistry() *ConstraintRegistry {
 		),
 	)
 
-	// ── AllergyIntolerance ────────────────────────────────────────────────────
-
-	r.add("AllergyIntolerance",
-		// ait-1: AllergyIntolerance.clinicalStatus SHALL be present if verificationStatus is not entered-in-error
-		constraint("ait-1", "error",
-			"AllergyIntolerance.clinicalStatus SHALL be present if verificationStatus is not entered-in-error",
-			func(res map[string]interface{}) bool {
-				vs := extractCodeableConcept(res["verificationStatus"])
-				if vs == "entered-in-error" {
-					return true
-				}
-				return res["clinicalStatus"] != nil
-			},
-		),
-	)
+	// ait-1: now covered generically by real spec data — same retirement as
+	// obs-6/obs-7 above.
 
 	// ── Condition ─────────────────────────────────────────────────────────────
 
 	r.add("Condition",
-		// con-4: Condition.clinicalStatus SHALL NOT be present if verificationStatus is entered-in-error
-		constraint("con-4", "error",
-			"If condition is abated, then clinicalStatus must be either inactive, resolved, or remission",
-			func(res map[string]interface{}) bool {
-				// abatement[x] present → clinicalStatus must be inactive/resolved/remission
-				if !hasAbatementX(res) {
-					return true
-				}
-				cs := extractCodeableConcept(res["clinicalStatus"])
-				return cs == "inactive" || cs == "resolved" || cs == "remission"
-			},
-		),
+		// con-4: now covered generically by real spec data — same retirement
+		// as obs-6/obs-7/ait-1 above.
+		//
 		// con-5: Condition.clinicalStatus SHALL be present if category is problem-list-item
 		constraint("con-5", "warning",
 			"Condition.clinicalStatus SHALL be present if category is problem-list-item",
@@ -573,32 +457,6 @@ func (cr *ConstraintRegistry) add(resourceType string, cs ...CompiledConstraint)
 
 func constraint(key, severity, desc string, fn ConstraintFunc) CompiledConstraint {
 	return CompiledConstraint{Key: key, Severity: severity, Description: desc, Check: fn}
-}
-
-// hasValueX returns true if a FHIR resource contains any value[x] variant.
-func hasValueX(r map[string]interface{}) bool {
-	valueKeys := []string{
-		"valueQuantity", "valueCodeableConcept", "valueString", "valueBoolean",
-		"valueInteger", "valueRange", "valueRatio", "valueSampledData",
-		"valueTime", "valueDateTime", "valuePeriod",
-	}
-	for _, k := range valueKeys {
-		if r[k] != nil {
-			return true
-		}
-	}
-	return false
-}
-
-// hasAbatementX returns true if a Condition has any abatement[x] variant.
-func hasAbatementX(r map[string]interface{}) bool {
-	for _, k := range []string{"abatementDateTime", "abatementAge", "abatementPeriod",
-		"abatementRange", "abatementString", "abatement"} {
-		if r[k] != nil {
-			return true
-		}
-	}
-	return false
 }
 
 // toSlice coerces an interface{} to []interface{}, returning (nil, false) on failure.

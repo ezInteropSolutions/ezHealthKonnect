@@ -94,6 +94,12 @@ type onDiskAlternateEntryArchetype struct {
 	Fields             []*CDAFieldDef `json:"fields"`
 
 	StructuralTemplateIDs []onDiskStructuralTemplateAnchor `json:"structuralTemplateIds,omitempty"`
+
+	// ComponentGroups is a direct, raw passthrough — same as
+	// onDiskSectionDef.RepeatingGroups — since ComponentDef.Fields' XPaths
+	// are bare and resolved at BUILD time (writeComponentGroups), not at
+	// schema-load time via resolveXPath.
+	ComponentGroups []ComponentGroup `json:"componentGroups,omitempty"`
 }
 
 // onDiskStructuralTemplateAnchor mirrors StructuralTemplateAnchor, plus
@@ -424,6 +430,7 @@ func resolveSection(disk *onDiskSectionDef, templates map[string]*onDiskEntryTem
 			EntryTemplateID:    alt.EntryTemplateID,
 			EntryTemplateIDExt: alt.EntryTemplateIDExt,
 			Fields:             resolveFields(alt.Fields, alt.EntryElementPath),
+			ComponentGroups:    alt.ComponentGroups,
 		}
 		for _, a := range alt.StructuralTemplateIDs {
 			resolved, err := resolveAnchor(a, constants)

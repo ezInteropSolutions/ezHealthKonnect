@@ -295,9 +295,10 @@ function Run-Restore {
     Write-Step "Starting the stack"
     docker compose up -d
 
-    Write-Step "Pruning build cache"
+    Write-Step "Pruning build cache and dangling images"
     & { $ErrorActionPreference = "SilentlyContinue"; docker builder prune -f 2>&1 | Out-Null }
-    Write-OK "Build cache cleared"
+    & { $ErrorActionPreference = "SilentlyContinue"; docker image prune -f 2>&1 | Out-Null }
+    Write-OK "Build cache and dangling images cleared"
 
     Start-Sleep -Seconds 5
     Write-Host ""

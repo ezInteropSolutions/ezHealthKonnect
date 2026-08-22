@@ -976,6 +976,166 @@ func TestBuildAlternateEntry_ProducesOwnRootShapeWithFields(t *testing.T) {
 	}
 }
 
+// syntheticUDIComponentGroupAlt is an isolated synthetic AlternateEntryArchetype
+// carrying a ComponentGroup, mirroring medicalEquipment.json's real
+// "udiOrganizer" group (2 components only, to keep the synthetic case
+// small) — proven on its own, same discipline as
+// syntheticRepeatingSection() above, before depending on the real 12-
+// component schema (already covered end-to-end in document_builder_test.go's
+// TestBuildDocument_MedicalEquipment_UDIOrganizer_ComponentGroup).
+func syntheticUDIComponentGroupAlt() *cdaSchema.AlternateEntryArchetype {
+	return &cdaSchema.AlternateEntryArchetype{
+		EntriesKey:       "procedureEntries",
+		EntryElementPath: "procedure",
+		ComponentGroups: []cdaSchema.ComponentGroup{
+			{
+				Key:                    "udiOrganizer",
+				WrapperTag:             "entryRelationship",
+				WrapperAttr:            "typeCode",
+				WrapperAttrValue:       "COMP",
+				OrganizerTag:           "organizer",
+				OrganizerTemplateID:    "2.16.840.1.113883.10.20.22.4.311",
+				OrganizerTemplateIDExt: "2019-06-21",
+				OrganizerFixedCode:     "74711-3",
+				OrganizerIDField:       "deviceIdentifier",
+				OrganizerIDSystemField: "deviceIdentifierSystem",
+				Components: []cdaSchema.ComponentDef{
+					{
+						Key:            "deviceIdentifier",
+						ComponentTag:   "component",
+						ObsElementPath: "observation",
+						TemplateID:     "2.16.840.1.113883.10.20.22.4.304",
+						TemplateIDExt:  "2022-06-01",
+						FixedCode:      "C101722",
+						Fields: []*cdaSchema.CDAFieldDef{
+							{Key: "deviceIdentifier", XPath: "value/@extension", XPathSystem: "value/@root"},
+						},
+					},
+					{
+						Key:            "lotOrBatchNumber",
+						ComponentTag:   "component",
+						ObsElementPath: "observation",
+						TemplateID:     "2.16.840.1.113883.10.20.22.4.315",
+						TemplateIDExt:  "2019-06-21",
+						FixedCode:      "C101672",
+						Fields: []*cdaSchema.CDAFieldDef{
+							{Key: "lotOrBatchNumber", XPath: "value"},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestBuildAlternateEntry_ComponentGroup_OnlyShallComponentPresent proves the
+// smallest real case: just the SHALL-required component populated -> the
+// whole group (organizer + exactly 1 component) is built, the other declared
+// component is entirely absent.
+func TestBuildAlternateEntry_ComponentGroup_OnlyShallComponentPresent(t *testing.T) {
+	alt := syntheticUDIComponentGroupAlt()
+	record := map[string]interface{}{
+		"deviceIdentifier":       "00999998998989",
+		"deviceIdentifierSystem": "1.3.160",
+	}
+
+	sectionEl := newTestSectionEl()
+	entryEl := buildAlternateEntry(sectionEl, alt, record)
+
+	wrapperEl := entryEl.FindElement("procedure/entryRelationship")
+	if wrapperEl == nil {
+		t.Fatalf("expected <entryRelationship>, got: %+v", entryEl.ChildElements())
+	}
+	if wrapperEl.SelectAttrValue("typeCode", "") != "COMP" {
+		t.Errorf("expected typeCode=COMP, got: %+v", wrapperEl.Attr)
+	}
+	organizerEl := wrapperEl.SelectElement("organizer")
+	if organizerEl == nil {
+		t.Fatal("expected an <organizer>")
+	}
+	components := organizerEl.SelectElements("component")
+	if len(components) != 1 {
+		t.Fatalf("expected exactly 1 <component> (only deviceIdentifier populated), got %d", len(components))
+	}
+	obs := components[0].SelectElement("observation")
+	if obs == nil {
+		t.Fatal("expected a nested <observation>")
+	}
+	val := obs.SelectElement("value")
+	if val == nil || val.SelectAttrValue("extension", "") != "00999998998989" || val.SelectAttrValue("root", "") != "1.3.160" {
+		t.Errorf("expected Device Identifier's own value, got: %+v", val)
+	}
+}
+
+// TestBuildAlternateEntry_ComponentGroup_MultipleComponentsPresent proves
+// several independently-shaped components can coexist under one organizer.
+func TestBuildAlternateEntry_ComponentGroup_MultipleComponentsPresent(t *testing.T) {
+	alt := syntheticUDIComponentGroupAlt()
+	record := map[string]interface{}{
+		"deviceIdentifier":       "00999998998989",
+		"deviceIdentifierSystem": "1.3.160",
+		"lotOrBatchNumber":       "LOT-4471",
+	}
+
+	sectionEl := newTestSectionEl()
+	entryEl := buildAlternateEntry(sectionEl, alt, record)
+
+	organizerEl := entryEl.FindElement("procedure/entryRelationship/organizer")
+	if organizerEl == nil {
+		t.Fatal("expected an <organizer>")
+	}
+	components := organizerEl.SelectElements("component")
+	if len(components) != 2 {
+		t.Fatalf("expected exactly 2 <component> elements, got %d", len(components))
+	}
+}
+
+// TestBuildAlternateEntry_ComponentGroup_NoComponentDataPresent_SkipsWholeGroup
+// is the "don't build an empty organizer" guard — the regression case for
+// every real procedureEntries record that has NO UDI data at all (the
+// overwhelming majority, since UDI is optional).
+func TestBuildAlternateEntry_ComponentGroup_NoComponentDataPresent_SkipsWholeGroup(t *testing.T) {
+	alt := syntheticUDIComponentGroupAlt()
+	record := map[string]interface{}{"someUnrelatedField": "x"}
+
+	sectionEl := newTestSectionEl()
+	entryEl := buildAlternateEntry(sectionEl, alt, record)
+
+	if entryEl.FindElement("procedure/entryRelationship") != nil {
+		t.Error("expected NO <entryRelationship> wrapper when no component has data")
+	}
+}
+
+// TestBuildAlternateEntry_ComponentGroup_OrganizerIDCorrelatesWithComponentValue
+// proves OrganizerIDField/OrganizerIDSystemField read the SAME caller-supplied
+// value the Device Identifier component's own Fields also read — the "shall
+// match Product Instance identifier value" spec requirement satisfied via one
+// shared field key, not new correlation logic (see ComponentGroup's own doc
+// comment).
+func TestBuildAlternateEntry_ComponentGroup_OrganizerIDCorrelatesWithComponentValue(t *testing.T) {
+	alt := syntheticUDIComponentGroupAlt()
+	record := map[string]interface{}{
+		"deviceIdentifier":       "00999998998989",
+		"deviceIdentifierSystem": "1.3.160",
+	}
+
+	sectionEl := newTestSectionEl()
+	entryEl := buildAlternateEntry(sectionEl, alt, record)
+
+	organizerEl := entryEl.FindElement("procedure/entryRelationship/organizer")
+	if organizerEl == nil {
+		t.Fatal("expected an <organizer>")
+	}
+	orgID := organizerEl.SelectElement("id")
+	if orgID == nil || orgID.SelectAttrValue("extension", "") != "00999998998989" || orgID.SelectAttrValue("root", "") != "1.3.160" {
+		t.Errorf("expected organizer <id> to correlate with deviceIdentifier/deviceIdentifierSystem, got: %+v", orgID)
+	}
+	compVal := organizerEl.FindElement("component/observation/value")
+	if compVal == nil || compVal.SelectAttrValue("extension", "") != "00999998998989" {
+		t.Errorf("expected the SAME value on the Device Identifier component, got: %+v", compVal)
+	}
+}
+
 // TestBuildEntry_StructuralTemplateAnchor_FixedStatusCode_OverridesTagDefault
 // verifies StructuralTemplateAnchor.FixedStatusCode (Immunization's nested
 // Substance Administered Act, CONF:1098-31505, SHALL statusCode="completed"

@@ -475,7 +475,15 @@ type CDALocation struct {
 
 // CDAHealthCareFacility is the physical care location.
 type CDAHealthCareFacility struct {
-	Code                        CDACode          `json:"code"`
+	Code CDACode `json:"code"`
+	// Ids is healthCareFacility's own <id> elements (e.g.
+	// root="...549.2.7.2.686980" extension="103001002") — USCDI v3's
+	// "Facility Identifier". Previously dropped at parse time (never
+	// selected here at all, unlike Code/Location/ServiceProviderOrganization
+	// right below, which all already worked) — confirmed and fixed; see
+	// EncompassingEncounterLocationMappingRules in declarative_oob_rules.go
+	// for where this now feeds FHIR Location.identifier.
+	Ids                         []CDAII          `json:"ids,omitempty"`
 	Location                    *CDAPlace        `json:"location,omitempty"`
 	ServiceProviderOrganization *CDAOrganization `json:"serviceProviderOrganization,omitempty"`
 }

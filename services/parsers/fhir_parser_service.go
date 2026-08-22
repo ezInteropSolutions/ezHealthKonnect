@@ -12,7 +12,7 @@ import (
 	"sort"
 	"time"
 
-	"ezhealthkonnect/fhir"
+	"ezhealthkonnect/fhir/r4"
 	"ezhealthkonnect/models"
 )
 
@@ -132,16 +132,16 @@ func (fp *FHIRParserService) buildEnhancedFields(
 }
 
 // loadSchema loads the FHIR schema for a resource type, returning nil on failure.
-func (fp *FHIRParserService) loadSchema(resourceType string) *fhir.FHIRSchema {
-	loader := fhir.GetFHIRSchemaLoader()
-	if loader == nil {
+func (fp *FHIRParserService) loadSchema(resourceType string) *r4.CompiledProfile {
+	reg := r4.GetRegistry()
+	if reg == nil {
 		return nil
 	}
-	s, err := loader.LoadFHIRSchema(resourceType, "base", "R4")
-	if err != nil || s == nil {
+	cp, ok := reg.Get("R4", resourceType, "base")
+	if !ok {
 		return nil
 	}
-	return s
+	return cp
 }
 
 // annotateResource adds EnhancedFields for all top-level keys of a resource,
@@ -149,7 +149,7 @@ func (fp *FHIRParserService) loadSchema(resourceType string) *fhir.FHIRSchema {
 func (fp *FHIRParserService) annotateResource(
 	resource map[string]interface{},
 	resourceType string,
-	schema *fhir.FHIRSchema,
+	schema *r4.CompiledProfile,
 	fields map[string]*models.EnhancedField,
 ) {
 	for key, value := range resource {
@@ -163,17 +163,19 @@ func (fp *FHIRParserService) annotateResource(
 			HasValue: value != nil,
 		}
 		if schema != nil {
-			if elem, ok := schema.Elements[path]; ok {
-				f.Name = elem.Name
-				f.Description = elem.Description
-				f.DataType = elem.DataType
-				f.Cardinality = elem.Cardinality
-				f.Required = elem.Required
-				f.MustSupport = elem.MustSupport
-				f.IsModifier = elem.IsModifier
-				f.IsSummary = elem.IsSummary
-				f.ValueSet = elem.ValueSet
-				f.BindingStrength = elem.BindingStrength
+			if _, ok := schema.MinCard[path]; ok {
+				f.Name = schema.ElementNames[path]
+				f.Description = schema.ElementDescriptions[path]
+				f.DataType = schema.DataTypes[path]
+				f.Cardinality = schema.Cardinality(path)
+				f.Required = schema.Required[path]
+				f.MustSupport = schema.IsMustSupport(path)
+				f.IsModifier = schema.IsModifier[path]
+				f.IsSummary = schema.IsSummary[path]
+				if vs, bs, ok := schema.Binding(path); ok {
+					f.ValueSet = vs
+					f.BindingStrength = bs
+				}
 				f.SchemaFound = true
 			}
 		}

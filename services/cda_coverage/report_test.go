@@ -245,3 +245,65 @@ func TestBuildReport_CategoryOrder_IsFirstSeenInInventory(t *testing.T) {
 		t.Errorf("Problems.Total = %d, want 2", report.Categories[0].Total)
 	}
 }
+
+func TestBuildReport_USCDIClasses_CarriedFromInventoryItems(t *testing.T) {
+	inventory := []InventoryItem{
+		{Category: "Medications", SectionKey: "medications", EntryIndex: 0, USCDIClasses: []string{"Medications"}},
+		{Category: "Medications", SectionKey: "medications", EntryIndex: 1, USCDIClasses: []string{"Medications"}},
+	}
+	report := BuildReport(inventory, map[string]struct{}{})
+	if len(report.Categories) != 1 {
+		t.Fatalf("got %d categories, want 1", len(report.Categories))
+	}
+	got := report.Categories[0].USCDIClasses
+	if len(got) != 1 || got[0] != "Medications" {
+		t.Errorf("USCDIClasses = %v, want [Medications]", got)
+	}
+}
+
+// TestBuildReport_USCDIClasses_UnionedAcrossEntriesInSameCategory covers the
+// rare-but-real case a section's own class set differs entry-to-entry within
+// the SAME category grouping (Category, not SectionKey, is what BuildReport
+// groups by) — the result must be the deduped union, not just the first
+// entry's set silently winning.
+func TestBuildReport_USCDIClasses_UnionedAcrossEntriesInSameCategory(t *testing.T) {
+	inventory := []InventoryItem{
+		{Category: "Social History", SectionKey: "socialHistory", EntryIndex: 0, USCDIClasses: []string{"Health Status Assessments"}},
+		{Category: "Social History", SectionKey: "socialHistory", EntryIndex: 1, USCDIClasses: []string{"Care Plan", "Health Status Assessments"}},
+	}
+	report := BuildReport(inventory, map[string]struct{}{})
+	got := report.Categories[0].USCDIClasses
+	want := map[string]bool{"Care Plan": true, "Health Status Assessments": true}
+	if len(got) != len(want) {
+		t.Fatalf("USCDIClasses = %v, want %d deduped classes", got, len(want))
+	}
+	for _, class := range got {
+		if !want[class] {
+			t.Errorf("unexpected class %q, want only %v", class, want)
+		}
+	}
+}
+
+// TestBuildReport_USCDIClasses_NilWhenItemsHaveNone guards the "absence
+// isn't an error" contract: a report built from items with no USCDIClasses
+// (no vocabulary supplied, or the section isn't in uscdi_v3.json yet) must
+// omit the field entirely (nil, not an empty-but-present slice) so it reads
+// identically to a pre-schema-version-5 report — matching currentSchemaVersion's
+// own additive-only discipline.
+func TestBuildReport_USCDIClasses_NilWhenItemsHaveNone(t *testing.T) {
+	inventory := []InventoryItem{
+		{Category: "Problems", SectionKey: "problems", EntryIndex: 0},
+	}
+	report := BuildReport(inventory, map[string]struct{}{})
+	if report.Categories[0].USCDIClasses != nil {
+		t.Errorf("USCDIClasses = %v, want nil", report.Categories[0].USCDIClasses)
+	}
+}
+
+func TestReport_SchemaVersion_Is5(t *testing.T) {
+	report := BuildReport(nil, map[string]struct{}{})
+	if report.SchemaVersion != 5 {
+		t.Errorf("SchemaVersion = %d, want 5 (USCDI v3 class bridging) — if this changed intentionally, "+
+			"update this test's expectation and currentSchemaVersion's own doc comment together", report.SchemaVersion)
+	}
+}

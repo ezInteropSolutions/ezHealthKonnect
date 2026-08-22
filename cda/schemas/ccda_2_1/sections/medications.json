@@ -139,6 +139,48 @@
       "fixedCode": "ASSERTION",
       "fixedCodeSystem": "2.16.840.1.113883.5.4",
       "anchorRoot": "root"
+    },
+    {
+      "key": "medicationDispenses",
+      "wrapperTag": "entryRelationship",
+      "wrapperAttr": "typeCode",
+      "wrapperAttrValue": "REFR",
+      "observationElementPath": "supply",
+      "templateId": "2.16.840.1.113883.10.20.22.4.18",
+      "templateIdExtension": "2014-06-09",
+      "fields": [
+        {
+          "key": "fillStatus",
+          "uscdiElement": "Fill Status",
+          "conformance": "SHALL",
+          "dataType": "CS",
+          "valueSet": "Medication Fill Status",
+          "xpath": "statusCode/@code"
+        },
+        {
+          "key": "dispenseQuantity",
+          "uscdiElement": "Dispensed Quantity",
+          "conformance": "SHOULD",
+          "dataType": "PQ",
+          "xpath": "quantity/@value",
+          "xpathUnit": "quantity/@unit"
+        },
+        {
+          "key": "dispenseDate",
+          "uscdiElement": "Dispense Date",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "effectiveTime/@value"
+        },
+        {
+          "key": "dispenseSequence",
+          "uscdiElement": "Dispense Sequence Number",
+          "conformance": "SHOULD",
+          "dataType": "INT",
+          "xpath": "repeatNumber/@value"
+        }
+      ],
+      "anchorRoot": "root"
     }
   ]
 }

@@ -54,7 +54,19 @@ var patientScalarFields = []headerFieldMapping{
 	{"firstName", "patient/name/given[1]"},
 	{"middleName", "patient/name/given[2]"},
 	{"lastName", "patient/name/family"},
+	{"nameSuffix", "patient/name/suffix"},
 	{"dateOfBirth", "patient/birthTime/@value"},
+	// sdtc:deceasedInd/deceasedTime are the CDA R2 "Additional CDA" extension
+	// elements (root's xmlns:sdtc, see document_builder.go) USCDI v3's "Date
+	// of Death" maps to — no separate template, just two more Patient-class
+	// fields in schema sequence right after birthTime (confirmed against both
+	// the base C-CDA R2.1 IG and the R4.1 Companion Guide's own worked
+	// example, both agree). deceasedInd's canonical value is the literal
+	// string "true"/"false" (matching the HL7 BL datatype's own @value, same
+	// convention every other field in this table already uses — writeHeaderFields
+	// writes whatever string is given verbatim, no bool-typed special case).
+	{"deceasedInd", "patient/sdtc:deceasedInd/@value"},
+	{"deceasedTime", "patient/sdtc:deceasedTime/@value"},
 	// languageCommunication's own base type sequence is languageCode,
 	// modeCode?, proficiencyLevelCode?, preferenceInd? — all three must stay
 	// in THIS relative order below, all in patientScalarFields (not split
@@ -160,12 +172,22 @@ var authorCodedFields = []headerFieldMapping{
 
 // writeRepeatingGroup creates one NEW <tag> child of root per item in
 // data[arrayKey] ([]interface{} of maps), applying itemMappings (paths
-// relative to that one new element) via WriteAtXPath. Reused for patient
-// ids[], document informants[], and documentationOf performers[] — three
-// header fields that are structurally "a list of records," not one-off.
-// Always creates a fresh element per item (unlike WriteAtXPath's bare-tag
-// find-or-reuse semantics), since repeating siblings — not one shared node
-// — is exactly what these fields need.
+// relative to that one new element) via WriteAtXPath, plus an HL7 @use
+// attribute read straight from the item's own data when present (e.g.
+// patient names[]/addresses[] — USCDI v3's Previous Name/Previous Address,
+// and any other repeatable use: alias, maiden name, work address, ...; this
+// codebase has no verified HL7 EntityNameUse/PostalAddressUse code for
+// "previous/former" — checked against the real C-CDA IG, neither
+// vocabulary's STATIC value set has one — so rather than invent one, the
+// caller supplies whatever @use value their own source system already
+// carries, or none; @use is optional on both <name> and <addr>, and a
+// second sibling element is itself valid, spec-conformant repetition either
+// way). Reused for patient ids[] (no "use" key in that item shape, so this
+// is a no-op for it — same function, not a second one) and
+// names[]/addresses[] — header fields that are structurally "a list of
+// records," not one-off. Always creates a fresh element per item (unlike
+// WriteAtXPath's bare-tag find-or-reuse semantics), since repeating
+// siblings — not one shared node — is exactly what these fields need.
 func writeRepeatingGroup(root *etree.Element, data map[string]interface{}, arrayKey, tag string, itemMappings []headerFieldMapping) {
 	items, ok := data[arrayKey].([]interface{})
 	if !ok {
@@ -177,6 +199,21 @@ func writeRepeatingGroup(root *etree.Element, data map[string]interface{}, array
 			continue
 		}
 		itemEl := root.CreateElement(tag)
+		if use, ok := stringValue(item["use"]); ok {
+			itemEl.CreateAttr("use", use)
+		}
 		writeHeaderFields(itemEl, item, itemMappings)
 	}
+}
+
+// patientAdditionalNameFields maps one names[]-array item's own keys,
+// relative to the <name> element writeRepeatingGroup just created for it —
+// a single given/family/suffix per repeated name (unlike firstName/
+// middleName's given[1]/given[2] positional pair on the ONE primary name; a
+// second given name on an alias/previous name is a real but rare enough
+// case to add if a caller actually needs it, not preemptively).
+var patientAdditionalNameFields = []headerFieldMapping{
+	{"given", "given"},
+	{"family", "family"},
+	{"suffix", "suffix"},
 }

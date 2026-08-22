@@ -38,7 +38,13 @@
 // optional data entry (see cda_build_executor.go's CdaCustodianConfig).
 package builder
 
-import cdaSchema "ezhealthkonnect/cda"
+import (
+	"sort"
+	"strings"
+
+	cdaSchema "ezhealthkonnect/cda"
+	"ezhealthkonnect/uscdi"
+)
 
 // headerKeyTranslation maps schemaKey (a header.<group> field's own Key in
 // ccda_2_1.json) to canonicalKey (the key header_fields.go's writeXHeader
@@ -46,18 +52,21 @@ import cdaSchema "ezhealthkonnect/cda"
 // HeaderFieldCatalog already exposes for cda.map_to_canonical's mapping UI).
 var headerKeyTranslation = map[string]map[string]string{
 	"patient": {
-		"patientId":   "ids", // patientRole/id — repeating group, see idItemFields
-		"givenName":   "firstName",
-		"familyName":  "lastName",
-		"birthDate":   "dateOfBirth",
-		"gender":      "sex",
-		"race":        "race",
-		"ethnicity":   "ethnicity",
-		"addressLine": "address.street",
-		"city":        "address.city",
-		"state":       "address.state",
-		"postalCode":  "address.postalCode",
-		"telecom":     "phone",
+		"patientId":    "ids", // patientRole/id — repeating group, see idItemFields
+		"givenName":    "firstName",
+		"familyName":   "lastName",
+		"nameSuffix":   "nameSuffix",
+		"birthDate":    "dateOfBirth",
+		"gender":       "sex",
+		"deceasedInd":  "deceasedInd",
+		"deceasedTime": "deceasedTime",
+		"race":         "race",
+		"ethnicity":    "ethnicity",
+		"addressLine":  "address.street",
+		"city":         "address.city",
+		"state":        "address.state",
+		"postalCode":   "address.postalCode",
+		"telecom":      "phone",
 	},
 	"author": {
 		"authorNPI":    "npi",
@@ -97,15 +106,27 @@ type HeaderFieldRequirement struct {
 	Key         string `json:"key"`         // canonical key, e.g. "firstName" or "address.street"
 	Label       string `json:"label"`       // human label, from the schema's USCDIElement
 	Conformance string `json:"conformance"` // "SHALL" | "SHOULD"
+
+	// USCDIClasses is the real, ONC-verified USCDI v3 class set this field
+	// maps to (cda/schemas/uscdi_v3.json via uscdi.USCDIVocabulary), omitted
+	// when unmapped — never fabricated. Resolved the same additive,
+	// honestly-absent-when-unknown way Coverage Audit's own
+	// CategoryStat.USCDIClasses already works (services/cda_coverage/
+	// inventory.go's uscdiClassesForSection) — see classesForHeaderField's
+	// own doc comment for the one wrinkle specific to header fields (a
+	// dotted canonicalKey like "address.street" needs to match uscdi_v3.
+	// json's coarser bare "address" cdaField).
+	USCDIClasses []string `json:"uscdiClasses,omitempty"`
 }
 
 // HeaderRequirementsCatalog returns the canonical-keyed requirement list for
 // one header group ("patient" | "author" | "custodian"), sourced live from
 // loader.GetSection("header."+group) and translated via headerKeyTranslation
-// above. Returns nil for an unrecognized group or a schema section that
-// can't be loaded (mirrors HeaderFieldCatalog's own nil-for-unknown
-// convention in canonical_field_catalog.go).
-func HeaderRequirementsCatalog(loader *cdaSchema.CDASchemaLoader, group string) []HeaderFieldRequirement {
+// above. vocabulary may be nil (graceful degradation — see
+// classesForHeaderField). Returns nil for an unrecognized group or a schema
+// section that can't be loaded (mirrors HeaderFieldCatalog's own
+// nil-for-unknown convention in canonical_field_catalog.go).
+func HeaderRequirementsCatalog(loader *cdaSchema.CDASchemaLoader, vocabulary *uscdi.USCDIVocabulary, group string) []HeaderFieldRequirement {
 	translation, ok := headerKeyTranslation[group]
 	if !ok {
 		return nil
@@ -122,10 +143,53 @@ func HeaderRequirementsCatalog(loader *cdaSchema.CDASchemaLoader, group string) 
 			continue // schema field with no build-direction counterpart (e.g. patientIdRoot, custodianIdRoot — root OID is fixed at write time, not user-supplied)
 		}
 		out = append(out, HeaderFieldRequirement{
-			Key:         canonicalKey,
-			Label:       f.USCDIElement,
-			Conformance: f.Conformance,
+			Key:          canonicalKey,
+			Label:        f.USCDIElement,
+			Conformance:  f.Conformance,
+			USCDIClasses: classesForHeaderField(vocabulary, group, canonicalKey),
 		})
 	}
 	return out
+}
+
+// classesForHeaderField filters vocabulary's "header.<group>" elements down
+// to the ones whose own CDAField matches canonicalKey, returning the
+// deduped, alphabetically-sorted class set (nil when vocabulary is nil,
+// unmapped, or — the common case for section-level-only USCDI elements like
+// header.author's Provenance authorTime/authorOrganization, whose CDAField
+// is "" since they don't correspond to any one specific canonical field —
+// no match at all, correctly not attributed to an unrelated field like
+// "given" or "family").
+//
+// canonicalKey may be dotted (e.g. "address.street", "address.city") —
+// header_requirements.go's own translation table splits ONE schema field
+// ("addressLine"/"city"/"state"/"postalCode" in header.patient.json, all
+// backing the same canonical "address" object) into 4 separate UI-facing
+// requirement rows, but uscdi_v3.json's own header.patient entry for address
+// uses the coarser bare "address" cdaField — matching on the part before the
+// first "." lets all 4 rows correctly resolve to the same real USCDI class
+// instead of silently finding nothing due to a granularity mismatch that
+// isn't a real absence.
+func classesForHeaderField(vocabulary *uscdi.USCDIVocabulary, group, canonicalKey string) []string {
+	if vocabulary == nil {
+		return nil
+	}
+	prefix := canonicalKey
+	if dot := strings.Index(canonicalKey, "."); dot != -1 {
+		prefix = canonicalKey[:dot]
+	}
+	seen := make(map[string]bool)
+	var classes []string
+	for _, el := range vocabulary.GetByCDASection("header." + group) {
+		if el.CDAField != canonicalKey && el.CDAField != prefix {
+			continue
+		}
+		if seen[el.Class] {
+			continue
+		}
+		seen[el.Class] = true
+		classes = append(classes, el.Class)
+	}
+	sort.Strings(classes)
+	return classes
 }

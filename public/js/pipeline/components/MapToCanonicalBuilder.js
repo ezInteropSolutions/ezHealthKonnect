@@ -178,6 +178,7 @@ class MapToCanonicalBuilder {
             </div>
 
             ${typeof CDARequirementsHelper !== 'undefined' ? CDARequirementsHelper.renderCompletenessBanner(missing) : ''}
+            ${typeof CDARequirementsHelper !== 'undefined' ? CDARequirementsHelper.renderUSCDISummary(this._requirements) : ''}
 
             <div class="config-group" style="margin-bottom:1.1rem;">
                 <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Output Field</label>

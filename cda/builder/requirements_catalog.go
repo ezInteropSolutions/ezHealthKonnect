@@ -10,7 +10,10 @@
 // author, and custodian (see header_requirements.go).
 package builder
 
-import cdaSchema "ezhealthkonnect/cda"
+import (
+	cdaSchema "ezhealthkonnect/cda"
+	"ezhealthkonnect/uscdi"
+)
 
 // SectionRequirement is one section's doc-type-specific conformance level.
 type SectionRequirement struct {
@@ -18,6 +21,13 @@ type SectionRequirement struct {
 	DisplayName string `json:"displayName"`
 	LOINCCode   string `json:"loincCode"`
 	Conformance string `json:"conformance"` // "SHALL" | "SHOULD" | "MAY" — for THIS document type
+
+	// USCDIClasses is the real, ONC-verified USCDI v3 class set this section
+	// maps to (cda/schemas/uscdi_v3.json via uscdi.USCDIVocabulary.
+	// ClassesForSection), omitted when unmapped — never fabricated. Same
+	// additive, honestly-absent-when-unknown principle Coverage Audit's own
+	// CategoryStat.USCDIClasses already established.
+	USCDIClasses []string `json:"uscdiClasses,omitempty"`
 }
 
 // DocumentTypeRequirements is the combined guided-configuration catalog for
@@ -36,9 +46,12 @@ type DocumentTypeRequirements struct {
 var headerRequirementGroups = []string{"patient", "author", "custodian", "legalAuthenticator"}
 
 // GetDocumentTypeRequirements builds the combined requirements catalog for
-// documentType. Returns nil if documentType is unknown (mirrors
-// CDASchemaLoader.GetDocumentTypeSections' own nil-for-unknown convention).
-func GetDocumentTypeRequirements(loader *cdaSchema.CDASchemaLoader, documentType string) *DocumentTypeRequirements {
+// documentType. vocabulary may be nil (graceful degradation — every
+// USCDIClasses field simply comes back nil/omitted, same as Coverage Audit's
+// own worker_pool.go handles a failed uscdi_v3.json load). Returns nil if
+// documentType is unknown (mirrors CDASchemaLoader.GetDocumentTypeSections'
+// own nil-for-unknown convention).
+func GetDocumentTypeRequirements(loader *cdaSchema.CDASchemaLoader, vocabulary *uscdi.USCDIVocabulary, documentType string) *DocumentTypeRequirements {
 	sectionInfo := loader.GetDocumentTypeSections(documentType)
 	if sectionInfo == nil {
 		return nil
@@ -53,6 +66,7 @@ func GetDocumentTypeRequirements(loader *cdaSchema.CDASchemaLoader, documentType
 			}
 			sections = append(sections, SectionRequirement{
 				Key: key, DisplayName: sec.DisplayName, LOINCCode: sec.LOINCCode, Conformance: conformance,
+				USCDIClasses: vocabulary.ClassesForSection(key),
 			})
 		}
 	}
@@ -62,7 +76,7 @@ func GetDocumentTypeRequirements(loader *cdaSchema.CDASchemaLoader, documentType
 
 	headerGroups := make(map[string][]HeaderFieldRequirement, len(headerRequirementGroups))
 	for _, group := range headerRequirementGroups {
-		headerGroups[group] = HeaderRequirementsCatalog(loader, group)
+		headerGroups[group] = HeaderRequirementsCatalog(loader, vocabulary, group)
 	}
 
 	return &DocumentTypeRequirements{

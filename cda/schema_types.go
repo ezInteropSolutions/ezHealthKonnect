@@ -272,6 +272,14 @@ type AlternateEntryArchetype struct {
 	// need their own <templateId>/FixedCode/FixedStatusCode but aren't
 	// reachable via EntryElementPath alone.
 	StructuralTemplateIDs []StructuralTemplateAnchor `json:"structuralTemplateIds,omitempty"`
+
+	// ComponentGroups declares this alternate's own heterogeneous-component
+	// wrappers (see ComponentGroup's own doc comment) — e.g. Medical
+	// Equipment's Procedure Activity Procedure alternate carrying a UDI
+	// Organizer. Added here (not on CDASectionDef) because the first real
+	// need for this mechanism is on an alternate shape; add it to
+	// CDASectionDef too, symmetrically, if a primary shape ever needs one.
+	ComponentGroups []ComponentGroup `json:"componentGroups,omitempty"`
 }
 
 // RepeatingGroup is the schema-driven, data-only counterpart to hand-writing
@@ -424,6 +432,92 @@ type StructuralTemplateAnchor struct {
 	// statusCode="completed" (CONF:1098-31505) even though a bare <act> tag
 	// otherwise defaults to "active".
 	FixedStatusCode string `json:"fixedStatusCode,omitempty"`
+}
+
+// ComponentGroup models a shared wrapper element (e.g. C-CDA's UDI Organizer)
+// containing a FIXED, enumerated set of independently-optional, differently-
+// shaped sub-observations — the heterogeneous counterpart to RepeatingGroup.
+// RepeatingGroup assumes N items that all share ONE TemplateID/FixedCode/
+// Fields shape (e.g. Medication's 0..* Indications); ComponentGroup instead
+// has a known, finite Components list, each with its OWN TemplateID/
+// FixedCode/Fields/DataType, where any subset (as few as zero, though the
+// whole group is only emitted if at least one Component has data) may be
+// present per real document.
+//
+// This shape can't be built with WriteAtXPath's own predicate-matching
+// (xpath_writer.go's findOrCreateChild/candidatesForSegment): disambiguating
+// repeated same-tag siblings there requires the AMBIGUOUS segment itself to
+// carry a "[predicate]" (the discriminator-lookahead only fires when the
+// CURRENT segment has one). A UDI Organizer's own <component> wrapper has no
+// attributes to predicate on — it's bare and repeated, distinguished only by
+// what's nested inside it — so a bare "component" xpath segment would always
+// resolve to the FIRST existing <component>, wrongly collapsing every
+// sub-observation into one. writeComponentGroups (cda/builder/
+// entry_archetypes.go) instead always DIRECT-CREATES a new WrapperTag/
+// ComponentTag sibling per present Component, the same "never risk a
+// predicate match, just create" approach writeRepeatingGroups already uses
+// for its own items.
+type ComponentGroup struct {
+	Key string `json:"key"` // doc/debug label only, e.g. "udiOrganizer"
+
+	// WrapperTag/WrapperAttr/WrapperAttrValue mirror RepeatingGroup's own
+	// fields of the same name — the element (e.g. "entryRelationship",
+	// typeCode="COMP") that hosts this group's own OrganizerTag.
+	WrapperTag       string `json:"wrapperTag"`
+	WrapperAttr      string `json:"wrapperAttr,omitempty"`
+	WrapperAttrValue string `json:"wrapperAttrValue,omitempty"`
+
+	// OrganizerTag/OrganizerTemplateID/OrganizerTemplateIDExt/
+	// OrganizerFixedCode* describe the ONE shared wrapper element (e.g.
+	// "organizer", UDI Organizer's own templateId + fixed LOINC 74711-3)
+	// that every Component nests inside. OrganizerFixedStatusCode is rarely
+	// needed — tagBoilerplate's own per-tag default (e.g. "organizer" ->
+	// "completed") already covers UDI Organizer's own SHALL — but kept for
+	// symmetry with StructuralTemplateAnchor.FixedStatusCode, for a future
+	// ComponentGroup on a tag whose boilerplate default doesn't match.
+	OrganizerTag               string `json:"organizerTag"`
+	OrganizerTemplateID        string `json:"organizerTemplateId"`
+	OrganizerTemplateIDExt     string `json:"organizerTemplateIdExtension,omitempty"`
+	OrganizerFixedCode         string `json:"organizerFixedCode,omitempty"`
+	OrganizerFixedCodeSystem   string `json:"organizerFixedCodeSystem,omitempty"`
+	OrganizerFixedCodeDisplay  string `json:"organizerFixedCodeDisplay,omitempty"`
+	OrganizerFixedStatusCode   string `json:"organizerFixedStatusCode,omitempty"`
+
+	// OrganizerIDField/OrganizerIDSystemField are canonical field KEYS read
+	// from the SAME top-level record map buildAlternateEntry already has
+	// (NOT a nested per-component map) — the organizer's own <id>/@extension
+	// and @root. Pointing these at a field key ANOTHER part of the section
+	// already uses (e.g. Medical Equipment's own Tier-1 "deviceIdentifier"/
+	// "deviceIdentifierSystem" on Product Instance) satisfies a spec
+	// requirement like "the Organizer id SHALL match Product Instance's own
+	// id" for free — one caller-supplied value flows into both places, no
+	// new correlation logic.
+	OrganizerIDField       string `json:"organizerIdField"`
+	OrganizerIDSystemField string `json:"organizerIdSystemField,omitempty"`
+
+	Components []ComponentDef `json:"components"`
+}
+
+// ComponentDef is ONE possible sub-observation within a ComponentGroup,
+// gated by its own Key: emitted only when record[Key] has a non-empty value
+// (checked the same way RepeatingGroup.RequiredPaths already checks
+// presence, via stringValue). Fields' XPaths are bare, relative to this
+// component's own resolved ObsElementPath element — the same convention
+// RepeatingGroup.Fields already uses (resolved at BUILD time by
+// writeFieldValue, never at schema-load time by resolveXPath).
+type ComponentDef struct {
+	Key            string `json:"key"`
+	ComponentTag   string `json:"componentTag"`   // e.g. "component"
+	ObsElementPath string `json:"obsElementPath"` // e.g. "observation", relative to ComponentTag
+
+	TemplateID    string `json:"templateId"`
+	TemplateIDExt string `json:"templateIdExtension,omitempty"`
+
+	FixedCode        string `json:"fixedCode"`
+	FixedCodeSystem  string `json:"fixedCodeSystem"`
+	FixedCodeDisplay string `json:"fixedCodeDisplay,omitempty"`
+
+	Fields []*CDAFieldDef `json:"fields"`
 }
 
 // CDAFieldDef defines one extractable field within a CDA section.

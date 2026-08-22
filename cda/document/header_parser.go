@@ -306,6 +306,9 @@ func (h *headerParser) parseComponentOf(root *etree.Element) *CDAEncounter {
 		loc := &CDALocation{}
 		if hcfEl := locEl.SelectElement("healthCareFacility"); hcfEl != nil {
 			hcf := CDAHealthCareFacility{}
+			for _, idEl := range hcfEl.SelectElements("id") {
+				hcf.Ids = append(hcf.Ids, parseII(idEl))
+			}
 			if c := hcfEl.SelectElement("code"); c != nil {
 				hcf.Code = parseCD(c)
 			}

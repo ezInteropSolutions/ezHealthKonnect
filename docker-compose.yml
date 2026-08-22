@@ -47,6 +47,7 @@ services:
   # Ollama — local LLM inference server (no PHI leaves the network)
   ollama:
     image: ollama/ollama:latest
+    pull_policy: if_not_present
     container_name: ezhealthkonnect-ollama
     restart: unless-stopped
     ports:
@@ -75,6 +76,7 @@ services:
   # ollama-init pulls required models once on first startup
   ollama-init:
     image: ollama/ollama:latest
+    pull_policy: if_not_present
     container_name: ezhealthkonnect-ollama-init
     depends_on:
       ollama:

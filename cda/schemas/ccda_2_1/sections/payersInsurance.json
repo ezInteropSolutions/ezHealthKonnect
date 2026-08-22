@@ -21,11 +21,25 @@
       "xpathDisplay": "entry/act/entryRelationship[@typeCode='COMP']/act/code/@displayName"
     },
     {
+      "key": "coverageCheckDate",
+      "uscdiElement": "Coverage Status",
+      "conformance": "SHOULD",
+      "dataType": "TS",
+      "xpath": "entry/act/effectiveTime/@value"
+    },
+    {
       "key": "payerName",
       "uscdiElement": "Payer Name",
       "conformance": "SHALL",
       "dataType": "ST",
       "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/performer/assignedEntity/representedOrganization/name"
+    },
+    {
+      "key": "payerId",
+      "uscdiElement": "Payer Identifier",
+      "conformance": "SHOULD",
+      "dataType": "II",
+      "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/performer/assignedEntity/id/@extension"
     },
     {
       "key": "memberId",
@@ -35,11 +49,19 @@
       "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='COV']/participantRole/id/@extension"
     },
     {
+      "key": "subscriberRelationship",
+      "uscdiElement": "Relationship to Subscriber",
+      "conformance": "SHOULD",
+      "dataType": "CD",
+      "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='COV']/participantRole/code/@code",
+      "xpathDisplay": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='COV']/participantRole/code/@displayName"
+    },
+    {
       "key": "groupNumber",
       "uscdiElement": "Group Number",
       "conformance": "SHOULD",
       "dataType": "ST",
-      "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='HLD']/participantRole/id/@extension"
+      "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/id/@extension"
     },
     {
       "key": "subscriberName",
@@ -47,6 +69,13 @@
       "conformance": "SHOULD",
       "dataType": "ST",
       "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='HLD']/participantRole/playingEntity/name/given"
+    },
+    {
+      "key": "subscriberId",
+      "uscdiElement": "Subscriber Identifier",
+      "conformance": "SHOULD",
+      "dataType": "ST",
+      "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='HLD']/participantRole/id/@extension"
     }
   ],
   "entryElementPath": "entry/act",

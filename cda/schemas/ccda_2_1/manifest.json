@@ -462,6 +462,7 @@
     "header.author",
     "header.custodian",
     "header.legalAuthenticator",
+    "header.relatedPerson",
     "findingsDIR",
     "anesthesia",
     "procedureDescription",

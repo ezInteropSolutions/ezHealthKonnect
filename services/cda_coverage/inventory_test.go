@@ -7,6 +7,7 @@ import (
 
 	cdaSchema "ezhealthkonnect/cda"
 	"ezhealthkonnect/services/executors"
+	"ezhealthkonnect/uscdi"
 )
 
 func testSchemaLoader(t *testing.T) *cdaSchema.CDASchemaLoader {
@@ -16,6 +17,35 @@ func testSchemaLoader(t *testing.T) *cdaSchema.CDASchemaLoader {
 		t.Fatalf("NewCDASchemaLoader: %v", err)
 	}
 	return loader
+}
+
+func testVocabulary(t *testing.T) *uscdi.USCDIVocabulary {
+	t.Helper()
+	vocab, err := uscdi.NewUSCDIVocabulary("../../cda/schemas/uscdi_v3.json")
+	if err != nil {
+		t.Fatalf("NewUSCDIVocabulary: %v", err)
+	}
+	return vocab
+}
+
+// socialHistorySectionNode builds a synthetic GenericXMLToJSON-shaped
+// <section> node matching the real Social History section's templateId —
+// the richest real multi-USCDI-class section (Health Status Assessments,
+// Care Plan, and Patient Demographics/Information all resolve here — see
+// uscdi_v3.json's smokingStatus/sdohAssessment/sexualOrientation entries).
+func socialHistorySectionNode(n int) map[string]interface{} {
+	entries := make([]interface{}, n)
+	for i := range entries {
+		entries[i] = map[string]interface{}{"@typeCode": "DRIV"}
+	}
+	return map[string]interface{}{
+		"templateId": []interface{}{
+			map[string]interface{}{"@root": "2.16.840.1.113883.10.20.22.2.17", "@extension": "2015-08-01"},
+		},
+		"code":  map[string]interface{}{"@code": "29762-2"},
+		"title": "Social History",
+		"entry": entries,
+	}
 }
 
 // medicationsSectionNode builds a synthetic GenericXMLToJSON-shaped <section>
@@ -67,7 +97,7 @@ func TestBuildInventory_RecognizedSection(t *testing.T) {
 		map[string]interface{}{"section": medicationsSectionNode(3)},
 	)
 
-	items := BuildInventory(mirror, loader)
+	items := BuildInventory(mirror, loader, nil)
 	if len(items) != 3 {
 		t.Fatalf("got %d items, want 3", len(items))
 	}
@@ -103,7 +133,7 @@ func TestBuildInventory_UnrecognizedSection_IsUnclassified(t *testing.T) {
 		map[string]interface{}{"section": unrecognizedSectionNode("", 2)},
 	)
 
-	items := BuildInventory(mirror, loader)
+	items := BuildInventory(mirror, loader, nil)
 	if len(items) != 2 {
 		t.Fatalf("got %d items, want 2", len(items))
 	}
@@ -141,7 +171,7 @@ func TestBuildInventory_TitleFallback_RegisteredKey(t *testing.T) {
 		map[string]interface{}{"section": unrecognizedSectionNode("Advance Directives", 1)},
 	)
 
-	items := BuildInventory(mirror, loader)
+	items := BuildInventory(mirror, loader, nil)
 	if len(items) != 1 {
 		t.Fatalf("got %d items, want 1", len(items))
 	}
@@ -175,7 +205,7 @@ func TestBuildInventory_TitleFallback_UnregisteredKey(t *testing.T) {
 		map[string]interface{}{"section": unrecognizedSectionNode("Reason for Visit", 1)},
 	)
 
-	items := BuildInventory(mirror, loader)
+	items := BuildInventory(mirror, loader, nil)
 	if len(items) != 1 {
 		t.Fatalf("got %d items, want 1", len(items))
 	}
@@ -198,7 +228,7 @@ func TestBuildInventory_MultipleSections_MixedRecognition(t *testing.T) {
 		map[string]interface{}{"section": unrecognizedSectionNode("Something New", 1)},
 	)
 
-	items := BuildInventory(mirror, loader)
+	items := BuildInventory(mirror, loader, nil)
 	if len(items) != 3 {
 		t.Fatalf("got %d items, want 3 (2 medications + 1 title-fallback-classified 'Something New')", len(items))
 	}
@@ -206,17 +236,17 @@ func TestBuildInventory_MultipleSections_MixedRecognition(t *testing.T) {
 
 func TestBuildInventory_NilInputs(t *testing.T) {
 	loader := testSchemaLoader(t)
-	if items := BuildInventory(nil, loader); items != nil {
+	if items := BuildInventory(nil, loader, nil); items != nil {
 		t.Errorf("BuildInventory(nil, loader) = %v, want nil", items)
 	}
-	if items := BuildInventory(mirrorWithSections(), nil); items != nil {
+	if items := BuildInventory(mirrorWithSections(), nil, nil); items != nil {
 		t.Errorf("BuildInventory(mirror, nil) = %v, want nil", items)
 	}
 }
 
 func TestBuildInventory_NoSections_ReturnsEmpty(t *testing.T) {
 	loader := testSchemaLoader(t)
-	items := BuildInventory(mirrorWithSections(), loader)
+	items := BuildInventory(mirrorWithSections(), loader, nil)
 	if len(items) != 0 {
 		t.Errorf("got %d items, want 0 for a document with no sections", len(items))
 	}
@@ -225,7 +255,7 @@ func TestBuildInventory_NoSections_ReturnsEmpty(t *testing.T) {
 func TestBuildInventory_DefaultsToEntryLevel(t *testing.T) {
 	loader := testSchemaLoader(t)
 	mirror := mirrorWithSections(map[string]interface{}{"section": medicationsSectionNode(2)})
-	if got := BuildInventory(mirror, loader); len(got) != 2 {
+	if got := BuildInventory(mirror, loader, nil); len(got) != 2 {
 		t.Errorf("BuildInventory (entry-level default) = %d items, want 2 (no element items)", len(got))
 	}
 }
@@ -311,12 +341,12 @@ func TestBuildInventoryWithGranularity_ElementLevel(t *testing.T) {
 		"entry": []interface{}{entry},
 	}})
 
-	entryLevel := BuildInventoryWithGranularity(mirror, loader, false)
+	entryLevel := BuildInventoryWithGranularity(mirror, loader, nil, false)
 	if len(entryLevel) != 1 {
 		t.Fatalf("entry-level: got %d items, want 1", len(entryLevel))
 	}
 
-	elementLevel := BuildInventoryWithGranularity(mirror, loader, true)
+	elementLevel := BuildInventoryWithGranularity(mirror, loader, nil, true)
 	// 1 entry-level item + 2 element items (code, statusCode).
 	if len(elementLevel) != 3 {
 		t.Fatalf("element-level: got %d items, want 3 -- got %+v", len(elementLevel), elementLevel)
@@ -352,7 +382,7 @@ func TestBuildInventoryWithGranularity_ElementLevel(t *testing.T) {
 func TestBuildInventoryWithGranularity_NoHeaderData_ProducesNoHeaderItems(t *testing.T) {
 	loader := testSchemaLoader(t)
 	mirror := mirrorWithSections(map[string]interface{}{"section": medicationsSectionNode(1)})
-	items := BuildInventoryWithGranularity(mirror, loader, true)
+	items := BuildInventoryWithGranularity(mirror, loader, nil, true)
 	for _, item := range items {
 		if item.Category == headerCategory {
 			t.Errorf("unexpected header item from a mirror with no header data: %+v", item)
@@ -383,7 +413,7 @@ func TestBuildInventoryWithGranularity_HeaderPatient(t *testing.T) {
 		},
 	})
 
-	items := BuildInventoryWithGranularity(mirror, loader, true)
+	items := BuildInventoryWithGranularity(mirror, loader, nil, true)
 	var sawEntry, sawId, sawName bool
 	for _, item := range items {
 		if item.SectionKey != "header.patient" {
@@ -418,7 +448,7 @@ func TestBuildInventoryWithGranularity_HeaderAuthors_MultipleDistinctEntries(t *
 		},
 	})
 
-	items := BuildInventoryWithGranularity(mirror, loader, true)
+	items := BuildInventoryWithGranularity(mirror, loader, nil, true)
 	entryIndices := map[int]bool{}
 	var sawAuthor0Device, sawAuthor1Person bool
 	for _, item := range items {
@@ -456,7 +486,7 @@ func TestBuildInventoryWithGranularity_HeaderCustodian(t *testing.T) {
 		},
 	})
 
-	items := BuildInventoryWithGranularity(mirror, loader, true)
+	items := BuildInventoryWithGranularity(mirror, loader, nil, true)
 	var sawEntry, sawName bool
 	for _, item := range items {
 		if item.SectionKey != "header.custodian" {
@@ -489,7 +519,7 @@ func TestBuildInventoryWithGranularity_HeaderEncompassingEncounter(t *testing.T)
 		},
 	})
 
-	items := BuildInventoryWithGranularity(mirror, loader, true)
+	items := BuildInventoryWithGranularity(mirror, loader, nil, true)
 	var sawEntry, sawId, sawFacilityCode bool
 	for _, item := range items {
 		if item.SectionKey != "header.encompassingEncounter" {
@@ -549,7 +579,7 @@ func TestBuildInventoryWithGranularity_HeaderUntrackedGroups_AlwaysGap(t *testin
 	seenEntry := map[string]bool{}
 	seenElement := map[string]bool{}
 
-	items := BuildInventoryWithGranularity(mirror, loader, true)
+	items := BuildInventoryWithGranularity(mirror, loader, nil, true)
 	for _, item := range items {
 		if _, want := wantSectionKeys[item.SectionKey]; !want {
 			continue
@@ -596,7 +626,7 @@ func TestBuildInventory_NonXMLBody_ProducesPseudoItem(t *testing.T) {
 		},
 	}
 
-	items := BuildInventory(mirror, loader)
+	items := BuildInventory(mirror, loader, nil)
 	if len(items) != 1 {
 		t.Fatalf("got %d items, want 1 (the nonXMLBody pseudo-item)", len(items))
 	}
@@ -615,8 +645,102 @@ func TestBuildInventory_NonXMLBody_ProducesPseudoItem(t *testing.T) {
 // inventing ground truth, not reporting it.
 func TestBuildInventory_NoStructuredBodyNoNonXMLBody_ProducesNoPseudoItem(t *testing.T) {
 	loader := testSchemaLoader(t)
-	items := BuildInventory(map[string]interface{}{}, loader)
+	items := BuildInventory(map[string]interface{}{}, loader, nil)
 	if len(items) != 0 {
 		t.Errorf("got %d items, want 0 for a mirror with neither structuredBody nor nonXMLBody -- %+v", len(items), items)
+	}
+}
+
+func TestUSCDIClassesForSection_NilVocabularyOrEmptySectionKey_ReturnsNil(t *testing.T) {
+	vocab := testVocabulary(t)
+	if got := uscdiClassesForSection(nil, "medications"); got != nil {
+		t.Errorf("uscdiClassesForSection(nil vocab, ...) = %v, want nil", got)
+	}
+	if got := uscdiClassesForSection(vocab, ""); got != nil {
+		t.Errorf("uscdiClassesForSection(vocab, \"\") = %v, want nil", got)
+	}
+}
+
+// TestUSCDIClassesForSection_UnmappedSection_ReturnsNilNotAFabricatedGuess
+// guards the honesty guarantee this whole bridge exists for: a section
+// uscdi_v3.json has no entry for yet must read as "not yet in the USCDI v3
+// vocabulary," never as a fabricated empty-but-non-nil "no coverage" signal.
+// "goals" is deliberately used here since it's a real, schema-recognized
+// section with no USCDI v3 vocabulary entry as of this test (unlike most
+// sections touched during Phase A/A2, which now do) — if a future Phase
+// A3 adds one, this test should be repointed at another still-unmapped
+// section rather than deleted, so the "unmapped renders as nil" guarantee
+// stays covered.
+func TestUSCDIClassesForSection_UnmappedSection_ReturnsNilNotAFabricatedGuess(t *testing.T) {
+	vocab := testVocabulary(t)
+	if got := uscdiClassesForSection(vocab, "not-a-real-section-key"); got != nil {
+		t.Errorf("uscdiClassesForSection(vocab, unmapped) = %v, want nil", got)
+	}
+}
+
+func TestUSCDIClassesForSection_SingleClassSection(t *testing.T) {
+	vocab := testVocabulary(t)
+	got := uscdiClassesForSection(vocab, "medications")
+	if len(got) != 1 || got[0] != "Medications" {
+		t.Errorf("uscdiClassesForSection(vocab, medications) = %v, want [Medications]", got)
+	}
+}
+
+// TestUSCDIClassesForSection_MultiClassSection guards the finding that a
+// single CDA section can legitimately carry elements from more than one
+// USCDI class at once — socialHistory is the richest real example (Health
+// Status Assessments' smokingStatus/pregnancyStatus, Care Plan's
+// sdohAssessment, Patient Demographics/Information's sexualOrientation/
+// genderIdentity all live in this one section). A naive "one class per
+// section" implementation would silently drop classes here.
+func TestUSCDIClassesForSection_MultiClassSection(t *testing.T) {
+	vocab := testVocabulary(t)
+	got := uscdiClassesForSection(vocab, "socialHistory")
+	want := map[string]bool{"Care Plan": true, "Health Status Assessments": true, "Patient Demographics/Information": true}
+	if len(got) != len(want) {
+		t.Fatalf("uscdiClassesForSection(vocab, socialHistory) = %v, want %d classes", got, len(want))
+	}
+	for _, class := range got {
+		if !want[class] {
+			t.Errorf("unexpected class %q in socialHistory's USCDI class set: %v", class, got)
+		}
+	}
+}
+
+// TestBuildInventoryWithGranularity_PopulatesUSCDIClassesEndToEnd proves the
+// full wiring (BuildInventoryWithGranularity -> classifySection ->
+// uscdiClassesForSection -> InventoryItem.USCDIClasses), not just the
+// resolver function in isolation.
+func TestBuildInventoryWithGranularity_PopulatesUSCDIClassesEndToEnd(t *testing.T) {
+	loader := testSchemaLoader(t)
+	vocab := testVocabulary(t)
+	mirror := mirrorWithSections(map[string]interface{}{"section": medicationsSectionNode(2)})
+
+	items := BuildInventoryWithGranularity(mirror, loader, vocab, false)
+	if len(items) != 2 {
+		t.Fatalf("got %d items, want 2", len(items))
+	}
+	for i, item := range items {
+		if len(item.USCDIClasses) != 1 || item.USCDIClasses[0] != "Medications" {
+			t.Errorf("item[%d].USCDIClasses = %v, want [Medications]", i, item.USCDIClasses)
+		}
+	}
+}
+
+// TestBuildInventoryWithGranularity_NilVocabulary_LeavesUSCDIClassesNil
+// confirms the feature is fully opt-in at the vocabulary level too (not just
+// per-interface via cda_coverage_audit_config) — a nil vocabulary (e.g. the
+// vocabulary file failed to load at startup) must not panic and must leave
+// every item's USCDIClasses nil, matching pre-Phase-B report shape exactly.
+func TestBuildInventoryWithGranularity_NilVocabulary_LeavesUSCDIClassesNil(t *testing.T) {
+	loader := testSchemaLoader(t)
+	mirror := mirrorWithSections(map[string]interface{}{"section": medicationsSectionNode(1)})
+
+	items := BuildInventoryWithGranularity(mirror, loader, nil, false)
+	if len(items) != 1 {
+		t.Fatalf("got %d items, want 1", len(items))
+	}
+	if items[0].USCDIClasses != nil {
+		t.Errorf("USCDIClasses = %v, want nil with a nil vocabulary", items[0].USCDIClasses)
 	}
 }

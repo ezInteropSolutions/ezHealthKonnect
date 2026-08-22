@@ -23,6 +23,7 @@ import (
 	cdaSchema "ezhealthkonnect/cda"
 	cdadocument "ezhealthkonnect/cda/document"
 	"ezhealthkonnect/services/executors"
+	"ezhealthkonnect/uscdi"
 )
 
 // InventoryItem is one section entry, or (when ElementPath is set) one
@@ -57,6 +58,22 @@ type InventoryItem struct {
 	// sides must agree without either needing information only the other
 	// has).
 	ElementPath string
+
+	// USCDIClasses is the real, ONC-verified USCDI v3 class set this item's
+	// SectionKey resolves to via uscdi_v3.json (uscdi.USCDIVocabulary.
+	// GetByCDASection) — nil when the vocabulary wasn't supplied, the
+	// section is unclassified, or (the common case today) uscdi_v3.json
+	// simply doesn't have an entry for this section yet. Deliberately
+	// distinct from Category (CDASectionDef.USCDIClass) — see this
+	// package's own plan doc on why the schema's own "uscdiClass" field
+	// isn't a verified USCDI crosswalk and must never be conflated with
+	// this one. A section can resolve to MORE than one class at once (e.g.
+	// socialHistory -> Health Status Assessments and Care Plan and Patient
+	// Demographics/Information) — always the full set, never collapsed to
+	// one, and never narrowed to "the one class THIS entry belongs to"
+	// (that would need resolving a raw element path back to a schema
+	// CDAFieldDef.Key, which nothing does today).
+	USCDIClasses []string
 }
 
 // TrackingKey returns the CDAEntryKey (optionally "/elementPath"-suffixed)
@@ -82,15 +99,18 @@ func (i InventoryItem) TrackingKey() string {
 // re-implemented, so classification never silently drifts between parsing
 // and auditing. Entry-level granularity only — see BuildInventoryWithGranularity
 // for the element-level variant.
-func BuildInventory(xmlMirror map[string]interface{}, schemaLoader *cdaSchema.CDASchemaLoader) []InventoryItem {
-	return BuildInventoryWithGranularity(xmlMirror, schemaLoader, false)
+func BuildInventory(xmlMirror map[string]interface{}, schemaLoader *cdaSchema.CDASchemaLoader, vocabulary *uscdi.USCDIVocabulary) []InventoryItem {
+	return BuildInventoryWithGranularity(xmlMirror, schemaLoader, vocabulary, false)
 }
 
 // BuildInventoryWithGranularity is BuildInventory, plus element-level items
 // (one per XML element within each entry, not just the entry itself) when
 // elementLevel is true. The interface's own cda_coverage_audit_config.
 // granularity field controls this — see services/cda_coverage/worker_pool.go.
-func BuildInventoryWithGranularity(xmlMirror map[string]interface{}, schemaLoader *cdaSchema.CDASchemaLoader, elementLevel bool) []InventoryItem {
+// vocabulary may be nil (every item's USCDIClasses is then nil too) — this
+// feature works exactly as before without it, per report.go's own
+// schema-version-4-vs-5 additive discipline.
+func BuildInventoryWithGranularity(xmlMirror map[string]interface{}, schemaLoader *cdaSchema.CDASchemaLoader, vocabulary *uscdi.USCDIVocabulary, elementLevel bool) []InventoryItem {
 	if xmlMirror == nil || schemaLoader == nil {
 		return nil
 	}
@@ -116,6 +136,7 @@ func BuildInventoryWithGranularity(xmlMirror map[string]interface{}, schemaLoade
 			continue
 		}
 		category, sectionKey, title := classifySection(sectionMap, schemaLoader)
+		uscdiClasses := uscdiClassesForSection(vocabulary, sectionKey)
 
 		entries := executors.ResolveCDAPaths(sectionMap, "entry[*]", true)
 		for idx, entryNode := range entries {
@@ -124,6 +145,7 @@ func BuildInventoryWithGranularity(xmlMirror map[string]interface{}, schemaLoade
 				SectionKey:   sectionKey,
 				SectionTitle: title,
 				EntryIndex:   idx,
+				USCDIClasses: uscdiClasses,
 			})
 			if !elementLevel {
 				continue
@@ -139,12 +161,24 @@ func BuildInventoryWithGranularity(xmlMirror map[string]interface{}, schemaLoade
 					SectionTitle: title,
 					EntryIndex:   idx,
 					ElementPath:  elementPath,
+					USCDIClasses: uscdiClasses,
 				})
 			}
 		}
 	}
-	items = append(items, buildHeaderInventory(xmlMirror, elementLevel)...)
+	items = append(items, buildHeaderInventory(xmlMirror, vocabulary, elementLevel)...)
 	return items
+}
+
+// uscdiClassesForSection resolves sectionKey's real USCDI v3 class set —
+// a thin wrapper around uscdi.USCDIVocabulary.ClassesForSection (the class-
+// resolution logic itself lives there now, shared with cda/builder's Build
+// Requirements bridge, rather than duplicated in each consumer). Kept as its
+// own named function here (not inlined at each call site) purely to avoid
+// touching every call site's nil-vocabulary variable name across this file
+// and inventory_test.go.
+func uscdiClassesForSection(vocabulary *uscdi.USCDIVocabulary, sectionKey string) []string {
+	return vocabulary.ClassesForSection(sectionKey)
 }
 
 // buildNonXMLBodyInventoryItem reports a document with no structuredBody at
@@ -217,27 +251,29 @@ const headerCategory = "Document Header"
 // translator counterpart to match against (nothing ever resolves a path
 // against them), so their raw tag names are traced directly against
 // header_parser.go instead.
-func buildHeaderInventory(xmlMirror map[string]interface{}, elementLevel bool) []InventoryItem {
+func buildHeaderInventory(xmlMirror map[string]interface{}, vocabulary *uscdi.USCDIVocabulary, elementLevel bool) []InventoryItem {
 	var items []InventoryItem
-	items = append(items, headerSingularInventory(xmlMirror, elementLevel,
+	items = append(items, headerSingularInventory(xmlMirror, vocabulary, elementLevel,
 		"header.patient", "Patient Demographics", "recordTarget.patientRole", "recordTarget[0].patientRole[0]")...)
-	items = append(items, headerSingularInventory(xmlMirror, elementLevel,
+	items = append(items, headerSingularInventory(xmlMirror, vocabulary, elementLevel,
 		"header.custodian", "Custodian", "custodian.assignedCustodian", "custodian[0].assignedCustodian[0]")...)
-	items = append(items, headerSingularInventory(xmlMirror, elementLevel,
+	items = append(items, headerSingularInventory(xmlMirror, vocabulary, elementLevel,
 		"header.encompassingEncounter", "Encompassing Encounter", "componentOf.encompassingEncounter", "componentOf[0].encompassingEncounter[0]")...)
-	items = append(items, headerRepeatingInventory(xmlMirror, elementLevel,
+	items = append(items, headerRepeatingInventory(xmlMirror, vocabulary, elementLevel,
 		"header.author", "Author", "author")...)
 
 	// Never mapped to any FHIR resource today (see doc comment above) --
 	// always report as a full gap, not silently omitted.
-	items = append(items, headerSingularInventory(xmlMirror, elementLevel,
+	items = append(items, headerSingularInventory(xmlMirror, vocabulary, elementLevel,
 		"header.legalAuthenticator", "Legal Authenticator", "legalAuthenticator", "legalAuthenticator[0]")...)
-	items = append(items, headerSingularInventory(xmlMirror, elementLevel,
+	items = append(items, headerSingularInventory(xmlMirror, vocabulary, elementLevel,
 		"header.documentationOf", "Documentation Of (Service Event)", "documentationOf.serviceEvent", "documentationOf[0].serviceEvent[0]")...)
-	items = append(items, headerRepeatingInventory(xmlMirror, elementLevel,
+	items = append(items, headerRepeatingInventory(xmlMirror, vocabulary, elementLevel,
 		"header.informant", "Informant", "informant")...)
-	items = append(items, headerRepeatingInventory(xmlMirror, elementLevel,
+	items = append(items, headerRepeatingInventory(xmlMirror, vocabulary, elementLevel,
 		"header.relatedDocument", "Related Document", "relatedDocument")...)
+	items = append(items, headerParticipantInventory(xmlMirror, vocabulary, elementLevel,
+		"header.relatedPerson", "Related Person", "IND")...)
 	return items
 }
 
@@ -248,7 +284,7 @@ func buildHeaderInventory(xmlMirror map[string]interface{}, elementLevel bool) [
 // EncompassingEncounter's TWO call sites still share this SAME single
 // tracking unit). xmlPrefix is that node's own basePath, in the identical
 // index-every-segment convention every recorded coverage key already uses.
-func headerSingularInventory(xmlMirror map[string]interface{}, elementLevel bool, sectionKey, sectionTitle, rawPath, xmlPrefix string) []InventoryItem {
+func headerSingularInventory(xmlMirror map[string]interface{}, vocabulary *uscdi.USCDIVocabulary, elementLevel bool, sectionKey, sectionTitle, rawPath, xmlPrefix string) []InventoryItem {
 	nodes := executors.ResolveCDAPaths(xmlMirror, rawPath, true)
 	if len(nodes) == 0 {
 		return nil
@@ -257,7 +293,8 @@ func headerSingularInventory(xmlMirror map[string]interface{}, elementLevel bool
 	if !ok {
 		return nil
 	}
-	items := []InventoryItem{{Category: headerCategory, SectionKey: sectionKey, SectionTitle: sectionTitle, EntryIndex: 0}}
+	uscdiClasses := uscdiClassesForSection(vocabulary, sectionKey)
+	items := []InventoryItem{{Category: headerCategory, SectionKey: sectionKey, SectionTitle: sectionTitle, EntryIndex: 0, USCDIClasses: uscdiClasses}}
 	if !elementLevel {
 		return items
 	}
@@ -268,6 +305,7 @@ func headerSingularInventory(xmlMirror map[string]interface{}, elementLevel bool
 			SectionTitle: sectionTitle,
 			EntryIndex:   0,
 			ElementPath:  elementPath,
+			USCDIClasses: uscdiClasses,
 		})
 	}
 	return items
@@ -284,18 +322,58 @@ func headerSingularInventory(xmlMirror map[string]interface{}, elementLevel bool
 // happened to pick -- same reasoning already established for Performers on
 // Vital Signs (a field with real data but no rule ever reads it correctly
 // shows as a gap, not as silently excluded).
-func headerRepeatingInventory(xmlMirror map[string]interface{}, elementLevel bool, sectionKey, sectionTitle, rawTag string) []InventoryItem {
+func headerRepeatingInventory(xmlMirror map[string]interface{}, vocabulary *uscdi.USCDIVocabulary, elementLevel bool, sectionKey, sectionTitle, rawTag string) []InventoryItem {
+	return headerRepeatingInventoryQuery(xmlMirror, vocabulary, elementLevel, sectionKey, sectionTitle, rawTag+"[*]", rawTag)
+}
+
+// headerParticipantInventory walks every raw <participant typeCode="IND">
+// element at the document root — the AppxA "Related Person Relationship and
+// Name Participant" header construct (header.relatedPerson.json). Needs a
+// predicate query ("participant[typeCode='IND']") rather than
+// headerRepeatingInventory's plain "rawTag[*]" wildcard, since "participant"
+// is a raw tag shared with other participation kinds elsewhere in CDA (a
+// single bracket group is ResolveCDAPaths' segmentPredicate kind, which
+// already resolves to every matching node — see cda_path_resolver.go's own
+// parseCDAPathSegment doc comment on why "[pred][*]" chained brackets aren't
+// supported, so the query is exactly one bracket group, not two) — otherwise
+// identical walk, factored into the shared helper below. Never marked
+// "touched" today (no FHIR-mapping rule reads Related Person data yet) —
+// reports as a full gap whenever present, the same deliberate, correct
+// signal header.legalAuthenticator/header.documentationOf already establish
+// for header constructs with real content but no reader.
+func headerParticipantInventory(xmlMirror map[string]interface{}, vocabulary *uscdi.USCDIVocabulary, elementLevel bool, sectionKey, sectionTitle, typeCode string) []InventoryItem {
+	query := "participant[typeCode='" + typeCode + "']"
+	return headerRepeatingInventoryQuery(xmlMirror, vocabulary, elementLevel, sectionKey, sectionTitle, query, "participant")
+}
+
+// headerRepeatingInventoryQuery is the shared walk both
+// headerRepeatingInventory and headerParticipantInventory run — every raw
+// match of query at the document root, each as its own trackable unit at
+// its own real raw index, not just whichever one (if any) the typed side's
+// own selection logic picks. This matters most for author:
+// firstAuthorWithPersonIndexed picks the first author WITH a usable person;
+// other raw authors, e.g. an authoring device with no person, are real,
+// present content that was never used. Ground truth means walking what's
+// actually IN the document, not what the mapping engine happened to pick --
+// same reasoning already established for Performers on Vital Signs (a field
+// with real data but no rule ever reads it correctly shows as a gap, not as
+// silently excluded). prefixTag is separate from query since a predicate
+// query ("participant[typeCode='IND']") isn't itself a valid element-path
+// prefix segment — callers pass the bare tag name their own query resolves
+// against.
+func headerRepeatingInventoryQuery(xmlMirror map[string]interface{}, vocabulary *uscdi.USCDIVocabulary, elementLevel bool, sectionKey, sectionTitle, query, prefixTag string) []InventoryItem {
 	var items []InventoryItem
-	for idx, a := range executors.ResolveCDAPaths(xmlMirror, rawTag+"[*]", true) {
+	uscdiClasses := uscdiClassesForSection(vocabulary, sectionKey)
+	for idx, a := range executors.ResolveCDAPaths(xmlMirror, query, true) {
 		aMap, ok := a.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		items = append(items, InventoryItem{Category: headerCategory, SectionKey: sectionKey, SectionTitle: sectionTitle, EntryIndex: idx})
+		items = append(items, InventoryItem{Category: headerCategory, SectionKey: sectionKey, SectionTitle: sectionTitle, EntryIndex: idx, USCDIClasses: uscdiClasses})
 		if !elementLevel {
 			continue
 		}
-		prefix := rawTag + "[" + strconv.Itoa(idx) + "]"
+		prefix := prefixTag + "[" + strconv.Itoa(idx) + "]"
 		for _, elementPath := range walkEntryElements(aMap, prefix) {
 			items = append(items, InventoryItem{
 				Category:     headerCategory,
@@ -303,6 +381,7 @@ func headerRepeatingInventory(xmlMirror map[string]interface{}, elementLevel boo
 				SectionTitle: sectionTitle,
 				EntryIndex:   idx,
 				ElementPath:  elementPath,
+				USCDIClasses: uscdiClasses,
 			})
 		}
 	}

@@ -7,7 +7,7 @@ import (
 	"database/sql"
 	"log"
 
-	"ezhealthkonnect/fhir" // Your existing FHIR package
+	"ezhealthkonnect/fhir/r4"
 )
 
 // =====================================
@@ -16,7 +16,6 @@ import (
 
 type FHIRSchemaAdapter struct {
 	db              *sql.DB
-	fhirLoader      *fhir.FHIRSchemaLoader
 	schemaDirectory string
 }
 
@@ -32,12 +31,10 @@ func NewFHIRSchemaAdapter(db *sql.DB, schemaDirectory string) *FHIRSchemaAdapter
 
 	log.Printf("🔧 Initializing FHIR Schema Adapter with directory: %s", schemaDirectory)
 
-	// Try to get existing FHIR schema loader
-	adapter.fhirLoader = fhir.GetFHIRSchemaLoader()
-	if adapter.fhirLoader == nil {
-		log.Printf("⚠️ FHIR schema loader not initialized, will skip schema validation")
+	if r4.GetRegistry() == nil {
+		log.Printf("⚠️ FHIR schema registry not initialized, will skip schema validation")
 	} else {
-		log.Printf("✅ FHIR schema loader found and connected")
+		log.Printf("✅ FHIR schema registry found and connected")
 	}
 
 	return adapter
@@ -81,7 +78,7 @@ func (adapter *FHIRSchemaAdapter) ValidateResource(resource map[string]interface
 // =====================================
 
 func (adapter *FHIRSchemaAdapter) IsSchemaAvailable() bool {
-	return adapter.fhirLoader != nil
+	return r4.GetRegistry() != nil
 }
 
 func (adapter *FHIRSchemaAdapter) GetSchemaDirectory() string {

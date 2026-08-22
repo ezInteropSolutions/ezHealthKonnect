@@ -44,7 +44,7 @@ test.describe('CDA-GC0 Requirements Catalog API', () => {
         expect(body.documentTypes).toContain('CCD');
     });
 
-    test('CDA-GC0-002 GET /api/cda/document-types/CCD/requirements returns 7 SHALL sections + 3 header groups', async ({ request }) => {
+    test('CDA-GC0-002 GET /api/cda/document-types/CCD/requirements returns 6 SHALL sections + 3 header groups', async ({ request }) => {
         const res = await request.get(`${BASE_URL}/api/cda/document-types/CCD/requirements`);
         expect(res.ok()).toBeTruthy();
         const body = await res.json();
@@ -52,8 +52,13 @@ test.describe('CDA-GC0 Requirements Catalog API', () => {
         const { requirements } = body;
         expect(requirements.documentType).toBe('CCD');
 
+        // 6, not 7 — see CLAUDE.md's "Document-Type Section-List Audit"
+        // (August 2026): CCD's planOfTreatment was corrected SHALL->SHOULD
+        // against the real IG text, confirmed live below rather than just
+        // asserting a count so a future regression names the actual section.
         const shallSections = requirements.sections.filter(s => s.conformance === 'SHALL');
-        expect(shallSections.length).toBe(7);
+        expect(shallSections.length).toBe(6);
+        expect(shallSections.map(s => s.key)).not.toContain('planOfTreatment');
 
         for (const group of ['patient', 'author', 'custodian']) {
             expect(Array.isArray(requirements.headerGroups[group])).toBe(true);
@@ -81,6 +86,54 @@ test.describe('CDA-GC0 Requirements Catalog API', () => {
         const ccdShall = (await ccdRes.json()).requirements.sections.filter(s => s.conformance === 'SHALL').map(s => s.key).sort();
         const dsShall = (await dsRes.json()).requirements.sections.filter(s => s.conformance === 'SHALL').map(s => s.key).sort();
         expect(ccdShall).not.toEqual(dsShall);
+    });
+
+    // Phase C — USCDI v3 vocabulary bridge (August 2026). requirements.sections[]
+    // and requirements.headerGroups.<group>[] items now carry an additive,
+    // omitted-when-unmapped `uscdiClasses` string array (cda/builder/
+    // requirements_catalog.go + header_requirements.go, bridged from the
+    // real, ONC-verified cda/schemas/uscdi_v3.json). "problems" -> exactly
+    // ["Problems"]; "results" -> both "Clinical Tests" and "Laboratory" (a
+    // genuinely multi-class section) — both confirmed directly against the
+    // live vocabulary data, not re-derived here.
+    test('CDA-GC0-005 CCD requirements: "problems" and "results" sections carry the expected uscdiClasses', async ({ request }) => {
+        const res = await request.get(`${BASE_URL}/api/cda/document-types/CCD/requirements`);
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        const { requirements } = body;
+
+        const problems = requirements.sections.find(s => s.key === 'problems');
+        expect(problems).toBeTruthy();
+        expect(problems.uscdiClasses).toEqual(['Problems']);
+
+        const results = requirements.sections.find(s => s.key === 'results');
+        expect(results).toBeTruthy();
+        expect(results.uscdiClasses).toEqual(expect.arrayContaining(['Clinical Tests', 'Laboratory']));
+        expect(results.uscdiClasses.length).toBe(2);
+    });
+
+    test('CDA-GC0-006 CCD requirements: a header field carries uscdiClasses, and uscdiClasses is never a fabricated empty array', async ({ request }) => {
+        const res = await request.get(`${BASE_URL}/api/cda/document-types/CCD/requirements`);
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        const { requirements } = body;
+
+        const patientFields = requirements.headerGroups.patient;
+        const firstName = patientFields.find(f => f.key === 'firstName');
+        expect(firstName).toBeTruthy();
+        expect(Array.isArray(firstName.uscdiClasses)).toBe(true);
+        expect(firstName.uscdiClasses.length).toBeGreaterThan(0);
+
+        // uscdiClasses is additive/omitted-when-absent — never present as a
+        // fabricated empty array for a section that has no real USCDI bridge
+        // yet. Confirms the shape without asserting which specific sections
+        // are currently unmapped (that set is expected to grow over time).
+        for (const sec of requirements.sections) {
+            if (sec.uscdiClasses !== undefined) {
+                expect(Array.isArray(sec.uscdiClasses)).toBe(true);
+                expect(sec.uscdiClasses.length).toBeGreaterThan(0);
+            }
+        }
     });
 });
 
@@ -163,7 +216,10 @@ test.describe('CDA-GC1 Pipeline Builder UI', () => {
             const step = groups.flatMap(g => g.steps || []).find(s => (s.stepType || s.step_type) === 'cda.map_to_canonical');
             return step.config;
         });
-        const shallSectionKeys = ['allergiesAndIntolerances', 'medications', 'problems', 'results', 'planOfTreatment', 'socialHistory', 'vitalSigns'];
+        // planOfTreatment deliberately excluded — no longer SHALL for CCD (see
+        // CLAUDE.md's "Document-Type Section-List Audit"), so it's no longer
+        // among the sections SHALL pre-population pushes into config.
+        const shallSectionKeys = ['allergiesAndIntolerances', 'medications', 'problems', 'results', 'socialHistory', 'vitalSigns'];
         for (const key of shallSectionKeys) {
             expect(cfg.sections.some(s => s.sectionKey === key)).toBe(true);
         }
@@ -223,8 +279,13 @@ test.describe('CDA-GC1 Pipeline Builder UI', () => {
         await page.waitForTimeout(300);
         await expect(page.locator('#cdaBuildCustOrgName')).toBeVisible();
         // Only Name/ID are spec-required for custodian — Street must not
-        // carry a "Required" badge.
-        const streetLabel = page.locator('label:has-text("Street Address")');
+        // carry a "Required" badge. Scoped to #cdaBuildTab-custodian, not the
+        // whole page: the Legal Authenticator tab (a later addition) has its
+        // OWN "Street Address" field that IS Required (CONF:1198-5589/5595),
+        // and that tab's markup stays in the DOM (display:none) even while
+        // Custodian is active — an unscoped locator hits both and violates
+        // Playwright strict mode.
+        const streetLabel = page.locator('#cdaBuildTab-custodian label:has-text("Street Address")');
         await expect(streetLabel).not.toContainText('Required');
     });
 
@@ -330,5 +391,101 @@ test.describe('CDA-GC1 Pipeline Builder UI', () => {
         await page.locator('#copyCdaXmlBtn').click();
         const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
         expect(clipboardText).toContain('<ClinicalDocument');
+    });
+
+    // Phase C — USCDI v3 vocabulary bridge, UI wiring. CDARequirementsHelper.
+    // renderUSCDISummary(requirements) renders a blue "USCDI v3: represents N
+    // classes — ..." banner, additive to (never a replacement for) the
+    // existing SHALL/SHOULD/MAY completeness banner. summarizeUSCDICoverage
+    // sums over the WHOLE document type's requirements catalog (every
+    // section + header field in requirements.sections/.headerGroups), not
+    // just what a sibling step has mapped so far — so this banner's class
+    // list is the same for CCD regardless of which sections a particular
+    // cda.map_to_canonical config maps, which is why these two tests don't
+    // need to special-case their own step setup beyond "some CCD steps
+    // exist." CDA-GC0-005 already confirmed "problems" -> ["Problems"] and
+    // "results" -> ["Clinical Tests", "Laboratory"] directly from the API,
+    // so both class names are guaranteed to appear in CCD's banner here.
+    test('CDA-GC1-005 cda.map_to_canonical: USCDI v3 summary banner renders with expected class names', async ({ page }) => {
+        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+
+        await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
+        await page.waitForLoadState('load');
+        await page.waitForFunction(() => window.pipelineBuilder && window.pipelineBuilder.pipeline, { timeout: 8000 });
+
+        await page.evaluate(() => {
+            const pb = window.pipelineBuilder;
+            const findStep = t => (pb.pipeline.executionGroups || []).flatMap(g => g.steps || []).find(s => (s.stepType || s.step_type) === t);
+            if (!findStep('cda.map_to_canonical')) {
+                pb.addStep({ stepType: 'cda.map_to_canonical', name: 'Map To Canonical', config: {} });
+            }
+        });
+        await page.waitForTimeout(300);
+
+        await page.evaluate(() => {
+            const pb = window.pipelineBuilder;
+            const step = (pb.pipeline.executionGroups || []).flatMap(g => g.steps || []).find(s => (s.stepType || s.step_type) === 'cda.map_to_canonical');
+            pb.propertiesPanel.showStepProperties(step);
+        });
+        await page.waitForTimeout(500);
+        await expect(page.locator('#mapToCanonicalBuilder')).toBeVisible({ timeout: 3000 });
+
+        // Give the requirements fetch a moment (same wait CDA-GC1-001 relies on).
+        await page.waitForTimeout(2000);
+
+        const panelText = await page.locator('#mapToCanonicalBuilder').innerText();
+        const match = panelText.match(/USCDI v3:\s*represents (\d+) class(?:es)? — ([^\n]+)/);
+        expect(match, `expected a "USCDI v3: represents N classes — ..." banner in panel text:\n${panelText}`).toBeTruthy();
+        const classCount = Number(match[1]);
+        const classList = match[2];
+        expect(classCount).toBeGreaterThan(0);
+        expect(classList).toContain('Problems');
+        expect(classList).toContain('Laboratory');
+    });
+
+    test('CDA-GC1-006 cda.build: USCDI v3 summary banner renders in the Requirements tab with expected class names', async ({ page }) => {
+        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+
+        await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
+        await page.waitForLoadState('load');
+        await page.waitForFunction(() => window.pipelineBuilder && window.pipelineBuilder.pipeline, { timeout: 8000 });
+
+        // Ensure both steps exist (idempotent — earlier tests in this file may
+        // already have added them, but each test navigates fresh and unsaved
+        // in-memory state doesn't survive a reload unless explicitly saved).
+        await page.evaluate(() => {
+            const pb = window.pipelineBuilder;
+            const findStep = t => (pb.pipeline.executionGroups || []).flatMap(g => g.steps || []).find(s => (s.stepType || s.step_type) === t);
+            if (!findStep('cda.map_to_canonical')) {
+                pb.addStep({
+                    stepType: 'cda.map_to_canonical', name: 'Map To Canonical',
+                    config: { outputField: 'parsedCDA', header: [], sections: [{ sectionKey: 'problems', rowsPath: 'records', fields: [{ canonicalField: 'conditionCode', sourcePath: 'icd10Code' }] }] },
+                });
+            }
+            if (!findStep('cda.build')) {
+                pb.addStep({ stepType: 'cda.build', name: 'Build CDA', config: { documentType: 'CCD' } });
+            }
+        });
+        await page.waitForTimeout(300);
+
+        await page.evaluate(() => {
+            const pb = window.pipelineBuilder;
+            const step = (pb.pipeline.executionGroups || []).flatMap(g => g.steps || []).find(s => (s.stepType || s.step_type) === 'cda.build');
+            pb.propertiesPanel.showStepProperties(step);
+        });
+        await page.waitForTimeout(500);
+        await expect(page.locator('#cdaBuildBuilder')).toBeVisible({ timeout: 3000 });
+
+        await page.locator('#cdaBuildTabBtn-requirements').click();
+        await page.waitForTimeout(1500);
+
+        const tabText = await page.locator('#cdaBuildTab-requirements').innerText();
+        const match = tabText.match(/USCDI v3:\s*represents (\d+) class(?:es)? — ([^\n]+)/);
+        expect(match, `expected a "USCDI v3: represents N classes — ..." banner in Requirements tab text:\n${tabText}`).toBeTruthy();
+        const classCount = Number(match[1]);
+        const classList = match[2];
+        expect(classCount).toBeGreaterThan(0);
+        expect(classList).toContain('Problems');
+        expect(classList).toContain('Laboratory');
     });
 });

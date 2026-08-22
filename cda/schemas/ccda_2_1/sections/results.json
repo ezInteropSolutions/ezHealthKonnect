@@ -46,7 +46,7 @@
     },
     {
       "key": "referenceRangeLowInclusive",
-      "uscdiElement": "Reference Range (Low) Inclusive Flag (HL7 V3 IVXB_PQ @inclusive — whether the low boundary value itself counts as part of the normal range; defaults to true per the base datatype when omitted, only written when a source system actually distinguishes inclusive/exclusive boundaries)",
+      "uscdiElement": "Reference Range (Low) Inclusive Flag",
       "conformance": "MAY",
       "dataType": "BL",
       "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value/low/@inclusive"
@@ -61,7 +61,7 @@
     },
     {
       "key": "referenceRangeHighInclusive",
-      "uscdiElement": "Reference Range (High) Inclusive Flag (HL7 V3 IVXB_PQ @inclusive — whether the high boundary value itself counts as part of the normal range)",
+      "uscdiElement": "Reference Range (High) Inclusive Flag",
       "conformance": "MAY",
       "dataType": "BL",
       "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value/high/@inclusive"
@@ -106,6 +106,15 @@
       "xpath": "entry/organizer/code/@code",
       "xpathDisplay": "entry/organizer/code/@displayName",
       "xpathSystem": "entry/organizer/code/@codeSystem"
+    },
+    {
+      "key": "specimenTypeCode",
+      "uscdiElement": "Specimen Type",
+      "conformance": "MAY",
+      "dataType": "CD",
+      "valueSet": "Specimen Type",
+      "xpath": "entry/organizer/specimen/specimenRole/specimenPlayingEntity/code/@code",
+      "xpathDisplay": "entry/organizer/specimen/specimenRole/specimenPlayingEntity/code/@displayName"
     },
     {
       "key": "panelStatus",

@@ -1166,3 +1166,160 @@ Making `problem-observation-wrapped`/`problem-observation-bare` the single sourc
 - Tests: `cda/schema_loader_test.go` (golden snapshot), `cda/schema_disk_types_test.go` (resolution unit tests), `cda/testdata/schema_snapshot_golden.json` (fixture)
 - Unchanged (verified, not just assumed): `cda/schema_types.go`, `cda/builder/entry_archetypes.go`, `cda/document/section_parser.go`, `services/cda_fhir/`, `services/cda_coverage/`, `controllers/cda_schema_controller.go`
 
+## USCDI v3 Vocabulary Bridge — Fill Status + UDI (Phase A3, August 2026)
+
+### Context
+`cda/schemas/uscdi_v3.json` (loaded by `uscdi/vocabulary.go`) is the one ONC-verified USCDI v3
+dataset in this codebase — kept deliberately separate from the schema's own `uscdiClass`/
+`uscdiElement` display labels (unverified, used only for Requirements-catalog grouping and, as of
+this round, confirmed to double as literal narrative `<th>` text — see the bug note below). A prior
+round of work expanded it to all 19 USCDI v3 classes / 92 elements and closed 5 of 7 remaining gaps
+by checking the real spec text instead of stopping at "not found in the Go code." This round closes
+2 more: Fill Status and UDI's core Device Identifier, both requiring new schema capability (not just
+a bridge to an existing field), so both directions (parse + build) were scoped and built together.
+
+### Fill Status — `medications.json`'s `medicationDispenses` RepeatingGroup
+Medication Dispense (V2) (`.4.18:2014-06-09`) attaches to Medication Activity via a 0..*
+`<entryRelationship typeCode="REFR">` wrapping a `<supply>` act (CONF:1098-7549/7553/16090,
+distinct from Medication Activity's OTHER REFR relationship, to Medication Supply Order `.4.17`,
+which isn't modeled in this schema — no collision risk). `statusCode/@code` is bound to ValueSet
+**"Medication Fill Status"** — that's the actual field; the Companion Guide's own crosswalk table
+label ("supply/code") is imprecise relative to the real constraint table. Implemented as a new
+`RepeatingGroup` — `wrapperTag: "entryRelationship"`/`wrapperAttr: "typeCode"`/`wrapperAttrValue:
+"REFR"`, `observationElementPath: "supply"` — the exact same mechanism `indications` already
+proved, zero new Go code. Fields: `fillStatus`, `dispenseQuantity`, `dispenseDate`,
+`dispenseSequence`.
+
+### UDI — Tier 1 (Product Instance's own `id`) and Tier 2 (full UDI Organizer) both done
+**Tier 1**: the base C-CDA R2.1 IG's OWN Product Instance template (`.4.37`, not a Companion Guide
+addition) is already the sanctioned UDI/DI capture point — its own prose: *"When sending a UDI,
+populate the participantRole/id/@root with the FDA OID and participantRole/id/@extension with the
+UDI. When sending a DI, populate participantRole/id/@root with the assigning agency OID and
+.../id/@extension with the DI."* `medicalEquipment.json` already anchors Product Instance
+(`entry/supply/participant[@typeCode='PRD']/participantRole`) but had never modeled its `id` —
+added `deviceIdentifier`/`deviceIdentifierSystem` as two plain fields, no new template, no new Go
+code. This alone satisfies the USCDI "Unique Device Identifier (UDI)" element for both directions.
+
+**Tier 2**: the Companion Guide's richer **UDI Organizer** (`.4.311:2019-06-21`, 11 further
+sub-observations: Lot/Batch Number, Serial Number, Manufacturing/Expiration Date, Brand Name, Model
+Number, Catalog Number, Company Name, MRI Safety, Latex Safety, Implantable Device Status, Distinct
+Identification Code). Confirmed via the appendix's own Figure 1 worked example and each
+sub-observation's own Contexts table: all 11 are `Contained By: UDI Organizer` only, and the
+Organizer itself nests under Procedure Activity Procedure (`medicalEquipment.json`'s existing
+`procedureEntries` alternate archetype — a DIFFERENT anchor than Tier 1 uses) via
+`<entryRelationship typeCode="COMP">` (confirmed against the main Companion Guide body, not just the
+appendix), with its own `<id>` required to VALUE-MATCH Product Instance's `id` for correlation — not
+a structural parent/child link.
+
+This needed a genuinely new schema construct — `ComponentGroup`/`ComponentDef`
+(`cda/schema_types.go`), a shared `<organizer>` wrapper containing a FIXED, enumerated set of
+independently-optional, differently-shaped sub-observations (each its own templateId/fixed NCIt
+code/datatype). Neither `RepeatingGroup` (assumes N items of the *same* shape) nor
+`StructuralTemplateAnchor` (one fixed path) covers this — confirmed by reading
+`cda/builder/xpath_writer.go`'s own disambiguation logic: a bare, repeated `<component>` tag has no
+attribute to predicate on, so `findOrCreateChild`'s discriminator-lookahead (which only fires when
+the AMBIGUOUS segment itself carries a `[predicate]`) can't safely tell 12 differently-shaped
+components apart. New Go function `writeComponentGroups` (`cda/builder/entry_archetypes.go`) always
+DIRECT-CREATES a fresh sibling per present component instead — the same "never risk a predicate
+match" approach `writeRepeatingGroups` already uses for its own items.
+
+The id-correlation requirement is satisfied for free WITHIN Tier 2 by pointing
+`OrganizerIDField`/`OrganizerIDSystemField` at the SAME `deviceIdentifier`/`deviceIdentifierSystem`
+keys the Device Identifier component's own value reads — one caller-supplied value, read twice from
+the same record. It's NOT automatically tied to Tier 1's own value, though: Tier 1's Product
+Instance lives in `medicalEquipment`'s primary `entries[]` array, Tier 2's Organizer lives in the
+`procedureEntries[]` alternate — genuinely separate records (possibly from different source rows via
+`cda.map_to_canonical`'s cross-table join), so keeping the SAME literal value in both arrays is the
+caller's responsibility, same as any other cross-array correlation in this engine.
+
+**Bug found and fixed during Tier 2 implementation**: none of the 12 sub-observation constraint
+tables declare a `<statusCode>` element (confirmed individually for several, plus every worked XML
+example) — but `tagBoilerplate["observation"]`'s generic `StatusCode: "completed"` default would
+have auto-injected one onto every component anyway. `writeComponentGroups` now strips any
+auto-injected `<statusCode>` from each component (the shared organizer's OWN
+statusCode="completed", which IS spec-required, is untouched) — regression-guarded by an explicit
+count assertion in the round-trip test.
+
+### Bug found: `USCDIElement` is also the literal narrative table header
+`cda/builder/narrative.go:73-77` uses `CDAFieldDef.USCDIElement` directly as `<th>` text in the
+generated document's own narrative table — confirmed by a failing test assertion during this round
+(a verbose parenthetical-rationale label for `deviceIdentifier` showed up whole, HTML-escaped, as a
+column header in built XML). `USCDIElement` must stay a short display label; longer rationale
+belongs in CLAUDE.md/the plan file, not the JSON. Fixed for `deviceIdentifier`/`fillStatus` and 3
+pre-existing instances found via a repo-wide grep for the same pattern: `functionalStatus.json`'s
+`disabilityStatus` (from the prior A2.5 round), `advanceDirectives.json`'s 5
+`referencedDocument*` fields, and `results.json`'s 2 "Reference Range ... Inclusive Flag" fields —
+all shortened to clean labels, re-verified via the golden snapshot + full `cda`/`uscdi` test suite
+(green, zero regressions).
+
+### Key Files
+- `cda/schemas/uscdi_v3.json` — Fill Status and UDI entries now point at real fields (87/92 mapped)
+- `cda/schemas/ccda_2_1/sections/medications.json` — `medicationDispenses` RepeatingGroup
+- `cda/schemas/ccda_2_1/sections/medicalEquipment.json` — `deviceIdentifier`/`deviceIdentifierSystem` fields (Tier 1) + `procedureEntries`'s `udiOrganizer` ComponentGroup, 12 components (Tier 2)
+- New engine mechanism: `cda/schema_types.go` (`ComponentGroup`/`ComponentDef`, `AlternateEntryArchetype.ComponentGroups`), `cda/schema_disk_types.go` (raw passthrough), `cda/builder/entry_archetypes.go` (`writeComponentGroups`, wired into `buildAlternateEntry`)
+- Tests: `cda/builder/document_builder_test.go` (`TestBuildDocument_MedicationDispense_FillStatus_BuildsAsREFRSupply`, `TestBuildDocument_MedicalEquipment_DeviceIdentifier_BuildsOnProductInstanceId`, `TestBuildDocument_MedicalEquipment_UDIOrganizer_ComponentGroup`), `cda/builder/entry_archetypes_test.go` (4 synthetic `TestBuildAlternateEntry_ComponentGroup_*` unit tests)
+- Plan (full design rationale): `C:\Users\ShanawazKhan\.claude\plans\soft-napping-shell.md`
+
+## USCDI v3 Vocabulary Bridge — Phase C: Build Requirements (August 2026)
+
+### What shipped
+Same USCDI class signal Phase B gave Coverage Audit, now also on the guided-configuration
+Requirements catalog (`cda.map_to_canonical`/`cda.build`'s SHALL/SHOULD/MAY checklist):
+`SectionRequirement.USCDIClasses` (`cda/builder/requirements_catalog.go`) and
+`HeaderFieldRequirement.USCDIClasses` (`cda/builder/header_requirements.go`), both resolved from
+the real `cda/schemas/uscdi_v3.json` dataset, additive and honestly-absent-when-unmapped — never
+fabricated. `CDASchemaController` (`controllers/cda_schema_controller.go`) gained a constructor-
+injected `vocabulary *uscdi.USCDIVocabulary` field (DI, matching `db`/`loader`/`mapper`, not a
+global singleton); `main.go` constructs its own instance the same per-consumer way Coverage Audit's
+`coverageVocab` already does (not shared — different lifecycle/scope). `CDARequirementsHelper.js`
+gained `renderUSCDISummary`, a small blue "USCDI v3: represents N classes — A, B, C" banner, wired
+into both `CDAStepBuilder.js`'s Requirements tab and `MapToCanonicalBuilder.js`, additive to (never
+replacing) the existing SHALL/SHOULD/MAY completeness banner.
+
+### DRY fix found along the way: class-resolution logic promoted to the vocabulary itself
+Phase B's `services/cda_coverage/inventory.go` already had this exact dedup/sort logic as an
+unexported `uscdiClassesForSection` helper. Rather than copy-pasting a second implementation for
+`cda/builder` (which can't import `services/cda_coverage` — wrong dependency direction), the logic
+moved up to a new exported `uscdi.USCDIVocabulary.ClassesForSection(sectionKey string) []string`
+method (`uscdi/vocabulary.go`), which BOTH `services/cda_coverage` and `cda/builder` now call —
+`inventory.go`'s own function is now a 1-line wrapper. Includes a `v == nil` guard so a gracefully-
+degraded nil vocabulary (either consumer's own load-failure fallback) never panics.
+
+### Real wrinkle found during implementation: dotted canonical keys need prefix matching
+`header_requirements.go`'s own translation table splits ONE schema field — uscdi_v3.json's bare
+`"address"` cdaField in `header.patient.json` — into 4 separate UI-facing requirement rows
+(`address.street`/`.city`/`.state`/`.postalCode`). A literal `CDAField == canonicalKey` check (as
+originally planned) would have silently found zero matches for all 4. Fixed in a new
+`classesForHeaderField` helper: when canonicalKey is dotted, also match on the part before the first
+`.` against uscdi_v3.json's coarser cdaField.
+
+### Test correction: `results` maps to Clinical Tests + Laboratory, not Diagnostic Imaging
+The original plan's illustrative test case assumed `results`'s multi-class set was Diagnostic
+Imaging + Laboratory. The real, current data (post-A2.5's Clinical Tests fix) is **Clinical Tests +
+Laboratory** — Diagnostic Imaging maps to the separate `findingsDIR` section instead (see the
+C-CDA R2.1 Document-Type Coverage section above). Caught by running the test, not assumed.
+
+### Verification status — Go AND UI both done
+Go side: `go vet`/`go build .`/`go test` across `cda`, `cda/builder`, `cda/document`,
+`cda/validator`, `uscdi`, `controllers` — all green (a full `go build .` now also succeeds; the
+pre-existing, unrelated `fhir` package compile break noted earlier this session was resolved by
+other in-progress work by the time Phase C landed). UI side: app container rebuilt from current
+source (`docker-compose build app && docker-compose up -d app`), then `tests/playwright/
+cda-guided-config.spec.js` extended with 4 new permanent tests (CDA-GC0-005/006 for the API's
+`uscdiClasses` field, CDA-GC1-005/006 for the rendered banner text in both
+`#mapToCanonicalBuilder` and `#cdaBuildTab-requirements`) — all pass, confirming the whole chain
+end-to-end. Found and fixed 3 unrelated pre-existing test-staleness bugs along the way (CDA-GC0-002/
+CDA-GC1-001 still expected CCD's `planOfTreatment` as SHALL, corrected to SHOULD in the earlier
+Document-Type Section-List Audit above but the tests hadn't been updated; CDA-GC1-002's Street
+Address locator was unscoped and started matching both Custodian's and Legal Authenticator's own
+fields once the latter shipped) — none related to Phase C itself.
+
+### Key Files
+- `uscdi/vocabulary.go` — new `ClassesForSection` method (shared by both Phase B and Phase C)
+- `services/cda_coverage/inventory.go` — `uscdiClassesForSection` now a thin wrapper
+- `cda/builder/requirements_catalog.go`, `cda/builder/header_requirements.go` — `USCDIClasses` fields + resolution
+- `controllers/cda_schema_controller.go`, `main.go` — vocabulary DI wiring
+- `public/js/pipeline/utils/CDARequirementsHelper.js` — `summarizeUSCDICoverage`/`renderUSCDISummary`
+- `public/js/pipeline/components/CDAStepBuilder.js`, `public/js/pipeline/components/MapToCanonicalBuilder.js` — wired the new summary in
+- Tests: `cda/builder/requirements_catalog_test.go` (6 new tests), `tests/playwright/cda-guided-config.spec.js` (4 new tests, browser-verified)
+

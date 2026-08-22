@@ -52,7 +52,6 @@ type AssemblyRule struct {
 
 type HL7FHIRTransformServiceV3 struct {
 	db            *sql.DB
-	fhirLoader    *fhir.FHIRSchemaLoader
 	schemaReady   bool
 	zsegmentSvc   *ZSegmentService // loads MFNRuntimeConfig per interface
 
@@ -68,12 +67,11 @@ type HL7FHIRTransformServiceV3 struct {
 func NewHL7FHIRTransformServiceV3(database *sql.DB) *HL7FHIRTransformServiceV3 {
 	service := &HL7FHIRTransformServiceV3{
 		db:           database,
-		fhirLoader:   nil, // Will be loaded on-demand during Transform()
 		zsegmentSvc:  NewZSegmentService(database),
 		valueMapper:  mappers.NewValueMapper(database),
 	}
 
-	// Note: FHIR schema loader availability is checked at Transform() time
+	// Note: FHIR schema registry availability is checked at Transform() time
 	// This allows the service to be created before schemas are loaded (OOB pattern)
 
 	return service
@@ -87,19 +85,10 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 	ctx context.Context,
 	request *TransformRequest,
 ) (*TransformResponse, error) {
-	// On-demand FHIR schema loader initialization (OOB pattern)
-	if s.fhirLoader == nil {
-		s.fhirLoader = fhir.GetFHIRSchemaLoader()
-	}
-
-	// Verify schemas are available
-	if s.fhirLoader == nil {
-		return nil, fmt.Errorf("FHIR schema loader not initialized")
-	}
-
-	// Check if schemas are loaded
-	available, err := s.fhirLoader.ListAvailableSchemas()
-	if err != nil || len(available) == 0 {
+	// Verify the FHIR schema registry is available (OOB pattern — registry is
+	// initialized asynchronously at startup, so this may not be ready yet).
+	reg := r4.GetRegistry()
+	if reg == nil || len(reg.List("R4")) == 0 {
 		return nil, fmt.Errorf("FHIR schemas not loaded - cannot perform schema-driven transformation")
 	}
 
@@ -2964,21 +2953,20 @@ func (s *HL7FHIRTransformServiceV3) enrichMappingsWithDataTypes(mappings []Field
 		}
 
 		// ── FHIR data type lookup ─────────────────────────────────────────────────
-		if m.FHIRDataType == "" && s.fhirLoader != nil && m.FHIRResourceType != "" && m.FHIRElementPath != "" {
-			schema, err := s.fhirLoader.LoadFHIRSchema(m.FHIRResourceType, "base", "R4")
-			if err == nil && schema != nil {
-				// Build the element path key as stored in schema.Elements, e.g. "Patient.birthDate"
+		if m.FHIRDataType == "" && m.FHIRResourceType != "" && m.FHIRElementPath != "" {
+			if cp, ok := r4.GetRegistry().Get("R4", m.FHIRResourceType, "base"); ok && cp != nil {
+				// Build the element path key as stored in DataTypes, e.g. "Patient.birthDate"
 				elementKey := m.FHIRResourceType + "." + m.FHIRElementPath
 				// Strip array indices for schema lookup: name[0].given → name.given
 				cleanKey := stripArrayIndices(elementKey)
-				if elem, ok := schema.Elements[cleanKey]; ok && elem != nil {
-					m.FHIRDataType = elem.DataType
+				if dt, ok := cp.DataTypes[cleanKey]; ok {
+					m.FHIRDataType = dt
 				}
 				// Try without resource prefix if not found
 				if m.FHIRDataType == "" {
 					cleanPath := stripArrayIndices(m.FHIRElementPath)
-					if elem, ok := schema.Elements[cleanPath]; ok && elem != nil {
-						m.FHIRDataType = elem.DataType
+					if dt, ok := cp.DataTypes[cleanPath]; ok {
+						m.FHIRDataType = dt
 					}
 				}
 			}

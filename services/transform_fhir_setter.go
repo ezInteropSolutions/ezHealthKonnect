@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"ezhealthkonnect/fhir"
+	"ezhealthkonnect/fhir/r4"
 )
 
 func (s *HL7FHIRTransformServiceV3) setAtomicFieldInResource(
@@ -786,6 +787,12 @@ func (s *HL7FHIRTransformServiceV3) nestedFieldExists(resource map[string]interf
 	return true
 }
 
+// loadFHIRSchema resolves a *fhir.FHIRSchema for resourceType via the real
+// schema source (r4.SchemaRegistry), converted through fhir.BuildLegacySchemaShape
+// since every other function in this file still expects that shape — see
+// fhir/legacy_shape.go's own doc comment for why. Was previously backed by a
+// second, independent .gz-decoding system (fhir.FHIRSchemaLoader, deleted
+// 2026-08-16); this is the one call site that changed.
 func (s *HL7FHIRTransformServiceV3) loadFHIRSchema(resourceType, profile, version string) (*fhir.FHIRSchema, error) {
 	if profile == "" {
 		profile = "base"
@@ -794,16 +801,23 @@ func (s *HL7FHIRTransformServiceV3) loadFHIRSchema(resourceType, profile, versio
 		version = "R4"
 	}
 
-	schema, err := s.fhirLoader.LoadFHIRSchema(resourceType, profile, version)
-	if err != nil {
-		// Try fallback to base profile
-		if profile != "base" {
-			return s.fhirLoader.LoadFHIRSchema(resourceType, "base", version)
-		}
-		return nil, err
+	reg := r4.GetRegistry()
+	if reg == nil {
+		return nil, fmt.Errorf("FHIR schema registry not initialised")
 	}
 
-	return schema, nil
+	cp, ok := reg.Get(version, resourceType, profile)
+	if !ok {
+		// Try fallback to base profile
+		if profile != "base" {
+			cp, ok = reg.Get(version, resourceType, "base")
+		}
+		if !ok {
+			return nil, fmt.Errorf("no FHIR schema found for %s/%s/%s", version, resourceType, profile)
+		}
+	}
+
+	return fhir.BuildLegacySchemaShape(cp), nil
 }
 
 // isComplexDataType checks if the data type is a FHIR complex type (not a primitive)

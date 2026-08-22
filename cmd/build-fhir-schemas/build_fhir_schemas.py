@@ -106,12 +106,24 @@ def get_element_type(element: dict) -> str:
     return normalize_type_name(first.get("code", ""))
 
 
-def get_element_constraints(element: dict) -> list[str]:
+def get_element_constraints(element: dict) -> list[dict]:
     constraints = []
     for item in element.get("constraint") or []:
-        text = item.get("human") or item.get("expression") or item.get("key")
-        if text:
-            constraints.append(text)
+        key = item.get("key") or ""
+        expression = item.get("expression") or ""
+        # Keep the full structured invariant (key/severity/human/expression) so
+        # downstream Go code can compile and evaluate the real FHIRPath formula
+        # generically, instead of only having human-readable text to hand-port.
+        # An entry with no key or expression carries nothing a generic engine
+        # could act on, so it is skipped rather than emitted as dead data.
+        if not key or not expression:
+            continue
+        constraints.append({
+            "key": key,
+            "severity": item.get("severity") or "error",
+            "human": item.get("human") or "",
+            "expression": expression,
+        })
     return constraints
 
 
@@ -158,6 +170,13 @@ def make_schema(sd: dict, version: str, include_constraints: bool) -> dict | Non
         return None
 
     root = elements[0]
+    # Resource-wide invariants (obs-6, bun-1, con-4, dom-2, ...) are declared on
+    # the root element itself (element.path == resource_type, no dot) — the loop
+    # below only walks elements[1:] and filters on "path startswith resourceType.",
+    # so the root's own constraint[] block would otherwise be silently dropped.
+    # This is where the majority of genuinely resource-specific business rules
+    # live (as opposed to the ele-1/ext-1 boilerplate repeated on every child).
+    resource_constraints = get_element_constraints(root)
     output_elements: dict[str, dict] = {}
     required: list[str] = []
     must_support: list[str] = []
@@ -214,6 +233,7 @@ def make_schema(sd: dict, version: str, include_constraints: bool) -> dict | Non
         "baseResource": base_resource,
         "profile": sd.get("url", ""),
         "elements": output_elements,
+        "resourceConstraints": resource_constraints,
         "required": sorted(set(required)),
         "mustSupport": sorted(set(must_support)),
         "sourceFile": sd.get("url") or sd.get("id") or resource_type,

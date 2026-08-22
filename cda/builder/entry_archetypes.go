@@ -217,6 +217,7 @@ func buildAlternateEntry(sectionEl *etree.Element, alt *cdaSchema.AlternateEntry
 	}
 
 	applyStructuralTemplateAnchors(entryEl, alt.StructuralTemplateIDs)
+	writeComponentGroups(rootEl, alt.ComponentGroups, record)
 
 	if rootEl != nil {
 		reorderChildrenByTag(rootEl, structuralElementOrder)
@@ -544,6 +545,122 @@ func writeRepeatingGroups(rootEl, obsEl *etree.Element, sec *cdaSchema.CDASectio
 			// none of which land in schema order by construction alone.
 			reorderChildrenByTag(targetEl, structuralElementOrder)
 		}
+	}
+}
+
+// writeComponentGroups builds each of groups (see ComponentGroup's own doc
+// comment for why this is a separate mechanism from writeRepeatingGroups) —
+// a shared wrapper/organizer element containing a FIXED, enumerated set of
+// independently-optional, differently-shaped sub-observations. anchorEl is
+// the element ComponentGroup.WrapperTag attaches under (buildAlternateEntry's
+// own rootEl today).
+//
+// The whole group (wrapper + organizer) is skipped entirely unless at least
+// one Component has data — never build an empty organizer just because the
+// section itself was built. Each Component that DOES have data gets its own
+// freshly DIRECT-CREATED WrapperTag/ComponentTag sibling (anchorEl.
+// CreateElement / organizerEl.CreateElement, never WriteAtXPath's predicate
+// matching) — see ComponentGroup's own doc comment for why predicate
+// matching can't safely disambiguate a bare repeated "component" tag.
+func writeComponentGroups(anchorEl *etree.Element, groups []cdaSchema.ComponentGroup, record map[string]interface{}) {
+	if anchorEl == nil {
+		return
+	}
+	for _, group := range groups {
+		present := false
+		for _, c := range group.Components {
+			if _, ok := stringValue(record[c.Key]); ok {
+				present = true
+				break
+			}
+		}
+		if !present {
+			continue
+		}
+
+		wrapperEl := anchorEl.CreateElement(group.WrapperTag)
+		if group.WrapperAttr != "" {
+			wrapperEl.CreateAttr(group.WrapperAttr, group.WrapperAttrValue)
+		}
+
+		organizerEl := wrapperEl.CreateElement(group.OrganizerTag)
+		applyTagBoilerplate(organizerEl, group.OrganizerTag)
+		if group.OrganizerTemplateID != "" {
+			injectTemplateID(organizerEl, group.OrganizerTemplateID, group.OrganizerTemplateIDExt)
+		}
+		if group.OrganizerFixedStatusCode != "" {
+			if sc := organizerEl.SelectElement("statusCode"); sc != nil {
+				sc.CreateAttr("code", group.OrganizerFixedStatusCode)
+			}
+		}
+		if group.OrganizerFixedCode != "" && organizerEl.SelectElement("code") == nil {
+			codeEl := organizerEl.CreateElement("code")
+			codeEl.CreateAttr("code", group.OrganizerFixedCode)
+			if group.OrganizerFixedCodeSystem != "" {
+				codeEl.CreateAttr("codeSystem", group.OrganizerFixedCodeSystem)
+			}
+			if group.OrganizerFixedCodeDisplay != "" {
+				codeEl.CreateAttr("displayName", group.OrganizerFixedCodeDisplay)
+			}
+		}
+		if group.OrganizerIDField != "" {
+			if v, ok := stringValue(record[group.OrganizerIDField]); ok {
+				WriteAtXPath(organizerEl, "id/@extension", v)
+			}
+		}
+		if group.OrganizerIDSystemField != "" {
+			if v, ok := stringValue(record[group.OrganizerIDSystemField]); ok {
+				WriteAtXPath(organizerEl, "id/@root", v)
+			}
+		}
+		ensureGeneratedID(organizerEl)
+
+		for _, c := range group.Components {
+			if _, ok := stringValue(record[c.Key]); !ok {
+				continue
+			}
+
+			componentEl := organizerEl.CreateElement(c.ComponentTag)
+			targetEl := componentEl
+			if c.ObsElementPath != "" {
+				targetEl = WriteAtXPath(componentEl, c.ObsElementPath, "")
+				applyTagBoilerplate(targetEl, lastSegmentTag(c.ObsElementPath))
+				// None of the UDI Organizer's own sub-observation templates
+				// (Device Identifier, Lot/Batch Number, Company Name,
+				// Implantable Device Status, MRI/Latex Safety, ...) declare a
+				// statusCode element — confirmed absent from every constraint
+				// table AND every worked XML example in companion_appxB.txt —
+				// unlike this codebase's other "observation"-tagged entries,
+				// which mostly DO want tagBoilerplate's "completed" default.
+				// Strip it here rather than adding a per-component config
+				// knob, since this is uniform across every ComponentGroup
+				// sub-observation seen so far.
+				if sc := targetEl.SelectElement("statusCode"); sc != nil {
+					targetEl.RemoveChild(sc)
+				}
+				if c.TemplateID != "" {
+					injectTemplateID(targetEl, c.TemplateID, c.TemplateIDExt)
+				}
+			}
+
+			for _, field := range c.Fields {
+				writeFieldValue(targetEl, field, record)
+			}
+
+			if c.FixedCode != "" && targetEl.SelectElement("code") == nil {
+				codeEl := targetEl.CreateElement("code")
+				codeEl.CreateAttr("code", c.FixedCode)
+				if c.FixedCodeSystem != "" {
+					codeEl.CreateAttr("codeSystem", c.FixedCodeSystem)
+				}
+				if c.FixedCodeDisplay != "" {
+					codeEl.CreateAttr("displayName", c.FixedCodeDisplay)
+				}
+			}
+			reorderChildrenByTag(targetEl, structuralElementOrder)
+		}
+
+		reorderChildrenByTag(organizerEl, structuralElementOrder)
 	}
 }
 

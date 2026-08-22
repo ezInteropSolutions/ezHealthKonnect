@@ -20,10 +20,166 @@ import (
 	"context"
 	"encoding/json"
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/executors/payload"
+	"ezhealthkonnect/services/executors/transform"
+	"ezhealthkonnect/fhir/r4"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// testFHIRSchemaDirPAS mirrors fhir/r4/r4_test.go's testSchemaDir, adjusted
+// for this package's depth (services/executors/enrichment -> repo root is 3
+// levels up). r4.ForceReinit is idempotent-per-call (matches the pattern
+// already proven in services/executors/transform/fhir_build_executor_test.go)
+// and must be called from THIS package's own test process — schema-registry
+// init is a process-global sync.Once, and each Go test package runs as its
+// own binary/process.
+const testFHIRSchemaDirPAS = "../../../schemas/fhir"
+
+func initFHIRRegistryPAS(t *testing.T) {
+	t.Helper()
+	if err := r4.ForceReinit(testFHIRSchemaDirPAS); err != nil {
+		t.Fatalf("r4.ForceReinit failed: %v", err)
+	}
+	if r4.GetRegistry() == nil {
+		t.Fatal("expected non-nil registry after ForceReinit")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V212 step config loader — reads directly from the actual migration file so
+// this test can never drift from what's really deployed. Same principle as
+// tests/pas_template_test.js's loadV212NewGroups(): the migration SQL is the
+// single source of truth for Zone 2's step configs, not a second
+// independently-maintained Go copy (which is exactly how bugs 1/2/5/6
+// happened earlier in this template's history).
+// ─────────────────────────────────────────────────────────────────────────────
+
+func loadV212Groups(t *testing.T) []map[string]interface{} {
+	t.Helper()
+	sqlPath := filepath.Join("..", "..", "..", "database", "migrations", "V212__PAS_Template_Rebuild_On_FHIR_Builder.sql")
+	raw, err := os.ReadFile(sqlPath)
+	if err != nil {
+		t.Fatalf("could not read V212 migration: %v", err)
+	}
+	sql := string(raw)
+
+	const tag = "$groups$"
+	start := strings.Index(sql, tag)
+	if start == -1 {
+		t.Fatal("could not locate $groups$ dollar-quote in V212 migration")
+	}
+	jsonStart := start + len(tag)
+	end := strings.Index(sql[jsonStart:], tag)
+	if end == -1 {
+		t.Fatal("could not locate closing $groups$ dollar-quote in V212 migration")
+	}
+
+	var groups []map[string]interface{}
+	if err := json.Unmarshal([]byte(sql[jsonStart:jsonStart+end]), &groups); err != nil {
+		t.Fatalf("could not parse V212's embedded groups JSON: %v", err)
+	}
+	return groups
+}
+
+// loadV212StepConfig finds the named step_alias among V212's new Zone 2
+// groups and returns its config map.
+func loadV212StepConfig(t *testing.T, alias string) map[string]interface{} {
+	t.Helper()
+	for _, g := range loadV212Groups(t) {
+		steps, _ := g["steps"].([]interface{})
+		for _, s := range steps {
+			step, _ := s.(map[string]interface{})
+			if step["step_alias"] == alias {
+				cfg, _ := step["config"].(map[string]interface{})
+				return cfg
+			}
+		}
+	}
+	t.Fatalf("step_alias %q not found in V212's Zone 2 groups", alias)
+	return nil
+}
+
+// runFHIRBuildStep runs a fhir.build step using config loaded from V212.
+func runFHIRBuildStep(t *testing.T, alias string, data map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	exec := transform.NewFHIRBuildExecutor()
+	step := &models.TransformationStep{
+		StepName:  alias,
+		StepAlias: strPtr(alias),
+		StepType:  "fhir.build",
+		Enabled:   true,
+		Config:    loadV212StepConfig(t, alias),
+	}
+	result, err := exec.Execute(context.Background(), step, data)
+	if err != nil {
+		t.Fatalf("[%s] fhir.build error: %v", alias, err)
+	}
+	out := stepOutput(t, result, alias)
+	for k, v := range result {
+		data[k] = v
+	}
+	injectStepOutput(data, alias, out)
+	return data
+}
+
+// runPASZone2 runs V212's full Zone 2 chain (derive -> 5x fhir.build ->
+// payload.builder assemble -> stamp profile), all with config loaded
+// directly from the migration, and returns the updated pipeline data.
+func runPASZone2(t *testing.T, data map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	initFHIRRegistryPAS(t)
+
+	deriveCfg := loadV212StepConfig(t, "derive_pas_fields")
+	result := runScript(t, "Derive PAS Computed Fields", deriveCfg["script"].(string), data)
+	deriveOut := stepOutput(t, result, "Derive PAS Computed Fields")
+	for k, v := range result {
+		data[k] = v
+	}
+	injectStepOutput(data, "derive_pas_fields", deriveOut)
+	if derived, ok := deriveOut["_pas_derived"]; ok {
+		data["_pas_derived"] = derived
+	}
+
+	data = runFHIRBuildStep(t, "build_patient_fhir", data)
+	data = runFHIRBuildStep(t, "build_coverage_fhir", data)
+	data = runFHIRBuildStep(t, "build_practitioner_fhir", data)
+	data = runFHIRBuildStep(t, "build_organization_fhir", data)
+	data = runFHIRBuildStep(t, "build_claim_fhir", data)
+
+	assembleCfg := loadV212StepConfig(t, "assemble_pas_bundle")
+	pbExec := payload.NewPayloadBuilderExecutor()
+	pbStep := &models.TransformationStep{
+		StepName:  "Assemble PAS Bundle",
+		StepAlias: strPtr("assemble_pas_bundle"),
+		StepType:  "payload.builder",
+		Enabled:   true,
+		Config:    assembleCfg,
+	}
+	pbResult, err := pbExec.Execute(context.Background(), pbStep, data)
+	if err != nil {
+		t.Fatalf("payload.builder error: %v", err)
+	}
+	pbOut := stepOutput(t, pbResult, "assemble_pas_bundle")
+	for k, v := range pbResult {
+		data[k] = v
+	}
+	injectStepOutput(data, "assemble_pas_bundle", pbOut)
+
+	stampCfg := loadV212StepConfig(t, "stamp_bundle_profile")
+	result = runScript(t, "Stamp Bundle Profile", stampCfg["script"].(string), data)
+	stampOut := stepOutput(t, result, "Stamp Bundle Profile")
+	for k, v := range result {
+		data[k] = v
+	}
+	injectStepOutput(data, "stamp_bundle_profile", stampOut)
+
+	return data
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock payer server fixtures
@@ -156,37 +312,12 @@ func runPASPipeline(t *testing.T, inbound map[string]interface{}, payerServer *h
 		data[k] = v
 	}
 
-	// ── Zone 2: Build FHIR Patient ────────────────────────────────────────────
-	result := runScript(t, "Build FHIR Patient", pasPatientScript, data)
-	patOut := stepOutput(t, result, "Build FHIR Patient")
-	for k, v := range result {
-		data[k] = v
-	}
-	injectStepOutput(data, "build_patient", patOut)
-
-	// ── Zone 2: Build FHIR Coverage ───────────────────────────────────────────
-	result = runScript(t, "Build FHIR Coverage", pasCoverageScript, data)
-	covOut := stepOutput(t, result, "Build FHIR Coverage")
-	for k, v := range result {
-		data[k] = v
-	}
-	injectStepOutput(data, "build_coverage", covOut)
-
-	// ── Zone 2: Build Provider Resources ─────────────────────────────────────
-	result = runScript(t, "Build Provider Resources", pasProviderScript, data)
-	provOut := stepOutput(t, result, "Build Provider Resources")
-	for k, v := range result {
-		data[k] = v
-	}
-	injectStepOutput(data, "build_provider", provOut)
-
-	// ── Zone 2: Assemble PAS Bundle ────────────────────────────────────────────
-	result = runScript(t, "Assemble PAS Bundle", pasBundleScript, data)
-	bundleOut := stepOutput(t, result, "Assemble PAS Bundle")
-	for k, v := range result {
-		data[k] = v
-	}
-	injectStepOutput(data, "assemble_pas_bundle", bundleOut)
+	// ── Zone 2: Derive -> 5x fhir.build -> assemble -> stamp (V212 chain) ─────
+	// Config for every one of these steps is loaded directly from
+	// database/migrations/V212__PAS_Template_Rebuild_On_FHIR_Builder.sql —
+	// this integration test exercises exactly what's deployed, not a
+	// hand-maintained copy of it.
+	data = runPASZone2(t, data)
 
 	// ── Zone 3: Submit to Payer (enrichment.api with bodyRef) ─────────────────
 	apiExec := NewAPIEnrichmentExecutor()
@@ -203,7 +334,7 @@ func runPASPipeline(t *testing.T, inbound map[string]interface{}, payerServer *h
 				"Content-Type": "application/fhir+json",
 				"Accept":       "application/fhir+json",
 			},
-			"bodyRef":   "steps.assemble_pas_bundle.step_output.pas_bundle",
+			"bodyRef":   "steps.stamp_bundle_profile.step_output.pas_bundle",
 			"timeoutMs": 10000,
 		},
 	}
@@ -414,26 +545,8 @@ func TestPASIntegration_PayerServerError(t *testing.T) {
 	ctx := context.Background()
 	data := fullPASInput()
 
-	// Run zones 1-2 manually to build the bundle
-	result := runScript(t, "Build FHIR Patient",    pasPatientScript,  data)
-	patOut := stepOutput(t, result, "Build FHIR Patient")
-	for k, v := range result { data[k] = v }
-	injectStepOutput(data, "build_patient", patOut)
-
-	result = runScript(t, "Build FHIR Coverage", pasCoverageScript, data)
-	covOut := stepOutput(t, result, "Build FHIR Coverage")
-	for k, v := range result { data[k] = v }
-	injectStepOutput(data, "build_coverage", covOut)
-
-	result = runScript(t, "Build Provider Resources", pasProviderScript, data)
-	provOut := stepOutput(t, result, "Build Provider Resources")
-	for k, v := range result { data[k] = v }
-	injectStepOutput(data, "build_provider", provOut)
-
-	result = runScript(t, "Assemble PAS Bundle", pasBundleScript, data)
-	bundleOut := stepOutput(t, result, "Assemble PAS Bundle")
-	for k, v := range result { data[k] = v }
-	injectStepOutput(data, "assemble_pas_bundle", bundleOut)
+	// Run Zone 2 (V212 chain) to build the bundle
+	data = runPASZone2(t, data)
 
 	// Zone 3 — expect error from 500 response
 	apiExec := NewAPIEnrichmentExecutor()
@@ -445,7 +558,7 @@ func TestPASIntegration_PayerServerError(t *testing.T) {
 		Config: map[string]interface{}{
 			"method":   "POST",
 			"endpoint": payer.URL + "/fhir/R4/$submit",
-			"bodyRef":  "steps.assemble_pas_bundle.step_output.pas_bundle",
+			"bodyRef":  "steps.stamp_bundle_profile.step_output.pas_bundle",
 		},
 	}
 	_, err := apiExec.Execute(ctx, apiStep, data)

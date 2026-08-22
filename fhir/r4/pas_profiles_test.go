@@ -410,15 +410,20 @@ func TestPASC_UnknownResourceType_NoPanic(t *testing.T) {
 	}
 }
 
-// TC-PASC-033: Standard obs-6 constraint still fires alongside PAS constraints
+// TC-PASC-033: A pre-existing generic constraint still fires alongside PAS
+// constraints — i.e. registerPASConstraints()'s own init() doesn't clobber
+// other resource types' entries in the shared globalConstraintRegistry.
+// Was pinned to obs-6 (Observation) until that key was retired from this
+// hand-written registry in favor of real spec-driven data (see
+// fhir/r4/compiler.go's compileSpecConstraints) — pat-1 (Patient) proves the
+// same "PAS registration doesn't clobber other types" property just as well.
 func TestPASC_ExistingConstraintsStillWork(t *testing.T) {
 	res := map[string]interface{}{
-		"resourceType":      "Observation",
-		"dataAbsentReason":  map[string]interface{}{},
-		"valueString":       "some value",
+		"resourceType": "Patient",
+		"telecom":      []interface{}{map[string]interface{}{"value": "555-1234"}}, // value without system
 	}
-	violations := checkConstraints(t, "Observation", res)
-	assertHasViolation(t, "obs-6", violations)
+	violations := checkConstraints(t, "Patient", res)
+	assertHasViolation(t, "pat-1", violations)
 }
 
 // TC-PASC-034: Full valid PAS bundle (all 5 resources) has zero violations

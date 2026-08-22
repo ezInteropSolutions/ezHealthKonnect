@@ -21,7 +21,7 @@
     "fhirResource": "AllergyIntolerance",
     "fhirPath": "AllergyIntolerance.code",
     "cdaSection": "allergiesAndIntolerances",
-    "cdaField": "drugClassAllergyCode"
+    "cdaField": "medicationAllergyCode"
   },
   {
     "class": "Allergies and Intolerances",
@@ -43,9 +43,9 @@
     "hl7Inject": false,
     "ccdInject": true,
     "fhirResource": "CarePlan",
-    "fhirPath": "CarePlan.description",
+    "fhirPath": "CarePlan.activity[0].detail.code.coding[0]",
     "cdaSection": "assessmentAndPlan",
-    "cdaField": "assessmentText"
+    "cdaField": "activityCode"
   },
   {
     "class": "Care Plan",
@@ -57,54 +57,90 @@
     "fhirResource": "Observation",
     "fhirPath": "Observation.code",
     "cdaSection": "socialHistory",
-    "cdaField": "sdohAssessment"
+    "cdaField": "observationCode"
   },
   {
     "class": "Health Insurance Information",
     "element": "Coverage Status",
-    "valueSet": "",
+    "valueSet": "NA",
     "hl7Field": "IN1-11",
     "hl7Inject": true,
     "ccdInject": true,
     "fhirResource": "Coverage",
     "fhirPath": "Coverage.status",
-    "cdaSection": "insurance",
-    "cdaField": "coverageStatus"
+    "cdaSection": "payersInsurance",
+    "cdaField": "coverageCheckDate"
   },
   {
     "class": "Health Insurance Information",
     "element": "Coverage Type",
-    "valueSet": "",
+    "valueSet": "NA",
     "hl7Field": "IN1-15",
     "hl7Inject": true,
     "ccdInject": true,
     "fhirResource": "Coverage",
     "fhirPath": "Coverage.type",
-    "cdaSection": "insurance",
+    "cdaSection": "payersInsurance",
     "cdaField": "coverageType"
   },
   {
     "class": "Health Insurance Information",
+    "element": "Relationship to Subscriber",
+    "valueSet": "NA",
+    "hl7Field": "IN1-17.1 & IN1-17.2",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Coverage",
+    "fhirPath": "Coverage.relationship",
+    "cdaSection": "payersInsurance",
+    "cdaField": "subscriberRelationship"
+  },
+  {
+    "class": "Health Insurance Information",
     "element": "Member Identifier",
-    "valueSet": "",
+    "valueSet": "NA",
     "hl7Field": "IN1-36",
     "hl7Inject": true,
     "ccdInject": true,
     "fhirResource": "Coverage",
-    "fhirPath": "Coverage.memberIdentifier",
-    "cdaSection": "insurance",
+    "fhirPath": "Coverage.subscriberId",
+    "cdaSection": "payersInsurance",
     "cdaField": "memberId"
   },
   {
     "class": "Health Insurance Information",
+    "element": "Subscriber Identifier",
+    "valueSet": "NA",
+    "hl7Field": "IN2",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Coverage",
+    "fhirPath": "Coverage.subscriber.identifier",
+    "cdaSection": "payersInsurance",
+    "cdaField": "subscriberId"
+  },
+  {
+    "class": "Health Insurance Information",
+    "element": "Group Identifier",
+    "valueSet": "NA",
+    "hl7Field": "IN1-8",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Coverage",
+    "fhirPath": "Coverage.class[0].value",
+    "cdaSection": "payersInsurance",
+    "cdaField": "groupNumber"
+  },
+  {
+    "class": "Health Insurance Information",
     "element": "Payer Identifier",
-    "valueSet": "",
+    "valueSet": "NA",
     "hl7Field": "IN1-3.1",
     "hl7Inject": true,
     "ccdInject": true,
     "fhirResource": "Coverage",
     "fhirPath": "Coverage.payor[0].identifier[0].value",
-    "cdaSection": "insurance",
+    "cdaSection": "payersInsurance",
     "cdaField": "payerId"
   },
   {
@@ -116,7 +152,7 @@
     "ccdInject": true,
     "fhirResource": "Patient",
     "fhirPath": "Patient.name[0].given[0]",
-    "cdaSection": "header",
+    "cdaSection": "header.patient",
     "cdaField": "firstName"
   },
   {
@@ -128,7 +164,7 @@
     "ccdInject": true,
     "fhirResource": "Patient",
     "fhirPath": "Patient.name[0].family",
-    "cdaSection": "header",
+    "cdaSection": "header.patient",
     "cdaField": "lastName"
   },
   {
@@ -140,8 +176,32 @@
     "ccdInject": true,
     "fhirResource": "Patient",
     "fhirPath": "Patient.name[0].given[1]",
-    "cdaSection": "header",
+    "cdaSection": "header.patient",
     "cdaField": "middleName"
+  },
+  {
+    "class": "Patient Demographics/Information",
+    "element": "Name Suffix",
+    "valueSet": "",
+    "hl7Field": "PID-5.4",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Patient",
+    "fhirPath": "Patient.name[0].suffix[0]",
+    "cdaSection": "header.patient",
+    "cdaField": "nameSuffix"
+  },
+  {
+    "class": "Patient Demographics/Information",
+    "element": "Previous Name",
+    "valueSet": "",
+    "hl7Field": "",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Patient",
+    "fhirPath": "Patient.name[1]",
+    "cdaSection": "header.patient",
+    "cdaField": "names"
   },
   {
     "class": "Patient Demographics/Information",
@@ -152,7 +212,7 @@
     "ccdInject": true,
     "fhirResource": "Patient",
     "fhirPath": "Patient.birthDate",
-    "cdaSection": "header",
+    "cdaSection": "header.patient",
     "cdaField": "dateOfBirth"
   },
   {
@@ -164,8 +224,8 @@
     "ccdInject": true,
     "fhirResource": "Patient",
     "fhirPath": "Patient.deceasedDateTime",
-    "cdaSection": "header",
-    "cdaField": "dateOfDeath"
+    "cdaSection": "header.patient",
+    "cdaField": "deceasedTime"
   },
   {
     "class": "Patient Demographics/Information",
@@ -176,7 +236,7 @@
     "ccdInject": true,
     "fhirResource": "Patient",
     "fhirPath": "Patient.extension[race].valueCoding",
-    "cdaSection": "header",
+    "cdaSection": "header.patient",
     "cdaField": "race"
   },
   {
@@ -188,8 +248,20 @@
     "ccdInject": true,
     "fhirResource": "Patient",
     "fhirPath": "Patient.extension[ethnicity].valueCoding",
-    "cdaSection": "header",
+    "cdaSection": "header.patient",
     "cdaField": "ethnicity"
+  },
+  {
+    "class": "Patient Demographics/Information",
+    "element": "Tribal Affiliation",
+    "valueSet": "",
+    "hl7Field": "",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Patient",
+    "fhirPath": "Patient.extension[tribal-affiliation]",
+    "cdaSection": "socialHistory",
+    "cdaField": "tribalAffiliation"
   },
   {
     "class": "Patient Demographics/Information",
@@ -200,8 +272,32 @@
     "ccdInject": true,
     "fhirResource": "Patient",
     "fhirPath": "Patient.gender",
-    "cdaSection": "header",
+    "cdaSection": "header.patient",
     "cdaField": "sex"
+  },
+  {
+    "class": "Patient Demographics/Information",
+    "element": "Sexual Orientation",
+    "valueSet": "",
+    "hl7Field": "",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueCodeableConcept.coding[0]",
+    "cdaSection": "socialHistory",
+    "cdaField": "sexualOrientation"
+  },
+  {
+    "class": "Patient Demographics/Information",
+    "element": "Gender Identity",
+    "valueSet": "",
+    "hl7Field": "",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueCodeableConcept.coding[0]",
+    "cdaSection": "socialHistory",
+    "cdaField": "genderIdentity"
   },
   {
     "class": "Patient Demographics/Information",
@@ -212,7 +308,7 @@
     "ccdInject": true,
     "fhirResource": "Patient",
     "fhirPath": "Patient.communication[0].language.coding[0].code",
-    "cdaSection": "header",
+    "cdaSection": "header.patient",
     "cdaField": "preferredLanguage"
   },
   {
@@ -224,8 +320,20 @@
     "ccdInject": true,
     "fhirResource": "Patient",
     "fhirPath": "Patient.address[0]",
-    "cdaSection": "header",
+    "cdaSection": "header.patient",
     "cdaField": "address"
+  },
+  {
+    "class": "Patient Demographics/Information",
+    "element": "Previous Address",
+    "valueSet": "Project US@",
+    "hl7Field": "PID-11.7",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Patient",
+    "fhirPath": "Patient.address[1]",
+    "cdaSection": "header.patient",
+    "cdaField": "addresses"
   },
   {
     "class": "Patient Demographics/Information",
@@ -236,8 +344,20 @@
     "ccdInject": true,
     "fhirResource": "Patient",
     "fhirPath": "Patient.telecom[0].value",
-    "cdaSection": "header",
+    "cdaSection": "header.patient",
     "cdaField": "phone"
+  },
+  {
+    "class": "Patient Demographics/Information",
+    "element": "Phone Number Type",
+    "valueSet": "",
+    "hl7Field": "PID-13.2",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Patient",
+    "fhirPath": "Patient.telecom[0].use",
+    "cdaSection": "header.patient",
+    "cdaField": "phoneType"
   },
   {
     "class": "Patient Demographics/Information",
@@ -248,8 +368,56 @@
     "ccdInject": true,
     "fhirResource": "Patient",
     "fhirPath": "Patient.telecom[email].value",
-    "cdaSection": "header",
+    "cdaSection": "header.patient",
     "cdaField": "email"
+  },
+  {
+    "class": "Patient Demographics/Information",
+    "element": "Related Person's Name",
+    "valueSet": "",
+    "hl7Field": "NK1-2",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "RelatedPerson",
+    "fhirPath": "RelatedPerson.name[0]",
+    "cdaSection": "header.relatedPerson",
+    "cdaField": "given"
+  },
+  {
+    "class": "Patient Demographics/Information",
+    "element": "Related Person's Relationship",
+    "valueSet": "",
+    "hl7Field": "NK1-3",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "RelatedPerson",
+    "fhirPath": "RelatedPerson.relationship[0]",
+    "cdaSection": "header.relatedPerson",
+    "cdaField": "relationshipCode"
+  },
+  {
+    "class": "Patient Demographics/Information",
+    "element": "Occupation",
+    "valueSet": "Occupational Data for Health",
+    "hl7Field": "",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueCodeableConcept.coding[0]",
+    "cdaSection": "socialHistory",
+    "cdaField": "occupationCode"
+  },
+  {
+    "class": "Patient Demographics/Information",
+    "element": "Occupation Industry",
+    "valueSet": "",
+    "hl7Field": "",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.component[0].valueCodeableConcept.coding[0]",
+    "cdaSection": "socialHistory",
+    "cdaField": "occupationIndustryCode"
   },
   {
     "class": "Health Status Assessments",
@@ -259,9 +427,33 @@
     "hl7Inject": false,
     "ccdInject": true,
     "fhirResource": "Observation",
-    "fhirPath": "Observation.code",
+    "fhirPath": "Observation.value",
     "cdaSection": "functionalStatus",
-    "cdaField": "functionalStatusCode"
+    "cdaField": "value"
+  },
+  {
+    "class": "Health Status Assessments",
+    "element": "Mental/Cognitive Status",
+    "valueSet": "LOINC",
+    "hl7Field": "OBX-3,OBX-5",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.value",
+    "cdaSection": "mentalStatus",
+    "cdaField": "value"
+  },
+  {
+    "class": "Health Status Assessments",
+    "element": "Disability Status",
+    "valueSet": "LOINC",
+    "hl7Field": "OBX-3,OBX-5",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.value",
+    "cdaSection": "functionalStatus",
+    "cdaField": "disabilityStatus"
   },
   {
     "class": "Health Status Assessments",
@@ -274,6 +466,30 @@
     "fhirPath": "Observation.valueCodeableConcept.coding[0].code",
     "cdaSection": "socialHistory",
     "cdaField": "smokingStatus"
+  },
+  {
+    "class": "Health Status Assessments",
+    "element": "Health Concerns",
+    "valueSet": "",
+    "hl7Field": "OBX-3",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Condition",
+    "fhirPath": "Condition.code.coding[0]",
+    "cdaSection": "healthConcerns",
+    "cdaField": "concernCode"
+  },
+  {
+    "class": "Health Status Assessments",
+    "element": "Pregnancy Status",
+    "valueSet": "",
+    "hl7Field": "OBX-3,OBX-5",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueCodeableConcept.coding[0]",
+    "cdaSection": "socialHistory",
+    "cdaField": "pregnancyStatus"
   },
   {
     "class": "Immunizations",
@@ -345,7 +561,19 @@
     "fhirResource": "Procedure",
     "fhirPath": "Procedure.code.coding[0]",
     "cdaSection": "procedures",
-    "cdaField": "sdohInterventionCode"
+    "cdaField": "procedureCode"
+  },
+  {
+    "class": "Procedures",
+    "element": "Reason for Referral",
+    "valueSet": "SNOMED CT, ICD-10-CM",
+    "hl7Field": "PR1-3",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "ServiceRequest",
+    "fhirPath": "ServiceRequest.reasonCode[0].coding[0]",
+    "cdaSection": "reasonForReferral",
+    "cdaField": "referralCode"
   },
   {
     "class": "Laboratory",
@@ -373,6 +601,18 @@
   },
   {
     "class": "Laboratory",
+    "element": "Specimen Type",
+    "valueSet": "SNOMED CT US Edition",
+    "hl7Field": "SPM-4",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Specimen",
+    "fhirPath": "Specimen.type.coding[0]",
+    "cdaSection": "results",
+    "cdaField": "specimenTypeCode"
+  },
+  {
+    "class": "Laboratory",
     "element": "Result Status",
     "valueSet": "",
     "hl7Field": "OBX-11",
@@ -392,8 +632,8 @@
     "ccdInject": true,
     "fhirResource": "DiagnosticReport",
     "fhirPath": "DiagnosticReport.code.coding[0]",
-    "cdaSection": "results",
-    "cdaField": "imagingTestCode"
+    "cdaSection": "findingsDIR",
+    "cdaField": ""
   },
   {
     "class": "Diagnostic Imaging",
@@ -404,8 +644,8 @@
     "ccdInject": true,
     "fhirResource": "DiagnosticReport",
     "fhirPath": "DiagnosticReport.presentedForm[0].data",
-    "cdaSection": "results",
-    "cdaField": "imagingReport"
+    "cdaSection": "findingsDIR",
+    "cdaField": ""
   },
   {
     "class": "Provenance",
@@ -416,8 +656,8 @@
     "ccdInject": true,
     "fhirResource": "Provenance",
     "fhirPath": "Provenance.recorded",
-    "cdaSection": "header",
-    "cdaField": "authorTime"
+    "cdaSection": "header.author",
+    "cdaField": ""
   },
   {
     "class": "Provenance",
@@ -428,7 +668,439 @@
     "ccdInject": true,
     "fhirResource": "Provenance",
     "fhirPath": "Provenance.agent[0].who.display",
-    "cdaSection": "header",
-    "cdaField": "authorOrganization"
+    "cdaSection": "header.author",
+    "cdaField": ""
+  },
+  {
+    "class": "Encounter Information",
+    "element": "Encounter Type",
+    "valueSet": "",
+    "hl7Field": "PV1-2",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Encounter",
+    "fhirPath": "Encounter.type[0].coding[0]",
+    "cdaSection": "encounters",
+    "cdaField": "encounterCode"
+  },
+  {
+    "class": "Encounter Information",
+    "element": "Encounter Diagnosis",
+    "valueSet": "SNOMED CT, ICD-10-CM",
+    "hl7Field": "DG1",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Condition",
+    "fhirPath": "Condition.code.coding[0]",
+    "cdaSection": "encounters",
+    "cdaField": ""
+  },
+  {
+    "class": "Encounter Information",
+    "element": "Encounter Time",
+    "valueSet": "",
+    "hl7Field": "PV1-44/PV1-45/EVN-2",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Encounter",
+    "fhirPath": "Encounter.period",
+    "cdaSection": "encounters",
+    "cdaField": "effectiveTime"
+  },
+  {
+    "class": "Encounter Information",
+    "element": "Encounter Location",
+    "valueSet": "NHSN HSLOC, SNOMED CT",
+    "hl7Field": "PV1-3/PV1-7",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Encounter",
+    "fhirPath": "Encounter.location[0].location",
+    "cdaSection": "encounters",
+    "cdaField": "locationCode"
+  },
+  {
+    "class": "Encounter Information",
+    "element": "Encounter Disposition",
+    "valueSet": "",
+    "hl7Field": "PV1-36",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Encounter",
+    "fhirPath": "Encounter.hospitalization.dischargeDisposition.coding[0]",
+    "cdaSection": "encounters",
+    "cdaField": "dischargeDispositionCode"
+  },
+  {
+    "class": "Medical Devices",
+    "element": "Unique Device Identifier (UDI)",
+    "valueSet": "FDA Unique Device Identification (UDI) System",
+    "hl7Field": "",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Device",
+    "fhirPath": "Device.udiCarrier[0].deviceIdentifier",
+    "cdaSection": "medicalEquipment",
+    "cdaField": "deviceIdentifier"
+  },
+  {
+    "class": "Vital Signs",
+    "element": "Blood Pressure",
+    "valueSet": "LOINC, UCUM",
+    "hl7Field": "OBX-3/OBX-5/OBX-6",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.component[0].valueQuantity",
+    "cdaSection": "vitalSigns",
+    "cdaField": "value"
+  },
+  {
+    "class": "Vital Signs",
+    "element": "Diastolic Blood Pressure",
+    "valueSet": "LOINC, UCUM",
+    "hl7Field": "OBX-3/OBX-5/OBX-6",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.component[1].valueQuantity",
+    "cdaSection": "vitalSigns",
+    "cdaField": "value"
+  },
+  {
+    "class": "Vital Signs",
+    "element": "Heart Rate",
+    "valueSet": "LOINC, UCUM",
+    "hl7Field": "OBX-3/OBX-5/OBX-6",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueQuantity",
+    "cdaSection": "vitalSigns",
+    "cdaField": "value"
+  },
+  {
+    "class": "Vital Signs",
+    "element": "Respiratory Rate",
+    "valueSet": "LOINC, UCUM",
+    "hl7Field": "OBX-3/OBX-5/OBX-6",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueQuantity",
+    "cdaSection": "vitalSigns",
+    "cdaField": "value"
+  },
+  {
+    "class": "Vital Signs",
+    "element": "Body Temperature",
+    "valueSet": "LOINC, UCUM",
+    "hl7Field": "OBX-3/OBX-5/OBX-6",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueQuantity",
+    "cdaSection": "vitalSigns",
+    "cdaField": "value"
+  },
+  {
+    "class": "Vital Signs",
+    "element": "Body Height",
+    "valueSet": "LOINC, UCUM",
+    "hl7Field": "OBX-3/OBX-5/OBX-6",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueQuantity",
+    "cdaSection": "vitalSigns",
+    "cdaField": "value"
+  },
+  {
+    "class": "Vital Signs",
+    "element": "Body Weight",
+    "valueSet": "LOINC, UCUM",
+    "hl7Field": "OBX-3/OBX-5/OBX-6",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueQuantity",
+    "cdaSection": "vitalSigns",
+    "cdaField": "value"
+  },
+  {
+    "class": "Vital Signs",
+    "element": "Pulse Oximetry",
+    "valueSet": "LOINC, UCUM",
+    "hl7Field": "OBX-3/OBX-5/OBX-6",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueQuantity",
+    "cdaSection": "vitalSigns",
+    "cdaField": "value"
+  },
+  {
+    "class": "Vital Signs",
+    "element": "Inhaled Oxygen Concentration",
+    "valueSet": "LOINC, UCUM",
+    "hl7Field": "OBX-3/OBX-5/OBX-6",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueQuantity",
+    "cdaSection": "vitalSigns",
+    "cdaField": "value"
+  },
+  {
+    "class": "Vital Signs",
+    "element": "BMI Percentile (2 - 20 years)",
+    "valueSet": "LOINC, UCUM",
+    "hl7Field": "OBX-3/OBX-5/OBX-6",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueQuantity",
+    "cdaSection": "vitalSigns",
+    "cdaField": "value"
+  },
+  {
+    "class": "Vital Signs",
+    "element": "Weight-for-length Percentile (Birth - 24 Months)",
+    "valueSet": "LOINC, UCUM",
+    "hl7Field": "OBX-3/OBX-5/OBX-6",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueQuantity",
+    "cdaSection": "vitalSigns",
+    "cdaField": "value"
+  },
+  {
+    "class": "Vital Signs",
+    "element": "Head Occipital-frontal Circumference Percentile (Birth - 36 Months)",
+    "valueSet": "LOINC, UCUM",
+    "hl7Field": "OBX-3/OBX-5/OBX-6",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.valueQuantity",
+    "cdaSection": "vitalSigns",
+    "cdaField": "value"
+  },
+  {
+    "class": "Medications",
+    "element": "Medications",
+    "valueSet": "RxNorm, NDC",
+    "hl7Field": "RXE-2 / RXO-1",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "MedicationStatement",
+    "fhirPath": "MedicationStatement.medicationCodeableConcept.coding[0]",
+    "cdaSection": "medications",
+    "cdaField": "drugCode"
+  },
+  {
+    "class": "Medications",
+    "element": "Dose",
+    "valueSet": "",
+    "hl7Field": "RXE-3",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "MedicationStatement",
+    "fhirPath": "MedicationStatement.dosage[0].doseAndRate[0].doseQuantity",
+    "cdaSection": "medications",
+    "cdaField": "doseQuantity"
+  },
+  {
+    "class": "Medications",
+    "element": "Dose Unit of Measure",
+    "valueSet": "UCUM",
+    "hl7Field": "RXE-5",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "MedicationStatement",
+    "fhirPath": "MedicationStatement.dosage[0].doseAndRate[0].doseQuantity.unit",
+    "cdaSection": "medications",
+    "cdaField": "doseQuantity"
+  },
+  {
+    "class": "Medications",
+    "element": "Indication",
+    "valueSet": "SNOMED CT, ICD-10-CM",
+    "hl7Field": "OBX-3",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Condition",
+    "fhirPath": "Condition.code.coding[0]",
+    "cdaSection": "medications",
+    "cdaField": "indicationCode"
+  },
+  {
+    "class": "Medications",
+    "element": "Fill Status",
+    "valueSet": "Medication Fill Status",
+    "hl7Field": "ORC-5",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "MedicationDispense",
+    "fhirPath": "MedicationDispense.status",
+    "cdaSection": "medications",
+    "cdaField": "fillStatus"
+  },
+  {
+    "class": "Facility Information",
+    "element": "Facility Identifier",
+    "valueSet": "",
+    "hl7Field": "MSH-4",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Location",
+    "fhirPath": "Location.identifier[0]",
+    "cdaSection": "header.encompassingEncounter",
+    "cdaField": ""
+  },
+  {
+    "class": "Facility Information",
+    "element": "Facility Type",
+    "valueSet": "",
+    "hl7Field": "MSH-4/PV1-3",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Location",
+    "fhirPath": "Location.type[0].coding[0]",
+    "cdaSection": "header.encompassingEncounter",
+    "cdaField": ""
+  },
+  {
+    "class": "Facility Information",
+    "element": "Facility Name",
+    "valueSet": "",
+    "hl7Field": "MSH-4",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Location",
+    "fhirPath": "Location.name",
+    "cdaSection": "header.encompassingEncounter",
+    "cdaField": ""
+  },
+  {
+    "class": "Facility Information",
+    "element": "Facility Address",
+    "valueSet": "",
+    "hl7Field": "PV1-3",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Location",
+    "fhirPath": "Location.address",
+    "cdaSection": "header.encompassingEncounter",
+    "cdaField": ""
+  },
+  {
+    "class": "Care Team Members",
+    "element": "Care Team Member Name",
+    "valueSet": "",
+    "hl7Field": "ROL-4",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Practitioner",
+    "fhirPath": "Practitioner.name[0]",
+    "cdaSection": "careTeam",
+    "cdaField": ""
+  },
+  {
+    "class": "Care Team Members",
+    "element": "Care Team Member Identifier",
+    "valueSet": "",
+    "hl7Field": "ROL-4",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "CareTeam",
+    "fhirPath": "CareTeam.participant[0].member.identifier",
+    "cdaSection": "careTeam",
+    "cdaField": "memberId"
+  },
+  {
+    "class": "Care Team Members",
+    "element": "Care Team Member Role",
+    "valueSet": "",
+    "hl7Field": "ROL-3",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "CareTeam",
+    "fhirPath": "CareTeam.participant[0].role[0].coding[0]",
+    "cdaSection": "careTeam",
+    "cdaField": "memberRole"
+  },
+  {
+    "class": "Care Team Members",
+    "element": "Care Team Member Location",
+    "valueSet": "",
+    "hl7Field": "PV1-3",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Practitioner",
+    "fhirPath": "Practitioner.address[0]",
+    "cdaSection": "careTeam",
+    "cdaField": ""
+  },
+  {
+    "class": "Care Team Members",
+    "element": "Care Team Member Telecom",
+    "valueSet": "",
+    "hl7Field": "ROL-12",
+    "hl7Inject": true,
+    "ccdInject": true,
+    "fhirResource": "Practitioner",
+    "fhirPath": "Practitioner.telecom[0]",
+    "cdaSection": "careTeam",
+    "cdaField": ""
+  },
+  {
+    "class": "Clinical Tests",
+    "element": "Clinical Test",
+    "valueSet": "",
+    "hl7Field": "",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.code",
+    "cdaSection": "results",
+    "cdaField": "testCode"
+  },
+  {
+    "class": "Clinical Tests",
+    "element": "Clinical Test Result/Report",
+    "valueSet": "",
+    "hl7Field": "",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Observation",
+    "fhirPath": "Observation.value",
+    "cdaSection": "results",
+    "cdaField": "resultValue"
+  },
+  {
+    "class": "Goals",
+    "element": "Patient Goals",
+    "valueSet": "",
+    "hl7Field": "",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Goal",
+    "fhirPath": "Goal.description.coding[0]",
+    "cdaSection": "goals",
+    "cdaField": "goalCode"
+  },
+  {
+    "class": "Goals",
+    "element": "SDOH Goals",
+    "valueSet": "",
+    "hl7Field": "",
+    "hl7Inject": false,
+    "ccdInject": true,
+    "fhirResource": "Goal",
+    "fhirPath": "Goal.description.coding[0]",
+    "cdaSection": "goals",
+    "cdaField": "goalCode"
   }
 ]

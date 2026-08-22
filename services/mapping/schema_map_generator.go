@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 
-	"ezhealthkonnect/fhir"
+	"ezhealthkonnect/fhir/r4"
 	"ezhealthkonnect/hl7"
 )
 
@@ -293,21 +293,20 @@ func isProtocolDelimiterField(segmentName, lowerName string) bool {
 
 // Generator orchestrates schema lookups to produce position maps.
 type Generator struct {
-	hl7Loader  *hl7.RealSchemaLoader
-	fhirLoader *fhir.FHIRSchemaLoader
+	hl7Loader *hl7.RealSchemaLoader
 	// dbAnchors optionally overrides / extends the hardcoded anchor table.
 	// Loaded from ig_field_anchors by IGAnchorService; nil = use hardcoded only.
 	// Keyed "SEGMENT.FIELD" → []Candidate, same format as knownAnchorsR4.
 	dbAnchors map[string][]Candidate
 }
 
-// NewGenerator returns a Generator wired to the process-global schema loaders.
-// Both loaders must have been initialised (InitRealSchemaLoader /
-// InitFHIRSchemaLoader) before calling this.
+// NewGenerator returns a Generator wired to the process-global HL7 schema
+// loader (InitRealSchemaLoader must have run first). FHIR schema lookups go
+// through r4.GetRegistry(), a package-level singleton — no per-instance FHIR
+// loader field needed.
 func NewGenerator() *Generator {
 	return &Generator{
-		hl7Loader:  hl7.GetRealSchemaLoader(),
-		fhirLoader: fhir.GetFHIRSchemaLoader(),
+		hl7Loader: hl7.GetRealSchemaLoader(),
 	}
 }
 
@@ -322,7 +321,7 @@ func (g *Generator) WithDBAnchors(anchors map[string][]Candidate) *Generator {
 // matchField resolves candidates for one field, checking DB anchors first.
 func (g *Generator) matchField(
 	segmentName, fieldKey, fieldName, hl7DataType, fhirResource string,
-	fhirSchema *fhir.FHIRSchema,
+	fhirSchema *r4.CompiledProfile,
 	fhirVer FHIRVersion,
 ) []Candidate {
 	key := strings.ToUpper(segmentName) + "." + fieldNumber(fieldKey)
@@ -535,15 +534,12 @@ func (g *Generator) loadHL7Schema(version, msgType, triggerEvent string) (*hl7.R
 	return g.hl7Loader.LoadRealSchema(version, msgType, triggerEvent)
 }
 
-func (g *Generator) loadFHIRSchema(resourceType, version string) *fhir.FHIRSchema {
-	if g.fhirLoader == nil {
+func (g *Generator) loadFHIRSchema(resourceType, version string) *r4.CompiledProfile {
+	cp, ok := r4.GetRegistry().Get(version, resourceType, "base")
+	if !ok {
 		return nil
 	}
-	schema, err := g.fhirLoader.LoadFHIRSchema(resourceType, "", version)
-	if err != nil {
-		return nil
-	}
-	return schema
+	return cp
 }
 
 // generateComponents maps individual components of a composite HL7 field to

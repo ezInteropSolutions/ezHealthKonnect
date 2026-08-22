@@ -101,6 +101,45 @@ func (v *USCDIVocabulary) GetByCDASection(section string) []*USCDIElement {
 	return v.byCDASection[normalise(section)]
 }
 
+// ClassesForSection returns the full, deduped, alphabetically-sorted set of
+// USCDI class names that map to the given CDA section key (via
+// GetByCDASection) — nil when v is nil (both Coverage Audit's worker_pool.go
+// and Build Requirements' controllers gracefully degrade to a nil vocabulary
+// when uscdi_v3.json fails to load, rather than failing the whole request),
+// sectionKey is empty (unclassified sections), or — the common case —
+// uscdi_v3.json simply has no entry for this section yet (a deliberately
+// partial, honest subset; see this file's own header comment). Never
+// collapsed to one class: a section can legitimately belong to more than one
+// USCDI class at once (e.g. socialHistory -> Health Status Assessments, Care
+// Plan, AND Patient Demographics/Information — confirmed by scripting the
+// actual data during the CDA Coverage Audit / Build Requirements
+// USCDI-bridging work), and there is no way to narrow that down to "the one
+// class THIS specific field/entry belongs to" (would need resolving a raw
+// element path back to one CDAFieldDef.Key, which doesn't exist today).
+// Shared by services/cda_coverage (Coverage Audit) and cda/builder (Build
+// Requirements) — the same class-resolution logic, used by both consumers,
+// lives here once rather than duplicated in each.
+func (v *USCDIVocabulary) ClassesForSection(sectionKey string) []string {
+	if v == nil || sectionKey == "" {
+		return nil
+	}
+	elements := v.GetByCDASection(sectionKey)
+	if len(elements) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(elements))
+	var classes []string
+	for _, el := range elements {
+		if seen[el.Class] {
+			continue
+		}
+		seen[el.Class] = true
+		classes = append(classes, el.Class)
+	}
+	sort.Strings(classes)
+	return classes
+}
+
 // GetElement returns the first USCDIElement matching both class and element name.
 // Returns nil if not found.
 func (v *USCDIVocabulary) GetElement(class, element string) *USCDIElement {

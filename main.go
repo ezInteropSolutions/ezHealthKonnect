@@ -29,6 +29,7 @@ import (
 	fhirnarrative "ezhealthkonnect/services/fhir_narrative"
 	"ezhealthkonnect/services/logger"
 	appmetrics "ezhealthkonnect/services/metrics"
+	"ezhealthkonnect/uscdi"
 	"fmt"
 	"log"
 	"net/http"
@@ -200,7 +201,6 @@ func main() {
 				}
 				fhirSchemaDir := cfg.GetFHIRSchemaDirectory()
 				log.Printf("🔧 Initializing FHIR schema system from: %s", fhirSchemaDir)
-				fhir.InitFHIRSchemaLoader(fhirSchemaDir)
 				// r4.InitRegistry compiles all FHIR profiles and valuesets from .gz files.
 				// Run in background so the HTTP listener opens immediately.
 				// The registry uses sync.Once internally, so any request that needs a
@@ -247,7 +247,18 @@ func main() {
 			var coverageAuditPool *cdacoverage.WorkerPool
 			if objectStorageService != nil {
 				if coverageSchemaLoader, err := cdaSchemaLoader.NewCDASchemaLoader("./cda/schemas"); err == nil {
-					coverageAuditPool = cdacoverage.NewWorkerPool(db, objectStorageService, coverageSchemaLoader)
+					// USCDI v3 vocabulary for the report's USCDIClasses bridge
+					// (services/cda_coverage/inventory.go's uscdiClassesForSection)
+					// — constructed the same way every other CDA consumer already
+					// does (e.g. cdaparser.NewFromSchemaDir), not a shared
+					// singleton; a nil vocabulary here just means every report's
+					// USCDIClasses stays empty, not an error, so this degrades
+					// gracefully rather than disabling the whole feature.
+					coverageVocab, vocabErr := uscdi.NewUSCDIVocabulary("./cda/schemas/uscdi_v3.json")
+					if vocabErr != nil {
+						log.Printf("⚠️  CDA Coverage Audit: USCDI vocabulary unavailable, USCDI class bridging disabled: %v", vocabErr)
+					}
+					coverageAuditPool = cdacoverage.NewWorkerPool(db, objectStorageService, coverageSchemaLoader, coverageVocab)
 					processingEngine.SetCoverageAuditPool(coverageAuditPool)
 					log.Printf("📊 CDA Coverage Audit worker pool initialized")
 				} else {
@@ -358,15 +369,14 @@ func main() {
 		fhirSchemaDir := cfg.GetFHIRSchemaDirectory()
 		log.Printf("🔧 Initializing FHIR schema system from: %s", fhirSchemaDir)
 
-		fhir.InitFHIRSchemaLoader(fhirSchemaDir)
 		if err := r4.InitRegistry(fhirSchemaDir); err != nil {
 			log.Printf("⚠️  [r4] Registry init warning: %v", err)
 		}
 
-		// Verify FHIR schema loader initialization - ENHANCED
-		fhirLoader := fhir.GetFHIRSchemaLoader()
-		if fhirLoader == nil {
-			log.Printf("❌ FATAL: FHIR schema loader failed to initialize")
+		// Verify FHIR schema registry initialization - ENHANCED
+		reg := r4.GetRegistry()
+		if reg == nil {
+			log.Printf("❌ FATAL: FHIR schema registry failed to initialize")
 			log.Printf("💡 SOLUTION: Download FHIR packages to %s", fhirSchemaDir)
 			log.Printf("💡 Expected structure:")
 			log.Printf("   %s/R4/resources/Patient.gz", fhirSchemaDir)
@@ -375,18 +385,19 @@ func main() {
 			log.Printf("🚨 Server will start but FHIR transformations will be limited")
 		} else {
 			// Check available schemas
-			if available, err := fhirLoader.ListAvailableSchemas(); err == nil {
-				if len(available) > 0 {
-					log.Printf("✅ FHIR schema system initialized with %d schemas", len(available))
-					if cfg.VerboseLogging {
-						log.Printf("📋 Available FHIR schemas: %v", available[:min(5, len(available))])
+			available := reg.List("R4")
+			if len(available) > 0 {
+				log.Printf("✅ FHIR schema system initialized with %d schemas", len(available))
+				if cfg.VerboseLogging {
+					n := len(available)
+					if n > 5 {
+						n = 5
 					}
-				} else {
-					log.Printf("⚠️ WARNING: FHIR schema loader initialized but no schemas found")
-					log.Printf("💡 Check that .gz files exist in expected directories")
+					log.Printf("📋 Available FHIR schemas: %v", available[:n])
 				}
 			} else {
-				log.Printf("❌ ERROR: Cannot list FHIR schemas: %v", err)
+				log.Printf("⚠️ WARNING: FHIR schema registry initialized but no schemas found")
+				log.Printf("💡 Check that .gz files exist in expected directories")
 			}
 		}
 	} else {
@@ -548,32 +559,31 @@ func main() {
 			}
 
 			// FHIR Schema System Status - ENHANCED
-			fhirLoader := fhir.GetFHIRSchemaLoader()
-			if fhirLoader != nil {
-				fhirStats := fhirLoader.GetStats()
-				available, err := fhirLoader.ListAvailableSchemas()
+			fhirReg := r4.GetRegistry()
+			if fhirReg != nil {
+				regStats := fhirReg.GetStats()
+				available := fhirReg.List("R4")
 
 				fhirStatus := gin.H{
-					"enabled":     true,
-					"source":      "filesystem",
-					"directory":   cfg.GetFHIRSchemaDirectory(),
-					"cacheStats":  fhirStats,
-					"initialized": true,
+					"enabled":          true,
+					"source":           "filesystem",
+					"directory":        cfg.GetFHIRSchemaDirectory(),
+					"cacheStats":       regStats,
+					"initialized":      true,
+					"availableSchemas": len(available),
+					"schemasReady":     len(available) > 0,
 				}
 
-				if err == nil {
-					fhirStatus["availableSchemas"] = len(available)
-					fhirStatus["schemasReady"] = len(available) > 0
-					if len(available) > 0 {
-						fhirStatus["status"] = "operational"
-						fhirStatus["sampleSchemas"] = available[:min(3, len(available))]
-					} else {
-						fhirStatus["status"] = "no_schemas"
-						fhirStatus["message"] = "Loader initialized but no schema files found"
+				if len(available) > 0 {
+					fhirStatus["status"] = "operational"
+					sample := make([]string, 0, min(3, len(available)))
+					for _, k := range available[:min(3, len(available))] {
+						sample = append(sample, k.String())
 					}
+					fhirStatus["sampleSchemas"] = sample
 				} else {
-					fhirStatus["status"] = "error"
-					fhirStatus["error"] = err.Error()
+					fhirStatus["status"] = "no_schemas"
+					fhirStatus["message"] = "Registry initialized but no schema files found"
 				}
 
 				health["fhirSchemaSystem"] = fhirStatus
@@ -582,7 +592,7 @@ func main() {
 					"enabled":   false,
 					"status":    "failed_to_initialize",
 					"directory": cfg.GetFHIRSchemaDirectory(),
-					"message":   "FHIR schema loader not initialized - check directory structure",
+					"message":   "FHIR schema registry not initialized - check directory structure",
 				}
 			}
 		} else {
@@ -779,7 +789,16 @@ func main() {
 				cdaMapper := cdafhir.NewGenericCDAFHIRMapper(db, cdaLoader)
 				cdaTermSvc := cdaterminology.NewTerminologyService(db)
 				cdaMapper.WithTerminologyService(cdaTermSvc)
-				cdaSchemaCtrl := controllers.NewCDASchemaController(db, cdaLoader, cdaMapper)
+				// USCDI v3 vocabulary for GetDocumentTypeRequirements' USCDIClasses
+				// bridge (cda/builder/requirements_catalog.go) — constructed the
+				// same per-consumer way as Coverage Audit's own coverageVocab above
+				// (not a shared singleton); a nil vocabulary here just means every
+				// requirements response's USCDIClasses stays empty, not an error.
+				cdaReqVocab, cdaReqVocabErr := uscdi.NewUSCDIVocabulary("./cda/schemas/uscdi_v3.json")
+				if cdaReqVocabErr != nil {
+					log.Printf("⚠️  [cda] USCDI vocabulary unavailable, Requirements USCDI class bridging disabled: %v", cdaReqVocabErr)
+				}
+				cdaSchemaCtrl := controllers.NewCDASchemaController(db, cdaLoader, cdaMapper, cdaReqVocab)
 				cdaSchemaCtrl.RegisterRoutes(api.Group("/cda"))
 				log.Printf("✅ CDA Schema Controller registered (/api/cda/schema, /api/cda/mappings, /api/cda/templates)")
 
@@ -1275,23 +1294,18 @@ func main() {
 
 			// ADDED: Schema listing endpoint
 			fhirGroup.GET("/transform/schemas", func(c *gin.Context) {
-				fhirLoader := fhir.GetFHIRSchemaLoader()
-				if fhirLoader == nil {
+				fhirReg := r4.GetRegistry()
+				if fhirReg == nil {
 					c.JSON(http.StatusServiceUnavailable, gin.H{
 						"success": false,
-						"error":   "FHIR schema loader not initialized",
+						"error":   "FHIR schema registry not initialized",
 					})
 					return
 				}
 
-				available, err := fhirLoader.ListAvailableSchemas()
-				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{
-						"success": false,
-						"error":   "Failed to list schemas",
-						"details": err.Error(),
-					})
-					return
+				var available []r4.RegistryKey
+				for _, v := range []string{"R4", "R5"} {
+					available = append(available, fhirReg.List(v)...)
 				}
 
 				// Parse and structure schema information
@@ -1299,24 +1313,17 @@ func main() {
 				versionCount := make(map[string]int)
 				profileCount := make(map[string]int)
 
-				for _, schemaID := range available {
-					parts := strings.Split(schemaID, "_")
-					if len(parts) >= 3 {
-						version := parts[0]
-						profile := parts[1]
-						resourceType := parts[2]
+				for _, key := range available {
+					versionCount[key.Version]++
+					profileCount[key.Profile]++
 
-						versionCount[version]++
-						profileCount[profile]++
-
-						schemas = append(schemas, map[string]interface{}{
-							"id":           schemaID,
-							"version":      version,
-							"profile":      profile,
-							"resourceType": resourceType,
-							"displayName":  fmt.Sprintf("%s %s (%s)", resourceType, profile, version),
-						})
-					}
+					schemas = append(schemas, map[string]interface{}{
+						"id":           key.String(),
+						"version":      key.Version,
+						"profile":      key.Profile,
+						"resourceType": key.ResourceType,
+						"displayName":  fmt.Sprintf("%s %s (%s)", key.ResourceType, key.Profile, key.Version),
+					})
 				}
 
 				c.JSON(http.StatusOK, gin.H{
@@ -1329,7 +1336,7 @@ func main() {
 					},
 					"loader": gin.H{
 						"status": "operational",
-						"stats":  fhirLoader.GetStats(),
+						"stats":  fhirReg.GetStats(),
 					},
 				})
 			})
@@ -1340,28 +1347,29 @@ func main() {
 				profile := c.DefaultQuery("profile", "base")
 				version := c.DefaultQuery("version", "R4")
 
-				fhirLoader := fhir.GetFHIRSchemaLoader()
-				if fhirLoader == nil {
+				fhirReg := r4.GetRegistry()
+				if fhirReg == nil {
 					c.JSON(http.StatusServiceUnavailable, gin.H{
 						"success": false,
-						"error":   "FHIR schema loader not initialized",
+						"error":   "FHIR schema registry not initialized",
 					})
 					return
 				}
 
-				schema, err := fhirLoader.LoadFHIRSchema(resourceType, profile, version)
-				if err != nil {
+				cp, ok := fhirReg.Get(version, resourceType, profile)
+				if !ok {
 					c.JSON(http.StatusNotFound, gin.H{
 						"success":      false,
 						"error":        "Schema not found",
 						"resourceType": resourceType,
 						"profile":      profile,
 						"version":      version,
-						"details":      err.Error(),
 						"suggestion":   "Try with profile=base or check available schemas at /api/fhir/transform/schemas",
 					})
 					return
 				}
+
+				schema := fhir.BuildLegacySchemaShape(cp)
 
 				c.JSON(http.StatusOK, gin.H{
 					"success": true,
@@ -1373,7 +1381,6 @@ func main() {
 						"elements":     len(schema.Elements),
 						"required":     len(schema.Required),
 						"mustSupport":  len(schema.MustSupport),
-						"loadTime":     schema.LoadTime.String(),
 					},
 				})
 			})
@@ -1633,16 +1640,16 @@ func main() {
 			fhirGroup.GET("/debug-schema", func(c *gin.Context) {
 				debug := gin.H{}
 
-				// Check what FHIR loader you actually have
-				fhirLoader := fhir.GetFHIRSchemaLoader()
-				if fhirLoader == nil {
-					debug["fhirLoader"] = "NOT AVAILABLE"
+				// Check what FHIR schema registry you actually have
+				fhirReg := r4.GetRegistry()
+				if fhirReg == nil {
+					debug["fhirRegistry"] = "NOT AVAILABLE"
 				} else {
-					debug["fhirLoader"] = "AVAILABLE"
-					debug["loaderType"] = fmt.Sprintf("%T", fhirLoader)
+					debug["fhirRegistry"] = "AVAILABLE"
+					debug["registryType"] = fmt.Sprintf("%T", fhirReg)
 
 					// Get stats
-					stats := fhirLoader.GetStats()
+					stats := fhirReg.GetStats()
 					debug["fhirStats"] = stats
 				}
 
@@ -1928,7 +1935,7 @@ func main() {
 
 				if cfg.UseFilesystemSchema() {
 					hl7Ready = hl7.GetSchemaLoader() != nil
-					fhirReady = fhir.GetFHIRSchemaLoader() != nil
+					fhirReady = r4.GetRegistry() != nil
 				}
 
 				c.JSON(http.StatusOK, gin.H{

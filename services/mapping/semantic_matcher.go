@@ -18,7 +18,7 @@ import (
 	"strings"
 	"unicode"
 
-	"ezhealthkonnect/fhir"
+	"ezhealthkonnect/fhir/r4"
 )
 
 // Candidate is one scored FHIR element path suggestion for an HL7 field.
@@ -646,7 +646,7 @@ func Match(
 	fieldName string, // e.g. "Patient Name"
 	hl7DataType string,
 	fhirResource string,
-	fhirSchema *fhir.FHIRSchema,
+	fhirSchema *r4.CompiledProfile,
 	fhirVer FHIRVersion,
 ) []Candidate {
 	key := strings.ToUpper(segmentName) + "." + fieldNumber(fieldKey)
@@ -661,20 +661,20 @@ func Match(
 
 	// Pass 2 — data-type compatibility against loaded FHIR elements
 	if fhirSchema != nil {
-		for path, elem := range fhirSchema.Elements {
+		for path, dataType := range fhirSchema.DataTypes {
 			if !strings.HasPrefix(path, fhirResource+".") {
 				continue
 			}
 			if isBlocklisted(path) {
 				continue
 			}
-			if !typeCompatible(typeEntry.FHIRType, elem.DataType) {
+			if !typeCompatible(typeEntry.FHIRType, dataType) {
 				continue
 			}
-			score := nameSimilarity(fieldName, elem.Path) * 0.85
+			score := nameSimilarity(fieldName, path) * 0.85
 			results = append(results, Candidate{
 				FHIRPath:   path,
-				FHIRType:   elem.DataType,
+				FHIRType:   dataType,
 				Confidence: math.Round(score*100) / 100,
 				Source:     "type_match",
 			})
@@ -683,18 +683,18 @@ func Match(
 
 	// Pass 3 — name similarity without type filter (fallback)
 	if len(results) == 0 && fhirSchema != nil {
-		for path, elem := range fhirSchema.Elements {
+		for path, dataType := range fhirSchema.DataTypes {
 			if !strings.HasPrefix(path, fhirResource+".") {
 				continue
 			}
 			if isBlocklisted(path) {
 				continue
 			}
-			score := nameSimilarity(fieldName, elem.Path) * 0.65
+			score := nameSimilarity(fieldName, path) * 0.65
 			if score > 0.4 {
 				results = append(results, Candidate{
 					FHIRPath:   path,
-					FHIRType:   elem.DataType,
+					FHIRType:   dataType,
 					Confidence: math.Round(score*100) / 100,
 					Source:     "name_similarity",
 				})

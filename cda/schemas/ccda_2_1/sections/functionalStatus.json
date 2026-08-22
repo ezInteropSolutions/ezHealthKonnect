@@ -19,6 +19,15 @@
       "xpathDisplay": "entry/observation/value/@displayName"
     },
     {
+      "key": "disabilityStatus",
+      "uscdiElement": "Disability Status",
+      "conformance": "MAY",
+      "dataType": "CD",
+      "valueSet": "CUBS_Disability",
+      "xpath": "entry/observation[code/@code='89571-4']/value/@code",
+      "xpathDisplay": "entry/observation[code/@code='89571-4']/value/@displayName"
+    },
+    {
       "key": "effectiveTime",
       "uscdiElement": "Observation Date",
       "conformance": "SHALL",

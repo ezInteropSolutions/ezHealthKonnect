@@ -169,6 +169,7 @@ func (v *FHIRR4Validator) ValidateResource(
 	// ── Layer 3: terminology + constraints ────────────────────────────────────
 	if cp != nil {
 		v.validateTerminology(resource, cp, &res)
+		v.validateSpecConstraints(resource, cp, &res)
 	}
 	v.validateConstraints(resource, rt, &res)
 
@@ -197,11 +198,22 @@ func (v *FHIRR4Validator) ValidateBundle(
 			"Bundle.type is required"))
 	}
 
-	// ── Bundle-level constraint checks (bun-1, bun-2, bun-3, bun-7) ──────────
+	// ── Bundle-level constraint checks (bun-7, bdl-12, ...) ──────────────────
 	if v.constraints != nil && opts.Level >= LevelStrict {
 		for _, viol := range v.constraints.Check("Bundle", bundle) {
 			result.addBundleIssue(issue(viol.Severity, "constraint", viol.Key, "Bundle",
 				viol.Description))
+		}
+	}
+
+	// ── Bundle-level spec-driven constraint checks (bdl-1, bdl-2, ...) ───────
+	// A Bundle is itself a resource with its own resource-root invariants —
+	// this is ValidateResource's Layer 3b run directly against the Bundle,
+	// not against any one of its entries (see evaluateSpecConstraints).
+	if opts.Level >= LevelStrict {
+		cp := v.resolveProfile(opts.Version, "Bundle", opts.Profile)
+		for _, iss := range evaluateSpecConstraints(bundle, cp) {
+			result.addBundleIssue(iss)
 		}
 	}
 
@@ -557,7 +569,57 @@ func (v *FHIRR4Validator) validateTerminology(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Layer 3b: constraint validation
+// Layer 3b: spec-driven constraint validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+// validateSpecConstraints runs every real, resource-root FHIR invariant
+// compiled onto cp (fhir/r4/fhirpath — see compileSpecConstraints) against
+// resource. This is the generic, data-driven counterpart to validateConstraints
+// below: a rule's own Key/Severity/Human text is read straight off the
+// compiled schema, the same way validateTerminology/validateStructure already
+// read Bindings/Required generically — nothing here is per-resource-type code.
+func (v *FHIRR4Validator) validateSpecConstraints(
+	resource map[string]interface{},
+	cp *CompiledProfile,
+	res *ResourceResult,
+) {
+	for _, iss := range evaluateSpecConstraints(resource, cp) {
+		res.addIssue(iss)
+	}
+}
+
+// evaluateSpecConstraints is the shared core evaluateSpecConstraints/
+// validateSpecConstraints and ValidateBundle's own bundle-level constraint
+// check both build on — a Bundle is itself a resource with its own
+// resource-root invariants (bdl-1, bdl-2, ...), checked against the whole
+// Bundle rather than against any one of its entries, so it needs the same
+// evaluation logic but a different place to put the resulting issues
+// (BundleIssues, not a per-entry ResourceResult).
+func evaluateSpecConstraints(resource map[string]interface{}, cp *CompiledProfile) []ValidationIssue {
+	if cp == nil {
+		return nil
+	}
+	var issues []ValidationIssue
+	for _, rule := range cp.SpecConstraints {
+		ok, err := rule.Evaluate(resource)
+		if err != nil {
+			// A rule that fails to evaluate on real (as opposed to
+			// malformed-input) data indicates a gap in this codebase's
+			// fhirpath subset, not a violation of the invariant itself —
+			// skipped rather than reported, matching compileSpecConstraints'
+			// own "unsupported expression → skip, don't block" posture.
+			continue
+		}
+		if ok {
+			continue
+		}
+		issues = append(issues, issue(rule.Severity, "constraint", rule.Key, cp.ResourceType, rule.Human))
+	}
+	return issues
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Layer 3b (hand-written): constraint validation
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (v *FHIRR4Validator) validateConstraints(

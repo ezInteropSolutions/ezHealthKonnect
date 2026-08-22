@@ -11,19 +11,33 @@ import (
 	"time"
 
 	"ezhealthkonnect/config"
-	"ezhealthkonnect/fhir"
+	"ezhealthkonnect/fhir/r4"
 
 	"github.com/gin-gonic/gin"
 )
+
+// listAvailableSchemaNames formats every profile in reg as "{version}_{profile}_{resourceType}"
+// (e.g. "R4_base_Patient", "R4_us-core_Patient") — the same shape the legacy
+// fhir.FHIRSchemaLoader.ListAvailableSchemas() used, since this is a
+// diagnostics endpoint whose response shape external callers may already
+// depend on.
+func listAvailableSchemaNames(reg *r4.SchemaRegistry) []string {
+	var names []string
+	for _, version := range []string{"R4", "R5"} {
+		for _, key := range reg.List(version) {
+			names = append(names, fmt.Sprintf("%s_%s_%s", key.Version, key.Profile, key.ResourceType))
+		}
+	}
+	return names
+}
 
 // =====================================
 // ENHANCED SCHEMA-DRIVEN FHIR CONTROLLER
 // =====================================
 
 type SchemaFHIRTransformController struct {
-	db              *sql.DB
-	config          *config.Config
-	transformEngine *fhir.TransformationEngine
+	db     *sql.DB
+	config *config.Config
 }
 
 // =====================================
@@ -96,21 +110,15 @@ type FHIRFieldDefinition struct {
 // CONTROLLER INITIALIZATION
 // =====================================
 
+// NewSchemaFHIRTransformController used to also build a fhir.TransformationEngine
+// here (fhir/transformation_engine.go) — deleted 2026-08-16 as confirmed dead
+// code: the two handlers that would have called it (Transform, ValidateOnly)
+// were always stubs returning 501, so the engine was constructed on every
+// startup and never actually invoked.
 func NewSchemaFHIRTransformController(database *sql.DB, cfg *config.Config) *SchemaFHIRTransformController {
-	transformConfig := &fhir.TransformationConfig{
-		DefaultProfile:    "base",
-		ValidateOutput:    true,
-		CreateBundle:      false,
-		MaxProcessingTime: 30 * time.Second,
-		VerboseLogging:    cfg.VerboseLogging,
-	}
-
-	transformEngine := fhir.NewTransformationEngine(database, transformConfig)
-
 	return &SchemaFHIRTransformController{
-		db:              database,
-		config:          cfg,
-		transformEngine: transformEngine,
+		db:     database,
+		config: cfg,
 	}
 }
 
@@ -167,13 +175,9 @@ func (c *SchemaFHIRTransformController) GetStatus(ctx *gin.Context) {
 		"configured": true,
 	}
 
-	if c.transformEngine != nil {
-		status["transformEngine"] = "ready"
-	}
-
-	schemaLoader := fhir.GetFHIRSchemaLoader()
-	if schemaLoader != nil {
-		available, _ := schemaLoader.ListAvailableSchemas()
+	reg := r4.GetRegistry()
+	if reg != nil {
+		available := listAvailableSchemaNames(reg)
 		status["fhirSchemas"] = map[string]interface{}{
 			"available": available,
 			"count":     len(available),
@@ -190,22 +194,15 @@ func (c *SchemaFHIRTransformController) GetStatus(ctx *gin.Context) {
 }
 
 func (c *SchemaFHIRTransformController) ListSchemas(ctx *gin.Context) {
-	schemaLoader := fhir.GetFHIRSchemaLoader()
-	if schemaLoader == nil {
+	reg := r4.GetRegistry()
+	if reg == nil {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "FHIR schema loader not initialized",
+			"error": "FHIR schema registry not initialized",
 		})
 		return
 	}
 
-	available, err := schemaLoader.ListAvailableSchemas()
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to list schemas",
-			"details": err.Error(),
-		})
-		return
-	}
+	available := listAvailableSchemaNames(reg)
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"success": true,

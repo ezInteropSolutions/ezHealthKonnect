@@ -168,7 +168,7 @@
     },
     {
       "key": "referencedDocumentIdRoot",
-      "uscdiElement": "Advance Directive Referenced External Document ID Root (CONF:1198-8692/8693/8695 — a scanned/filed copy of the physical directive, e.g. a POLST form; genuinely optional, only present when such a document actually exists)",
+      "uscdiElement": "Referenced Document ID Root",
       "conformance": "MAY",
       "dataType": "ST",
       "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/id/@root"
@@ -182,28 +182,28 @@
     },
     {
       "key": "referencedDocumentContent",
-      "uscdiElement": "Advance Directive Referenced External Document Content (base64-embedded — the ED datatype's OTHER representation mode, an alternative to a URL reference: the actual scanned/filed document embedded inline rather than linked. Use this OR referencedDocumentURL, whichever matches how the source system actually holds the document — both are valid ED content, not mutually required.)",
+      "uscdiElement": "Referenced Document Content",
       "conformance": "MAY",
       "dataType": "ST",
       "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text"
     },
     {
       "key": "referencedDocumentRepresentation",
-      "uscdiElement": "Advance Directive Referenced External Document Representation (ED datatype @representation — \"B64\" for base64-embedded binary content, the normal value whenever referencedDocumentContent is populated; \"TXT\" for literal inline plain text)",
+      "uscdiElement": "Referenced Document Representation",
       "conformance": "MAY",
       "dataType": "ST",
       "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/@representation"
     },
     {
       "key": "referencedDocumentMediaType",
-      "uscdiElement": "Advance Directive Referenced External Document Media Type (e.g. application/pdf, image/tiff — IANA media type of the embedded/linked document)",
+      "uscdiElement": "Referenced Document Media Type",
       "conformance": "MAY",
       "dataType": "ST",
       "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/@mediaType"
     },
     {
       "key": "referencedDocumentURL",
-      "uscdiElement": "Advance Directive Referenced External Document URL (CONF:1198-8697/8698) — the ED datatype's pointer representation mode, an alternative to embedding referencedDocumentContent inline",
+      "uscdiElement": "Referenced Document URL",
       "conformance": "MAY",
       "dataType": "ST",
       "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/reference/@value"

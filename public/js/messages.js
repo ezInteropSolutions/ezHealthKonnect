@@ -1077,11 +1077,20 @@ class MessageManager {
                     // once; the category HEADER itself (found/total,
                     // elements used) is always visible either way.
                     const catId = `covcat-${ri}-${ci}`;
+                    // USCDI v3 badge — only when this category's SectionKey
+                    // actually resolves in cda/schemas/uscdi_v3.json (services/
+                    // cda_coverage's uscdiClassesForSection); most categories
+                    // won't have one yet, since that file is a deliberately
+                    // partial, honest subset — absence here is correct, not a
+                    // bug, and must never be shown as "0% USCDI coverage."
+                    const uscdiBadge = (cat.uscdiClasses && cat.uscdiClasses.length > 0)
+                        ? `<span style="display:inline-block;margin-left:0.5rem;font-size:0.68rem;font-weight:600;color:#1e40af;background:#dbeafe;padding:0.05rem 0.45rem;border-radius:10px;white-space:nowrap;" title="Real USCDI v3 data class(es) this category maps to">USCDI v3: ${cat.uscdiClasses.map(c => this.escapeHtml(c)).join(', ')}</span>`
+                        : '';
                     return `
                         <div style="margin-bottom:0.5rem;">
                             <button onclick="messageManager._toggleCoverageRow('${catId}')"
                                     style="width:100%;display:flex;align-items:center;gap:0.5rem;padding:0.2rem 0;background:none;border:none;text-align:left;cursor:pointer;margin-bottom:0.25rem;">
-                                <span style="flex:1;font-size:0.78rem;color:#475569;"><strong>${this.escapeHtml(cat.category)}</strong> — ${catLabel}</span>
+                                <span style="flex:1;font-size:0.78rem;color:#475569;"><strong>${this.escapeHtml(cat.category)}</strong> — ${catLabel}${uscdiBadge}</span>
                                 <svg id="${catId}-chevron" style="width:14px;height:14px;color:#94a3b8;flex-shrink:0;transition:transform 0.15s;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                             </button>
                             <div id="${catId}-body" style="display:none;">${rows}</div>

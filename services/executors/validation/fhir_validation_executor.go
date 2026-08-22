@@ -52,6 +52,13 @@ type fhirValidationConfig struct {
 	ValidateReferences bool `json:"validate_references"`
 	// FailOnError stops the pipeline when validation errors are found.
 	FailOnError bool `json:"fail_on_error"`
+	// SourceField optionally points at a prior step's output, e.g.
+	// "steps.assemble_pas_bundle.step_output.pas_bundle", for pipelines that
+	// build a bundle via enrichment.script rather than a dedicated FHIR-build
+	// step. Resolved via executors.GetNestedValue — the same mechanism
+	// api_enrichment_executor.go uses for bodyRef — before falling back to
+	// findFHIRData's fixed-key search (fhirBundle/fhirResource/message/enriched).
+	SourceField string `json:"source_field"`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -88,10 +95,13 @@ func (fve *FHIRValidationExecutor) Execute(
 		ValidateRefs:  cfg.ValidateReferences,
 	}
 
-	fhirData, isBundle := fve.findFHIRData(inputData)
+	fhirData, isBundle := fve.resolveSourceField(inputData, cfg.SourceField)
+	if fhirData == nil {
+		fhirData, isBundle = fve.findFHIRData(inputData)
+	}
 	if fhirData == nil {
 		return fve.buildErrorOutput(inputData, startTime,
-			"No FHIR data found in pipeline data (looked for fhirBundle, fhirResource, and resourceType)")
+			"No FHIR data found in pipeline data (looked for source_field, fhirBundle, fhirResource, and resourceType)")
 	}
 
 	validator := r4.GetValidator()
@@ -319,9 +329,37 @@ func (fve *FHIRValidationExecutor) buildErrorOutput(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FHIR data location — unchanged from v1
+// FHIR data location
 // ─────────────────────────────────────────────────────────────────────────────
 
+// resolveSourceField resolves an explicit config.source_field path (e.g.
+// "steps.assemble_pas_bundle.step_output.pas_bundle") against the raw
+// (non-unwrapped) inputData via executors.GetNestedValue — the same helper
+// api_enrichment_executor.go uses for bodyRef. Returns (nil, false) when
+// source_field is empty, unresolvable, or resolves to a non-object value, so
+// callers can fall back to findFHIRData's fixed-key search.
+func (fve *FHIRValidationExecutor) resolveSourceField(inputData map[string]interface{}, sourceField string) (map[string]interface{}, bool) {
+	if sourceField == "" {
+		return nil, false
+	}
+	resolved := executors.GetNestedValue(inputData, sourceField)
+	if resolved == nil {
+		log.Printf("  ⚠️  [FHIR Validation] source_field '%s' resolved to nil — falling back to default search", sourceField)
+		return nil, false
+	}
+	data, ok := resolved.(map[string]interface{})
+	if !ok {
+		log.Printf("  ⚠️  [FHIR Validation] source_field '%s' resolved to %T, not an object — falling back to default search", sourceField, resolved)
+		return nil, false
+	}
+	rt, _ := data["resourceType"].(string)
+	isBundle := rt == "Bundle"
+	log.Printf("  🔍 Found FHIR data via configured source_field '%s' (resourceType: %s, mode: %s)",
+		sourceField, rt, map[bool]string{true: "bundle", false: "resource"}[isBundle])
+	return data, isBundle
+}
+
+// findFHIRData — fixed-key fallback search, unchanged from v1
 func (fve *FHIRValidationExecutor) findFHIRData(inputData map[string]interface{}) (map[string]interface{}, bool) {
 	type searchLoc struct {
 		key    string

@@ -147,6 +147,45 @@ func TestUSCorePatient_MustSupport(t *testing.T) {
 	assert.NotEmpty(t, cp.MustSupport, "US Core Patient must have must-support elements")
 }
 
+// TestCompiledProfile_NameDescriptionAllBindings proves the schema-consolidation
+// work's additive fields actually carry real data from the .gz files, not just
+// compile without error — this is what unblocked migrating
+// controllers/cda_schema_controller.go and services/parsers/fhir_parser_service.go
+// off the separate legacy loader (fhir/schema_loader.go), which had carried
+// this same information independently until now.
+func TestCompiledProfile_NameDescriptionAllBindings(t *testing.T) {
+	initRegistry(t)
+	reg := r4.GetRegistry()
+
+	cp, ok := reg.Get("R4", "Patient", "base")
+	require.True(t, ok)
+
+	assert.Equal(t, "Patient", cp.Name, "resource-level Name should come from the StructureDefinition")
+	assert.NotEmpty(t, cp.Description, "resource-level Description should be populated")
+
+	assert.NotEmpty(t, cp.ElementNames["Patient.gender"], "per-element Name should be populated")
+	assert.NotEmpty(t, cp.ElementDescriptions["Patient.gender"], "per-element Description should be populated")
+
+	// Patient.gender is bound to administrative-gender (required strength) —
+	// must appear in both Bindings (enforcement) and AllBindings (display).
+	foundInBindings := false
+	for _, b := range cp.Bindings {
+		if b.Path == "Patient.gender" {
+			foundInBindings = true
+		}
+	}
+	assert.True(t, foundInBindings, "Patient.gender should be a required/extensible binding")
+
+	foundInAll := false
+	for _, b := range cp.AllBindings {
+		if b.Path == "Patient.gender" {
+			foundInAll = true
+			assert.NotEmpty(t, b.ValueSetURL)
+		}
+	}
+	assert.True(t, foundInAll, "AllBindings should also carry Patient.gender")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. TerminologyRegistry — Contains
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,48 +245,14 @@ func TestTerminology_UnknownValueSet(t *testing.T) {
 // 5. ConstraintRegistry — predicate functions
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestConstraint_obs6_DataAbsentReason(t *testing.T) {
-	cr := r4.GetConstraintRegistry()
-	require.NotNil(t, cr)
-
-	// PASS: dataAbsentReason present, no value[x]
-	passRes := map[string]interface{}{
-		"resourceType":     "Observation",
-		"dataAbsentReason": map[string]interface{}{"coding": []interface{}{}},
-	}
-	viols := cr.Check("Observation", passRes)
-	obs6Violations := filterKey(viols, "obs-6")
-	assert.Empty(t, obs6Violations, "obs-6 should pass when no value[x] present")
-
-	// FAIL: both dataAbsentReason AND valueString present
-	failRes := map[string]interface{}{
-		"resourceType":     "Observation",
-		"dataAbsentReason": map[string]interface{}{},
-		"valueString":      "some value",
-	}
-	viols = cr.Check("Observation", failRes)
-	obs6Violations = filterKey(viols, "obs-6")
-	assert.NotEmpty(t, obs6Violations, "obs-6 should fail when both dataAbsentReason and value[x] present")
-	assert.Equal(t, "error", obs6Violations[0].Severity)
-}
-
-func TestConstraint_bun1_TotalOnlyForSearchset(t *testing.T) {
-	cr := r4.GetConstraintRegistry()
-
-	// PASS: total absent
-	pass := map[string]interface{}{"resourceType": "Bundle", "type": "transaction"}
-	assert.Empty(t, filterKey(cr.Check("Bundle", pass), "bun-1"))
-
-	// PASS: type=searchset with total
-	passSearch := map[string]interface{}{"resourceType": "Bundle", "type": "searchset", "total": 5}
-	assert.Empty(t, filterKey(cr.Check("Bundle", passSearch), "bun-1"))
-
-	// FAIL: type=transaction with total
-	fail := map[string]interface{}{"resourceType": "Bundle", "type": "transaction", "total": 5}
-	viols := filterKey(cr.Check("Bundle", fail), "bun-1")
-	assert.NotEmpty(t, viols)
-	assert.Equal(t, "error", viols[0].Severity)
-}
+// obs-6 and bun-1 were retired from ConstraintRegistry once real spec data
+// covered them generically (see fhir/r4/compiler.go's compileSpecConstraints
+// and fhir/r4/fhirpath) — their old direct-registry tests moved to
+// fhir/r4/fhirpath/spec_rules_test.go's TestSpecRules_Obs6_* /
+// TestSpecRules_Bdl1_* (same pass/fail fixtures, testing the rule directly).
+// End-to-end coverage that the retirement didn't change observable validator
+// behavior remains right here: TestValidator_Strict_ObsDataAbsentViolation
+// and TestValidator_Bundle_StrictBdl1Violation below.
 
 func TestConstraint_bun7_DuplicateFullUrl(t *testing.T) {
 	cr := r4.GetConstraintRegistry()
@@ -534,19 +539,25 @@ func TestValidator_Bundle_RequiredTypesMissing(t *testing.T) {
 	assert.Contains(t, codes, "missing-required-type")
 }
 
-func TestValidator_Bundle_StrictBun1Violation(t *testing.T) {
+// The retired hand-written predicate this test originally exercised was
+// registered under the key "bun-1" — not a real FHIR constraint key at all
+// (the actual R4 invariant is "bdl-1"; confirmed directly against
+// hl7.org/fhir/R4/bundle.profile.json while building the spec-driven
+// replacement). The new engine reports the real key, so this test now
+// asserts on "bdl-1" — the same rule, correctly named.
+func TestValidator_Bundle_StrictBdl1Violation(t *testing.T) {
 	initRegistry(t)
 	v := r4.NewFHIRR4Validator(r4.GetRegistry(), r4.GetTerminologyRegistry(), r4.GetConstraintRegistry())
 
 	bundle := map[string]interface{}{
 		"resourceType": "Bundle",
 		"type":         "transaction",
-		"total":        42, // bun-1: total only allowed for searchset/history
+		"total":        42, // bdl-1: total only allowed for searchset/history
 		"entry":        []interface{}{},
 	}
 	result := v.ValidateBundle(bundle, r4.ValidationOptions{Level: r4.LevelStrict})
 	codes := collectIssueCodes(result.BundleIssues)
-	assert.Contains(t, codes, "bun-1")
+	assert.Contains(t, codes, "bdl-1")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

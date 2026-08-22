@@ -4,9 +4,12 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
+
+	"ezhealthkonnect/fhir/r4/fhirpath"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14,27 +17,45 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 type rawSchema struct {
-	ResourceType string                `json:"resourceType"`
-	Version      string                `json:"version"`
-	Name         string                `json:"name"`
-	Description  string                `json:"description"`
-	BaseResource string                `json:"baseResource"`
-	Elements     map[string]*rawElem   `json:"elements"`
-	Required     []string              `json:"required"`
-	MustSupport  []string              `json:"mustSupport"`
+	ResourceType        string               `json:"resourceType"`
+	Version             string               `json:"version"`
+	Name                string               `json:"name"`
+	Description         string               `json:"description"`
+	BaseResource        string               `json:"baseResource"`
+	Elements            map[string]*rawElem  `json:"elements"`
+	// ResourceConstraints are the invariants declared on the resource's own
+	// root element (obs-6, bun-1, con-4, ...) — where the majority of real,
+	// genuinely resource-specific business rules live, as opposed to the
+	// ele-1/ext-1 boilerplate repeated on every child element. See
+	// cmd/build-fhir-schemas/build_fhir_schemas.py's own comment on this
+	// field for why it's separate from any one element's own Constraints.
+	ResourceConstraints []RawConstraint      `json:"resourceConstraints"`
+	Required            []string             `json:"required"`
+	MustSupport         []string             `json:"mustSupport"`
 }
 
 type rawElem struct {
-	Path            string   `json:"path"`
-	DataType        string   `json:"dataType"`
-	Cardinality     string   `json:"cardinality"`   // e.g. "0..1", "1..*"
-	Required        bool     `json:"required"`
-	MustSupport     bool     `json:"mustSupport"`
-	IsModifier      bool     `json:"isModifier"`
-	IsSummary       bool     `json:"isSummary"`
-	Constraints     []string `json:"constraints"`
-	ValueSet        string   `json:"valueSet"`
-	BindingStrength string   `json:"bindingStrength"` // required | extensible | preferred | example
+	Path            string          `json:"path"`
+	Name            string          `json:"name"`
+	Description     string          `json:"description"`
+	DataType        string          `json:"dataType"`
+	Cardinality     string          `json:"cardinality"` // e.g. "0..1", "1..*"
+	Required        bool            `json:"required"`
+	MustSupport     bool            `json:"mustSupport"`
+	IsModifier      bool            `json:"isModifier"`
+	IsSummary       bool            `json:"isSummary"`
+	Constraints     []RawConstraint `json:"constraints"`
+	ValueSet        string          `json:"valueSet"`
+	BindingStrength string          `json:"bindingStrength"` // required | extensible | preferred | example
+}
+
+// RawConstraint mirrors one entry of a StructureDefinition element's
+// constraint[] array: key/severity/human-text/the real FHIRPath expression.
+type RawConstraint struct {
+	Key        string `json:"key"`
+	Severity   string `json:"severity"`
+	Human      string `json:"human"`
+	Expression string `json:"expression"`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -49,6 +70,17 @@ type CompiledProfile struct {
 	ResourceType string
 	Profile      string // "base", "us-core", …
 
+	// Name/Description are the resource-level display text from the source
+	// StructureDefinition (e.g. Name="Patient", Description="Demographics
+	// and administrative information about an individual..."). Informational
+	// only — never used for validation — for UI/catalog consumers like
+	// services/parsers/fhir_parser_service.go and
+	// controllers/cda_schema_controller.go, which previously had to go
+	// through the separate legacy loader (fhir/schema_loader.go) for this
+	// text since it was compiled away here until now.
+	Name        string
+	Description string
+
 	// ── Structure rules ───────────────────────────────────────────────────────
 
 	// Required contains every element path whose min cardinality is ≥ 1.
@@ -61,17 +93,40 @@ type CompiledProfile struct {
 	DataTypes map[string]string
 	// IsModifier flags modifier elements (semantic significance warnings).
 	IsModifier map[string]bool
+	// IsSummary flags elements included in a resource's _summary=true view.
+	IsSummary map[string]bool
+	// ElementNames/ElementDescriptions carry the same informational,
+	// validation-irrelevant per-element display text as Name/Description
+	// above, keyed by element path.
+	ElementNames        map[string]string
+	ElementDescriptions map[string]string
 
 	// ── Terminology bindings ──────────────────────────────────────────────────
 
 	// Bindings contains only required and extensible bindings; preferred/example
 	// are omitted — they carry no validation obligation.
 	Bindings []CompiledBinding
+	// AllBindings carries every element's valueSet/bindingStrength regardless
+	// of strength (including preferred/example) — for display/UX consumers
+	// (e.g. a field-picker UI showing "this field's suggested codes") that
+	// want to show a binding exists even when it imposes no validation
+	// obligation. Bindings above stays scoped to enforcement; this is a
+	// separate, purely informational concern.
+	AllBindings []CompiledBinding
 
 	// ── Constraint functions ──────────────────────────────────────────────────
 
-	// Constraints are pre-resolved Go predicate functions for this resource type.
+	// Constraints are pre-resolved Go predicate functions for this resource type
+	// (fhir/r4/constraints.go) — hand-written invariants not (yet, or ever, for
+	// IG-specific ones like Da Vinci PAS) covered by SpecConstraints below.
 	Constraints []CompiledConstraint
+
+	// SpecConstraints are the resource's real, resource-root FHIR invariants
+	// (obs-6, bun-1, con-4, ...), compiled once from RawConstraint data via
+	// fhir/r4/fhirpath — evaluated generically, not hand-ported to Go. A raw
+	// constraint whose expression uses something fhirpath doesn't support
+	// yet is skipped here (logged, not fatal) — see compileSchema.
+	SpecConstraints []*fhirpath.Rule
 
 	// ── Informational ─────────────────────────────────────────────────────────
 
@@ -79,6 +134,43 @@ type CompiledProfile struct {
 	// implementors to support; used for information/warning only.
 	MustSupport  []string
 	ElementCount int
+}
+
+// Cardinality reconstructs the "min..max" display string (e.g. "0..1", "1..*")
+// for path from MinCard/MaxCard. Shared by every consumer that wants the
+// human-readable form instead of the parsed ints — e.g. UI/catalog endpoints
+// that display a resource's fields (controllers/cda_schema_controller.go,
+// services/parsers/fhir_parser_service.go, and the fhir.FHIRSchema-shaped
+// adapter services/transform_fhir_setter.go's legacy-loader migration
+// produces) — kept here once rather than re-implemented per caller.
+func (cp *CompiledProfile) Cardinality(path string) string {
+	min, max := cp.MinCard[path], cp.MaxCard[path]
+	if max == -1 {
+		return strconv.Itoa(min) + "..*"
+	}
+	return strconv.Itoa(min) + ".." + strconv.Itoa(max)
+}
+
+// IsMustSupport reports whether path appears in MustSupport.
+func (cp *CompiledProfile) IsMustSupport(path string) bool {
+	for _, p := range cp.MustSupport {
+		if p == path {
+			return true
+		}
+	}
+	return false
+}
+
+// Binding finds path's valueSet/bindingStrength in AllBindings (every
+// strength, not just required/extensible — for display purposes, not
+// validation; see AllBindings' own doc comment).
+func (cp *CompiledProfile) Binding(path string) (valueSet, strength string, ok bool) {
+	for _, b := range cp.AllBindings {
+		if b.Path == path {
+			return b.ValueSetURL, b.BindingStrength, true
+		}
+	}
+	return "", "", false
 }
 
 // CompiledBinding is a pre-compiled terminology binding for a single element.
@@ -140,16 +232,21 @@ func loadRawSchema(filePath string) (*rawSchema, error) {
 func compileSchema(raw *rawSchema, version, profile string, checker ConstraintChecker) *CompiledProfile {
 	n := len(raw.Elements)
 	cp := &CompiledProfile{
-		Version:      version,
-		ResourceType: raw.ResourceType,
-		Profile:      profile,
-		Required:     make(map[string]bool, n),
-		MinCard:      make(map[string]int, n),
-		MaxCard:      make(map[string]int, n),
-		DataTypes:    make(map[string]string, n),
-		IsModifier:   make(map[string]bool),
-		ElementCount: n,
-		MustSupport:  raw.MustSupport,
+		Version:             version,
+		ResourceType:        raw.ResourceType,
+		Profile:             profile,
+		Name:                raw.Name,
+		Description:         raw.Description,
+		Required:            make(map[string]bool, n),
+		MinCard:             make(map[string]int, n),
+		MaxCard:             make(map[string]int, n),
+		DataTypes:           make(map[string]string, n),
+		IsModifier:          make(map[string]bool),
+		IsSummary:           make(map[string]bool),
+		ElementNames:        make(map[string]string, n),
+		ElementDescriptions: make(map[string]string, n),
+		ElementCount:        n,
+		MustSupport:         raw.MustSupport,
 	}
 
 	for path, elem := range raw.Elements {
@@ -166,19 +263,32 @@ func compileSchema(raw *rawSchema, version, profile string, checker ConstraintCh
 		if elem.IsModifier {
 			cp.IsModifier[path] = true
 		}
+		if elem.IsSummary {
+			cp.IsSummary[path] = true
+		}
 		if elem.MustSupport {
 			cp.MustSupport = appendUniq(cp.MustSupport, path)
 		}
+		if elem.Name != "" {
+			cp.ElementNames[path] = elem.Name
+		}
+		if elem.Description != "" {
+			cp.ElementDescriptions[path] = elem.Description
+		}
 
-		// Only compile required/extensible bindings — preferred/example carry
-		// no normative validation obligation in FHIR R4.
-		if elem.ValueSet != "" &&
-			(elem.BindingStrength == "required" || elem.BindingStrength == "extensible") {
-			cp.Bindings = append(cp.Bindings, CompiledBinding{
+		if elem.ValueSet != "" {
+			binding := CompiledBinding{
 				Path:            path,
 				ValueSetURL:     normalizeValueSetURL(elem.ValueSet),
 				BindingStrength: elem.BindingStrength,
-			})
+			}
+			// AllBindings carries every strength for display/UX consumers;
+			// Bindings stays scoped to required/extensible — the only
+			// strengths that carry a normative validation obligation in FHIR R4.
+			cp.AllBindings = append(cp.AllBindings, binding)
+			if elem.BindingStrength == "required" || elem.BindingStrength == "extensible" {
+				cp.Bindings = append(cp.Bindings, binding)
+			}
 		}
 	}
 
@@ -197,7 +307,30 @@ func compileSchema(raw *rawSchema, version, profile string, checker ConstraintCh
 		cp.Constraints = constraintDefsFor(raw.ResourceType)
 	}
 
+	cp.SpecConstraints = compileSpecConstraints(raw.ResourceType, raw.ResourceConstraints)
+
 	return cp
+}
+
+// compileSpecConstraints parses every raw resource-level invariant once at
+// schema-compile time. An expression using something outside fhirpath's
+// deliberately scoped subset (see fhir/r4/fhirpath's package doc) fails to
+// compile — that rule is logged and skipped, never fatal, so a partial
+// function set degrades gracefully instead of blocking startup.
+func compileSpecConstraints(resourceType string, raw []RawConstraint) []*fhirpath.Rule {
+	if len(raw) == 0 {
+		return nil
+	}
+	rules := make([]*fhirpath.Rule, 0, len(raw))
+	for _, rc := range raw {
+		rule, err := fhirpath.CompileRule(rc.Key, rc.Severity, rc.Human, rc.Expression)
+		if err != nil {
+			log.Printf("⚠️  [r4.Compiler] %s: skipping constraint %s (unsupported expression): %v", resourceType, rc.Key, err)
+			continue
+		}
+		rules = append(rules, rule)
+	}
+	return rules
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

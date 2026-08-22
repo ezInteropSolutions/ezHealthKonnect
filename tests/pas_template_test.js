@@ -7,10 +7,13 @@
  * What is tested:
  *   TC-NODE-001  Template exists in the DB after V91 migration
  *   TC-NODE-002  Template has the correct slug, category, and tags
- *   TC-NODE-003  Template pipeline_config contains all 8 execution groups
+ *   TC-NODE-003  Template pipeline_config contains all 15 execution groups
+ *                (9 from V91 + receive_request/deliver_decision from V93)
  *   TC-NODE-004  Zone 1 step is pas_envelope_mapping with 17 mappings
  *   TC-NODE-005  Zone 2 has 4 enrichment.script steps in the correct sequence
- *   TC-NODE-006  Zone 2 FHIR validation step (seq 140) targets the correct field
+ *   TC-NODE-006  Zone 2 FHIR validation step (seq 140) targets the correct
+ *                field, uses the correct config keys (V210 fix), and runs
+ *                at strict level so the PAS constraint checks actually fire
  *   TC-NODE-007  Zone 3 submit step uses bodyRef pointing to assemble_pas_bundle
  *   TC-NODE-008  Zone 4 ClaimResponse parser step is present at seq 200
  *   TC-NODE-009  Zone 4 switch_case has all four decision codes (AA/AD/CP/PE)
@@ -18,6 +21,25 @@
  *   TC-NODE-011  sanitized_fields includes client secret
  *   TC-NODE-012  preview_steps contains 6 items
  *   TC-NODE-013  useTemplate merges payer credentials into pipeline config vars
+ *   TC-NODE-015  execution_groups has exactly ONE receive_request and ONE
+ *                deliver_decision group (V210 dedupe fix — V93 had left 3
+ *                duplicate copies of each in real environments)
+ *   TC-NODE-016  route_on_decision's actions are set_value/targetField, not
+ *                set_variable/variable (V211 fix — SwitchCaseExecutor has no
+ *                set_variable case, so _pa_status/_pa_status_label were
+ *                never actually set; a silent no-op)
+ *   TC-NODE-017  deliver_decision's contentField references the real
+ *                parse_claim_response alias (not the nonexistent
+ *                parse_response), and has retry enabled (V211 fix — the
+ *                wrong alias caused the raw inbound message to be sent
+ *                instead of the payer's decision, with no retry on failure)
+ *
+ * pipeline_config in unit-mode is reconstructed by replaying the full
+ * migration chain in JS: V91's literal JSON (base) -> V93's appended
+ * connector.inbound/outbound groups -> V210's dedupe + config-key fixes ->
+ * V211's decision-routing/delivery fixes. This mirrors what Postgres
+ * actually produces so unit-mode stays accurate without needing a live DB.
+ * See loadV93ConnectorGroups() / applyV210Fixes() / applyV211Fixes().
  *
  * Usage (requires running PostgreSQL with V91 migration applied):
  *   node tests/pas_template_test.js
@@ -110,6 +132,179 @@ function loadPipelineConfigFromSQL() {
     return JSON.parse(jsonStr);
 }
 
+/**
+ * Extract the two execution_groups (receive_request seq 5, deliver_decision
+ * seq 295) that V93 appends to pipeline_config.execution_groups via
+ * `(pipeline_config -> 'execution_groups') || $steps$[...]$steps$::jsonb`.
+ * The array is dollar-quoted ($steps$...$steps$), so no SQL string-escaping
+ * applies inside it — it is plain, directly parseable JSON.
+ */
+function loadV93ConnectorGroups() {
+    const sqlPath = path.join(__dirname, '..', 'database', 'migrations', 'V93__PAS_Template_Add_Connector_Steps.sql');
+    const sql = fs.readFileSync(sqlPath, 'utf8');
+
+    const startTag = sql.indexOf('$steps$');
+    if (startTag === -1) throw new Error('Could not locate $steps$ dollar-quote in V93 migration');
+    const jsonStart = startTag + '$steps$'.length;
+    const endTag = sql.indexOf('$steps$', jsonStart);
+    if (endTag === -1) throw new Error('Could not locate closing $steps$ dollar-quote in V93 migration');
+
+    return JSON.parse(sql.slice(jsonStart, endTag));
+}
+
+/**
+ * Replay V211's fix in JS:
+ *   - route_on_decision: every {action:"set_variable", variable:"X", value:"Y"}
+ *     (in cases[].actions[] and default.actions[]) becomes
+ *     {action:"set_value", targetField:"X", value:"Y"} — the executor
+ *     (SwitchCaseExecutor) has no "set_variable" case; it was a silent no-op.
+ *   - deliver_decision: contentField "steps.parse_response.step_output"
+ *     (wrong alias — the parser step's real alias is parse_claim_response)
+ *     becomes "steps.parse_claim_response.step_output", and a "retry" block
+ *     is added so a transient callback failure doesn't silently lose the
+ *     PA decision.
+ * Mutates and returns pipelineConfig.
+ */
+function applyV211Fixes(pipelineConfig) {
+    const fixAction = (action) => {
+        if (action.action !== 'set_variable') return action;
+        const { action: _a, variable, ...rest } = action;
+        return { ...rest, action: 'set_value', targetField: variable };
+    };
+
+    for (const group of pipelineConfig.execution_groups) {
+        const step = group.steps && group.steps[0];
+        if (!step) continue;
+
+        if (step.step_alias === 'route_on_decision' && step.config) {
+            if (Array.isArray(step.config.cases)) {
+                step.config.cases = step.config.cases.map(c => ({
+                    ...c,
+                    actions: Array.isArray(c.actions) ? c.actions.map(fixAction) : c.actions,
+                }));
+            }
+            if (step.config.default && Array.isArray(step.config.default.actions)) {
+                step.config.default = {
+                    ...step.config.default,
+                    actions: step.config.default.actions.map(fixAction),
+                };
+            }
+        }
+
+        if (step.step_alias === 'deliver_decision' && step.config) {
+            step.config.contentField = 'steps.parse_claim_response.step_output';
+            step.config.retry = {
+                enabled: true,
+                maxRetries: 3,
+                delayMs: 1000,
+                backoffMultiplier: 2.0,
+                maxDelayMs: 60000,
+            };
+        }
+    }
+
+    return pipelineConfig;
+}
+
+/**
+ * Replay V210's fix in JS: dedupe execution_groups to one per step_alias
+ * (keeping the first occurrence — V210 uses DISTINCT ON ordered by original
+ * array position), then rewrite validate_pas_bundle's config keys to match
+ * what the Go executor (fhirValidationConfig) actually reads:
+ *   level                   -> validation_level (value forced to "strict")
+ *   required_resource_types -> required_resources (value preserved)
+ * Mutates and returns pipelineConfig.
+ */
+function applyV210Fixes(pipelineConfig) {
+    const seen = new Set();
+    const deduped = [];
+    for (const group of pipelineConfig.execution_groups) {
+        const alias = group.steps && group.steps[0] && group.steps[0].step_alias;
+        if (alias && seen.has(alias)) continue;
+        if (alias) seen.add(alias);
+        deduped.push(group);
+    }
+    deduped.sort((a, b) => a.sequence - b.sequence);
+
+    for (const group of deduped) {
+        const step = group.steps && group.steps[0];
+        if (step && step.step_alias === 'validate_pas_bundle' && step.config) {
+            const oldRequiredTypes = step.config.required_resource_types;
+            delete step.config.level;
+            delete step.config.required_resource_types;
+            step.config.validation_level = 'strict';
+            step.config.required_resources = oldRequiredTypes;
+        }
+    }
+
+    pipelineConfig.execution_groups = deduped;
+    return pipelineConfig;
+}
+
+/**
+ * Extract the 8 new Zone 2 execution_groups (derive_pas_fields through
+ * stamp_bundle_profile) that V212 appends via
+ * `... UNION ALL SELECT jsonb_array_elements($groups$[...]$groups$::jsonb) ...`.
+ * Same dollar-quote extraction technique as loadV93ConnectorGroups() — reads
+ * directly from the migration file so this test can never drift from what
+ * V212 actually contains (V212's SQL transformation is too structurally
+ * complex — UNION ALL, correlated subqueries rewriting the mappings array —
+ * to safely re-derive independently in JS without risking exactly the kind
+ * of two-independently-authored-copies drift that caused bugs 1/2/5/6).
+ */
+function loadV212NewGroups() {
+    const sqlPath = path.join(__dirname, '..', 'database', 'migrations', 'V212__PAS_Template_Rebuild_On_FHIR_Builder.sql');
+    const sql = fs.readFileSync(sqlPath, 'utf8');
+
+    const startTag = sql.indexOf('$groups$');
+    if (startTag === -1) throw new Error('Could not locate $groups$ dollar-quote in V212 migration');
+    const jsonStart = startTag + '$groups$'.length;
+    const endTag = sql.indexOf('$groups$', jsonStart);
+    if (endTag === -1) throw new Error('Could not locate closing $groups$ dollar-quote in V212 migration');
+
+    return JSON.parse(sql.slice(jsonStart, endTag));
+}
+
+/**
+ * Replay V212's fix in JS: removes the 4 old Zone 2 execution_groups
+ * (build_patient, build_coverage, build_provider, assemble_pas_bundle — the
+ * hand-written enrichment.script ones), splits pas_envelope's single
+ * provider.name mapping into firstName/lastName, repoints
+ * validate_pas_bundle/submit_to_payer at the new stamp_bundle_profile
+ * output, and appends the 8 new groups (read directly from V212's own SQL
+ * via loadV212NewGroups()). Mutates and returns pipelineConfig.
+ */
+function applyV212Fixes(pipelineConfig) {
+    const removedAliases = new Set(['build_patient', 'build_coverage', 'build_provider', 'assemble_pas_bundle']);
+    const kept = pipelineConfig.execution_groups.filter(g => {
+        const alias = g.steps && g.steps[0] && g.steps[0].step_alias;
+        return !removedAliases.has(alias);
+    });
+
+    for (const group of kept) {
+        const step = group.steps && group.steps[0];
+        if (!step) continue;
+
+        if (step.step_alias === 'pas_envelope' && step.config && Array.isArray(step.config.mappings)) {
+            step.config.mappings = step.config.mappings.filter(m => m.lhs !== '_pas_envelope.provider.name');
+            step.config.mappings.push(
+                { lhs: '_pas_envelope.provider.firstName', rhs: '', _label: 'Provider First Name', _required: false, _hint: 'e.g. Alice' },
+                { lhs: '_pas_envelope.provider.lastName', rhs: '', _label: 'Provider Last Name', _required: false, _hint: 'e.g. Johnson' }
+            );
+        }
+        if (step.step_alias === 'validate_pas_bundle' && step.config) {
+            step.config.source_field = 'steps.stamp_bundle_profile.step_output.pas_bundle';
+        }
+        if (step.step_alias === 'submit_to_payer' && step.config) {
+            step.config.bodyRef = 'steps.stamp_bundle_profile.step_output.pas_bundle';
+        }
+    }
+
+    pipelineConfig.execution_groups = kept.concat(loadV212NewGroups());
+    pipelineConfig.execution_groups.sort((a, b) => a.sequence - b.sequence);
+    return pipelineConfig;
+}
+
 function loadTemplateMetaFromSQL() {
     const sqlPath = path.join(__dirname, '..', 'database', 'migrations', 'V91__DaVinci_PAS_Template.sql');
     const sql = fs.readFileSync(sqlPath, 'utf8');
@@ -165,9 +360,13 @@ async function runUnitTests() {
     let pipelineConfig, meta;
     try {
         pipelineConfig = loadPipelineConfigFromSQL();
+        pipelineConfig.execution_groups = pipelineConfig.execution_groups.concat(loadV93ConnectorGroups());
+        applyV210Fixes(pipelineConfig);
+        applyV211Fixes(pipelineConfig);
+        applyV212Fixes(pipelineConfig);
         meta = loadTemplateMetaFromSQL();
     } catch (err) {
-        fail('LOAD', 'Could not load/parse V91 migration SQL', err.message);
+        fail('LOAD', 'Could not load/parse PAS template migrations (V91 + V93 + V210)', err.message);
         return;
     }
 
@@ -185,10 +384,12 @@ async function runUnitTests() {
         `got: ${typeof groups}`
     );
 
-    // ── TC-NODE-003: Exactly 9 execution groups ───────────────────────────────
-    // Zones: seq 10 (user mapping) + seq 100/110/120/130/140/150 (PAS core) + seq 200/210 (decision)
-    assert('TC-NODE-003', 'pipeline_config has 9 execution groups',
-        groups && groups.length === 9,
+    // ── TC-NODE-003: Exactly 15 execution groups ──────────────────────────────
+    // Zones: seq 5 (receive) + seq 10 (user mapping) + seq 95-135 (V212's 8-step
+    // FHIR-builder Zone 2: derive, 5x fhir.build, payload.builder, stamp) +
+    // seq 140/150 (validate/submit) + seq 200/210 (decision) + seq 295 (deliver).
+    assert('TC-NODE-003', 'pipeline_config has 15 execution groups',
+        groups && groups.length === 15,
         `got ${groups ? groups.length : 'undefined'} groups`
     );
 
@@ -209,8 +410,10 @@ async function runUnitTests() {
         `got: ${envStep && envStep.step_type}`
     );
     const mappings = envStep && envStep.config && envStep.config.mappings;
-    assert('TC-NODE-004b', 'PAS envelope has 17 mapping entries',
-        Array.isArray(mappings) && mappings.length === 17,
+    // V212 split the single provider.name field into firstName/lastName
+    // (mirroring how patient.firstName/.lastName already worked) — 17 -> 18.
+    assert('TC-NODE-004b', 'PAS envelope has 18 mapping entries',
+        Array.isArray(mappings) && mappings.length === 18,
         `got ${mappings ? mappings.length : 'undefined'} mappings`
     );
     const hasAllRequired = mappings && [
@@ -224,16 +427,28 @@ async function runUnitTests() {
         '_pas_envelope.request.diagnosisCodes',
     ].every(lhs => mappings.some(m => m.lhs === lhs));
     assert('TC-NODE-004c', 'All 8 required PAS fields present in mappings', hasAllRequired);
+    assert('TC-NODE-004d', 'provider.name mapping replaced by firstName/lastName',
+        mappings &&
+        !mappings.some(m => m.lhs === '_pas_envelope.provider.name') &&
+        mappings.some(m => m.lhs === '_pas_envelope.provider.firstName') &&
+        mappings.some(m => m.lhs === '_pas_envelope.provider.lastName'),
+        `mappings: ${mappings && mappings.map(m => m.lhs).join(', ')}`
+    );
 
-    // ── TC-NODE-005: Zone 2 — 4 enrichment.script steps ──────────────────────
+    // ── TC-NODE-005: Zone 2 — enrichment.script steps (derive + stamp + parse) ─
+    // V212 replaced the 4 hand-written resource-building scripts with a
+    // generic fhir.build/payload.builder chain (see TC-NODE-018 below) —
+    // only 2 small, non-resource-building scripts remain in Zone 2 (derive
+    // computed fields, stamp bundle profile), plus the pre-existing Zone 4
+    // parser script.
     const scriptSteps = allSteps.filter(s => s.step_type === 'enrichment.script');
-    assert('TC-NODE-005a', 'Zone 2 has at least 4 enrichment.script steps',
-        scriptSteps.length >= 4,
+    assert('TC-NODE-005a', 'Exactly 3 enrichment.script steps remain',
+        scriptSteps.length === 3,
         `got ${scriptSteps.length}`
     );
     const scriptSeqs = scriptSteps.map(s => s.sequence).sort((a, b) => a - b);
-    assert('TC-NODE-005b', 'Script steps run in sequences 100, 110, 120, 130, 200',
-        [100, 110, 120, 130, 200].every(seq => scriptSeqs.includes(seq)),
+    assert('TC-NODE-005b', 'Script steps run in sequences 95, 135, 200',
+        [95, 135, 200].every(seq => scriptSeqs.includes(seq)),
         `found seqs: ${scriptSeqs}`
     );
 
@@ -247,10 +462,27 @@ async function runUnitTests() {
         validStep && validStep.config && validStep.config.profile === 'davinci-pas',
         `got: ${validStep && validStep.config && validStep.config.profile}`
     );
-    assert('TC-NODE-006c', 'FHIR validation requires Claim, Patient, Coverage',
+    // config key must be "validation_level" — services/executors/validation/
+    // fhir_validation_executor.go's fhirValidationConfig struct tag is
+    // `json:"validation_level"`, not "level"; a "level" key is silently
+    // dropped by json.Unmarshal and never reaches r4.ParseLevel().
+    assert('TC-NODE-006b2', 'FHIR validation runs at strict level (validation_level key)',
+        validStep && validStep.config && validStep.config.validation_level === 'strict',
+        `got: ${validStep && validStep.config && validStep.config.validation_level}`
+    );
+    // config key must be "required_resources" — the Go struct field is
+    // RequiredResources []string `json:"required_resources"`; the old key
+    // "required_resource_types" was silently dropped, making the check a no-op.
+    assert('TC-NODE-006c', 'FHIR validation requires Claim, Patient, Coverage (required_resources key)',
         validStep && validStep.config &&
-        Array.isArray(validStep.config.required_resource_types) &&
-        ['Claim','Patient','Coverage'].every(rt => validStep.config.required_resource_types.includes(rt))
+        Array.isArray(validStep.config.required_resources) &&
+        ['Claim','Patient','Coverage'].every(rt => validStep.config.required_resources.includes(rt))
+    );
+    assert('TC-NODE-006d', 'FHIR validation config no longer uses the stale key names',
+        validStep && validStep.config &&
+        validStep.config.level === undefined &&
+        validStep.config.required_resource_types === undefined,
+        `level: ${validStep && validStep.config && validStep.config.level}, required_resource_types: ${validStep && validStep.config && validStep.config.required_resource_types}`
     );
 
     // ── TC-NODE-007: seq 150 — bodyRef points to assembled bundle ─────────────
@@ -263,9 +495,12 @@ async function runUnitTests() {
         submitStep && submitStep.config && submitStep.config.bodyRef,
         'bodyRef missing'
     );
-    assert('TC-NODE-007c', 'bodyRef points to assemble_pas_bundle step output',
+    // V212: bodyRef now points at stamp_bundle_profile (the step that
+    // converts payload.builder's JSON-string output back into a usable map
+    // and stamps Bundle.meta.profile), not assemble_pas_bundle directly.
+    assert('TC-NODE-007c', 'bodyRef points to stamp_bundle_profile step output',
         submitStep && submitStep.config &&
-        (submitStep.config.bodyRef || '').includes('assemble_pas_bundle'),
+        submitStep.config.bodyRef === 'steps.stamp_bundle_profile.step_output.pas_bundle',
         `bodyRef: ${submitStep && submitStep.config && submitStep.config.bodyRef}`
     );
     assert('TC-NODE-007d', 'Submit step uses oauth2 auth',
@@ -369,6 +604,152 @@ async function runUnitTests() {
         missingAlias.length === 0,
         `steps without alias: ${missingAlias.map(s => s.step_name).join(', ')}`
     );
+
+    // ── TC-NODE-015: No duplicate connector groups (V210 dedupe fix) ──────────
+    // V93 left 3 duplicate copies each of receive_request/deliver_decision in
+    // real environments — an interface built from the template would inherit
+    // 3 duplicate inbound listeners (port-binding conflict) and triplicate
+    // delivery of the PA decision. Nothing previously asserted uniqueness,
+    // which is why bug 3 wasn't caught.
+    const receiveRequestSteps  = allSteps.filter(s => s.step_alias === 'receive_request');
+    const deliverDecisionSteps = allSteps.filter(s => s.step_alias === 'deliver_decision');
+    assert('TC-NODE-015a', 'Exactly one receive_request step (no duplicates)',
+        receiveRequestSteps.length === 1,
+        `got ${receiveRequestSteps.length}`
+    );
+    assert('TC-NODE-015b', 'Exactly one deliver_decision step (no duplicates)',
+        deliverDecisionSteps.length === 1,
+        `got ${deliverDecisionSteps.length}`
+    );
+    assert('TC-NODE-015c', 'receive_request is a connector.inbound step at sequence 5',
+        receiveRequestSteps[0] &&
+        receiveRequestSteps[0].step_type === 'connector.inbound' &&
+        receiveRequestSteps[0].sequence === 5,
+        `got: ${receiveRequestSteps[0] && receiveRequestSteps[0].step_type}, seq ${receiveRequestSteps[0] && receiveRequestSteps[0].sequence}`
+    );
+    assert('TC-NODE-015d', 'deliver_decision is a connector.outbound step at sequence 295',
+        deliverDecisionSteps[0] &&
+        deliverDecisionSteps[0].step_type === 'connector.outbound' &&
+        deliverDecisionSteps[0].sequence === 295,
+        `got: ${deliverDecisionSteps[0] && deliverDecisionSteps[0].step_type}, seq ${deliverDecisionSteps[0] && deliverDecisionSteps[0].sequence}`
+    );
+    // General invariant: no step_alias appears more than once anywhere in the
+    // pipeline (catches any future re-introduction of this class of bug).
+    const aliasCounts = {};
+    allSteps.forEach(s => { aliasCounts[s.step_alias] = (aliasCounts[s.step_alias] || 0) + 1; });
+    const duplicateAliases = Object.keys(aliasCounts).filter(a => aliasCounts[a] > 1);
+    assert('TC-NODE-015e', 'No step_alias is duplicated anywhere in execution_groups',
+        duplicateAliases.length === 0,
+        `duplicated aliases: ${duplicateAliases.join(', ')}`
+    );
+
+    // ── TC-NODE-016: route_on_decision uses set_value, not set_variable ───────
+    // SwitchCaseExecutor (services/executors/control/conditional_executor.go)
+    // has no "set_variable" case — every one of these actions was a silent
+    // no-op before V211. _pa_status/_pa_status_label were never actually set.
+    const routeStep = bySeq[210];
+    assert('TC-NODE-016a', 'route_on_decision step_type is switch_case',
+        routeStep && routeStep.step_type === 'switch_case',
+        `got: ${routeStep && routeStep.step_type}`
+    );
+    const routeActions = routeStep && routeStep.config
+        ? [
+            ...(routeStep.config.cases || []).flatMap(c => c.actions || []),
+            ...((routeStep.config.default && routeStep.config.default.actions) || []),
+        ]
+        : [];
+    assert('TC-NODE-016b', 'route_on_decision has actions to check',
+        routeActions.length === 10, // 5 branches (AA/AD/CP/PE/default) x 2 actions
+        `got ${routeActions.length} actions`
+    );
+    const staleActions = routeActions.filter(a => a.action === 'set_variable' || a.variable !== undefined);
+    assert('TC-NODE-016c', 'No route_on_decision action uses the stale set_variable/variable shape',
+        staleActions.length === 0,
+        `stale actions: ${JSON.stringify(staleActions)}`
+    );
+    const allSetValue = routeActions.every(a => a.action === 'set_value' && typeof a.targetField === 'string' && a.targetField);
+    assert('TC-NODE-016d', 'Every route_on_decision action is set_value with a targetField',
+        allSetValue,
+        `actions: ${JSON.stringify(routeActions)}`
+    );
+    const aaCase = routeStep && routeStep.config && (routeStep.config.cases || []).find(c => c.value === 'AA');
+    assert('TC-NODE-016e', 'AA case sets _pa_status=approved via targetField',
+        aaCase && aaCase.actions.some(a => a.targetField === '_pa_status' && a.value === 'approved'),
+        `AA case actions: ${aaCase && JSON.stringify(aaCase.actions)}`
+    );
+
+    // ── TC-NODE-017: deliver_decision content/retry (V211 fix) ────────────────
+    // Bug 6: contentField pointed at "steps.parse_response.step_output" — the
+    // parser step's real alias is parse_claim_response, so this always
+    // resolved to nil and silently fell back to sending the raw inbound
+    // message instead of the parsed decision.
+    const deliverStep = bySeq[295];
+    assert('TC-NODE-017a', 'deliver_decision contentField references parse_claim_response',
+        deliverStep && deliverStep.config && deliverStep.config.contentField === 'steps.parse_claim_response.step_output',
+        `got: ${deliverStep && deliverStep.config && deliverStep.config.contentField}`
+    );
+    assert('TC-NODE-017b', 'deliver_decision no longer references the nonexistent parse_response alias',
+        !(deliverStep && deliverStep.config && String(deliverStep.config.contentField || '').includes('parse_response.') && !String(deliverStep.config.contentField).includes('parse_claim_response')),
+        `contentField: ${deliverStep && deliverStep.config && deliverStep.config.contentField}`
+    );
+    assert('TC-NODE-017c', 'deliver_decision has retry enabled (resilience gap fix)',
+        deliverStep && deliverStep.config && deliverStep.config.retry && deliverStep.config.retry.enabled === true,
+        `retry: ${deliverStep && deliverStep.config && JSON.stringify(deliverStep.config.retry)}`
+    );
+    assert('TC-NODE-017d', 'deliver_decision retry.maxRetries is a positive number',
+        deliverStep && deliverStep.config && deliverStep.config.retry &&
+        typeof deliverStep.config.retry.maxRetries === 'number' && deliverStep.config.retry.maxRetries > 0,
+        `maxRetries: ${deliverStep && deliverStep.config && deliverStep.config.retry && deliverStep.config.retry.maxRetries}`
+    );
+
+    // ── TC-NODE-018: Zone 2 rebuilt on fhir.build + payload.builder (V212) ────
+    // Replaces the 4 hand-written enrichment.script resource-building steps
+    // with the codebase's generic, schema-driven FHIR builder engine —
+    // config-only, zero new code per resource type, matching CLAUDE.md's
+    // "not hardcoded" standard and structurally eliminating the fullUrl/
+    // reference-form bug the old hand-written scripts had.
+    const buildSteps = allSteps.filter(s => s.step_type === 'fhir.build');
+    assert('TC-NODE-018a', 'Exactly 5 fhir.build steps (Patient/Coverage/Practitioner/Organization/Claim)',
+        buildSteps.length === 5,
+        `got ${buildSteps.length}: ${buildSteps.map(s => s.config && s.config.resourceType).join(', ')}`
+    );
+    const resourceTypes = buildSteps.map(s => s.config && s.config.resourceType).sort();
+    assert('TC-NODE-018b', 'fhir.build steps cover Claim, Coverage, Organization, Patient, Practitioner',
+        JSON.stringify(resourceTypes) === JSON.stringify(['Claim', 'Coverage', 'Organization', 'Patient', 'Practitioner']),
+        `got: ${resourceTypes.join(', ')}`
+    );
+
+    const claimStep = buildSteps.find(s => s.config && s.config.resourceType === 'Claim');
+    const claimFields = (claimStep && claimStep.config && claimStep.config.fields) || [];
+    const patientRefField = claimFields.find(f => f.targetPath === 'patient.reference');
+    assert('TC-NODE-018c', 'Claim.patient.reference derives from the same field as Patient.id (correlation by construction)',
+        patientRefField && patientRefField.sourcePath === '_pas_envelope.patient.memberId' && patientRefField.transform === 'string_prefix',
+        `patient.reference field: ${JSON.stringify(patientRefField)}`
+    );
+    const coverageRefField = claimFields.find(f => f.targetPath === 'insurance[0].coverage.reference');
+    assert('TC-NODE-018d', 'Claim.insurance[0].coverage.reference matches Coverage.id literally',
+        coverageRefField && coverageRefField.literalValue === 'Coverage/coverage-1',
+        `coverage.reference field: ${JSON.stringify(coverageRefField)}`
+    );
+
+    const assembleStep = bySeq[130];
+    assert('TC-NODE-018e', 'seq 130 (assemble_pas_bundle) is now payload.builder, not enrichment.script',
+        assembleStep && assembleStep.step_type === 'payload.builder' && assembleStep.step_alias === 'assemble_pas_bundle',
+        `got: ${assembleStep && assembleStep.step_type}`
+    );
+    const resourcePaths = assembleStep && assembleStep.config && assembleStep.config.fhirBundle && assembleStep.config.fhirBundle.resourcePaths;
+    assert('TC-NODE-018f', 'payload.builder resourcePaths lists all 5 built resources',
+        Array.isArray(resourcePaths) && resourcePaths.length === 5 &&
+        ['message.fhirClaim', 'message.fhirPatient', 'message.fhirCoverage', 'message.fhirPractitioner', 'message.fhirOrganization'].every(p => resourcePaths.includes(p)),
+        `resourcePaths: ${JSON.stringify(resourcePaths)}`
+    );
+
+    const stampStep = bySeq[135];
+    assert('TC-NODE-018g', 'seq 135 (stamp_bundle_profile) sets Bundle.meta.profile',
+        stampStep && stampStep.step_type === 'enrichment.script' &&
+        stampStep.config && stampStep.config.script && stampStep.config.script.includes('profile-pas-request-bundle'),
+        `got step_type: ${stampStep && stampStep.step_type}`
+    );
 }
 
 async function runDBTests() {
@@ -431,9 +812,88 @@ async function runDBTests() {
         assert('TC-DB-007', 'estimated_setup_minutes = 45',
             t.estimated_setup_minutes === 45, `got: ${t.estimated_setup_minutes}`
         );
-        assert('TC-DB-008', 'preview_steps has 6 entries',
-            Array.isArray(t.preview_steps) && t.preview_steps.length === 6,
+        // V93 added the connector.inbound/outbound preview entries, bringing
+        // this from 6 (V91 baseline) to 8 — matches TC-NODE-012's 6-item
+        // check on V91's own baseline SQL, which is deliberately unaffected.
+        assert('TC-DB-008', 'preview_steps has 8 entries (V93 added connector steps)',
+            Array.isArray(t.preview_steps) && t.preview_steps.length === 8,
             `got: ${t.preview_steps && t.preview_steps.length}`
+        );
+
+        // ── TC-DB-009/010: V210 fixes, verified against the live pipeline_config ──
+        const dbGroups = (t.pipeline_config && t.pipeline_config.execution_groups) || [];
+        const dbSteps  = dbGroups.flatMap(g => g.steps || []);
+        const dbReceive = dbSteps.filter(s => s.step_alias === 'receive_request');
+        const dbDeliver = dbSteps.filter(s => s.step_alias === 'deliver_decision');
+        assert('TC-DB-009a', 'Live pipeline_config has exactly one receive_request group',
+            dbReceive.length === 1, `got ${dbReceive.length}`
+        );
+        assert('TC-DB-009b', 'Live pipeline_config has exactly one deliver_decision group',
+            dbDeliver.length === 1, `got ${dbDeliver.length}`
+        );
+        assert('TC-DB-009c', 'Live pipeline_config has exactly 15 execution groups total',
+            dbGroups.length === 15, `got ${dbGroups.length}`
+        );
+
+        const dbValidateStep = dbSteps.find(s => s.step_alias === 'validate_pas_bundle');
+        assert('TC-DB-010a', 'Live validate_pas_bundle runs at validation_level=strict',
+            dbValidateStep && dbValidateStep.config && dbValidateStep.config.validation_level === 'strict',
+            `got: ${dbValidateStep && dbValidateStep.config && dbValidateStep.config.validation_level}`
+        );
+        assert('TC-DB-010b', 'Live validate_pas_bundle uses required_resources key',
+            dbValidateStep && dbValidateStep.config &&
+            Array.isArray(dbValidateStep.config.required_resources) &&
+            ['Claim','Patient','Coverage'].every(rt => dbValidateStep.config.required_resources.includes(rt)),
+            `got: ${dbValidateStep && JSON.stringify(dbValidateStep.config && dbValidateStep.config.required_resources)}`
+        );
+
+        // ── TC-DB-011/012: V211 fixes, verified against the live pipeline_config ──
+        const dbRouteStep = dbSteps.find(s => s.step_alias === 'route_on_decision');
+        const dbRouteActions = dbRouteStep && dbRouteStep.config
+            ? [
+                ...(dbRouteStep.config.cases || []).flatMap(c => c.actions || []),
+                ...((dbRouteStep.config.default && dbRouteStep.config.default.actions) || []),
+            ]
+            : [];
+        assert('TC-DB-011a', 'Live route_on_decision has no set_variable actions',
+            dbRouteActions.length > 0 && dbRouteActions.every(a => a.action !== 'set_variable'),
+            `actions: ${JSON.stringify(dbRouteActions)}`
+        );
+        assert('TC-DB-011b', 'Live route_on_decision actions all use targetField',
+            dbRouteActions.every(a => typeof a.targetField === 'string' && a.targetField),
+            `actions: ${JSON.stringify(dbRouteActions)}`
+        );
+
+        const dbDeliverStep = dbSteps.find(s => s.step_alias === 'deliver_decision');
+        assert('TC-DB-012a', 'Live deliver_decision contentField references parse_claim_response',
+            dbDeliverStep && dbDeliverStep.config && dbDeliverStep.config.contentField === 'steps.parse_claim_response.step_output',
+            `got: ${dbDeliverStep && dbDeliverStep.config && dbDeliverStep.config.contentField}`
+        );
+        assert('TC-DB-012b', 'Live deliver_decision has retry enabled',
+            dbDeliverStep && dbDeliverStep.config && dbDeliverStep.config.retry && dbDeliverStep.config.retry.enabled === true,
+            `retry: ${dbDeliverStep && dbDeliverStep.config && JSON.stringify(dbDeliverStep.config.retry)}`
+        );
+
+        // ── TC-DB-013: V212 — Zone 2 rebuilt on fhir.build + payload.builder ──────
+        const dbBuildSteps = dbSteps.filter(s => s.step_type === 'fhir.build');
+        assert('TC-DB-013a', 'Live pipeline_config has exactly 5 fhir.build steps',
+            dbBuildSteps.length === 5, `got ${dbBuildSteps.length}`
+        );
+        const dbAssembleStep = dbSteps.find(s => s.step_alias === 'assemble_pas_bundle');
+        assert('TC-DB-013b', 'Live assemble_pas_bundle is payload.builder, not enrichment.script',
+            dbAssembleStep && dbAssembleStep.step_type === 'payload.builder',
+            `got: ${dbAssembleStep && dbAssembleStep.step_type}`
+        );
+        const dbValidateSourceField = dbValidateStep && dbValidateStep.config && dbValidateStep.config.source_field;
+        assert('TC-DB-013c', 'Live validate_pas_bundle source_field points at stamp_bundle_profile',
+            dbValidateSourceField === 'steps.stamp_bundle_profile.step_output.pas_bundle',
+            `got: ${dbValidateSourceField}`
+        );
+        const dbSubmitStep = dbSteps.find(s => s.step_alias === 'submit_to_payer');
+        const dbSubmitBodyRef = dbSubmitStep && dbSubmitStep.config && dbSubmitStep.config.bodyRef;
+        assert('TC-DB-013d', 'Live submit_to_payer bodyRef points at stamp_bundle_profile',
+            dbSubmitBodyRef === 'steps.stamp_bundle_profile.step_output.pas_bundle',
+            `got: ${dbSubmitBodyRef}`
         );
     } finally {
         await sequelize.close();

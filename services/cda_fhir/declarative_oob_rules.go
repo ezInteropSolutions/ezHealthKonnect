@@ -4089,6 +4089,20 @@ func EncompassingEncounterLocationMappingRules() []MappingRule {
 					TargetPath: "name",
 				},
 				{
+					// healthCareFacility's own <id> (e.g. root="...549.2.7.2.
+					// 686980" extension="103001002") -- USCDI v3's "Facility
+					// Identifier". Previously silently dropped: header_parser.go
+					// never selected it at all (unlike code/location/
+					// serviceProviderOrganization right here, which all already
+					// worked) -- fixed at the parser (CDAHealthCareFacility.Ids)
+					// so this row has real data to read.
+					Scope:            "ids[*]",
+					Transform:        "cda_ii_to_identifier",
+					CollectAll:       true,
+					TargetPath:       "identifier",
+					EmbedCDAIdentity: true,
+				},
+				{
 					// healthCareFacility's own <code> -- the department/
 					// specialty (e.g. "Obstetrics & Gynecology"), Location.type
 					// not Location.name. Handles nullFlavor+translations the

@@ -106,6 +106,12 @@ func BuildDocument(loader *cdaSchema.CDASchemaLoader, canonicalDoc map[string]in
 	root := doc.CreateElement("ClinicalDocument")
 	root.CreateAttr("xmlns", "urn:hl7-org:v3")
 	root.CreateAttr("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
+	// sdtc: is the CDA R2 "Additional CDA" extension namespace HL7 defines for
+	// fields (deceasedInd/deceasedTime, etc.) that exist in the base RIM but
+	// weren't in CDA's original 2005 schema — required on the root once any
+	// sdtc:-prefixed element is written anywhere in the document (see
+	// patientScalarFields' deceasedInd/deceasedTime entries in header_fields.go).
+	root.CreateAttr("xmlns:sdtc", "urn:hl7-org:sdtc")
 	root.CreateAttr("xsi:schemaLocation", "urn:hl7-org:v3 CDA.xsd")
 
 	// Unstructured Document has no fixed document-level LOINC (unlike every
@@ -142,6 +148,12 @@ func BuildDocument(loader *cdaSchema.CDASchemaLoader, canonicalDoc map[string]in
 	writeInformantsHeader(root, headerMap)
 	writeCustodianHeader(root, opts)
 	writeLegalAuthenticatorHeader(root, opts)
+	// ClinicalDocument's real schema sequence is informant*, custodian,
+	// legalAuthenticator?, authenticator*, participant*, inFulfillmentOf*,
+	// documentationOf* — participant (Related Person) belongs here, after
+	// legalAuthenticator and before documentationOf, not grouped next to
+	// informant just because both are "people associated with the document."
+	writeRelatedPersonsHeader(root, headerMap)
 	writeDocumentationOfHeader(root, headerMap)
 	writeEncompassingEncounterHeader(root, headerMap)
 
@@ -497,14 +509,57 @@ func writePatientHeader(root *etree.Element, header map[string]interface{}) {
 		writeHeaderFields(addrEl, addr, patientAddressFields)
 	}
 
+	// Additional addresses (USCDI v3's Previous Address, plus any other
+	// repeatable use — work, temporary, ...) — a direct <patientRole>/<addr>
+	// sibling of the primary one above, so this belongs here; additional
+	// <name>s are handled further down since <name> nests inside <patient>,
+	// not <patientRole>, and <patient> doesn't exist yet at this point. See
+	// writeRepeatingGroup's own doc comment for why this is a generic,
+	// caller-supplied-@use mechanism rather than one hardcoded field per
+	// address "kind." The primary address above is untouched (existing
+	// canonical contract, zero behavior change for saved pipelines).
+	writeRepeatingGroup(patientRole, patientData, "addresses", "addr", patientAddressFields)
+
+	// @use defaults to "HP" (Home) exactly as before when phoneType is absent
+	// — every existing saved pipeline keeps producing identical output.
 	if phone, ok := stringValue(patientData["phone"]); ok {
 		tel := patientRole.CreateElement("telecom")
 		tel.CreateAttr("value", "tel:"+phone)
+		phoneType, ok := stringValue(patientData["phoneType"])
+		if !ok {
+			phoneType = "HP"
+		}
+		tel.CreateAttr("use", phoneType)
+	}
+
+	// Email is the same repeatable <telecom> construct as phone, just a
+	// mailto: value instead of tel: — no separate template (US Realm Header
+	// doesn't distinguish telecom "kinds" beyond the value's own URI scheme).
+	if email, ok := stringValue(patientData["email"]); ok {
+		tel := patientRole.CreateElement("telecom")
+		tel.CreateAttr("value", "mailto:"+email)
 		tel.CreateAttr("use", "HP")
 	}
 
 	writeHeaderFields(patientRole, patientData, patientScalarFields)
 	writeCodedFields(patientRole, patientData, patientCodedFields)
+
+	// Additional names (USCDI v3's Previous Name, plus alias/maiden/etc.) —
+	// <name> nests inside <patient>, which patientScalarFields/patientCodedFields
+	// above create on demand (find-or-create by path) if any primary-name or
+	// demographic field was present; if names[] is the ONLY name data given
+	// (no firstName/lastName/etc. at all), <patient> won't exist yet, so it's
+	// created here too. See writeRepeatingGroup's doc comment for the
+	// generic caller-supplied-@use design this and addresses[] share.
+	patient := patientRole.SelectElement("patient")
+	if patient == nil {
+		if _, hasNames := patientData["names"].([]interface{}); hasNames {
+			patient = patientRole.CreateElement("patient")
+		}
+	}
+	if patient != nil {
+		writeRepeatingGroup(patient, patientData, "names", "name", patientAdditionalNameFields)
+	}
 
 	// patientScalarFields (name/birthTime/languageCommunication) and
 	// patientCodedFields (sex/race/ethnicity) are two independent
@@ -514,9 +569,17 @@ func writePatientHeader(root *etree.Element, header map[string]interface{}) {
 	// ..., languageCommunication) by call order alone — reorder once,
 	// after both have run, rather than trying to choreograph two unrelated
 	// lists into one combined order.
-	if patient := patientRole.SelectElement("patient"); patient != nil {
+	if patient != nil {
 		reorderChildrenByTag(patient, []string{
+			// etree.CreateElement("sdtc:deceasedInd") splits the namespace
+			// prefix into Element.Space, leaving Element.Tag as the bare
+			// local name ("deceasedInd") — reorderChildrenByTag ranks by
+			// .Tag only (see xpath_writer.go), so these two entries must be
+			// unprefixed to actually match (confirmed via
+			// TestWriteHeaderFields_DeceasedIndAndNameSuffix_SdtcNamespacedTagRoundTrips
+			// in header_fields_test.go, which caught this the first time).
 			"name", "administrativeGenderCode", "birthTime",
+			"deceasedInd", "deceasedTime",
 			"maritalStatusCode", "religiousAffiliationCode",
 			"raceCode", "ethnicGroupCode", "guardian", "birthplace",
 			"languageCommunication",
@@ -765,6 +828,65 @@ func writeInformantsHeader(root *etree.Element, header map[string]interface{}) {
 		}
 		writePersonReference(root, "informant", inf, true)
 	}
+}
+
+// relatedPersonRoleCodeSystem is the fixed codeSystem for
+// associatedEntity/code — Personal And Legal Relationship Role Type
+// (companion_appxA.txt §4.3, CONF:4537-32985) — the same fixed-codeSystem
+// convention patientCodedFields/writeCodedFields already use elsewhere,
+// applied by hand here since this shape (participant/associatedEntity, not
+// assignedEntity) doesn't fit writePersonReference's existing helper.
+const relatedPersonRoleCodeSystem = "2.16.840.1.113883.11.20.12.1"
+
+// writeRelatedPersonsHeader writes zero or more <participant typeCode="IND">
+// elements — the AppxA "Related Person Relationship and Name Participant"
+// template (2.16.840.1.113883.10.20.22.5.8:2023-05-01), USCDI v3's Related
+// Person's Name/Relationship. Genuinely different shape from
+// writePersonReference's informant/performer pattern (associatedEntity/
+// associatedPerson, not assignedEntity/assignedPerson; a required
+// relationship code the other shape has no equivalent for) — not a
+// reuse candidate, a sibling.
+func writeRelatedPersonsHeader(root *etree.Element, header map[string]interface{}) {
+	people, ok := header["relatedPersons"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, personRaw := range people {
+		person, ok := personRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		participant := root.CreateElement("participant")
+		participant.CreateAttr("typeCode", "IND")
+
+		tid := participant.CreateElement("templateId")
+		tid.CreateAttr("root", "2.16.840.1.113883.10.20.22.5.8")
+		tid.CreateAttr("extension", "2023-05-01")
+
+		associatedEntity := participant.CreateElement("associatedEntity")
+		associatedEntity.CreateAttr("classCode", "PRS")
+
+		if relCode, ok := stringValue(person["relationshipCode"]); ok {
+			code := associatedEntity.CreateElement("code")
+			code.CreateAttr("code", relCode)
+			code.CreateAttr("codeSystem", relatedPersonRoleCodeSystem)
+			if display, ok := stringValue(person["relationshipDisplay"]); ok {
+				code.CreateAttr("displayName", display)
+			}
+		}
+
+		// NOT personItemFields — its paths are relative to an <assignedEntity>
+		// and already start with "assignedPerson/..." (see its own doc
+		// comment); associatedPerson here is a different tag we've already
+		// created, so name/given and name/family are relative to IT directly.
+		associatedPerson := associatedEntity.CreateElement("associatedPerson")
+		writeHeaderFields(associatedPerson, person, relatedPersonNameFields)
+	}
+}
+
+var relatedPersonNameFields = []headerFieldMapping{
+	{"given", "name/given"},
+	{"family", "name/family"},
 }
 
 // writeDocumentationOfHeader writes <documentationOf><serviceEvent> — the

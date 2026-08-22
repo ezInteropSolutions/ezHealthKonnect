@@ -811,6 +811,48 @@
           "fixedCode": "ASSERTION",
           "fixedCodeSystem": "2.16.840.1.113883.5.4",
           "anchorRoot": "root"
+        },
+        {
+          "key": "medicationDispenses",
+          "wrapperTag": "entryRelationship",
+          "wrapperAttr": "typeCode",
+          "wrapperAttrValue": "REFR",
+          "observationElementPath": "supply",
+          "templateId": "2.16.840.1.113883.10.20.22.4.18",
+          "templateIdExtension": "2014-06-09",
+          "fields": [
+            {
+              "key": "fillStatus",
+              "uscdiElement": "Fill Status",
+              "conformance": "SHALL",
+              "dataType": "CS",
+              "valueSet": "Medication Fill Status",
+              "xpath": "statusCode/@code"
+            },
+            {
+              "key": "dispenseQuantity",
+              "uscdiElement": "Dispensed Quantity",
+              "conformance": "SHOULD",
+              "dataType": "PQ",
+              "xpath": "quantity/@value",
+              "xpathUnit": "quantity/@unit"
+            },
+            {
+              "key": "dispenseDate",
+              "uscdiElement": "Dispense Date",
+              "conformance": "SHOULD",
+              "dataType": "TS",
+              "xpath": "effectiveTime/@value"
+            },
+            {
+              "key": "dispenseSequence",
+              "uscdiElement": "Dispense Sequence Number",
+              "conformance": "SHOULD",
+              "dataType": "INT",
+              "xpath": "repeatNumber/@value"
+            }
+          ],
+          "anchorRoot": "root"
         }
       ]
     },
@@ -1265,7 +1307,7 @@
         },
         {
           "key": "referenceRangeLowInclusive",
-          "uscdiElement": "Reference Range (Low) Inclusive Flag (HL7 V3 IVXB_PQ @inclusive — whether the low boundary value itself counts as part of the normal range; defaults to true per the base datatype when omitted, only written when a source system actually distinguishes inclusive/exclusive boundaries)",
+          "uscdiElement": "Reference Range (Low) Inclusive Flag",
           "conformance": "MAY",
           "dataType": "BL",
           "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value/low/@inclusive"
@@ -1280,7 +1322,7 @@
         },
         {
           "key": "referenceRangeHighInclusive",
-          "uscdiElement": "Reference Range (High) Inclusive Flag (HL7 V3 IVXB_PQ @inclusive — whether the high boundary value itself counts as part of the normal range)",
+          "uscdiElement": "Reference Range (High) Inclusive Flag",
           "conformance": "MAY",
           "dataType": "BL",
           "xpath": "entry/organizer/component/observation/referenceRange/observationRange/value/high/@inclusive"
@@ -1325,6 +1367,15 @@
           "xpath": "entry/organizer/code/@code",
           "xpathDisplay": "entry/organizer/code/@displayName",
           "xpathSystem": "entry/organizer/code/@codeSystem"
+        },
+        {
+          "key": "specimenTypeCode",
+          "uscdiElement": "Specimen Type",
+          "conformance": "MAY",
+          "dataType": "CD",
+          "valueSet": "Specimen Type",
+          "xpath": "entry/organizer/specimen/specimenRole/specimenPlayingEntity/code/@code",
+          "xpathDisplay": "entry/organizer/specimen/specimenRole/specimenPlayingEntity/code/@displayName"
         },
         {
           "key": "panelStatus",
@@ -2132,6 +2183,33 @@
           "xpathDisplay": "entry/observation[code/@code='76691-5']/value/@displayName"
         },
         {
+          "key": "tribalAffiliation",
+          "uscdiElement": "Tribal Affiliation",
+          "conformance": "MAY",
+          "dataType": "CD",
+          "valueSet": "Tribal Entities US",
+          "xpath": "entry/observation[code/@code='95370-3']/value/@code",
+          "xpathDisplay": "entry/observation[code/@code='95370-3']/value/@displayName"
+        },
+        {
+          "key": "occupationCode",
+          "uscdiElement": "Occupation",
+          "conformance": "MAY",
+          "dataType": "CD",
+          "valueSet": "Occupation ONETSOC Detail (ODH)",
+          "xpath": "entry/observation[code/@code='11341-5']/value/@code",
+          "xpathDisplay": "entry/observation[code/@code='11341-5']/value/@displayName"
+        },
+        {
+          "key": "occupationIndustryCode",
+          "uscdiElement": "Occupation Industry",
+          "conformance": "MAY",
+          "dataType": "CD",
+          "valueSet": "Industry NAICS Detail (ODH)",
+          "xpath": "entry/observation[code/@code='11341-5']/entryRelationship[@typeCode='REFR']/observation[code/@code='86188-0']/value/@code",
+          "xpathDisplay": "entry/observation[code/@code='11341-5']/entryRelationship[@typeCode='REFR']/observation[code/@code='86188-0']/value/@displayName"
+        },
+        {
           "key": "authorGiven",
           "uscdiElement": "Author Given Name",
           "conformance": "MAY",
@@ -2185,6 +2263,30 @@
         {
           "path": "entry/observation[templateId/@root='2.16.840.1.113883.10.20.22.4.78']/author",
           "templateId": "2.16.840.1.113883.10.20.22.4.119"
+        },
+        {
+          "path": "entry/observation[code/@code='95370-3']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.501",
+          "templateIdExtension": "2023-05-01",
+          "fixedCode": "95370-3",
+          "fixedCodeSystem": "2.16.840.1.113883.6.1",
+          "fixedCodeDisplay": "Tribal Affiliation"
+        },
+        {
+          "path": "entry/observation[code/@code='11341-5']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.503",
+          "templateIdExtension": "2023-05-01",
+          "fixedCode": "11341-5",
+          "fixedCodeSystem": "2.16.840.1.113883.6.1",
+          "fixedCodeDisplay": "History of Occupation"
+        },
+        {
+          "path": "entry/observation[code/@code='11341-5']/entryRelationship[@typeCode='REFR']/observation[code/@code='86188-0']",
+          "templateId": "2.16.840.1.113883.10.20.22.4.504",
+          "templateIdExtension": "2023-05-01",
+          "fixedCode": "86188-0",
+          "fixedCodeSystem": "2.16.840.1.113883.6.1",
+          "fixedCodeDisplay": "History of Occupational Industry"
         }
       ]
     },
@@ -2207,6 +2309,15 @@
           "dataType": "CD",
           "xpath": "entry/observation/value/@code",
           "xpathDisplay": "entry/observation/value/@displayName"
+        },
+        {
+          "key": "disabilityStatus",
+          "uscdiElement": "Disability Status",
+          "conformance": "MAY",
+          "dataType": "CD",
+          "valueSet": "CUBS_Disability",
+          "xpath": "entry/observation[code/@code='89571-4']/value/@code",
+          "xpathDisplay": "entry/observation[code/@code='89571-4']/value/@displayName"
         },
         {
           "key": "effectiveTime",
@@ -2570,6 +2681,14 @@
           "conformance": "SHALL",
           "dataType": "CS",
           "xpath": "entry/supply/statusCode/@code"
+        },
+        {
+          "key": "deviceIdentifier",
+          "uscdiElement": "Unique Device Identifier (UDI)",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/supply/participant[@typeCode='PRD']/participantRole/id/@extension",
+          "xpathSystem": "entry/supply/participant[@typeCode='PRD']/participantRole/id/@root"
         }
       ],
       "entryElementPath": "entry/supply",
@@ -2769,6 +2888,278 @@
               "path": "entry/procedure/author",
               "templateId": "2.16.840.1.113883.10.20.22.4.119"
             }
+          ],
+          "componentGroups": [
+            {
+              "key": "udiOrganizer",
+              "wrapperTag": "entryRelationship",
+              "wrapperAttr": "typeCode",
+              "wrapperAttrValue": "COMP",
+              "organizerTag": "organizer",
+              "organizerTemplateId": "2.16.840.1.113883.10.20.22.4.311",
+              "organizerTemplateIdExtension": "2019-06-21",
+              "organizerFixedCode": "74711-3",
+              "organizerFixedCodeSystem": "2.16.840.1.113883.6.1",
+              "organizerFixedCodeDisplay": "Unique Device Identifier",
+              "organizerIdField": "deviceIdentifier",
+              "organizerIdSystemField": "deviceIdentifierSystem",
+              "components": [
+                {
+                  "key": "deviceIdentifier",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.304",
+                  "templateIdExtension": "2022-06-01",
+                  "fixedCode": "C101722",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "Primary DI Number",
+                  "fields": [
+                    {
+                      "key": "deviceIdentifier",
+                      "uscdiElement": "Unique Device Identifier (UDI)",
+                      "conformance": "SHALL",
+                      "dataType": "II",
+                      "xpath": "value/@extension",
+                      "xpathSystem": "value/@root"
+                    }
+                  ]
+                },
+                {
+                  "key": "lotOrBatchNumber",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.315",
+                  "templateIdExtension": "2019-06-21",
+                  "fixedCode": "C101672",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "Lot or Batch Number",
+                  "fields": [
+                    {
+                      "key": "lotOrBatchNumber",
+                      "uscdiElement": "Lot or Batch Number",
+                      "conformance": "SHOULD",
+                      "dataType": "ED",
+                      "xpath": "value"
+                    }
+                  ]
+                },
+                {
+                  "key": "serialNumber",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.319",
+                  "templateIdExtension": "2019-06-21",
+                  "fixedCode": "C101671",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "Serial Number",
+                  "fields": [
+                    {
+                      "key": "serialNumber",
+                      "uscdiElement": "Serial Number",
+                      "conformance": "SHOULD",
+                      "dataType": "ED",
+                      "xpath": "value"
+                    }
+                  ]
+                },
+                {
+                  "key": "manufacturingDate",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.316",
+                  "templateIdExtension": "2019-06-21",
+                  "fixedCode": "C101669",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "Manufacturing Date",
+                  "fields": [
+                    {
+                      "key": "manufacturingDate",
+                      "uscdiElement": "Manufacturing Date",
+                      "conformance": "SHOULD",
+                      "dataType": "TS",
+                      "xpath": "value/@value"
+                    }
+                  ]
+                },
+                {
+                  "key": "expirationDate",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.309",
+                  "templateIdExtension": "2019-06-21",
+                  "fixedCode": "C101670",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "Expiration Date",
+                  "fields": [
+                    {
+                      "key": "expirationDate",
+                      "uscdiElement": "Expiration Date",
+                      "conformance": "SHOULD",
+                      "dataType": "TS",
+                      "xpath": "value/@value"
+                    }
+                  ]
+                },
+                {
+                  "key": "distinctIdentificationCode",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.308",
+                  "templateIdExtension": "2019-06-21",
+                  "fixedCode": "C113843",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "Distinct Identification Code",
+                  "fields": [
+                    {
+                      "key": "distinctIdentificationCode",
+                      "uscdiElement": "Distinct Identification Code",
+                      "conformance": "SHOULD",
+                      "dataType": "ED",
+                      "xpath": "value"
+                    }
+                  ]
+                },
+                {
+                  "key": "brandName",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.301",
+                  "templateIdExtension": "2019-06-21",
+                  "fixedCode": "C71898",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "Brand Name",
+                  "fields": [
+                    {
+                      "key": "brandName",
+                      "uscdiElement": "Brand Name",
+                      "conformance": "MAY",
+                      "dataType": "ED",
+                      "xpath": "value"
+                    }
+                  ]
+                },
+                {
+                  "key": "modelNumber",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.317",
+                  "templateIdExtension": "2019-06-21",
+                  "fixedCode": "C99285",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "Model Number",
+                  "fields": [
+                    {
+                      "key": "modelNumber",
+                      "uscdiElement": "Model Number",
+                      "conformance": "MAY",
+                      "dataType": "ED",
+                      "xpath": "value"
+                    }
+                  ]
+                },
+                {
+                  "key": "catalogNumber",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.302",
+                  "templateIdExtension": "2019-06-21",
+                  "fixedCode": "C99286",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "Catalog Number",
+                  "fields": [
+                    {
+                      "key": "catalogNumber",
+                      "uscdiElement": "Catalog Number",
+                      "conformance": "MAY",
+                      "dataType": "ED",
+                      "xpath": "value"
+                    }
+                  ]
+                },
+                {
+                  "key": "companyName",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.303",
+                  "templateIdExtension": "2019-06-21",
+                  "fixedCode": "C54131",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "Company Name",
+                  "fields": [
+                    {
+                      "key": "companyName",
+                      "uscdiElement": "Company Name",
+                      "conformance": "MAY",
+                      "dataType": "ED",
+                      "xpath": "value"
+                    }
+                  ]
+                },
+                {
+                  "key": "mriSafety",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.318",
+                  "templateIdExtension": "2019-06-21",
+                  "fixedCode": "C106044",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "MRI Safety",
+                  "fields": [
+                    {
+                      "key": "mriSafety",
+                      "uscdiElement": "MRI Safety",
+                      "conformance": "MAY",
+                      "dataType": "CD",
+                      "valueSet": "Device Magnetic resonance (MR) Safety",
+                      "xpath": "value/@code",
+                      "xpathSystem": "value/@codeSystem"
+                    }
+                  ]
+                },
+                {
+                  "key": "latexSafety",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.314",
+                  "templateIdExtension": "2019-06-21",
+                  "fixedCode": "C160938",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "Latex Safety Status",
+                  "fields": [
+                    {
+                      "key": "latexSafety",
+                      "uscdiElement": "Latex Safety",
+                      "conformance": "MAY",
+                      "dataType": "CD",
+                      "valueSet": "Device Latex Safety",
+                      "xpath": "value/@code",
+                      "xpathSystem": "value/@codeSystem"
+                    }
+                  ]
+                },
+                {
+                  "key": "implantableDeviceStatus",
+                  "componentTag": "component",
+                  "obsElementPath": "observation",
+                  "templateId": "2.16.840.1.113883.10.20.22.4.305",
+                  "templateIdExtension": "2019-06-21",
+                  "fixedCode": "C160939",
+                  "fixedCodeSystem": "2.16.840.1.113883.3.26.1.1",
+                  "fixedCodeDisplay": "Implantable Device Status",
+                  "fields": [
+                    {
+                      "key": "implantableDeviceStatus",
+                      "uscdiElement": "Implantable Device Status",
+                      "conformance": "MAY",
+                      "dataType": "CD",
+                      "valueSet": "Implantable Device Status",
+                      "xpath": "value/@code",
+                      "xpathSystem": "value/@codeSystem"
+                    }
+                  ]
+                }
+              ]
+            }
           ]
         }
       ]
@@ -2943,7 +3334,7 @@
         },
         {
           "key": "referencedDocumentIdRoot",
-          "uscdiElement": "Advance Directive Referenced External Document ID Root (CONF:1198-8692/8693/8695 — a scanned/filed copy of the physical directive, e.g. a POLST form; genuinely optional, only present when such a document actually exists)",
+          "uscdiElement": "Referenced Document ID Root",
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/id/@root"
@@ -2957,28 +3348,28 @@
         },
         {
           "key": "referencedDocumentContent",
-          "uscdiElement": "Advance Directive Referenced External Document Content (base64-embedded — the ED datatype's OTHER representation mode, an alternative to a URL reference: the actual scanned/filed document embedded inline rather than linked. Use this OR referencedDocumentURL, whichever matches how the source system actually holds the document — both are valid ED content, not mutually required.)",
+          "uscdiElement": "Referenced Document Content",
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text"
         },
         {
           "key": "referencedDocumentRepresentation",
-          "uscdiElement": "Advance Directive Referenced External Document Representation (ED datatype @representation — \"B64\" for base64-embedded binary content, the normal value whenever referencedDocumentContent is populated; \"TXT\" for literal inline plain text)",
+          "uscdiElement": "Referenced Document Representation",
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/@representation"
         },
         {
           "key": "referencedDocumentMediaType",
-          "uscdiElement": "Advance Directive Referenced External Document Media Type (e.g. application/pdf, image/tiff — IANA media type of the embedded/linked document)",
+          "uscdiElement": "Referenced Document Media Type",
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/@mediaType"
         },
         {
           "key": "referencedDocumentURL",
-          "uscdiElement": "Advance Directive Referenced External Document URL (CONF:1198-8697/8698) — the ED datatype's pointer representation mode, an alternative to embedding referencedDocumentContent inline",
+          "uscdiElement": "Referenced Document URL",
           "conformance": "MAY",
           "dataType": "ST",
           "xpath": "entry/observation/reference[@typeCode='REFR']/externalDocument/text/reference/@value"
@@ -3100,11 +3491,25 @@
           "xpathDisplay": "entry/act/entryRelationship[@typeCode='COMP']/act/code/@displayName"
         },
         {
+          "key": "coverageCheckDate",
+          "uscdiElement": "Coverage Status",
+          "conformance": "SHOULD",
+          "dataType": "TS",
+          "xpath": "entry/act/effectiveTime/@value"
+        },
+        {
           "key": "payerName",
           "uscdiElement": "Payer Name",
           "conformance": "SHALL",
           "dataType": "ST",
           "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/performer/assignedEntity/representedOrganization/name"
+        },
+        {
+          "key": "payerId",
+          "uscdiElement": "Payer Identifier",
+          "conformance": "SHOULD",
+          "dataType": "II",
+          "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/performer/assignedEntity/id/@extension"
         },
         {
           "key": "memberId",
@@ -3114,11 +3519,19 @@
           "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='COV']/participantRole/id/@extension"
         },
         {
+          "key": "subscriberRelationship",
+          "uscdiElement": "Relationship to Subscriber",
+          "conformance": "SHOULD",
+          "dataType": "CD",
+          "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='COV']/participantRole/code/@code",
+          "xpathDisplay": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='COV']/participantRole/code/@displayName"
+        },
+        {
           "key": "groupNumber",
           "uscdiElement": "Group Number",
           "conformance": "SHOULD",
           "dataType": "ST",
-          "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='HLD']/participantRole/id/@extension"
+          "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/id/@extension"
         },
         {
           "key": "subscriberName",
@@ -3126,6 +3539,13 @@
           "conformance": "SHOULD",
           "dataType": "ST",
           "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='HLD']/participantRole/playingEntity/name/given"
+        },
+        {
+          "key": "subscriberId",
+          "uscdiElement": "Subscriber Identifier",
+          "conformance": "SHOULD",
+          "dataType": "ST",
+          "xpath": "entry/act/entryRelationship[@typeCode='COMP']/act/participant[@typeCode='HLD']/participantRole/id/@extension"
         }
       ],
       "entryElementPath": "entry/act",
@@ -3698,6 +4118,13 @@
           "xpath": "ClinicalDocument/recordTarget/patientRole/patient/name/family"
         },
         {
+          "key": "nameSuffix",
+          "uscdiElement": "Name Suffix",
+          "conformance": "MAY",
+          "dataType": "PN",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/patient/name/suffix"
+        },
+        {
           "key": "birthDate",
           "uscdiElement": "Date of Birth",
           "conformance": "SHALL",
@@ -3711,6 +4138,20 @@
           "dataType": "CD",
           "xpath": "ClinicalDocument/recordTarget/patientRole/patient/administrativeGenderCode/@code",
           "xpathDisplay": "ClinicalDocument/recordTarget/patientRole/patient/administrativeGenderCode/@displayName"
+        },
+        {
+          "key": "deceasedInd",
+          "uscdiElement": "Date of Death (deceased indicator)",
+          "conformance": "MAY",
+          "dataType": "BL",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/patient/sdtc:deceasedInd/@value"
+        },
+        {
+          "key": "deceasedTime",
+          "uscdiElement": "Date of Death",
+          "conformance": "MAY",
+          "dataType": "TS",
+          "xpath": "ClinicalDocument/recordTarget/patientRole/patient/sdtc:deceasedTime/@value"
         },
         {
           "key": "race",
@@ -3910,6 +4351,42 @@
           "conformance": "SHALL",
           "dataType": "TEL",
           "xpath": "ClinicalDocument/legalAuthenticator/assignedEntity/telecom/@value"
+        }
+      ]
+    },
+    {
+      "key": "header.relatedPerson",
+      "uscdiClass": "Related Person",
+      "displayName": "Related Person (Header)",
+      "loincCode": "",
+      "templateId": "2.16.840.1.113883.10.20.22.5.8",
+      "templateIdExtension": "2023-05-01",
+      "templateIdOptional": "",
+      "conformance": "MAY",
+      "isHeader": true,
+      "fields": [
+        {
+          "key": "relationshipCode",
+          "uscdiElement": "Related Person's Relationship",
+          "conformance": "SHALL",
+          "dataType": "CD",
+          "valueSet": "Personal And Legal Relationship Role Type",
+          "xpath": "ClinicalDocument/participant[@typeCode='IND']/associatedEntity/code/@code",
+          "xpathDisplay": "ClinicalDocument/participant[@typeCode='IND']/associatedEntity/code/@displayName"
+        },
+        {
+          "key": "relatedPersonGiven",
+          "uscdiElement": "Related Person's Name",
+          "conformance": "SHALL",
+          "dataType": "PN",
+          "xpath": "ClinicalDocument/participant[@typeCode='IND']/associatedEntity/associatedPerson/name/given"
+        },
+        {
+          "key": "relatedPersonFamily",
+          "uscdiElement": "Related Person's Name",
+          "conformance": "SHALL",
+          "dataType": "PN",
+          "xpath": "ClinicalDocument/participant[@typeCode='IND']/associatedEntity/associatedPerson/name/family"
         }
       ]
     },

@@ -3918,6 +3918,7 @@ class CDABuildStepBuilder {
 
         const sourceStep = (typeof CDARequirementsHelper !== 'undefined') ? CDARequirementsHelper.findMapToCanonicalStep(this._panel) : null;
         const badge = c => (typeof CDARequirementsHelper !== 'undefined') ? CDARequirementsHelper.renderConformanceBadge(c) : c;
+        const uscdiSummary = (typeof CDARequirementsHelper !== 'undefined') ? CDARequirementsHelper.renderUSCDISummary(this._requirements) : '';
 
         if (!sourceStep) {
             // No live cda.map_to_canonical sibling to score against (source is
@@ -3929,6 +3930,7 @@ class CDABuildStepBuilder {
             <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#92400e;">
                 No <code>cda.map_to_canonical</code> step found in this pipeline to check live completeness against — showing the static requirements for ${esc(cfg.documentType || 'CCD')} instead. If your source is <code>cda.parse</code>, completeness depends on the parsed document itself; use Test Pipeline's compliance report to check a real message.
             </div>
+            ${uscdiSummary}
             <table class="mapping-table" style="width:100%;">
                 <thead><tr><th style="font-size:0.7rem;color:#64748b;">Section</th><th style="font-size:0.7rem;color:#64748b;">Requirement</th></tr></thead>
                 <tbody>${sectionRows}</tbody>
@@ -3958,6 +3960,7 @@ class CDABuildStepBuilder {
             Live status of "<strong>${esc(CDARequirementsHelper.stepDisplayName(sourceStep) || 'Map to Canonical')}</strong>" — this pipeline's upstream <code>cda.map_to_canonical</code> step — against ${esc(cfg.documentType || 'CCD')}'s requirements.
         </div>
         ${banner}
+        ${uscdiSummary}
         <table class="mapping-table" style="width:100%;">
             <thead><tr>
                 <th style="font-size:0.7rem;color:#64748b;">Section</th>

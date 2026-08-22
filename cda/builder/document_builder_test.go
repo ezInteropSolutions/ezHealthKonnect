@@ -1457,6 +1457,65 @@ func TestBuildDocument_RoundTripsThroughParserAndValidator(t *testing.T) {
 	}
 }
 
+// TestBuildDocument_PatientDeceasedAndSuffixAndEmail_RoundTrips proves the
+// A2.2 patient-header additions (deceasedInd/deceasedTime, nameSuffix,
+// email, phoneType) survive a real build -> serialize -> re-parse loop,
+// using cda/document's OWN independent typed parser (not the schema-driven
+// one this test file otherwise exercises) as the check — CDAPatient.DeceasedInd
+// already existed and is already mapped to FHIR Patient.deceasedBoolean
+// (services/cda_fhir/declarative_oob_rules.go), so a correct round-trip here
+// is a strong, independent signal the xmlns:sdtc root declaration and the
+// sdtc:deceasedInd/deceasedTime write path are both genuinely correct, not
+// just "didn't panic."
+func TestBuildDocument_PatientDeceasedAndSuffixAndEmail_RoundTrips(t *testing.T) {
+	loader := loadTestSchema(t)
+	canonical := fullCanonicalDoc()
+	patient := canonical["header"].(map[string]interface{})["patient"].(map[string]interface{})
+	patient["nameSuffix"] = "Jr."
+	patient["deceasedInd"] = "true"
+	patient["deceasedTime"] = "20240315"
+	patient["email"] = "jane.doe@example.com"
+	patient["phoneType"] = "MC"
+
+	xml, err := BuildDocument(loader, canonical, "CCD", BuildOptions{OrgName: "Test Health System"})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+	if !strings.Contains(xml, `xmlns:sdtc="urn:hl7-org:sdtc"`) {
+		t.Errorf("expected root to declare xmlns:sdtc\n--- XML ---\n%s", xml)
+	}
+
+	parser := cdadocument.NewCDAParser(loader)
+	doc, err := parser.ParseFromRawXML(xml)
+	if err != nil {
+		t.Fatalf("re-parsing built XML failed: %v\n--- XML ---\n%s", err, xml)
+	}
+
+	p := doc.Header.Patient
+	if len(p.Names) == 0 || p.Names[0].Suffix != "Jr." {
+		t.Errorf("expected patient name suffix Jr. to round-trip, got Names=%+v", p.Names)
+	}
+	if p.DeceasedInd == nil || !*p.DeceasedInd {
+		t.Errorf("expected DeceasedInd=true to round-trip, got %v", p.DeceasedInd)
+	}
+	foundEmail := false
+	foundMobile := false
+	for _, tel := range p.Telecoms {
+		if tel.Value == "mailto:jane.doe@example.com" {
+			foundEmail = true
+		}
+		if tel.Value == "tel:5551234567" && tel.Use == "MC" {
+			foundMobile = true
+		}
+	}
+	if !foundEmail {
+		t.Errorf("expected an email telecom to round-trip, got Telecoms=%+v", p.Telecoms)
+	}
+	if !foundMobile {
+		t.Errorf("expected phone telecom with use=MC to round-trip, got Telecoms=%+v", p.Telecoms)
+	}
+}
+
 // TestBuildDocument_CarePlan_RoundTripsThroughParserAndValidator is the
 // same pattern as the CCD round-trip test above, scaled to Care Plan's
 // smaller 2-section SHALL list (healthConcerns, goals) — confirms the new
@@ -1965,6 +2024,233 @@ func TestBuildDocument_MedicationIndications_CrossTableJoinShape(t *testing.T) {
 		if !strings.Contains(xml, want) {
 			t.Errorf("expected %s in output, not found", want)
 		}
+	}
+}
+
+// TestBuildDocument_MedicationDispense_FillStatus_BuildsAsREFRSupply is the
+// Phase A3.1 proof: Medication Dispense (V2) (templateId .4.18:2014-06-09,
+// vol2.txt:30415) attaches to Medication Activity via a 0..* <entryRelationship
+// typeCode="REFR"> (CONF:1098-7549/7553/16090, vol2.txt:30254-30260) wrapping
+// a <supply> act (classCode SPLY/moodCode EVN per tagBoilerplate["supply"]),
+// with statusCode/@code bound to ValueSet "Medication Fill Status"
+// (CONF:1098-32361) carrying the actual fill-status value — same
+// RepeatingGroup mechanism "indications" already proves, different wrapper
+// typeCode/templateId/anchor tag.
+func TestBuildDocument_MedicationDispense_FillStatus_BuildsAsREFRSupply(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := map[string]interface{}{
+		"header": map[string]interface{}{},
+		"sections": map[string]interface{}{
+			"medications": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"drugCode": "197361", "drugCodeDisplay": "Lisinopril 10mg",
+					"status": "active",
+					"medicationDispenses": []interface{}{
+						map[string]interface{}{
+							"fillStatus": "completed",
+							"dispenseQuantity": "30", "dispenseQuantityUnit": "TAB",
+							"dispenseDate": "20240115", "dispenseSequence": "1",
+						},
+					},
+				},
+			}},
+		},
+	}
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	if !strings.Contains(xml, `<entryRelationship typeCode="REFR">`) {
+		t.Fatalf("expected <entryRelationship typeCode=\"REFR\"> wrapper, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<supply classCode="SPLY" moodCode="EVN">`) {
+		t.Errorf("expected <supply classCode=\"SPLY\" moodCode=\"EVN\"> from tagBoilerplate, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.4.18" extension="2014-06-09"`) {
+		t.Errorf("expected Medication Dispense (V2) templateId, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<statusCode code="completed"`) {
+		t.Errorf("expected fillStatus written to statusCode/@code, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<quantity value="30" unit="TAB"`) {
+		t.Errorf("expected dispenseQuantity/dispenseQuantityUnit on <quantity>, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<effectiveTime value="20240115"`) {
+		t.Errorf("expected dispenseDate on <effectiveTime>, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<repeatNumber value="1"`) {
+		t.Errorf("expected dispenseSequence on <repeatNumber>, got:\n%s", xml)
+	}
+}
+
+// TestBuildDocument_MedicalEquipment_DeviceIdentifier_BuildsOnProductInstanceId
+// is the Phase A3.2 Tier 1 proof: the base C-CDA R2.1 IG's own sanctioned UDI/
+// DI capture point is Product Instance's own participantRole/id (vol2.txt
+// 3.83's prose: "When sending a DI, populate the participantRole/id/@root
+// with the appropriate assigning agency OID and participantRole/id/@extension
+// with the DI") — not a separate Device Identifier Observation sub-template.
+// Confirms deviceIdentifier/deviceIdentifierSystem write to the SAME
+// participantRole/id element already anchored by equipmentCode/productName,
+// without disturbing them.
+func TestBuildDocument_MedicalEquipment_DeviceIdentifier_BuildsOnProductInstanceId(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := map[string]interface{}{
+		"header": map[string]interface{}{},
+		"sections": map[string]interface{}{
+			"medicalEquipment": map[string]interface{}{"entries": []interface{}{
+				map[string]interface{}{
+					"equipmentCode": "58938008", "equipmentCodeDisplay": "Wheelchair",
+					"productName":            "Standard Wheelchair",
+					"deviceIdentifier":       "00999998998989",
+					"deviceIdentifierSystem": "1.3.160",
+				},
+			}},
+		},
+	}
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	if !strings.Contains(xml, `code="58938008"`) {
+		t.Errorf("expected pre-existing equipmentCode still present, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<id extension="00999998998989" root="1.3.160"`) {
+		t.Errorf("expected participantRole/id with extension=deviceIdentifier, root=deviceIdentifierSystem, got:\n%s", xml)
+	}
+}
+
+// TestBuildDocument_MedicalEquipment_UDIOrganizer_ComponentGroup is the UDI
+// Tier 2 proof: the procedureEntries alternate's new "udiOrganizer"
+// ComponentGroup builds a shared <organizer> (UDI Organizer, templateId
+// .4.311:2019-06-21, fixed LOINC 74711-3, companion_appxB.txt:271-287/
+// 546-561) wrapped in <entryRelationship typeCode="COMP"> (confirmed against
+// the MAIN Companion Guide body, companion.txt:9587, not just the appendix),
+// containing independently-optional, differently-shaped/differently-coded
+// sub-observations — the SHALL-required Device Identifier component (II
+// datatype) plus one ED-text component (Lot or Batch Number), one TS
+// component (Manufacturing Date), and one CD component (MRI Safety), while a
+// populated-nowhere component (Brand Name) must not appear at all. Also
+// confirms the organizer's own <id> is correlated to the SAME
+// deviceIdentifier/deviceIdentifierSystem value the component's own <value>
+// carries (OrganizerIDField/OrganizerIDSystemField reading the same record),
+// and that none of the nested sub-observations carry a <statusCode> (absent
+// from every one of their own constraint tables — tagBoilerplate's generic
+// "observation" -> "completed" default is deliberately stripped for these).
+func TestBuildDocument_MedicalEquipment_UDIOrganizer_ComponentGroup(t *testing.T) {
+	loader := loadTestSchema(t)
+	doc := map[string]interface{}{
+		"header": map[string]interface{}{},
+		"sections": map[string]interface{}{
+			"medicalEquipment": map[string]interface{}{
+				"entries": []interface{}{
+					map[string]interface{}{
+						"equipmentCode": "360008007", "equipmentCodeDisplay": "Wheelchair",
+						"status": "completed",
+					},
+				},
+				"procedureEntries": []interface{}{
+					map[string]interface{}{
+						"equipmentProcedureCode": "87717006", "equipmentProcedureCodeDisplay": "Insertion of cardiac pacemaker",
+						"equipmentProcedureStatus": "completed",
+						"deviceIdentifier":         "00999998998989",
+						"deviceIdentifierSystem":   "1.3.160",
+						"lotOrBatchNumber":         "LOT-4471",
+						"manufacturingDate":        "20240115",
+						"mriSafety":                "C106046",
+					},
+				},
+			},
+		},
+	}
+	xml, err := BuildDocument(loader, doc, "CCD", BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildDocument failed: %v", err)
+	}
+
+	if !strings.Contains(xml, `<entryRelationship typeCode="COMP">`) {
+		t.Fatalf("expected <entryRelationship typeCode=\"COMP\"> wrapper, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<organizer classCode="CLUSTER" moodCode="EVN">`) {
+		t.Errorf("expected <organizer classCode=\"CLUSTER\" moodCode=\"EVN\">, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.4.311" extension="2019-06-21"`) {
+		t.Errorf("expected UDI Organizer templateId, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<code code="74711-3" codeSystem="2.16.840.1.113883.6.1" displayName="Unique Device Identifier"`) {
+		t.Errorf("expected UDI Organizer's fixed LOINC code, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<statusCode code="completed"`) {
+		t.Errorf("expected organizer's own statusCode=completed (tagBoilerplate default, correctly KEPT at this level), got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<id extension="00999998998989" root="1.3.160"`) {
+		t.Errorf("expected organizer's own <id> correlated to deviceIdentifier/deviceIdentifierSystem, got:\n%s", xml)
+	}
+
+	// Device Identifier component (II).
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.4.304" extension="2022-06-01"`) {
+		t.Errorf("expected Device Identifier Observation templateId, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<code code="C101722" codeSystem="2.16.840.1.113883.3.26.1.1" displayName="Primary DI Number"`) {
+		t.Errorf("expected Device Identifier's fixed NCIt code, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<value xsi:type="II" extension="00999998998989" root="1.3.160"`) {
+		t.Errorf("expected Device Identifier's own value (II, root+extension), got:\n%s", xml)
+	}
+
+	// Lot or Batch Number component (ED, plain text).
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.4.315" extension="2019-06-21"`) {
+		t.Errorf("expected Lot or Batch Number templateId, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<value xsi:type="ED">LOT-4471</value>`) {
+		t.Errorf("expected Lot or Batch Number's plain-text ED value, got:\n%s", xml)
+	}
+
+	// Manufacturing Date component (TS).
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.4.316" extension="2019-06-21"`) {
+		t.Errorf("expected Manufacturing Date templateId, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<value xsi:type="TS" value="20240115"`) {
+		t.Errorf("expected Manufacturing Date's TS value, got:\n%s", xml)
+	}
+
+	// MRI Safety component (CD).
+	if !strings.Contains(xml, `root="2.16.840.1.113883.10.20.22.4.318" extension="2019-06-21"`) {
+		t.Errorf("expected MRI Safety templateId, got:\n%s", xml)
+	}
+	if !strings.Contains(xml, `<value xsi:type="CD" code="C106046"`) {
+		t.Errorf("expected MRI Safety's CD value, got:\n%s", xml)
+	}
+
+	// Brand Name was never populated — must not appear at all.
+	if strings.Contains(xml, `2.16.840.1.113883.10.20.22.4.301`) {
+		t.Errorf("expected NO Brand Name component (never populated), got:\n%s", xml)
+	}
+
+	// None of the nested sub-observations may carry a statusCode — confirm
+	// the ONLY statusCode in the whole udiOrganizer subtree is the
+	// organizer's own (checked above), not one per component too.
+	if got := strings.Count(xml, `root="2.16.840.1.113883.10.20.22.4.31`); got < 4 {
+		t.Fatalf("expected at least 4 UDI-family templateIds (organizer + 3 populated components), got %d:\n%s", got, xml)
+	}
+	organizerStart := strings.Index(xml, `<organizer classCode="CLUSTER"`)
+	organizerEnd := strings.Index(xml, `</organizer>`)
+	if organizerStart == -1 || organizerEnd == -1 {
+		t.Fatalf("could not locate <organizer>...</organizer> subtree, got:\n%s", xml)
+	}
+	organizerXML := xml[organizerStart:organizerEnd]
+	componentCount := strings.Count(organizerXML, `<component>`)
+	if componentCount != 4 {
+		t.Errorf("expected exactly 4 <component> elements inside the UDI Organizer (Device Identifier + 3 populated optional ones), got %d:\n%s", componentCount, organizerXML)
+	}
+	// Exactly 3 statusCode elements total: primary supply's own (from
+	// "status"), the alternate procedure's own (from
+	// "equipmentProcedureStatus"), and the UDI Organizer's own tagBoilerplate
+	// default — NONE on any of the 4 nested sub-observation components,
+	// which would make this 7 if the bug this test guards against regressed.
+	if got := strings.Count(xml, `<statusCode`); got != 3 {
+		t.Errorf("expected exactly 3 <statusCode> elements (supply + procedure + organizer, none on the 4 UDI components), got %d:\n%s", got, xml)
 	}
 }
 

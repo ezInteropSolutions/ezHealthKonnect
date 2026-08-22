@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"ezhealthkonnect/models"
@@ -40,8 +41,17 @@ import (
 // can read a misleading 100% while every entry still has real element gaps
 // (an entry only needs ONE field read to count as entry-level "found").
 // Reports persisted before this version have no such field to prefer and
-// should keep using OverallCoveragePct exactly as before.
-const currentSchemaVersion = 4
+// should keep using OverallCoveragePct exactly as before. 5 = USCDI v3
+// class bridging: CategoryStat.USCDIClasses is a new, additive field — the
+// real, ONC-verified USCDI v3 class set inventory.go's uscdiClassesForSection
+// resolves this category's SectionKey to (cda/schemas/uscdi_v3.json via
+// uscdi.USCDIVocabulary), distinct from Category itself (which stays
+// CDASectionDef.USCDIClass, an unverified display label — see this
+// package's own plan doc on why the two must never be conflated). Absent/
+// empty on any report built without a vocabulary, and on every report
+// persisted before this version — a UI should treat "no USCDIClasses" as
+// "not yet in the USCDI v3 vocabulary," never as "zero USCDI coverage."
+const currentSchemaVersion = 5
 
 // ElementGap is one specific element within an entry that nothing
 // downstream ever read — never a clinical value, only where it lives.
@@ -117,6 +127,12 @@ type CategoryStat struct {
 	ElementsFound int          `json:"elementsFound,omitempty"`
 	ElementsTotal int          `json:"elementsTotal,omitempty"`
 	Missed        []MissedItem `json:"missed"`
+	// USCDIClasses is the real USCDI v3 class set every InventoryItem in
+	// this category resolved to (deduped/unioned — see
+	// inventory.go's uscdiClassesForSection), omitted from JSON when empty
+	// so a report built without a vocabulary, or a category with no
+	// vocabulary entries yet, reads identically to a pre-version-5 report.
+	USCDIClasses []string `json:"uscdiClasses,omitempty"`
 }
 
 // Report is the full coverage result for one message/destination pair.
@@ -161,6 +177,12 @@ type entryGroup struct {
 	elementTotalAll          int
 	elementFoundAll          int
 	missedElements           []ElementGap
+	// uscdiClasses is this entry's own SectionKey's resolved USCDI class set
+	// (identical for every item sharing this group — see
+	// inventory.go's uscdiClassesForSection) — carried on the group so
+	// BuildReport's category loop can union it across every group in that
+	// category without re-resolving anything.
+	uscdiClasses []string
 }
 
 // BuildReport groups inventory by category (and, within a category, by
@@ -184,7 +206,7 @@ func BuildReport(inventory []InventoryItem, touched map[string]struct{}) *Report
 		gk := entryGroupKey{category: item.Category, sectionKey: item.SectionKey, entryIndex: item.EntryIndex}
 		g, exists := groupIndex[gk]
 		if !exists {
-			g = &entryGroup{sectionKey: item.SectionKey, sectionTitle: item.SectionTitle, entryIndex: item.EntryIndex}
+			g = &entryGroup{sectionKey: item.SectionKey, sectionTitle: item.SectionTitle, entryIndex: item.EntryIndex, uscdiClasses: item.USCDIClasses}
 			groupIndex[gk] = g
 			groupsByCategory[item.Category] = append(groupsByCategory[item.Category], g)
 		}
@@ -228,6 +250,7 @@ func BuildReport(inventory []InventoryItem, touched map[string]struct{}) *Report
 	categories := make([]CategoryStat, 0, len(categoryOrder))
 	for _, cat := range categoryOrder {
 		stat := CategoryStat{Category: cat, Missed: []MissedItem{}}
+		uscdiClassSeen := make(map[string]bool)
 		for _, g := range groupsByCategory[cat] {
 			stat.Total++
 			if g.entryTouched {
@@ -235,6 +258,17 @@ func BuildReport(inventory []InventoryItem, touched map[string]struct{}) *Report
 			}
 			stat.ElementsFound += g.elementFound
 			stat.ElementsTotal += g.elementTotal
+			// Union across every group in this category, deduped — normally
+			// every group shares the identical class set already (all from
+			// the same SectionKey), but Category is what groups items here,
+			// not SectionKey, so this stays correct even in the rare case
+			// two differently-keyed sections share one Category label.
+			for _, class := range g.uscdiClasses {
+				if !uscdiClassSeen[class] {
+					uscdiClassSeen[class] = true
+					stat.USCDIClasses = append(stat.USCDIClasses, class)
+				}
+			}
 			// Surfaced when the whole entry was never touched (original
 			// meaning) OR the entry WAS touched but has its own element
 			// gaps (new: a "partially missed" entry) -- an entry that's
@@ -253,6 +287,7 @@ func BuildReport(inventory []InventoryItem, touched map[string]struct{}) *Report
 				})
 			}
 		}
+		sort.Strings(stat.USCDIClasses)
 		docElementsFound += stat.ElementsFound
 		docElementsTotal += stat.ElementsTotal
 		categories = append(categories, stat)
