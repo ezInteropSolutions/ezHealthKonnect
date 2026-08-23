@@ -183,6 +183,9 @@ func (k *KnowledgeIngestionService) IngestAppDocs(ctx context.Context, rootDir s
 	if r := k.IngestBuiltinAppKnowledge(ctx); r != nil {
 		results = append(results, *r)
 	}
+	if r := k.IngestPipelineStepDocs(ctx, filepath.Join(rootDir, "architecture", "generated", "pipeline_step_docs.json")); r != nil {
+		results = append(results, *r)
+	}
 	return results
 }
 

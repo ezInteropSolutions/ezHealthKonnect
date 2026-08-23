@@ -621,6 +621,31 @@
                     </div>
                 </div>
 
+                <!-- Bulk selection toolbar — hidden until >=1 message is selected -->
+                <div id="bulkSelectionToolbar" class="d-none align-items-center gap-3 mb-2 p-2 px-3"
+                     style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;">
+                    <span id="bulkSelectionCount" class="fw-semibold" style="color:#1e3a8a;"></span>
+                    <a href="#" id="bulkSelectAllMatchingLink" class="d-none" onclick="selectAllMatchingFilter(event)"></a>
+                    <span class="flex-grow-1"></span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="clearBulkSelection()">Clear</button>
+                    <button class="btn btn-sm btn-warning" onclick="openBulkReprocessConfirm()">
+                        <i class="fas fa-redo"></i> Reprocess Selected
+                    </button>
+                </div>
+
+                <!-- Bulk reprocess job progress panel — hidden until a job is active -->
+                <div id="bulkJobPanel" class="d-none mb-2 p-2 px-3"
+                     style="background:#fefce8;border:1px solid #fde68a;border-radius:8px;">
+                    <div class="d-flex align-items-center gap-3">
+                        <span id="bulkJobLabel" class="fw-semibold" style="color:#92400e;font-size:0.85rem;"></span>
+                        <div class="flex-grow-1" style="height:8px;background:#fef3c7;border-radius:4px;overflow:hidden;">
+                            <div id="bulkJobProgressBar" style="height:100%;width:0%;background:#f59e0b;transition:width .3s;"></div>
+                        </div>
+                        <span id="bulkJobCounts" class="text-muted" style="font-size:0.8rem;white-space:nowrap;"></span>
+                        <button id="bulkJobCancelBtn" class="btn btn-sm btn-outline-danger" onclick="cancelActiveBulkJob()">Cancel</button>
+                    </div>
+                </div>
+
                 <!-- Messages Table -->
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
@@ -632,6 +657,7 @@
                             <table class="table table-hover mb-0">
                                 <thead class="table-light">
                                     <tr>
+                                        <th style="width:36px;"><input type="checkbox" id="selectAllOnPageCheckbox" onchange="toggleSelectAllOnPage(this.checked)"></th>
                                         <th>Message ID</th>
                                         <th>Interface</th>
                                         <th>Type</th>
@@ -644,7 +670,7 @@
                                 </thead>
                                 <tbody id="messagesTableBody">
                                     <tr>
-                                        <td colspan="8" class="text-center loading">Loading messages...</td>
+                                        <td colspan="9" class="text-center loading">Loading messages...</td>
                                     </tr>
                                 </tbody>
                             </table>

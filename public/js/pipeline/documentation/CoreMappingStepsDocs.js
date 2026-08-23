@@ -36,7 +36,8 @@
                     'Convert DFT^P03 (billing) to FHIR Claim',
                     'Enrich FHIR resources with lookup data from a prior Database Enrichment step',
                     'Disable specific assembly rules (e.g. referenceRange parsing) for non-standard interfaces',
-                    'Add a Script Enrichment step after this one to post-process or extend assembled FHIR resources'
+                    'Add a Script Enrichment step after this one to post-process or extend assembled FHIR resources',
+                    'Hide noisy or irrelevant fields from a resource type\'s auto-generated narrative summary (resource.text.div) via the Narrative Fields tab, without touching the field mappings that produce the resource itself'
                 ],
                 example: {
                     fhir_version: 'R4',
@@ -88,6 +89,20 @@
                     { key: 'dr_status',            src: 'OBR.25',        fhir: 'DiagnosticReport.status', desc: 'Maps OBR result status to FHIR: F→final, P→preliminary, C→corrected, X→cancelled.' },
                     { key: 'dr_effective',         src: 'OBR.7',         fhir: 'effectiveDateTime',      desc: 'Converts OBR.7 observation date/time from HL7 TS to ISO 8601. Preferred over OBX.14 for the report-level timestamp.' },
                     { key: 'dr_category',          src: '(fixed)',        fhir: 'DiagnosticReport.category[]', desc: 'Adds the standard LAB category coding (http://terminology.hl7.org/CodeSystem/v2-0074 | LAB).' }
+                ],
+                bestPractices: [
+                    {
+                        practice: 'Use the Narrative Fields tab to control resource.text.div content, not the Visual Mapping tab',
+                        reason: 'Narrative field visibility is stored separately from step.config.mappings — per (interfaceId, messageType), via GET/PATCH /api/fhir/optional-segments — the same config surface the interface wizard\'s Step 4 panel and this step\'s cda.to_fhir/fhir.build siblings all share, since a resource built by any of them should narrate consistently.',
+                        example: 'Hiding AllergyIntolerance.criticality from the narrative for one interface: expand it in the Narrative Fields tab and uncheck it — no change to the field mappings that put criticality on the resource in the first place.',
+                    },
+                ],
+                troubleshooting: [
+                    {
+                        issue: 'A field I unchecked in the Narrative Fields tab still shows up in resource.text.div',
+                        cause: 'Narrative field visibility is scoped per (interfaceId, messageType) — resolved from step.config.interface_id/message_type, falling back to the pipeline\'s own interfaceId/messageType. If those didn\'t resolve to what you expected when the tab loaded, the save landed on a different scope than the resource you\'re actually looking at.',
+                        fix: 'Confirm the interface and message type shown when the tab loaded match the ones producing the resource you\'re inspecting, then re-check and re-save.',
+                    },
                 ],
                 referenceVariables: {
                     title: 'Using Enriched Data in Field Mappings',

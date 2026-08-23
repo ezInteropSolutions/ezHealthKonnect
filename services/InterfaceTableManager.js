@@ -392,6 +392,56 @@ class InterfaceTableManager {
     /**
      * PERFORMANCE: Query messages from interface-specific table
      */
+    /**
+     * Builds the WHERE clause + Sequelize replacements for the message-list filters
+     * (status/messageType/dateFrom/dateTo) — the SAME filters the Messages page's
+     * filter bar sends. Extracted out of getInterfaceMessages so bulk-reprocess job
+     * creation (MessageController's createBulkReprocessJob/getBulkReprocessCount) can
+     * compute an identical match count/set without duplicating the status map a
+     * second time in this file. Column names are unqualified (no table alias) since
+     * every caller queries one interface's dedicated table directly, never a join.
+     */
+    buildFilterWhere({ status, messageType, dateFrom, dateTo } = {}) {
+        let whereConditions = [];
+        let replacements = {};
+
+        // Map composite display status to DB columns
+        if (status) {
+            const statusMap = {
+                'received':         "status = 'received'",
+                'processing':       "status IN ('processing','reprocessing')",
+                'delivered':        "status IN ('processed','delivered') AND delivery_status = 'delivered'",
+                'completed':        "status IN ('processed','delivered') AND delivery_status = 'not_required'",
+                'pending_delivery': "status = 'processed' AND delivery_status = 'pending'",
+                'failed':           "(status = 'failed' OR delivery_status = 'failed')",
+            };
+            if (statusMap[status]) {
+                whereConditions.push(statusMap[status]);
+            } else {
+                whereConditions.push('status = :status');
+                replacements.status = status;
+            }
+        }
+
+        if (messageType) {
+            whereConditions.push('message_type ILIKE :messageType');
+            replacements.messageType = `%${messageType}%`;
+        }
+
+        if (dateFrom) {
+            whereConditions.push('received_at >= :dateFrom');
+            replacements.dateFrom = dateFrom;
+        }
+
+        if (dateTo) {
+            whereConditions.push('received_at <= :dateTo');
+            replacements.dateTo = dateTo;
+        }
+
+        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+        return { whereClause, replacements };
+    }
+
     async getInterfaceMessages(interfaceId, options = {}) {
         const tableName = this.getInterfaceTableName(interfaceId);
 
@@ -435,43 +485,9 @@ class InterfaceTableManager {
         } = options;
 
         const offset = (page - 1) * limit;
-        let whereConditions = [];
-        let replacements = { limit: parseInt(limit), offset: parseInt(offset) };
+        const { whereClause, replacements: filterReplacements } = this.buildFilterWhere({ status, messageType, dateFrom, dateTo });
+        let replacements = { limit: parseInt(limit), offset: parseInt(offset), ...filterReplacements };
 
-        // Build dynamic filters — map composite display status to DB columns
-        if (status) {
-            const statusMap = {
-                'received':         "status = 'received'",
-                'processing':       "status IN ('processing','reprocessing')",
-                'delivered':        "status IN ('processed','delivered') AND delivery_status = 'delivered'",
-                'completed':        "status IN ('processed','delivered') AND delivery_status = 'not_required'",
-                'pending_delivery': "status = 'processed' AND delivery_status = 'pending'",
-                'failed':           "(status = 'failed' OR delivery_status = 'failed')",
-            };
-            if (statusMap[status]) {
-                whereConditions.push(statusMap[status]);
-            } else {
-                whereConditions.push('status = :status');
-                replacements.status = status;
-            }
-        }
-
-        if (messageType) {
-            whereConditions.push('message_type ILIKE :messageType');
-            replacements.messageType = `%${messageType}%`;
-        }
-
-        if (dateFrom) {
-            whereConditions.push('received_at >= :dateFrom');
-            replacements.dateFrom = dateFrom;
-        }
-
-        if (dateTo) {
-            whereConditions.push('received_at <= :dateTo');
-            replacements.dateTo = dateTo;
-        }
-
-        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
         const validSortColumns = ['received_at', 'message_id', 'status', 'message_type', 'processing_time_ms'];
         const finalSortBy = validSortColumns.includes(sortBy) ? sortBy : 'received_at';
         const finalSortOrder = ['ASC', 'DESC'].includes(sortOrder.toUpperCase()) ? sortOrder.toUpperCase() : 'DESC';

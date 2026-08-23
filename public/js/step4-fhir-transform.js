@@ -25,6 +25,7 @@ class Step4FHIRTransform {
 
         // Load optional segment block toggles
         this.loadOptionalSegments();
+        this.loadNarrativeFields();
 
         // Set up event listeners
         this.setupEventListeners();
@@ -185,6 +186,8 @@ class Step4FHIRTransform {
 
         const resources = fhirResult.fhirResources || [];
         const atomicMappings = fhirResult.atomicMappings || [];
+
+        this.refreshNarrativeFieldsFromResult(resources);
 
         resultsContainer.innerHTML = `
             <div class="transformation-success">
@@ -553,6 +556,97 @@ class Step4FHIRTransform {
             })
             .catch(() => { statusEl.textContent = 'Network error'; })
             .finally(() => { btn.disabled = false; });
+    }
+
+    // ── Narrative field configuration panel ─────────────────────────────────────
+    // Which fields render in each resource type's auto-generated narrative
+    // (resource.text.div) — see services/fhir_narrative.NarrativeFieldConfig.
+    // Rendering/checkbox logic lives in the shared NarrativeFieldsPicker
+    // (public/js/shared/NarrativeFieldsPicker.js, also used by the pipeline
+    // builder's hl7_fhir_transform/cda.to_fhir/fhir.build step panels) — this
+    // is just the wizard-specific storage wiring: GET/PATCH
+    // /api/fhir/optional-segments/..., keyed by (interfaceId, messageType).
+
+    // Called from initializeStep4() — creates the picker and does an initial
+    // render using the pre-transform manifest hint (narrativeResourceTypes).
+    async loadNarrativeFields() {
+        const panel = document.getElementById('narr-fields-panel');
+        if (!panel) return;
+
+        const messageType = this.parsedHL7Data?.detectedMessageType || '';
+        if (!messageType) return;
+
+        if (!this._narrPicker) {
+            this._narrPicker = new NarrativeFieldsPicker({
+                instanceId: 'wizard-step4',
+                sectionsEl: document.getElementById('narr-fields-sections'),
+                statusEl: document.getElementById('narr-fields-status'),
+                badgeEl: document.getElementById('narr-fields-badge'),
+                getConfig: () => this._fetchNarrativeConfig(messageType),
+                onSave: (payload) => this._saveNarrativeConfig(messageType, payload),
+            });
+        }
+
+        try {
+            const res = await this._fetchOptionalSegmentsResponse(messageType);
+            // narrativeResourceTypes (manifest.AllowedResources) is only a
+            // pre-transform HINT — it's the quality-scoring baseline, not a
+            // gate on what the engine actually produces (see FilterResources'
+            // doc comment), so it can be incomplete for a given message
+            // (e.g. it omits AllergyIntolerance for ADT^A08 even though a
+            // real A08 message can legitimately produce one). Once an actual
+            // transform has run this step, refreshNarrativeFieldsFromResult()
+            // replaces this hint with the real resource types produced.
+            const resourceTypes = this._actualNarrativeResourceTypes || res.narrativeResourceTypes || [];
+            if (resourceTypes.length === 0) return;
+            panel.style.display = '';
+            await this._narrPicker.render(resourceTypes);
+        } catch (_) { /* panel stays hidden — non-fatal */ }
+    }
+
+    // Called after a real "Transform to FHIR" run completes (see
+    // showTransformationResults) — replaces the pre-transform manifest hint
+    // with the resource types the transform ACTUALLY produced, so e.g.
+    // AllergyIntolerance shows up as configurable the moment a message that
+    // genuinely carries AL1 segments has been transformed, regardless of
+    // whether manifest.AllowedResources happens to list it for this message type.
+    async refreshNarrativeFieldsFromResult(fhirResources) {
+        const types = [...new Set((fhirResources || []).map(r => r.resourceType).filter(Boolean))];
+        if (types.length === 0 || !this._narrPicker) return;
+        this._actualNarrativeResourceTypes = types;
+        const panel = document.getElementById('narr-fields-panel');
+        if (panel) panel.style.display = '';
+        await this._narrPicker.render(types);
+    }
+
+    async _fetchOptionalSegmentsResponse(messageType) {
+        const interfaceId = this._getInterfaceId();
+        const url = `/api/fhir/optional-segments?messageType=${encodeURIComponent(messageType)}` +
+                    (interfaceId ? `&interfaceId=${encodeURIComponent(interfaceId)}` : '');
+        return fetch(url, { credentials: 'include' }).then(r => r.json());
+    }
+
+    async _fetchNarrativeConfig(messageType) {
+        const res = await this._fetchOptionalSegmentsResponse(messageType);
+        return res.narrativeFields || {};
+    }
+
+    async _saveNarrativeConfig(messageType, payload) {
+        const interfaceId = this._getInterfaceId();
+        if (!messageType || !interfaceId) {
+            alert('Interface not yet saved — complete step 1 before saving mapping options.');
+            return { success: false, error: 'interface not yet saved' };
+        }
+        return fetch(`/api/fhir/optional-segments/${encodeURIComponent(interfaceId)}/${encodeURIComponent(messageType)}`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ narrative_fields: payload }),
+        }).then(r => r.json());
+    }
+
+    saveNarrativeFields() {
+        if (this._narrPicker) this._narrPicker.save();
     }
 
     _getInterfaceId() {

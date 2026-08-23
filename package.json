@@ -4,8 +4,10 @@
   "description": "AI-Powered Healthcare Integration Platform",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
     "release": "node scripts/release.js",
+    "docs:export-step-docs": "node scripts/export-pipeline-step-docs.js",
     "dictionary": "node services/hl7_dictionary_service.js",
     "dictionary:dev": "nodemon services/hl7_dictionary_service.js",
     "test:dictionary": "node test_dictionary.js",
@@ -48,7 +50,6 @@
     "p-limit": "^2.3.0",
     "pg": "^8.16.2",
     "picomatch": "^4.0.4",
-    "puppeteer": "^24.11.2",
     "redis": "^5.5.6",
     "sequelize": "^6.37.7",
     "xml2js": "^0.6.2"
@@ -57,6 +58,7 @@
     "@playwright/test": "^1.58.2",
     "cheerio": "^1.1.0",
     "concurrently": "^9.0.0",
+    "jest": "^30.4.2",
     "nodemon": "^3.0.1"
   },
   "overrides": {

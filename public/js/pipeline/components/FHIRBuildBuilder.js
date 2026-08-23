@@ -186,7 +186,75 @@ class FHIRBuildBuilder {
                         : cfg.repeatingGroups.map((rg, i) => this._renderGroupCard(rg, i)).join('')}
                 </div>
             </div>
+
+            ${this._renderNarrativeFieldsSection(cfg)}
         </div>`;
+    }
+
+    // ── Narrative Fields ──────────────────────────────────────────────────────
+    // Which fields render in THIS resource type's auto-generated narrative
+    // (resource.text.div). Single-type mode, pre-scoped to cfg.resourceType —
+    // no type list to fetch, unlike the multi-type pickers on
+    // hl7_fhir_transform/cda.to_fhir. Shares storage with hl7_fhir_transform
+    // (interface_message_mappings.custom_mapping_config, GET/PATCH
+    // /api/fhir/optional-segments) per the user-confirmed design: a
+    // fhir.build-produced resource renders consistently with any other
+    // resource of the same type in that interface, regardless of which step
+    // built it. Populated by _initNarrativePicker(), wired from
+    // _attachFieldSearches() (called after every render()/_rerender()).
+
+    _renderNarrativeFieldsSection(cfg) {
+        const esc = FHIRBuildBuilder._esc;
+        return `
+        <div class="config-group" style="margin-top:1.1rem;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
+                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;margin:0;">Narrative Fields — ${esc(cfg.resourceType)}</label>
+            </div>
+            <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">Controls which fields appear in this resource's human-readable summary (<code>resource.text.div</code>). Every populated field shows by default — uncheck fields to hide them for this interface's ${esc(cfg.resourceType)} resources.</div>
+            <div id="fbbNarrFieldsSections" style="display:flex;flex-direction:column;gap:6px;"></div>
+            <div style="margin-top:10px;">
+                <button type="button" id="fbbNarrFieldsSaveBtn" class="btn btn-sm btn-outline-secondary" style="font-size:0.72rem;padding:0.15rem 0.5rem;">
+                    <i class="fas fa-save"></i> Save Narrative Fields
+                </button>
+                <span id="fbbNarrFieldsStatus" style="margin-left:8px;font-size:11px;color:#6b7280;"></span>
+            </div>
+        </div>`;
+    }
+
+    _initNarrativePicker() {
+        if (typeof NarrativeFieldsPicker === 'undefined') return;
+        const root = document.getElementById('fhirBuildBuilder');
+        const sectionsEl = root && root.querySelector('#fbbNarrFieldsSections');
+        if (!sectionsEl || !this._step) return;
+
+        const cfg = this._step.config;
+        const interfaceId = cfg.interface_id || (window.pipelineBuilder && window.pipelineBuilder.pipeline && window.pipelineBuilder.pipeline.interfaceId);
+        const messageType = cfg.message_type || (window.pipelineBuilder && window.pipelineBuilder.pipeline && window.pipelineBuilder.pipeline.messageType) || 'ADT^A01';
+        const optSegUrl = `/api/fhir/optional-segments?messageType=${encodeURIComponent(messageType)}` +
+            (interfaceId ? `&interfaceId=${encodeURIComponent(interfaceId)}` : '');
+
+        const picker = new NarrativeFieldsPicker({
+            instanceId: `fhirbuild-${this._step.id}`,
+            sectionsEl,
+            statusEl: root.querySelector('#fbbNarrFieldsStatus'),
+            getConfig: async () => {
+                const res = await fetch(optSegUrl, { credentials: 'include' }).then(r => r.json());
+                return res.narrativeFields || {};
+            },
+            onSave: async (payload) => {
+                if (!interfaceId) return { success: false, error: 'Save the interface before configuring narrative fields.' };
+                return fetch(`/api/fhir/optional-segments/${encodeURIComponent(interfaceId)}/${encodeURIComponent(messageType)}`, {
+                    method: 'PATCH',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ narrative_fields: payload }),
+                }).then(r => r.json());
+            },
+        });
+        picker.render([cfg.resourceType]);
+
+        const saveBtn = root.querySelector('#fbbNarrFieldsSaveBtn');
+        if (saveBtn) saveBtn.addEventListener('click', () => picker.save());
     }
 
     _renderTransformOptions(selectedName) {
@@ -843,6 +911,7 @@ class FHIRBuildBuilder {
 
     _attachFieldSearches() {
         this._wireTopLevelChangeHandlers();
+        this._initNarrativePicker();
         if (typeof FieldPathSearchComponent === 'undefined') return;
         const root = document.getElementById('fhirBuildBuilder');
         if (!root) return;

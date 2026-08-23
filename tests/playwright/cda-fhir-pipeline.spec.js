@@ -317,7 +317,7 @@ test.describe('CDA-E2 Transform API', () => {
         test.skip(!CCD_FIXTURE_XML, 'CCD fixture file not found at tests/fixtures/cda/ccd_minimal.xml');
 
         // POST directly to Go backend pipeline test endpoint with a cda.parse step
-        const res = await request.post(`${GO_URL}/api/fhir/pipeline/test`, {
+        const res = await request.post(`${BASE_URL}/api/fhir/pipeline/test`, {
             data: {
                 interfaceId: 'test',
                 messageType: 'CCD',
@@ -344,7 +344,7 @@ test.describe('CDA-E2 Transform API', () => {
     test('CDA-E2-002 CDA→FHIR executor returns FHIR Bundle resourceType', async ({ request }) => {
         test.skip(!CCD_FIXTURE_XML, 'CCD fixture file not found');
 
-        const res = await request.post(`${GO_URL}/api/fhir/pipeline/test`, {
+        const res = await request.post(`${BASE_URL}/api/fhir/pipeline/test`, {
             data: {
                 interfaceId: 'test',
                 messageType: 'CCD',
@@ -413,7 +413,7 @@ test.describe('CDA-E2 Transform API', () => {
     test('CDA-E2-004 Section failure is isolated in processingResult', async ({ request }) => {
         // Run a cda.to_fhir test with a malformed parsedCDA (no sections) —
         // mapper should return an empty bundle without throwing a 500.
-        const res = await request.post(`${GO_URL}/api/fhir/pipeline/test`, {
+        const res = await request.post(`${BASE_URL}/api/fhir/pipeline/test`, {
             data: {
                 interfaceId: 'test',
                 messageType: 'CCD',
@@ -495,7 +495,7 @@ test.describe('CDA-E3 Translation Table CRUD', () => {
 test.describe('CDA-E4 OOB Pipeline Template', () => {
 
     test('CDA-E4-001 OOB CDA/CCD pipeline template exists in interface_templates', async ({ request }) => {
-        const res = await request.get(`${BASE_URL}/api/interfaces/templates`);
+        const res = await request.get(`${BASE_URL}/api/interface-templates`);
         expect([200, 404, 503]).toContain(res.status());
         if (res.ok()) {
             const body = await res.json();

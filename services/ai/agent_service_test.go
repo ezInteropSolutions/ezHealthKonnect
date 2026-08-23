@@ -7,6 +7,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -55,6 +56,81 @@ func TestProposeAction_BoundedLoopTerminates(t *testing.T) {
 	}
 	if provider.calls != maxAgentLoopIterations {
 		t.Fatalf("expected exactly %d ChatWithTools calls (the loop cap), got %d", maxAgentLoopIterations, provider.calls)
+	}
+}
+
+// fixedModelProvider returns a configurable ChatModelName plus a canned
+// zero-tool-call answer, and records whether ChatWithTools was ever called —
+// used to prove the model-capability gate short-circuits BEFORE reaching the
+// LLM for a confirmed-unsupported model, and to inspect the returned answer
+// for the unverified-model diagnostic suffix.
+type fixedModelProvider struct {
+	modelName           string
+	content             string
+	chatWithToolsCalled bool
+}
+
+func (p *fixedModelProvider) Generate(_ context.Context, _ string) (string, error) { return "", nil }
+func (p *fixedModelProvider) GenerateStream(_ context.Context, _ string, _ func(string) error) error {
+	return nil
+}
+func (p *fixedModelProvider) Embed(_ context.Context, _ string) ([]float32, error) { return nil, nil }
+func (p *fixedModelProvider) Ping(_ context.Context) error                        { return nil }
+func (p *fixedModelProvider) ProviderName() string                               { return "fake" }
+func (p *fixedModelProvider) ChatModelName() string                              { return p.modelName }
+func (p *fixedModelProvider) ChatWithTools(_ context.Context, _ []ChatMessage, _ []ToolSpec) (ChatResult, error) {
+	p.chatWithToolsCalled = true
+	return ChatResult{Content: p.content}, nil // zero tool calls
+}
+
+func TestProposeAction_KnownUnsupportedModel_ReturnsWarningWithoutCallingLLM(t *testing.T) {
+	provider := &fixedModelProvider{modelName: "qwen2.5-coder:7b", content: "should never be seen"}
+	agent := &AgentService{llm: provider, tools: NewToolRegistry()}
+
+	turn, err := agent.ProposeAction(context.Background(), "sess-1", "user-1", "retry the failed message")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if provider.chatWithToolsCalled {
+		t.Fatal("ChatWithTools should not be called for a confirmed-unsupported model")
+	}
+	if turn.ProposedAction != nil {
+		t.Fatal("no action should be proposed for an unsupported model")
+	}
+	if !strings.Contains(turn.Answer, "qwen2.5-coder:7b") {
+		t.Fatalf("expected the warning to name the model, got: %s", turn.Answer)
+	}
+}
+
+func TestProposeAction_UnknownModel_AppendsDiagnosticSuffixOnZeroToolCalls(t *testing.T) {
+	provider := &fixedModelProvider{modelName: "some-custom-model:latest", content: "Here's your answer."}
+	agent := &AgentService{llm: provider, tools: NewToolRegistry()}
+
+	turn, err := agent.ProposeAction(context.Background(), "sess-1", "user-1", "what is HL7?")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !provider.chatWithToolsCalled {
+		t.Fatal("an unverified model should still be attempted, not short-circuited")
+	}
+	if !strings.Contains(turn.Answer, "Here's your answer.") {
+		t.Fatalf("expected the model's own answer to be preserved, got: %s", turn.Answer)
+	}
+	if !strings.Contains(turn.Answer, "some-custom-model:latest") {
+		t.Fatalf("expected the diagnostic suffix naming the model, got: %s", turn.Answer)
+	}
+}
+
+func TestProposeAction_KnownSupportedModel_NoDiagnosticSuffix(t *testing.T) {
+	provider := &fixedModelProvider{modelName: "llama3.2:3b", content: "Here's your answer."}
+	agent := &AgentService{llm: provider, tools: NewToolRegistry()}
+
+	turn, err := agent.ProposeAction(context.Background(), "sess-1", "user-1", "what is HL7?")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if turn.Answer != "Here's your answer." {
+		t.Fatalf("expected no diagnostic suffix for a confirmed-supported model, got: %q", turn.Answer)
 	}
 }
 

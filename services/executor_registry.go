@@ -168,7 +168,7 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(transform.NewInboundConnectorExecutor())     // connector.inbound
 
 	// Payload builder executor
-	payloadBuilder := payloadexecutor.NewPayloadBuilderExecutor()
+	payloadBuilder := payloadexecutor.NewPayloadBuilderExecutor(er.db)
 	er.Register(payloadBuilder)                              // payload.builder
 	er.executors["payload_builder"] = payloadBuilder        // alias: underscore variant
 

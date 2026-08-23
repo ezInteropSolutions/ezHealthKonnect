@@ -119,11 +119,16 @@ test.describe('Monitoring', () => {
     // ── TC-MON-010 ───────────────────────────────────────────────────────────────
     test('TC-MON-010 alerts section renders table or empty state', async ({ page }) => {
         await page.waitForTimeout(2000);
-        const table     = page.locator('[class*="alerts"] table, [class*="alerts-table"]').first();
-        const emptyMsg  = page.locator('text=/no alerts|all clear|no active alerts/i');
-        const hasTable  = await table.isVisible().catch(() => false);
+        // Real alerts render as .alert-row divs (see monitoring.html's loadAlerts()),
+        // never a <table> — the original locator here assumed markup that was
+        // never actually used, so this test failed on every run where a real
+        // alert existed (i.e. exactly the case it's meant to verify renders
+        // correctly).
+        const alertRows = page.locator('.alert-row');
+        const emptyMsg  = page.locator('.alerts-empty, text=/no alerts|all clear|no active alerts/i').first();
+        const hasAlerts = (await alertRows.count()) > 0;
         const hasEmpty  = await emptyMsg.isVisible().catch(() => false);
-        expect(hasTable || hasEmpty).toBe(true);
+        expect(hasAlerts || hasEmpty).toBe(true);
     });
 
     // ── TC-MON-011 ───────────────────────────────────────────────────────────────

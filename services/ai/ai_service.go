@@ -100,6 +100,11 @@ type StatusResult struct {
 	Provider         string         `json:"provider"`
 	Models           []string       `json:"models"`
 	ChatModel        string         `json:"chat_model"`
+	// AgentToolsSupport: "supported" | "unsupported" | "unconfirmed" — whether
+	// ChatModel is known (via knownModelCapabilities) to support the tool
+	// calling Agent Mode needs. "unconfirmed" means the model isn't in that
+	// curated table, not that it's known to fail.
+	AgentToolsSupport string       `json:"agent_tools_support"`
 	EmbedModel       string         `json:"embed_model"`
 	QueueDepth       int            `json:"queue_depth"`
 	QueueCap         int            `json:"queue_cap"`
@@ -114,6 +119,15 @@ func (s *AIService) Status(ctx context.Context) StatusResult {
 		ProviderEnabled: s.llm != nil,
 		Provider:        s.llm.ProviderName(),
 		ChatModel:       s.llm.ChatModelName(),
+	}
+
+	result.AgentToolsSupport = "unconfirmed"
+	if cap, known := ResolveModelProfile(result.ChatModel); known {
+		if cap.SupportsTools {
+			result.AgentToolsSupport = "supported"
+		} else {
+			result.AgentToolsSupport = "unsupported"
+		}
 	}
 
 	// Embed model name if available
@@ -964,11 +978,16 @@ func (s *AIService) AskQuestion(ctx context.Context, input AskInput) (string, []
 	systemPrompt := ctxPrefix + historyText + ezCompanionSystemPrompt
 
 	// Layer 1: RAG retrieval + LLM generation
-	// topK=4 and maxTokens=400 keep total round-trip within 600s on CPU-only hardware.
-	// On CPU, llama3.2:3b evaluates ~6 input tokens/sec and generates ~1 token/sec;
-	// 400-token output cap + reduced history/RAG keeps total time to ~450s worst-case.
+	// Budget is resolved per the active chat model (ragBudgetForModel,
+	// services/ai/model_capabilities.go). Falls back to topK=4/maxTokens=400
+	// for any uncatalogued model — the CPU-only default, tuned to keep the
+	// round-trip within 600s: on CPU, llama3.2:3b evaluates ~6 input
+	// tokens/sec and generates ~1 token/sec, so that budget + reduced
+	// history/RAG keeps total time to ~450s worst-case. A larger, cataloged
+	// model gets a bigger budget instead of being held to that same cap.
 	filters := filterSourceTypesForContext(input.RequestContext)
-	answer, chunks, err := s.rag.QueryCapped(ctx, input.Question, systemPrompt, 4, 400, filters)
+	topK, maxTokens := ragBudgetForModel(s.llm.ChatModelName())
+	answer, chunks, err := s.rag.QueryCapped(ctx, input.Question, systemPrompt, topK, maxTokens, filters)
 	if err != nil {
 		return "", chunks, err
 	}

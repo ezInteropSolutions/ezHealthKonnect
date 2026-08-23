@@ -4,7 +4,7 @@
 // architecture as HL7 messages (PostgreSQL metadata + MongoDB raw content)
 
 const { v4: uuidv4 } = require('uuid');
-const { getDatabase } = require('../config/database');
+const database = require('../config/database');
 
 class FhirReceiverController {
     /**
@@ -106,29 +106,34 @@ class FhirReceiverController {
             });
 
             // 8. Store metadata in PostgreSQL
-            const db = await getDatabase();
             const tableName = `messages_intf_${interfaceId.replace(/-/g, '_')}`;
 
-            await db.query(`
+            await database.sequelize.query(`
                 INSERT INTO ${tableName} (
                     message_id, interface_id, status, received_at,
                     source_type, source_endpoint, source_ip,
                     message_type, message_size, raw_message,
                     correlation_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            `, [
-                messageId,
-                interfaceId,
-                'received',
-                new Date(),
-                'fhir_http',
-                req.path,
-                req.ip || req.connection.remoteAddress,
-                fhirResource.resourceType || 'Unknown',
-                JSON.stringify(fhirResource).length,
-                JSON.stringify(fhirResource), // Fallback if MongoDB fails
-                fhirResource.id || null // FHIR resource ID as correlation
-            ]);
+                ) VALUES (:messageId, :interfaceId, :status, :receivedAt,
+                    :sourceType, :sourceEndpoint, :sourceIp,
+                    :messageType, :messageSize, :rawMessage,
+                    :correlationId)
+            `, {
+                replacements: {
+                    messageId,
+                    interfaceId,
+                    status: 'received',
+                    receivedAt: new Date(),
+                    sourceType: 'fhir_http',
+                    sourceEndpoint: req.path,
+                    sourceIp: req.ip || req.connection.remoteAddress,
+                    messageType: fhirResource.resourceType || 'Unknown',
+                    messageSize: JSON.stringify(fhirResource).length,
+                    rawMessage: JSON.stringify(fhirResource), // Fallback if MongoDB fails
+                    correlationId: fhirResource.id || null // FHIR resource ID as correlation
+                },
+                type: database.sequelize.QueryTypes.INSERT
+            });
 
             console.log(`✅ FHIR resource stored: ${messageId} (${Date.now() - startTime}ms)`);
 
@@ -198,12 +203,11 @@ class FhirReceiverController {
      */
     async getInterfaceById(interfaceId) {
         try {
-            const db = await getDatabase();
-            const result = await db.query(
-                'SELECT * FROM interfaces WHERE id = $1',
-                [interfaceId]
+            const result = await database.sequelize.query(
+                'SELECT * FROM interfaces WHERE id = :interfaceId',
+                { replacements: { interfaceId }, type: database.sequelize.QueryTypes.SELECT }
             );
-            return result.rows[0] || null;
+            return result[0] || null;
         } catch (error) {
             console.error('Error loading interface:', error);
             return null;

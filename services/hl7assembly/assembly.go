@@ -15,7 +15,14 @@ import (
 	"strings"
 
 	"ezhealthkonnect/hl7"
+	fhirnarrative "ezhealthkonnect/services/fhir_narrative"
 )
+
+// sharedNarrativeGenerator renders resource.text.div for every assembled
+// resource in this package — see services/fhir_narrative's doc comment for why
+// this replaced the per-type buildXNarrative functions that used to live here.
+// Stateless, safe for concurrent use (per FHIRNarrativeGenerator's own doc).
+var sharedNarrativeGenerator = fhirnarrative.NewFHIRNarrativeGenerator()
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Private helpers  (pure functions — no external state)
@@ -107,7 +114,7 @@ func buildMergedTextObservation(
 	if ruleOn(rules.ObsNarrative) {
 		obs["text"] = map[string]interface{}{
 			"status": "generated",
-			"div":    buildObservationNarrative(obs),
+			"div":    sharedNarrativeGenerator.Generate(obs, nil, nil),
 		}
 	}
 
@@ -429,150 +436,13 @@ func AbnormalFlagToInterpretation(flag string) map[string]interface{} {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Narrative generators (XHTML — dom-6 best-practice compliance)
+// Narrative generation — see sharedNarrativeGenerator above. Observation and
+// DiagnosticReport narratives used to have their own hand-written builders
+// here; both now delegate to services/fhir_narrative (Observation gets that
+// package's richer, USCDI-category-aware builder for free; DiagnosticReport
+// renders generically, including its actual result[] references rather than
+// just a count).
 // ──────────────────────────────────────────────────────────────────────────────
-
-// buildObservationNarrative produces a minimal FHIR-compliant XHTML narrative
-// for an Observation resource built from an OBX segment.
-// The narrative is generated entirely from the resource map itself so it stays
-// consistent with whatever fields were actually populated.
-func buildObservationNarrative(obs map[string]interface{}) string {
-	var b strings.Builder
-	b.WriteString(`<div xmlns="http://www.w3.org/1999/xhtml"><table class="grid"><tbody>`)
-
-	// Code / description
-	codeLabel := ""
-	if cc, ok := obs["code"].(map[string]interface{}); ok {
-		if txt, ok := cc["text"].(string); ok && txt != "" {
-			codeLabel = txt
-		} else if codings, ok := cc["coding"].([]interface{}); ok && len(codings) > 0 {
-			if first, ok := codings[0].(map[string]interface{}); ok {
-				if c, ok := first["code"].(string); ok {
-					codeLabel = c
-					if d, ok := first["display"].(string); ok && d != "" {
-						codeLabel = d + " (" + c + ")"
-					}
-				}
-			}
-		}
-	}
-	if codeLabel != "" {
-		b.WriteString("<tr><td><b>Code</b></td><td>")
-		b.WriteString(escapeXML(codeLabel))
-		b.WriteString("</td></tr>")
-	}
-
-	// Value
-	switch {
-	case obs["valueQuantity"] != nil:
-		if vq, ok := obs["valueQuantity"].(map[string]interface{}); ok {
-			val := fmt.Sprintf("%v", vq["value"])
-			if unit, ok := vq["unit"].(string); ok && unit != "" {
-				val += " " + unit
-			}
-			b.WriteString("<tr><td><b>Value</b></td><td>")
-			b.WriteString(escapeXML(val))
-			b.WriteString("</td></tr>")
-		}
-	case obs["valueString"] != nil:
-		b.WriteString("<tr><td><b>Value</b></td><td>")
-		b.WriteString(escapeXML(fmt.Sprintf("%v", obs["valueString"])))
-		b.WriteString("</td></tr>")
-	case obs["valueCodeableConcept"] != nil:
-		if vcc, ok := obs["valueCodeableConcept"].(map[string]interface{}); ok {
-			label := ""
-			if txt, ok := vcc["text"].(string); ok {
-				label = txt
-			}
-			if label != "" {
-				b.WriteString("<tr><td><b>Value</b></td><td>")
-				b.WriteString(escapeXML(label))
-				b.WriteString("</td></tr>")
-			}
-		}
-	}
-
-	// Reference range
-	if rrs, ok := obs["referenceRange"].([]interface{}); ok && len(rrs) > 0 {
-		if rr, ok := rrs[0].(map[string]interface{}); ok {
-			if txt, ok := rr["text"].(string); ok && txt != "" {
-				b.WriteString("<tr><td><b>Reference Range</b></td><td>")
-				b.WriteString(escapeXML(txt))
-				b.WriteString("</td></tr>")
-			}
-		}
-	}
-
-	// Interpretation
-	if interps, ok := obs["interpretation"].([]interface{}); ok && len(interps) > 0 {
-		if interp, ok := interps[0].(map[string]interface{}); ok {
-			if txt, ok := interp["text"].(string); ok && txt != "" && txt != "Unknown" {
-				b.WriteString("<tr><td><b>Flag</b></td><td>")
-				b.WriteString(escapeXML(txt))
-				b.WriteString("</td></tr>")
-			}
-		}
-	}
-
-	// Status and date
-	if status, ok := obs["status"].(string); ok && status != "" {
-		b.WriteString("<tr><td><b>Status</b></td><td>")
-		b.WriteString(escapeXML(status))
-		b.WriteString("</td></tr>")
-	}
-	if eff, ok := obs["effectiveDateTime"].(string); ok && eff != "" {
-		b.WriteString("<tr><td><b>Date</b></td><td>")
-		b.WriteString(escapeXML(eff))
-		b.WriteString("</td></tr>")
-	}
-
-	b.WriteString("</tbody></table></div>")
-	return b.String()
-}
-
-// buildDRNarrative produces a FHIR-compliant XHTML narrative for a DiagnosticReport.
-func buildDRNarrative(dr map[string]interface{}, resultCount int) string {
-	var b strings.Builder
-	b.WriteString(`<div xmlns="http://www.w3.org/1999/xhtml"><table class="grid"><tbody>`)
-
-	// Code
-	if cc, ok := dr["code"].(map[string]interface{}); ok {
-		label := ""
-		if txt, ok := cc["text"].(string); ok && txt != "" {
-			label = txt
-		} else if codings, ok := cc["coding"].([]interface{}); ok && len(codings) > 0 {
-			if first, ok := codings[0].(map[string]interface{}); ok {
-				if d, ok := first["display"].(string); ok && d != "" {
-					label = d
-				} else if c, ok := first["code"].(string); ok {
-					label = c
-				}
-			}
-		}
-		if label != "" {
-			b.WriteString("<tr><td><b>Report</b></td><td>")
-			b.WriteString(escapeXML(label))
-			b.WriteString("</td></tr>")
-		}
-	}
-
-	if status, ok := dr["status"].(string); ok && status != "" {
-		b.WriteString("<tr><td><b>Status</b></td><td>")
-		b.WriteString(escapeXML(status))
-		b.WriteString("</td></tr>")
-	}
-	if eff, ok := dr["effectiveDateTime"].(string); ok && eff != "" {
-		b.WriteString("<tr><td><b>Date</b></td><td>")
-		b.WriteString(escapeXML(eff))
-		b.WriteString("</td></tr>")
-	}
-	if resultCount > 0 {
-		b.WriteString(fmt.Sprintf("<tr><td><b>Results</b></td><td>%d observation(s)</td></tr>", resultCount))
-	}
-
-	b.WriteString("</tbody></table></div>")
-	return b.String()
-}
 
 // isAssemblyDocRef returns true when the DocumentReference ID was auto-generated
 // by AssembleORUObservations ("docref-1", "docref-2", …).  These are always
@@ -828,7 +698,7 @@ func BuildObservationFromOBX(seg hl7.EnhancedSegment, patientRef string, rules A
 	if ruleOn(rules.ObsNarrative) {
 		obs["text"] = map[string]interface{}{
 			"status": "generated",
-			"div":    buildObservationNarrative(obs),
+			"div":    sharedNarrativeGenerator.Generate(obs, nil, nil),
 		}
 	}
 
@@ -1357,7 +1227,7 @@ func AssembleORUObservations(
 		if ruleOn(rules.DRNarrative) {
 			dr["text"] = map[string]interface{}{
 				"status": "generated",
-				"div":    buildDRNarrative(dr, len(resultRefs)),
+				"div":    sharedNarrativeGenerator.Generate(dr, nil, nil),
 			}
 		}
 	}

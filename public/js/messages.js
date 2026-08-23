@@ -8,6 +8,17 @@ class MessageManager {
         this.pageSize = 50;
         this.filters = {};
         this.selectedMessageId = null;
+
+        // Bulk reprocess selection state (see bulkSelectionToolbar in messages.html).
+        // bulkSelectedIds holds explicit checkbox picks; bulkSelectAllMatching, when
+        // true, means "every message matching the current filters" regardless of
+        // what's on the visible page — the two modes are mutually exclusive.
+        this.bulkSelectedIds = new Set();
+        this.bulkSelectAllMatching = false;
+        this.bulkSelectAllMatchingCount = 0;
+        this.activeBulkJobId = null;
+        this._bulkJobPollTimer = null;
+
         this.interfaces = [];
         this.currentInterfaceId = null; // NEW: Track current interface
         this.isInterfaceSpecific = false; // NEW: Flag for interface-specific mode
@@ -42,6 +53,8 @@ class MessageManager {
 
             await this.loadMessages();
             console.log('✅ loadMessages completed successfully');
+
+            this.checkForActiveBulkJob();
 
             await this.loadStats();
             console.log('✅ loadStats completed successfully');
@@ -252,6 +265,10 @@ class MessageManager {
                 const fmt = interfaceItem.sourceFormat || interfaceItem.messageType || interfaceItem.sourceType || '';
                 sendOption.textContent = fmt ? `${interfaceItem.name} (${fmt})` : interfaceItem.name;
                 if (interfaceItem.id === this.currentInterfaceId) {
+                    // defaultSelected (not just selected) so form.reset() after a
+                    // successful send — see sendMessage() — restores this option
+                    // instead of snapping back to the blank "Select Interface" one.
+                    sendOption.defaultSelected = true;
                     sendOption.selected = true;
                 }
                 sendSelect.appendChild(sendOption);
@@ -315,6 +332,13 @@ class MessageManager {
                 this.renderPagination(data.data.pagination);
                 this.updateMessageCount(data.data.pagination.totalCount);
 
+                // New page of rows — reset the "select all on this page" header
+                // checkbox (bulkSelectedIds itself persists across pages by design)
+                // and re-sync the toolbar to whatever's still selected.
+                const selectAllCb = document.getElementById('selectAllOnPageCheckbox');
+                if (selectAllCb) selectAllCb.checked = false;
+                this.updateBulkToolbar();
+
                 // Update interface info if available
                 if (data.data.interfaceInfo) {
                     this.updateInterfaceInfo(data.data.interfaceInfo);
@@ -340,7 +364,7 @@ class MessageManager {
         const tbody = document.getElementById('messagesTableBody');
 
         if (messages.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No messages found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No messages found</td></tr>';
             return;
         }
 
@@ -372,8 +396,13 @@ class MessageManager {
                       <i class="fas fa-clipboard-check" style="font-size:9px;"></i> Coverage Gap
                    </span>`
                 : '';
+            const checked = this.bulkSelectedIds.has(message.message_id) ? 'checked' : '';
             return `
             <tr class="message-row" onclick="showMessageDetail('${message.message_id}')">
+                <td onclick="event.stopPropagation()">
+                    <input type="checkbox" class="bulk-row-checkbox" ${checked}
+                           onchange="toggleRowSelect('${message.message_id}', this.checked)">
+                </td>
                 <td>
                     <div class="fw-bold">${message.message_id}</div>
                     ${message.correlation_id ? `<small class="text-muted">Corr: ${message.correlation_id}</small>` : ''}
@@ -2399,10 +2428,35 @@ class MessageManager {
 
         if (isFHIRBundle && typeof ClinicalDocumentViewer !== 'undefined') {
             const height = 'calc(90vh - 280px)';
+            // Outbound side: raw JSON panel (with its existing Pipeline Output/Sent
+            // Payload toggle, untouched — the Narrative View button is passed in via
+            // extraButtonsHtml so it renders in the SAME header row instead of an
+            // absolutely-positioned overlay, which used to collide with that toggle)
+            // plus a narrative overlay pane — mirrors the CDA Raw/Viewer toggle so raw
+            // FHIR JSON always stays reachable instead of being permanently replaced.
+            const narrativeToggleBtn = `<button id="fhirNarrativeToggleBtn" onclick="messageManager._switchFHIRPane('narrative')"
+                style="background:#2563eb;color:#fff;border:none;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;white-space:nowrap;">
+                <i class="fas fa-align-left"></i> Narrative View</button>`;
             container.innerHTML = `
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;height:${height};min-height:0;">
                     ${this._contentPanel('inbound', 'Inbound', rawContent, message.raw_content_uri, { source: 'raw', messageId })}
-                    <div id="fhirViewerMount" style="height:100%;min-height:0;"></div>
+                    <div id="fhirOutboundPanel" style="height:100%;min-height:0;position:relative;">
+                        <div id="fhirRawPane" style="height:100%;">
+                            ${this._contentPanel('outbound', outboundLabel, outboundContent, message.transformed_content_uri, { source: outboundSource, messageId, extraButtonsHtml: narrativeToggleBtn })}
+                        </div>
+                        <div id="fhirNarrativePane" style="position:absolute;inset:0;display:none;flex-direction:column;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.85rem;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
+                                <span style="font-size:0.8rem;font-weight:700;color:#374151;">${outboundLabel}</span>
+                                <span style="background:#dcfce7;color:#166534;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">Narrative View</span>
+                                <div style="margin-left:auto;">
+                                    <button onclick="messageManager._switchFHIRPane('raw')"
+                                        style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
+                                        <i class="fas fa-code"></i> Raw JSON</button>
+                                </div>
+                            </div>
+                            <div id="fhirViewerMount" style="flex:1;min-height:0;overflow:auto;"></div>
+                        </div>
+                    </div>
                 </div>`;
 
             const fhirBundle = JSON.parse(outboundContent);
@@ -2454,6 +2508,22 @@ class MessageManager {
                 style="background:${isActive ? '#2563eb' : '#f1f5f9'};color:${isActive ? '#fff' : '#475569'};border:1px solid ${isActive ? '#2563eb' : '#cbd5e1'};padding:0.2rem 0.5rem;border-radius:4px;cursor:${isActive ? 'default' : 'pointer'};font-size:0.72rem;font-weight:${isActive ? '600' : '400'};">
                 <i class="fas ${b.icon}"></i> ${b.label}</button>`;
         }).join('') + `</div>`;
+    }
+
+    // Switches the FHIR outbound panel between the raw JSON pane (with its own
+    // existing Pipeline Output/Sent Payload toggle, untouched) and the narrative
+    // overlay pane mounted by ClinicalDocumentViewer. Mirrors _switchCDAPane's
+    // show/hide-pane approach for the simpler two-pane FHIR case.
+    _switchFHIRPane(target) {
+        const rawPane = document.getElementById('fhirRawPane');
+        const narrativePane = document.getElementById('fhirNarrativePane');
+        if (!rawPane || !narrativePane) return;
+        // The Narrative View button lives inside fhirRawPane's own header (via
+        // extraButtonsHtml), so it hides/shows automatically with the pane —
+        // no separate toggle-button visibility bookkeeping needed.
+        const showNarrative = target === 'narrative';
+        rawPane.style.display = showNarrative ? 'none' : 'block';
+        narrativePane.style.display = showNarrative ? 'flex' : 'none';
     }
 
     // Switches the CDA left panel between Raw XML / CDA Viewer / Parsed CCD, lazy-mounting
@@ -2580,8 +2650,9 @@ class MessageManager {
                 ${sourceNote}
                 <span style="color:#94a3b8;font-size:0.78rem;">${sizeStr}</span>
                 ${uriHtml}
-                <div style="margin-left:auto;display:flex;gap:0.4rem;align-items:center;">
+                <div style="margin-left:auto;display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
                     <span data-cda-btnbar>${toggleBtn}</span>
+                    ${opts.extraButtonsHtml || ''}
                     ${parsedJsonBtn}
                     ${!isEmpty ? `<button onclick="messageManager._copyContentById('${idSuffix}')"
                         style="background:#2563eb;color:white;border:none;padding:0.25rem 0.6rem;border-radius:4px;cursor:pointer;font-size:0.75rem;">
@@ -3237,6 +3308,217 @@ class MessageManager {
             }
         }, 5000);
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // BULK REPROCESS (V213) — selection, confirmation, job creation, polling.
+    // The heavy lifting all happens server-side (bulk_reprocess_service.go);
+    // everything here only ever creates one job or polls one small status
+    // object, regardless of how many messages the job actually covers.
+    // ──────────────────────────────────────────────────────────────────────
+
+    toggleRowSelect(messageId, checked) {
+        // Any explicit checkbox action drops out of "select all matching" mode —
+        // the two selection modes are mutually exclusive, and picking a single
+        // row is a clearer signal of intent than a stale "all N" claim.
+        this.bulkSelectAllMatching = false;
+        if (checked) this.bulkSelectedIds.add(messageId);
+        else this.bulkSelectedIds.delete(messageId);
+        this.updateBulkToolbar();
+    }
+
+    toggleSelectAllOnPage(checked) {
+        this.bulkSelectAllMatching = false;
+        document.querySelectorAll('.bulk-row-checkbox').forEach(cb => {
+            cb.checked = checked;
+            const row = cb.closest('tr');
+            const idCell = row && row.querySelector('td:nth-child(2) .fw-bold');
+            const messageId = idCell ? idCell.textContent.trim() : null;
+            if (!messageId) return;
+            if (checked) this.bulkSelectedIds.add(messageId);
+            else this.bulkSelectedIds.delete(messageId);
+        });
+        this.updateBulkToolbar();
+    }
+
+    clearBulkSelection() {
+        this.bulkSelectedIds.clear();
+        this.bulkSelectAllMatching = false;
+        document.querySelectorAll('.bulk-row-checkbox').forEach(cb => cb.checked = false);
+        const selectAllCb = document.getElementById('selectAllOnPageCheckbox');
+        if (selectAllCb) selectAllCb.checked = false;
+        this.updateBulkToolbar();
+    }
+
+    // Fetches the exact count for the current filters and switches into
+    // "select all matching" mode — debounced by only being reachable via the
+    // toolbar link, which itself only appears once >=1 row on the page is
+    // checked (see updateBulkToolbar), not on every filter keystroke.
+    async selectAllMatchingFilter(event) {
+        if (event) event.preventDefault();
+        if (!this.currentInterfaceId) return;
+        try {
+            const params = new URLSearchParams({ interfaceId: this.currentInterfaceId });
+            Object.keys(this.filters).forEach(k => { if (k !== 'interfaceId' && this.filters[k]) params.append(k, this.filters[k]); });
+            const res = await fetch(`/api/messages/bulk-reprocess/count?${params}`);
+            const json = await res.json();
+            if (!json.success) throw new Error(json.error || 'Count failed');
+            this.bulkSelectAllMatching = true;
+            this.bulkSelectAllMatchingCount = json.data.count;
+            this.bulkSelectedIds.clear();
+            this.updateBulkToolbar();
+        } catch (e) {
+            this.showError('Failed to count matching messages: ' + e.message);
+        }
+    }
+
+    updateBulkToolbar() {
+        const toolbar = document.getElementById('bulkSelectionToolbar');
+        const countEl = document.getElementById('bulkSelectionCount');
+        const matchLink = document.getElementById('bulkSelectAllMatchingLink');
+        const checkedOnPage = document.querySelectorAll('.bulk-row-checkbox:checked').length;
+        const totalOnPage = document.querySelectorAll('.bulk-row-checkbox').length;
+
+        const anySelected = this.bulkSelectAllMatching || this.bulkSelectedIds.size > 0;
+        toolbar.classList.toggle('d-none', !anySelected);
+        toolbar.classList.toggle('d-flex', anySelected);
+        if (!anySelected) return;
+
+        if (this.bulkSelectAllMatching) {
+            countEl.textContent = `${this.bulkSelectAllMatchingCount.toLocaleString()} selected (all matching current filters)`;
+            matchLink.classList.add('d-none');
+        } else {
+            countEl.textContent = `${this.bulkSelectedIds.size.toLocaleString()} selected`;
+            // Offer "select all matching" only when every row on the current page
+            // is checked AND there's presumably more beyond this one page — a
+            // partial on-page selection isn't "all", so don't suggest it.
+            if (checkedOnPage === totalOnPage && totalOnPage > 0) {
+                matchLink.textContent = 'Select all messages matching current filters instead';
+                matchLink.classList.remove('d-none');
+            } else {
+                matchLink.classList.add('d-none');
+            }
+        }
+    }
+
+    async openBulkReprocessConfirm() {
+        const count = this.bulkSelectAllMatching ? this.bulkSelectAllMatchingCount : this.bulkSelectedIds.size;
+        if (count === 0) return;
+
+        const typed = await AppDialogs.prompt(
+            `You are about to reprocess <strong>${count.toLocaleString()}</strong> message(s). ` +
+            `This re-runs them through the pipeline and may re-deliver to the configured destination. ` +
+            `This cannot be undone.<br><br>Type <strong>REPROCESS</strong> to confirm.`,
+            { title: 'Confirm Bulk Reprocess', type: 'warning', placeholder: 'REPROCESS', okText: 'Reprocess' }
+        );
+        if (typed === null) return; // user cancelled
+        if (typed !== 'REPROCESS') {
+            AppDialogs.toast('Confirmation text did not match — reprocess cancelled.', 'warning');
+            return;
+        }
+        await this.startBulkReprocessJob();
+    }
+
+    async startBulkReprocessJob() {
+        try {
+            const body = { interfaceId: this.currentInterfaceId };
+            if (this.bulkSelectAllMatching) {
+                body.filter = { ...this.filters };
+                delete body.filter.interfaceId;
+            } else {
+                body.ids = Array.from(this.bulkSelectedIds);
+            }
+
+            const res = await fetch('/api/messages/bulk-reprocess', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const json = await res.json();
+            if (!json.success) throw new Error(json.error || 'Failed to start job');
+
+            this.clearBulkSelection();
+            this.activeBulkJobId = json.data.jobId;
+            AppDialogs.toast(`Reprocess job started for ${json.data.totalMatched.toLocaleString()} message(s).`, 'success');
+            this.pollBulkJob(this.activeBulkJobId);
+        } catch (e) {
+            this.showError('Failed to start bulk reprocess: ' + e.message);
+        }
+    }
+
+    async pollBulkJob(jobId) {
+        clearTimeout(this._bulkJobPollTimer);
+        try {
+            const res = await fetch(`/api/messages/bulk-reprocess/${jobId}`);
+            const json = await res.json();
+            if (!json.success) throw new Error(json.error || 'Failed to load job status');
+            this.renderBulkJobPanel(json.data);
+
+            const terminal = ['completed', 'cancelled', 'failed'].includes(json.data.status);
+            if (!terminal) {
+                this._bulkJobPollTimer = setTimeout(() => this.pollBulkJob(jobId), 2000);
+            } else {
+                this.activeBulkJobId = null;
+                if (json.data.status === 'completed') this.loadMessages(); // refresh list to show new statuses
+            }
+        } catch (e) {
+            console.error('Bulk job poll failed:', e);
+            this._bulkJobPollTimer = setTimeout(() => this.pollBulkJob(jobId), 5000);
+        }
+    }
+
+    renderBulkJobPanel(job) {
+        const panel = document.getElementById('bulkJobPanel');
+        const label = document.getElementById('bulkJobLabel');
+        const bar = document.getElementById('bulkJobProgressBar');
+        const counts = document.getElementById('bulkJobCounts');
+        const cancelBtn = document.getElementById('bulkJobCancelBtn');
+
+        panel.classList.remove('d-none');
+        const pct = job.totalMatched > 0 ? Math.min(100, Math.round((job.processedCount / job.totalMatched) * 100)) : 0;
+        bar.style.width = pct + '%';
+
+        const statusLabel = {
+            queued: 'Queued', running: 'Reprocessing…', completed: 'Completed',
+            cancelled: 'Cancelled', failed: 'Failed'
+        }[job.status] || job.status;
+        label.textContent = statusLabel;
+        counts.textContent = `${job.processedCount.toLocaleString()} / ${job.totalMatched.toLocaleString()}` +
+            ` — ${job.succeededCount.toLocaleString()} succeeded, ${job.failedCount.toLocaleString()} failed`;
+        cancelBtn.style.display = ['queued', 'running'].includes(job.status) ? '' : 'none';
+
+        if (['completed', 'cancelled', 'failed'].includes(job.status)) {
+            setTimeout(() => panel.classList.add('d-none'), 8000);
+        }
+    }
+
+    async cancelActiveBulkJob() {
+        if (!this.activeBulkJobId) return;
+        const ok = await AppDialogs.confirm('Cancel this bulk reprocess job? Messages already processed will keep their result.', { title: 'Cancel Job', type: 'warning', confirmText: 'Cancel Job' });
+        if (!ok) return;
+        try {
+            const res = await fetch(`/api/messages/bulk-reprocess/${this.activeBulkJobId}/cancel`, { method: 'POST' });
+            const json = await res.json();
+            if (!json.success) throw new Error(json.error || 'Cancel failed');
+        } catch (e) {
+            this.showError('Failed to cancel job: ' + e.message);
+        }
+    }
+
+    // Called on page load — if a job is still running from a previous visit,
+    // resume showing its progress instead of the panel silently disappearing.
+    async checkForActiveBulkJob() {
+        if (!this.currentInterfaceId) return;
+        try {
+            const res = await fetch(`/api/messages/bulk-reprocess?interfaceId=${this.currentInterfaceId}`);
+            const json = await res.json();
+            if (!json.success || !json.data.length) return;
+            const active = json.data.find(j => ['queued', 'running'].includes(j.status));
+            if (active) {
+                this.activeBulkJobId = active.jobId;
+                this.pollBulkJob(active.jobId);
+            }
+        } catch (_) { /* non-critical — just skip restoring the panel */ }
+    }
 }
 
 // Global functions for onclick handlers
@@ -3270,6 +3552,26 @@ function reprocessMessage() {
 
 function deleteMessage() {
     messageManager.deleteMessage();
+}
+
+// Bulk reprocess onclick handlers (see MessageManager's bulk-reprocess methods)
+function toggleRowSelect(messageId, checked) {
+    messageManager.toggleRowSelect(messageId, checked);
+}
+function toggleSelectAllOnPage(checked) {
+    messageManager.toggleSelectAllOnPage(checked);
+}
+function clearBulkSelection() {
+    messageManager.clearBulkSelection();
+}
+function selectAllMatchingFilter(event) {
+    messageManager.selectAllMatchingFilter(event);
+}
+function openBulkReprocessConfirm() {
+    messageManager.openBulkReprocessConfirm();
+}
+function cancelActiveBulkJob() {
+    messageManager.cancelActiveBulkJob();
 }
 
 // Logout function

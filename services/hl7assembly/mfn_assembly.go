@@ -249,7 +249,7 @@ func buildOrganizationFromMFN(
 	// narrative
 	org["text"] = map[string]interface{}{
 		"status": "generated",
-		"div":    buildOrganizationNarrative(org),
+		"div":    sharedNarrativeGenerator.Generate(org, nil, nil),
 	}
 
 	return org, "Organization"
@@ -415,7 +415,7 @@ func buildPractitionerFromSTF(
 	// narrative
 	pract["text"] = map[string]interface{}{
 		"status": "generated",
-		"div":    buildPractitionerNarrative(pract),
+		"div":    sharedNarrativeGenerator.Generate(pract, nil, nil),
 	}
 
 	return pract, "Practitioner"
@@ -517,7 +517,7 @@ func buildLocationFromLOC(
 	// narrative
 	location["text"] = map[string]interface{}{
 		"status": "generated",
-		"div":    buildLocationNarrative(location),
+		"div":    sharedNarrativeGenerator.Generate(location, nil, nil),
 	}
 
 	return location, "Location"
@@ -593,7 +593,7 @@ func buildChargeItemDefinitionFromCDM(
 	// narrative
 	cid["text"] = map[string]interface{}{
 		"status": "generated",
-		"div":    buildCIDNarrative(cid),
+		"div":    sharedNarrativeGenerator.Generate(cid, nil, nil),
 	}
 
 	return cid, "ChargeItemDefinition"
@@ -620,179 +620,9 @@ func hl7GenderToFHIR(code string) string {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Narrative builders
+// Narrative generation — see sharedNarrativeGenerator in assembly.go.
+// Organization, Practitioner, and Location narratives used to have their own
+// hand-written builders here; all three now delegate to services/fhir_narrative
+// (which has dedicated builders for all three); ChargeItemDefinition renders
+// generically.
 // ──────────────────────────────────────────────────────────────────────────────
-
-func buildOrganizationNarrative(org map[string]interface{}) string {
-	var b strings.Builder
-	b.WriteString(`<div xmlns="http://www.w3.org/1999/xhtml">`)
-	b.WriteString(`<table class="grid" style="border-collapse:collapse;width:100%;">`)
-	b.WriteString(`<thead><tr style="background:#f0f0f0;">`)
-	b.WriteString(`<th colspan="2" style="padding:8px;text-align:left;">Organization</th>`)
-	b.WriteString(`</tr></thead><tbody>`)
-
-	row := func(label, value string) {
-		if value == "" {
-			return
-		}
-		b.WriteString(`<tr><td style="padding:4px 8px;border:1px solid #ddd;font-weight:bold;">`)
-		b.WriteString(escapeXML(label))
-		b.WriteString(`</td><td style="padding:4px 8px;border:1px solid #ddd;">`)
-		b.WriteString(escapeXML(value))
-		b.WriteString(`</td></tr>`)
-	}
-
-	if id, ok := org["id"].(string); ok {
-		row("ID", id)
-	}
-	if name, ok := org["name"].(string); ok {
-		row("Name", name)
-	}
-	if types, ok := org["type"].([]interface{}); ok && len(types) > 0 {
-		if t, ok2 := types[0].(map[string]interface{}); ok2 {
-			if txt, ok3 := t["text"].(string); ok3 {
-				row("Type", txt)
-			}
-		}
-	}
-	if active, ok := org["active"].(bool); ok {
-		if active {
-			row("Status", "Active")
-		} else {
-			row("Status", "Inactive")
-		}
-	}
-	if addrs, ok := org["address"].([]interface{}); ok && len(addrs) > 0 {
-		if addr, ok2 := addrs[0].(map[string]interface{}); ok2 {
-			city, _ := addr["city"].(string)
-			state, _ := addr["state"].(string)
-			if city != "" || state != "" {
-				row("Address", fmt.Sprintf("%s, %s", city, state))
-			}
-		}
-	}
-	if telecoms, ok := org["telecom"].([]interface{}); ok && len(telecoms) > 0 {
-		if tc, ok2 := telecoms[0].(map[string]interface{}); ok2 {
-			if val, ok3 := tc["value"].(string); ok3 {
-				row("Phone", val)
-			}
-		}
-	}
-
-	b.WriteString(`</tbody></table></div>`)
-	return b.String()
-}
-
-func buildPractitionerNarrative(pract map[string]interface{}) string {
-	var b strings.Builder
-	b.WriteString(`<div xmlns="http://www.w3.org/1999/xhtml">`)
-	b.WriteString(`<table class="grid" style="border-collapse:collapse;width:100%;">`)
-	b.WriteString(`<thead><tr style="background:#f0f0f0;">`)
-	b.WriteString(`<th colspan="2" style="padding:8px;text-align:left;">Practitioner</th>`)
-	b.WriteString(`</tr></thead><tbody>`)
-
-	row := func(label, value string) {
-		if value == "" {
-			return
-		}
-		b.WriteString(`<tr><td style="padding:4px 8px;border:1px solid #ddd;font-weight:bold;">`)
-		b.WriteString(escapeXML(label))
-		b.WriteString(`</td><td style="padding:4px 8px;border:1px solid #ddd;">`)
-		b.WriteString(escapeXML(value))
-		b.WriteString(`</td></tr>`)
-	}
-
-	if id, ok := pract["id"].(string); ok {
-		row("ID", id)
-	}
-	if names, ok := pract["name"].([]interface{}); ok && len(names) > 0 {
-		if n, ok2 := names[0].(map[string]interface{}); ok2 {
-			family, _ := n["family"].(string)
-			row("Name", family)
-		}
-	}
-	if gender, ok := pract["gender"].(string); ok {
-		row("Gender", gender)
-	}
-	if active, ok := pract["active"].(bool); ok {
-		if active {
-			row("Status", "Active")
-		} else {
-			row("Status", "Inactive")
-		}
-	}
-
-	b.WriteString(`</tbody></table></div>`)
-	return b.String()
-}
-
-func buildLocationNarrative(loc map[string]interface{}) string {
-	var b strings.Builder
-	b.WriteString(`<div xmlns="http://www.w3.org/1999/xhtml">`)
-	b.WriteString(`<table class="grid" style="border-collapse:collapse;width:100%;">`)
-	b.WriteString(`<thead><tr style="background:#f0f0f0;">`)
-	b.WriteString(`<th colspan="2" style="padding:8px;text-align:left;">Location</th>`)
-	b.WriteString(`</tr></thead><tbody>`)
-
-	row := func(label, value string) {
-		if value == "" {
-			return
-		}
-		b.WriteString(`<tr><td style="padding:4px 8px;border:1px solid #ddd;font-weight:bold;">`)
-		b.WriteString(escapeXML(label))
-		b.WriteString(`</td><td style="padding:4px 8px;border:1px solid #ddd;">`)
-		b.WriteString(escapeXML(value))
-		b.WriteString(`</td></tr>`)
-	}
-
-	if id, ok := loc["id"].(string); ok {
-		row("ID", id)
-	}
-	if name, ok := loc["name"].(string); ok {
-		row("Name", name)
-	}
-	if status, ok := loc["status"].(string); ok {
-		row("Status", status)
-	}
-	if addr, ok := loc["address"].(map[string]interface{}); ok {
-		city, _ := addr["city"].(string)
-		state, _ := addr["state"].(string)
-		row("Address", fmt.Sprintf("%s, %s", city, state))
-	}
-
-	b.WriteString(`</tbody></table></div>`)
-	return b.String()
-}
-
-func buildCIDNarrative(cid map[string]interface{}) string {
-	var b strings.Builder
-	b.WriteString(`<div xmlns="http://www.w3.org/1999/xhtml">`)
-	b.WriteString(`<table class="grid" style="border-collapse:collapse;width:100%;">`)
-	b.WriteString(`<thead><tr style="background:#f0f0f0;">`)
-	b.WriteString(`<th colspan="2" style="padding:8px;text-align:left;">ChargeItemDefinition</th>`)
-	b.WriteString(`</tr></thead><tbody>`)
-
-	row := func(label, value string) {
-		if value == "" {
-			return
-		}
-		b.WriteString(`<tr><td style="padding:4px 8px;border:1px solid #ddd;font-weight:bold;">`)
-		b.WriteString(escapeXML(label))
-		b.WriteString(`</td><td style="padding:4px 8px;border:1px solid #ddd;">`)
-		b.WriteString(escapeXML(value))
-		b.WriteString(`</td></tr>`)
-	}
-
-	if id, ok := cid["id"].(string); ok {
-		row("ID", id)
-	}
-	if title, ok := cid["title"].(string); ok {
-		row("Title", title)
-	}
-	if status, ok := cid["status"].(string); ok {
-		row("Status", status)
-	}
-
-	b.WriteString(`</tbody></table></div>`)
-	return b.String()
-}

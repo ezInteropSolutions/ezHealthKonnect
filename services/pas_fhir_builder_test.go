@@ -383,7 +383,7 @@ func TestPASFHIRBuilder_FullChain_BuildsCleanValidatingBundle(t *testing.T) {
 	data = runFHIRBuild(t, "build_claim_fhir", claimBuildConfig(), data)
 
 	// payload.builder fhir_bundle
-	pbExec := payload.NewPayloadBuilderExecutor()
+	pbExec := payload.NewPayloadBuilderExecutor(nil)
 	pbStep := &models.TransformationStep{
 		StepName:  "Assemble PAS Bundle",
 		StepAlias: strPtrSvc("assemble_pas_bundle"),

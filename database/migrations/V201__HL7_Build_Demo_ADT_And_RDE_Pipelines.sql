@@ -26,6 +26,17 @@
 -- genuinely fresh install. This migration only ever ADDS to an
 -- already-existing HL7_Build_Demo interface.
 
+-- transformation_pipelines.status was never added by any tracked migration —
+-- it only exists on already-migrated environments because of undocumented
+-- schema drift (a manual ALTER TABLE at some point, outside Flyway). This
+-- INSERT (and V202's) has always assumed the column exists; on a genuinely
+-- fresh install (Flyway migrating from V1) it never did, breaking the chain
+-- here. IF NOT EXISTS makes this a no-op on every environment that already
+-- has the column (which Flyway's repair, always run before migrate in this
+-- project — see docker-compose.yml's flyway service — reconciles safely) and
+-- a real fix on one that doesn't.
+ALTER TABLE transformation_pipelines ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'draft';
+
 -- ── ADT^A01 pipeline ─────────────────────────────────────────────────────
 INSERT INTO transformation_pipelines (id, interface_id, message_type, pipeline_name, enabled, status, pipeline_config)
 SELECT

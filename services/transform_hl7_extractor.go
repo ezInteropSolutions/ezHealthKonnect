@@ -260,6 +260,24 @@ func (s *HL7FHIRTransformServiceV3) extractSegmentGroup(parsedHL7Data map[string
 	return converted[segmentName]
 }
 
+// enhancedSegmentToMap converts a single hl7.EnhancedSegment occurrence into the
+// map[string]interface{} shape extractHL7ValueAtomic expects — a JSON round-trip,
+// since EnhancedSegment's json tags already match that shape exactly (the same
+// technique extractSegmentGroup/ExtractSegmentGroup use for the whole-map case).
+func enhancedSegmentToMap(seg hl7.EnhancedSegment) map[string]interface{} {
+	b, err := json.Marshal(seg)
+	if err != nil {
+		log.Printf("⚠️ enhancedSegmentToMap: marshal failed: %v", err)
+		return nil
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		log.Printf("⚠️ enhancedSegmentToMap: unmarshal failed: %v", err)
+		return nil
+	}
+	return m
+}
+
 // segFieldValue returns the value of a named field (e.g. "OBX.3") from an EnhancedSegment.
 func segFieldValue(seg hl7.EnhancedSegment, key string) string {
 	for _, f := range seg.Fields {

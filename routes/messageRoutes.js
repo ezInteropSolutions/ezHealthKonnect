@@ -38,6 +38,18 @@ router.get('/interface/:interfaceId/stats',                               sessio
 router.get('/interface/:interfaceId/message/:messageId/parsed',           sessionAuth, canRead,  (req, res) => MessageController.getParsedContent(req, res));
 router.get('/interface/:interfaceId/message/:messageId/fhir-output',      sessionAuth, canRead,  (req, res) => MessageController.getFhirOutput(req, res));
 
+// BULK REPROCESS (V213) — registered before the /:messageId catch-all below,
+// same reason /interface/:interfaceId is: a bare literal path like
+// GET /bulk-reprocess would otherwise be swallowed by /:messageId (Express
+// matches route registration order, not specificity). /count and /:jobId are
+// both single-segment GETs under /bulk-reprocess/*, so /count must also come
+// before /:jobId for the same reason.
+router.get('/bulk-reprocess/count',        sessionAuth, canRead,  (req, res) => MessageController.getBulkReprocessCount(req, res));
+router.get('/bulk-reprocess',              sessionAuth, canRead,  (req, res) => MessageController.listBulkReprocessJobs(req, res));
+router.post('/bulk-reprocess',             sessionAuth, canWrite, (req, res) => MessageController.createBulkReprocessJob(req, res));
+router.get('/bulk-reprocess/:jobId',       sessionAuth, canRead,  (req, res) => MessageController.getBulkReprocessJob(req, res));
+router.post('/bulk-reprocess/:jobId/cancel', sessionAuth, canWrite, (req, res) => MessageController.cancelBulkReprocessJob(req, res));
+
 // GLOBAL ENDPOINTS REMOVED - Use interface-specific endpoints only
 router.get('/', sessionAuth, canRead, (req, res) => {
     res.status(400).json({ success: false, error: 'Global message viewing disabled. Please specify an interface.', redirect: '/interfaces.html' });

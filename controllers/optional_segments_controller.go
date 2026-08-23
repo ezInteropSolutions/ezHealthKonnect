@@ -10,8 +10,8 @@
 // PATCH /api/fhir/optional-segments/:interfaceId/:messageType
 //      Body: {"PV1_Encounter": true, "SPM_Specimen": false}
 //      Merges the toggle state into custom_mapping_config["optional_segments"].
-//      Also accepts "resource_policy" key in the same request body so the
-//      mapping editor can save both in one round-trip.
+//      Also accepts "resource_policy" and "narrative_fields" keys in the same
+//      request body so the mapping editor can save all three in one round-trip.
 package controllers
 
 import (
@@ -64,8 +64,10 @@ func (ctrl *OptionalSegmentsController) List(c *gin.Context) {
 
 	// Load the current enabled state for this interface (if provided).
 	var optCfg map[string]bool
+	var narrativeFieldsCfg map[string][]string
 	if interfaceID != "" && ctrl.db != nil {
 		optCfg = ctrl.loadOptionalSegmentConfig(c.Request.Context(), interfaceID, messageType)
+		narrativeFieldsCfg = ctrl.loadNarrativeFieldsConfig(c.Request.Context(), interfaceID, messageType)
 	}
 
 	dtos := make([]BlockDTO, len(blocks))
@@ -78,10 +80,22 @@ func (ctrl *OptionalSegmentsController) List(c *gin.Context) {
 		}
 	}
 
+	// Resource types relevant to this message type, for the narrative field
+	// picker's section list. AllowedResources is retained (see FilterResources'
+	// doc comment) as the scoring baseline — reused here too since it's exactly
+	// the "resource types this message type typically produces" list the
+	// picker needs, and MessageHeader is always implicitly relevant.
+	narrativeResourceTypes := []string{"MessageHeader"}
+	if m := manifest.Lookup(messageType); m != nil {
+		narrativeResourceTypes = append(narrativeResourceTypes, m.AllowedResources...)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"success":     true,
-		"messageType": messageType,
-		"blocks":      dtos,
+		"success":                true,
+		"messageType":            messageType,
+		"blocks":                 dtos,
+		"narrativeFields":        narrativeFieldsCfg,
+		"narrativeResourceTypes": narrativeResourceTypes,
 	})
 }
 
@@ -109,9 +123,11 @@ func (ctrl *OptionalSegmentsController) Save(c *gin.Context) {
 		return
 	}
 
-	// Detect shape B by checking for "optional_segments" or "resource_policy" keys.
+	// Detect shape B by checking for "optional_segments", "resource_policy", or
+	// "narrative_fields" keys.
 	var newOptSegments map[string]bool
 	var newResourcePolicy map[string]string
+	var newNarrativeFields map[string][]string
 
 	if combined, ok := rawBody["optional_segments"]; ok {
 		newOptSegments = toStringBoolMap(combined)
@@ -119,8 +135,11 @@ func (ctrl *OptionalSegmentsController) Save(c *gin.Context) {
 	if rp, ok := rawBody["resource_policy"]; ok {
 		newResourcePolicy = toStringStringMap(rp)
 	}
+	if nf, ok := rawBody["narrative_fields"]; ok {
+		newNarrativeFields = toStringStringSliceMap(nf)
+	}
 	// Shape A: flat bool map (no "optional_segments" wrapper)
-	if newOptSegments == nil && newResourcePolicy == nil {
+	if newOptSegments == nil && newResourcePolicy == nil && newNarrativeFields == nil {
 		newOptSegments = make(map[string]bool)
 		for k, v := range rawBody {
 			if b, ok := v.(bool); ok {
@@ -129,7 +148,7 @@ func (ctrl *OptionalSegmentsController) Save(c *gin.Context) {
 		}
 	}
 
-	if err := ctrl.mergeConfig(c.Request.Context(), interfaceID, messageType, newOptSegments, newResourcePolicy); err != nil {
+	if err := ctrl.mergeConfig(c.Request.Context(), interfaceID, messageType, newOptSegments, newResourcePolicy, newNarrativeFields); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
@@ -158,13 +177,41 @@ func (ctrl *OptionalSegmentsController) loadOptionalSegmentConfig(
 	return manifest.LoadOptionalSegmentConfig(configBytes)
 }
 
+// loadNarrativeFieldsConfig reads the "narrative_fields" key from
+// custom_mapping_config — the currently-saved per-resource-type field
+// restriction for this interface + message type, if any.
+func (ctrl *OptionalSegmentsController) loadNarrativeFieldsConfig(
+	ctx context.Context, interfaceID, messageType string,
+) map[string][]string {
+	query := `
+		SELECT custom_mapping_config
+		FROM interface_message_mappings
+		WHERE interface_id = $1 AND message_type = $2
+		  AND custom_mapping_config IS NOT NULL
+		LIMIT 1
+	`
+	var configBytes []byte
+	if err := ctrl.db.QueryRowContext(ctx, query, interfaceID, messageType).Scan(&configBytes); err != nil {
+		return nil
+	}
+	var decoded struct {
+		NarrativeFields map[string][]string `json:"narrative_fields"`
+	}
+	if err := json.Unmarshal(configBytes, &decoded); err != nil {
+		return nil
+	}
+	return decoded.NarrativeFields
+}
+
 // mergeConfig reads the existing custom_mapping_config, applies the new
-// optional_segments and resource_policy values, and upserts the row.
+// optional_segments, resource_policy, and narrative_fields values, and upserts
+// the row.
 func (ctrl *OptionalSegmentsController) mergeConfig(
 	ctx context.Context,
 	interfaceID, messageType string,
 	newOptSegments map[string]bool,
 	newResourcePolicy map[string]string,
+	newNarrativeFields map[string][]string,
 ) error {
 	// Read existing config so we preserve atomicMappings and other keys.
 	query := `
@@ -204,6 +251,29 @@ func (ctrl *OptionalSegmentsController) mergeConfig(
 			current[k] = v
 		}
 		cfg["resource_policy"] = current
+	}
+
+	// Merge narrative_fields. A resourceType mapped to an empty/absent list
+	// means "no restriction" per fhir_narrative.NarrativeFieldConfig — saving
+	// an empty array here removes any prior restriction for that type rather
+	// than storing a vacuous "show nothing" entry.
+	if newNarrativeFields != nil {
+		current := map[string]interface{}{}
+		if prev, ok := cfg["narrative_fields"].(map[string]interface{}); ok {
+			current = prev
+		}
+		for k, v := range newNarrativeFields {
+			if len(v) == 0 {
+				delete(current, k)
+				continue
+			}
+			fields := make([]interface{}, len(v))
+			for i, f := range v {
+				fields[i] = f
+			}
+			current[k] = fields
+		}
+		cfg["narrative_fields"] = current
 	}
 
 	updated, err := json.Marshal(cfg)
@@ -249,6 +319,30 @@ func toStringStringMap(v interface{}) map[string]string {
 		if s, ok := val.(string); ok {
 			out[k] = s
 		}
+	}
+	return out
+}
+
+// toStringStringSliceMap coerces a decoded JSON value (resourceType -> array
+// of field names) to map[string][]string, for the narrative_fields config.
+func toStringStringSliceMap(v interface{}) map[string][]string {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	out := make(map[string][]string, len(m))
+	for k, val := range m {
+		arr, ok := val.([]interface{})
+		if !ok {
+			continue
+		}
+		fields := make([]string, 0, len(arr))
+		for _, item := range arr {
+			if s, ok := item.(string); ok {
+				fields = append(fields, s)
+			}
+		}
+		out[k] = fields
 	}
 	return out
 }

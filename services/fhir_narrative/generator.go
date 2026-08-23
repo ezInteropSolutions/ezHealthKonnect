@@ -5,7 +5,11 @@
 
 package fhirnarrative
 
-import "strings"
+import (
+	"strings"
+
+	"ezhealthkonnect/fhir"
+)
 
 // FHIRNarrativeGenerator generates XHTML narrative for FHIR resources that
 // lack resource.text.div. One instance is stateless and safe for concurrent use.
@@ -18,8 +22,20 @@ func NewFHIRNarrativeGenerator() *FHIRNarrativeGenerator {
 
 // Generate returns an XHTML narrative div for the given FHIR resource.
 // If resource["text"]["div"] is already populated it is returned as-is.
-// Returns an empty string for unsupported resource types.
-func (g *FHIRNarrativeGenerator) Generate(resource map[string]interface{}) string {
+//
+// schema is optional (nil-safe) — passed through to the generic renderer for
+// field labels; dedicated per-type builders below don't need it.
+//
+// fieldConfig is optional (nil-safe) — when it has an explicit field-list
+// restriction for this resource's type (fieldConfig.Restricts(resourceType)),
+// the generic renderer is used EVEN for a resource type that has a dedicated
+// builder below, so a per-interface field configuration is never silently
+// ignored just because that type happens to have hand-written logic. With no
+// restriction, dedicated builders are preferred (they carry real, tested,
+// spec-informed behavior — e.g. Observation's USCDI category-driven labeling —
+// that a purely generic renderer can't replicate); anything with no dedicated
+// builder falls back to the generic renderer instead of returning "".
+func (g *FHIRNarrativeGenerator) Generate(resource map[string]interface{}, schema *fhir.FHIRSchema, fieldConfig NarrativeFieldConfig) string {
 	if resource == nil {
 		return ""
 	}
@@ -29,7 +45,13 @@ func (g *FHIRNarrativeGenerator) Generate(resource map[string]interface{}) strin
 			return div
 		}
 	}
-	switch fhirStr(resource, "resourceType") {
+
+	resourceType := fhirStr(resource, "resourceType")
+	if fieldConfig.Restricts(resourceType) {
+		return generateGeneric(resourceType, resource, schema, fieldConfig)
+	}
+
+	switch resourceType {
 	case "AllergyIntolerance":
 		return GenerateAllergyNarrative(resource)
 	case "Condition":
@@ -69,7 +91,7 @@ func (g *FHIRNarrativeGenerator) Generate(resource map[string]interface{}) strin
 	case "Location":
 		return GenerateLocationNarrative(resource)
 	default:
-		return ""
+		return generateGeneric(resourceType, resource, schema, fieldConfig)
 	}
 }
 
@@ -150,6 +172,20 @@ func ccText(v interface{}) string {
 		}
 	}
 	return ""
+}
+
+// anyText extracts display text from a field regardless of whether it arrived
+// as a plain string (the spec-correct shape for e.g. AllergyIntolerance.criticality,
+// a `code` type) or, due to an upstream field-mapping datatype mismatch, as a
+// CodeableConcept-shaped object instead. Dedicated builders in this package use
+// this instead of a bare string-type-assertion wherever a field's real-world
+// value has been observed to sometimes arrive mistyped — so the narrative still
+// shows something meaningful instead of silently dropping the value.
+func anyText(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ccText(v)
 }
 
 // ccCode extracts the first coding.code from a FHIR CodeableConcept.

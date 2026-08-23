@@ -1,0 +1,20 @@
+# docker-compose.ci.yml
+#
+# CI-only override for GitHub Actions (see .github/workflows/ci.yml's
+# test-e2e job). The only difference from docker-compose.yml: the ollama
+# service's volume bind-mounts ${USERPROFILE}/.ollama for local Windows dev,
+# which is undefined on Linux CI runners — this swaps it for a named volume.
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d ...
+# (list-valued fields like `volumes:` on a service are replaced wholesale by
+# the later file, not merged item-by-item — this is the only volume ollama
+# needs in CI since ollama-init, the only other consumer of the bind mount,
+# is deliberately not started here.)
+
+services:
+  ollama:
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  ollama_data:

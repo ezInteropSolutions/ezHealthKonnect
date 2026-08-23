@@ -1,7 +1,8 @@
 /**
  * PreProcessingStepsDocs — Documentation for validation/branching pre-processing steps
  *
- * pre.validation, pre.logic.switch, plus the legacy field_validation alias.
+ * pre.validation, if_then_else (alias: pre.logic), pre.logic.switch (alias: switch_case),
+ * plus the legacy field_validation alias.
  *
  * Self-registers into StepDocumentationRegistry at load time — this file must be
  * loaded (via <script>) after StepDocumentationRegistry.js and before any step's
@@ -322,8 +323,96 @@
                     }
                 ]
             },
+            'if_then_else': {
+                description: 'Conditional branching step (services/executors/control/conditional_executor.go, "If-Then-Else" v2.0.0). Evaluates one or more independent {field, operator, value} conditions in order and runs the matching onTrue/onFalse action(s) for each. Uses the same shared operator evaluator as Switch/Case and hl7.build\'s per-segment/field conditions (services/executors/condition.go) — 12 operators, cross-field comparisons via compareToField, not just literal-value matching. If ANY condition evaluates true, the step\'s overall branch is "true" and the pipeline auto-skips the false branch\'s steps (and vice versa) via _routing.branchTaken — no manual skip_steps needed for a simple two-branch flow. See pre.logic.switch\'s own documentation for a side-by-side comparison of when to use which.',
+                useCases: [
+                    'Flag a patient as high-risk when age > 65 AND a chronic-condition field is set — chained conditions a single-field Switch/Case can\'t express',
+                    'Reject a message outright (action: "reject") when a required cross-field relationship is violated, e.g. discharge date before admission date',
+                    'Route to a specific downstream step only when a field is missing (operator: "not_exists") without needing a Switch/Case default case',
+                    'Compare two fields against each other (compareToField) rather than a field against a literal — e.g. flag when PV1.44 (admission) is later than PV1.45 (discharge)',
+                    'Tag metadata (set_metadata) for later steps to read, without altering the message body itself',
+                ],
+                example: {
+                    conditions: [
+                        {
+                            name: 'High-risk age check',
+                            condition: { field: 'message.patientAge', operator: 'greater_than', value: '65' },
+                            onTrue: { action: 'set_field', field: 'message.riskFlag', value: 'high' },
+                            onFalse: { action: 'continue' },
+                        },
+                    ],
+                },
+                parameters: [
+                    { name: 'conditions', type: 'array', required: true, description: 'One or more independent condition blocks, evaluated in order: {name, condition, onTrue, onFalse}. Every condition in the array is evaluated and its matching branch\'s actions run — this is not a first-match-wins list like Switch/Case\'s cases.' },
+                    { name: 'conditions[].condition', type: 'object', required: true, description: '{field, operator, value, compareToField}. field is the path to evaluate; operator is one of equals, not_equals, contains, starts_with, ends_with, greater_than, greater_than_or_equal, less_than, less_than_or_equal, exists, not_exists, regex_match, in_list (services/executors/condition.go — the same evaluator Switch/Case and hl7.build\'s conditions use). value is the literal to compare against (unused/optional for exists/not_exists). compareToField, when set, compares against another field\'s current value instead of the literal value.' },
+                    { name: 'conditions[].onTrue / conditions[].onFalse', type: 'object | array', required: false, description: 'The action(s) to run for that branch. Accepts either a single action object ({action: "..."}) or an array of action objects — both are supported; use an array when a branch needs more than one action.' },
+                ],
+                actions: [
+                    { action: 'continue', description: 'No-op — just continue.', usedFor: 'The branch that needs no side effect.', parameters: 'None' },
+                    { action: 'reject', description: 'Fails the message with an error, stopping the pipeline for it.', usedFor: 'Hard validation failures that must NACK/stop rather than continue.', parameters: 'errorMessage, severity (default "error")' },
+                    { action: 'log_warning', description: 'Logs a warning.', usedFor: 'Non-fatal data-quality notices.', parameters: 'message, continue (bool, default true — set false to stop processing after the warning)' },
+                    { action: 'log_error', description: 'Logs an error.', usedFor: 'Serious but sometimes-recoverable issues.', parameters: 'message, continue (bool, default FALSE — unlike log_warning, this stops processing by default unless continue:true is set explicitly)' },
+                    { action: 'set_metadata', description: 'Merges keys into the message\'s _metadata object.', usedFor: 'Tagging for later steps/reporting without touching the message body.', parameters: 'metadata (object of key/value pairs to merge)' },
+                    { action: 'route_to', description: 'Sets a routing destination/queue and/or a single conditional next step.', usedFor: 'Lower-level routing distinct from route_to_step — sets _routing.destination/.queue directly.', parameters: 'destination, queue, nextStep (or stepId)' },
+                    { action: 'set_field (alias: set_value)', description: 'Sets a field value on the message.', usedFor: 'Writing a computed/flag value onto the message for downstream steps.', parameters: 'field (target path), value — NOT targetField; see the troubleshooting entry below, this differs from Switch/Case\'s own set_value action.' },
+                    { action: 'copy_field', description: 'Copies one field\'s value to another.', usedFor: 'Duplicating a value onto a normalized field name.', parameters: 'source, target — NOT sourceField/targetField; see the troubleshooting entry below, this differs from Switch/Case\'s own copy_field action.' },
+                    { action: 'delete_field', description: 'Removes a field from the message.', usedFor: 'Stripping a field once it\'s no longer needed downstream.', parameters: 'field' },
+                    { action: 'route_to_step', description: 'Routes to one or more specific steps by ID, same multi-step mechanism Switch/Case uses.', usedFor: 'Branching to different processing paths.', parameters: 'stepId (or targetStepId) for a single step, OR targetStepIds (array) for multiple in order; optional skipSteps (array) to force the OTHER branch\'s steps to be skipped even if they weren\'t auto-excluded — see the exclusive-branch note in Best Practices.' },
+                    { action: 'log_info / log_debug', description: 'Logs an informational/debug message.', usedFor: 'Tracing/diagnostics.', parameters: 'message' },
+                ],
+                bestPractices: [
+                    {
+                        practice: 'Every condition in the array is evaluated — this is not first-match-wins',
+                        reason: 'Unlike Switch/Case\'s cases (first match wins), all of if_then_else\'s conditions run and each one\'s matching branch executes. Two conditions that are both true both fire their onTrue actions.',
+                        example: 'Two independent checks (age > 65, AND separately has-chronic-condition) — both conditions run and both can tag metadata, even though neither one "wins" over the other.',
+                    },
+                    {
+                        practice: 'Only the LAST routing action across all conditions actually takes effect',
+                        reason: 'route_to_step/route_to actions are collected and executed once, after every condition has run — if more than one condition\'s branch calls a routing action, only the final one encountered is applied; earlier ones are silently overwritten, not combined.',
+                        example: 'If both Condition 1\'s onTrue and Condition 2\'s onFalse call route_to_step, only Condition 2\'s routing is the one that actually executes.',
+                    },
+                    {
+                        practice: 'Let branchTaken handle simple two-branch exclusion; use skipSteps only for more complex cases',
+                        reason: '_routing.branchTaken ("true"/"false") is set automatically from whether ANY condition matched, and the pipeline already uses it to skip the other branch\'s steps for a straightforward if/else — route_to_step\'s own skipSteps parameter exists for cases branchTaken\'s simple true/false split can\'t express (e.g. multiple independent conditions with different step sets to exclude).',
+                        example: 'A single condition with a true-path step and a false-path step needs no skipSteps at all — branchTaken already excludes the untaken path.',
+                    },
+                ],
+                troubleshooting: [
+                    {
+                        issue: 'set_value/set_field action runs without error but the field never actually updates',
+                        cause: 'If-Then-Else\'s set_field/set_value action reads its target from the "field" key — a config written for (or copied from) a Switch/Case case, which uses "targetField" for the same action name, is silently ignored here since "targetField" isn\'t a key this action reads.',
+                        fix: 'Use {"action": "set_field", "field": "message.yourField", "value": "..."} — "field", not "targetField".',
+                    },
+                    {
+                        issue: 'copy_field silently copies nothing',
+                        cause: 'Same class of gotcha as set_field — this action reads "source"/"target", not Switch/Case\'s "sourceField"/"targetField".',
+                        fix: 'Use {"action": "copy_field", "source": "message.a", "target": "message.b"}.',
+                    },
+                    {
+                        issue: 'Only one of two conditions\' routing actions seems to run',
+                        cause: 'Not a bug — see the Best Practices entry above: only the last routing action across ALL conditions in the array is executed, by design (routing is deferred and applied once, after every condition has been evaluated).',
+                        fix: 'Keep at most one condition emitting a routing action, or order conditions so the one you want to win is evaluated last.',
+                    },
+                    {
+                        issue: '"condition is required" error even though conditions look correctly configured',
+                        cause: 'The executor accepts three config shapes for backward compatibility (newest: conditions[] array; newer: ifThenElse.conditions; legacy: a single top-level condition/then_actions/else_actions) — a config with the array present but each entry missing its own nested "condition" object still fails, since each array entry needs {name, condition, onTrue, onFalse}, not a flat condition at the array level.',
+                        fix: 'Confirm each entry in conditions[] has its own nested condition object: {name: "...", condition: {field, operator, value}, onTrue: {...}, onFalse: {...}}.',
+                    },
+                ],
+                stepOutput: {
+                    description: 'Available to every step after this one.',
+                    fields: [
+                        { name: '_executionDetails.conditions_processed', type: 'number', description: 'How many condition blocks were evaluated.' },
+                        { name: '_executionDetails.conditions_results', type: 'array', description: 'Per-condition {name, evaluated, branch, actions_executed} breakdown.' },
+                        { name: '_executionDetails.branch_taken', type: 'string', description: '"true" if ANY condition matched, else "false" — mirrors _routing.branchTaken.' },
+                        { name: '_routing.branchTaken', type: 'string', description: '"true" or "false" — read by the pipeline service to auto-skip the untaken branch\'s steps.' },
+                    ],
+                },
+            },
     };
     Object.keys(docs).forEach((stepType) => StepDocumentationRegistry.register(stepType, docs[stepType]));
 })();
 
 StepDocumentationRegistry.registerAlias('field_validation', 'pre.validation');
+StepDocumentationRegistry.registerAlias('pre.logic', 'if_then_else');
+StepDocumentationRegistry.registerAlias('switch_case', 'pre.logic.switch');

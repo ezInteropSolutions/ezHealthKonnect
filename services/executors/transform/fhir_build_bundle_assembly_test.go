@@ -263,7 +263,7 @@ func TestFHIRBuildDemo_FullPipeline_AssemblesValidBundle(t *testing.T) {
 			},
 		},
 	}
-	payloadExecutor := payload.NewPayloadBuilderExecutor()
+	payloadExecutor := payload.NewPayloadBuilderExecutor(nil)
 	output, err := payloadExecutor.Execute(context.Background(), bundleStep, data)
 	if err != nil {
 		t.Fatalf("payload.builder (fhir_bundle) failed: %v", err)

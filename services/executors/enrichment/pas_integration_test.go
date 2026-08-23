@@ -152,7 +152,7 @@ func runPASZone2(t *testing.T, data map[string]interface{}) map[string]interface
 	data = runFHIRBuildStep(t, "build_claim_fhir", data)
 
 	assembleCfg := loadV212StepConfig(t, "assemble_pas_bundle")
-	pbExec := payload.NewPayloadBuilderExecutor()
+	pbExec := payload.NewPayloadBuilderExecutor(nil)
 	pbStep := &models.TransformationStep{
 		StepName:  "Assemble PAS Bundle",
 		StepAlias: strPtr("assemble_pas_bundle"),

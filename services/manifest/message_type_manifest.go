@@ -38,8 +38,10 @@ const (
 
 // MessageTypeManifest is the IG contract for one HL7 message type.
 type MessageTypeManifest struct {
-	// AllowedResources lists every FHIR resourceType the IG defines as a valid
-	// output.  MessageHeader is always implicitly allowed.
+	// AllowedResources lists the FHIR resourceTypes typically expected for this
+	// message type. No longer used to gate FilterResources' output (see its doc
+	// comment) — retained solely as the baseline transformation_scorer.go scores
+	// quality against.
 	AllowedResources []string
 	// SegmentProcessors names the SegmentProcessor implementations that must run
 	// for this message type (resolved via the SegmentProcessorRegistry).
@@ -49,17 +51,6 @@ type MessageTypeManifest struct {
 	// ensure every instance of each type (including processor-added resources) has
 	// a focus reference — without any per-processor MessageHeader logic.
 	FocusTypes []string
-}
-
-// allowedSet returns AllowedResources as a fast O(1) lookup map.
-// MessageHeader is always included regardless of the manifest entry.
-func (m *MessageTypeManifest) allowedSet() map[string]bool {
-	s := make(map[string]bool, len(m.AllowedResources)+1)
-	s["MessageHeader"] = true
-	for _, r := range m.AllowedResources {
-		s[r] = true
-	}
-	return s
 }
 
 // registry is the package-level IG manifest keyed by event code
@@ -268,12 +259,30 @@ func Lookup(messageType string) *MessageTypeManifest {
 	return registry[key]
 }
 
-// FilterResources removes resource types not permitted by the IG for messageType
-// and applies any interface-level policy overrides.
+// FilterResources applies interface-level policy overrides to the resource set.
+//
+// A resource only ever reaches here because it was actually built from a
+// segment genuinely present in the message via a valid template mapping — the
+// template itself IS the IG-derived segment→resource map, so "was it built" is
+// already an IG-conformant signal. This function used to ALSO gate output
+// against a hand-maintained per-trigger-event AllowedResources allow-list
+// (see MessageTypeManifest.AllowedResources), which required manually
+// auditing every one of ~60+ HL7 trigger event codes and silently stripped
+// correctly-built resources whenever that list was incomplete (e.g. AL1→
+// AllergyIntolerance was missing from ADT^A08's list even though AL1 is a
+// completely normal segment on real ADT^A08 messages). That gate is removed:
+// everything the engine actually built now passes through by default, and
+// resourcePolicy remains the only way to exclude a resource type, via an
+// explicit interface-level "suppress" override.
+//
+// AllowedResources / Lookup() are NOT removed — they remain the sole input to
+// transformation_scorer.go's quality-scoring baseline ("did this message type
+// produce the resources we'd typically expect"), a softer, non-gating signal
+// that is intentionally decoupled from output filtering by this change.
 //
 // resourcePolicy is decoded from the "resource_policy" key in
 // interface_message_mappings.custom_mapping_config.  Pass nil or an empty map
-// to use the IG defaults with no overrides.
+// to apply no overrides (identity pass-through).
 //
 // Returns the filtered slice and the list of resource types that were removed.
 func FilterResources(
@@ -281,28 +290,23 @@ func FilterResources(
 	messageType string,
 	resourcePolicy map[string]string,
 ) (filtered []map[string]interface{}, removed []string) {
-	m := Lookup(messageType)
-	if m == nil {
-		return resources, nil // no manifest → open policy, pass everything
+	suppressed := make(map[string]bool, len(resourcePolicy))
+	for rt, policy := range resourcePolicy {
+		if policy == "suppress" {
+			suppressed[rt] = true
+		}
 	}
 
-	allowed := m.allowedSet()
-
-	for rt, policy := range resourcePolicy {
-		switch policy {
-		case "allow":
-			allowed[rt] = true
-		case "suppress":
-			delete(allowed, rt)
-		}
+	if len(suppressed) == 0 {
+		return resources, nil
 	}
 
 	for _, r := range resources {
 		rt, _ := r["resourceType"].(string)
-		if allowed[rt] {
-			filtered = append(filtered, r)
-		} else {
+		if suppressed[rt] {
 			removed = append(removed, rt)
+		} else {
+			filtered = append(filtered, r)
 		}
 	}
 	return filtered, removed

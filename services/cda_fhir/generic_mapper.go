@@ -448,6 +448,40 @@ func (m *GenericCDAFHIRMapper) loadFromCDAOOBTemplates(
 	return loadFromDeclarativeRules(docType), nil
 }
 
+// loadNarrativeFieldConfig reads the "narrative_fields" key from
+// interface_cda_mappings.custom_mapping_config — the per-(interface,
+// document_type) override of which fields render in each resource type's
+// narrative (resource.text.div). Returns nil when the interface has no CDA
+// config row or no narrative_fields key, which fhir_narrative.Generate treats
+// as "render every populated field." Same query/unmarshal shape as
+// HL7FHIRTransformServiceV3.loadNarrativeFieldConfig
+// (services/hl7_fhir_transform_service_v3.go) — same JSON key, same JSONB
+// column, different table (CDA's own interface_cda_mappings, keyed by
+// document_type instead of message_type).
+func (m *GenericCDAFHIRMapper) loadNarrativeFieldConfig(ctx context.Context, interfaceID, docType string) fhirnarrative.NarrativeFieldConfig {
+	if interfaceID == "" || m.db == nil {
+		return nil
+	}
+	var configBytes []byte
+	err := m.db.QueryRowContext(ctx, `
+		SELECT custom_mapping_config
+		FROM interface_cda_mappings
+		WHERE interface_id = $1 AND document_type = $2
+		  AND custom_mapping_config IS NOT NULL
+		LIMIT 1
+	`, interfaceID, docType).Scan(&configBytes)
+	if err != nil {
+		return nil
+	}
+	var config struct {
+		NarrativeFields fhirnarrative.NarrativeFieldConfig `json:"narrative_fields"`
+	}
+	if err := json.Unmarshal(configBytes, &config); err != nil {
+		return nil
+	}
+	return config.NarrativeFields
+}
+
 // =========================================================
 // JSONB template config → []CDAFieldMapping
 // =========================================================

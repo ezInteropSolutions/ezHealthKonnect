@@ -27,6 +27,20 @@ Never claim an action has been completed: tools you call are only PROPOSED and r
 
 If a question has multiple parts (e.g. "how many DLQ messages are pending, AND are there any active alerts"), call ONE tool for the first part, wait for its result, then call the next tool for the remaining part — do not answer with only part of the question covered. Only give your final answer once you have gathered everything needed for every part of the question.`
 
+// unsupportedToolModelMsg is returned immediately, without attempting a
+// ChatWithTools call, when the active chat model is confirmed (via
+// knownModelCapabilities) not to support tool calling — otherwise Agent Mode
+// would silently look like "no action needed" for every question, with no
+// signal that the real cause is the selected model, not the question.
+const unsupportedToolModelMsg = "Agent Mode needs a tool-calling model — '%s' is not one. Switch to a confirmed model (llama3.1, llama3.2, llama3.3, or mistral-nemo) in Settings → AI Assistant, or ask a plain question instead."
+
+// unverifiedToolModelSuffix is appended to a plain (no-tool-call) answer when
+// the active chat model isn't in knownModelCapabilities at all — the model
+// may have genuinely decided no tool was needed, or it may not support tool
+// calling and always returns zero tool calls; this at least tells the user
+// which case they might be in.
+const unverifiedToolModelSuffix = "\n\n_(Note: '%s' isn't a model ezHealthKonnect has confirmed supports tool calling — if you expected an action here, this may be why.)_"
+
 // ProposedAction is a tool call the model requested, awaiting human approval.
 type ProposedAction struct {
 	ID         string          `json:"id"`
@@ -113,6 +127,11 @@ func (a *AgentService) ProposeAction(ctx context.Context, sessionID, userID, que
 		return nil, fmt.Errorf("agent mode is not available: current provider does not support tool calling")
 	}
 
+	modelName := a.llm.ChatModelName()
+	if cap, known := ResolveModelProfile(modelName); known && !cap.SupportsTools {
+		return &AgentTurn{Answer: fmt.Sprintf(unsupportedToolModelMsg, modelName)}, nil
+	}
+
 	messages := []ChatMessage{
 		{Role: "system", Content: agentSystemPrompt},
 		{Role: "user", Content: question},
@@ -125,7 +144,18 @@ func (a *AgentService) ProposeAction(ctx context.Context, sessionID, userID, que
 		}
 
 		if len(result.ToolCalls) == 0 {
-			return &AgentTurn{Answer: result.Content}, nil
+			answer := result.Content
+			// Only ambiguous on the FIRST iteration — zero tool calls there could
+			// mean "no tool needed" or "model can't call tools at all". Once a
+			// later iteration is reached, a tool call already succeeded earlier
+			// this turn (see below), so the model has already proven it supports
+			// tool calling and the diagnostic would be actively wrong here.
+			if i == 0 {
+				if _, known := ResolveModelProfile(modelName); !known {
+					answer += fmt.Sprintf(unverifiedToolModelSuffix, modelName)
+				}
+			}
+			return &AgentTurn{Answer: answer}, nil
 		}
 
 		// Only one proposed/pending tool call is surfaced per turn.

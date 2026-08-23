@@ -857,11 +857,12 @@ func (m *GenericCDAFHIRMapper) DeclarativeMapDocument(
 
 	// ── US Core profiles + narratives ────────────────────────────────────────
 	serialStart := time.Now()
+	narrativeFieldConfig := m.loadNarrativeFieldConfig(ctx, config.InterfaceID, config.DocType)
 	for i, r := range allResources {
 		if config.ProfileMode != "base" {
 			m.profileBuilder.InjectProfile(r, "")
 		}
-		narrative := m.narrativeGen.Generate(r)
+		narrative := m.narrativeGen.Generate(r, nil, narrativeFieldConfig)
 		if narrative != "" {
 			r["text"] = map[string]interface{}{
 				"status": "generated",

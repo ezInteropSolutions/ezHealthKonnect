@@ -28,11 +28,19 @@ RUN npm ci --omit=dev && \
 FROM node:22-alpine
 
 RUN apk upgrade --no-cache && apk add --no-cache curl && \
-    # node:22-alpine ships with npm 10.9.x which bundles picomatch 4.0.3
-    # (CVE-2026-33671). npm cannot self-upgrade on Alpine. Since our container
-    # never invokes npm at runtime, removing the bundled copy is safe and fixes
-    # the vulnerability at the image level rather than suppressing the scan.
-    rm -rf /usr/local/lib/node_modules/npm/node_modules/picomatch
+    # node:22-alpine ships with npm 10.9.x, which bundles several transitive
+    # deps with known CVEs (picomatch CVE-2026-33671, plus tar CVE-2026-59873/
+    # 59874/73566, brace-expansion CVE-2026-13149/14257/69152, ip-address
+    # CVE-2026-69192, sigstore CVE-2026-48815 — found via Trivy image scan).
+    # npm cannot self-upgrade on Alpine. Since our container never invokes npm
+    # at runtime (app.js/server.js only use the already-installed node_modules
+    # copied in below), removing these bundled copies is safe and fixes the
+    # vulnerabilities at the image level rather than suppressing the scan.
+    rm -rf /usr/local/lib/node_modules/npm/node_modules/picomatch \
+           /usr/local/lib/node_modules/npm/node_modules/tar \
+           /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
+           /usr/local/lib/node_modules/npm/node_modules/ip-address \
+           /usr/local/lib/node_modules/npm/node_modules/sigstore
 
 WORKDIR /app
 
@@ -54,6 +62,13 @@ COPY processing/      ./processing/
 COPY utils/           ./utils/
 COPY public/          ./public/
 COPY database/        ./database/
+
+# Architecture/product docs — read by the Go AI knowledge-ingestion service at
+# runtime (services/ai/knowledge_ingestion.go's IngestAppDocs walks this dir
+# for *.md, plus the generated pipeline_step_docs.json under generated/).
+# Previously missing here entirely, so that ingestion path was a silent no-op
+# in any deployment relying on the built image rather than a bind mount.
+COPY architecture/    ./architecture/
 
 # Go binary (compiled in gobuilder)
 COPY --from=gobuilder /app/go-api ./go-api

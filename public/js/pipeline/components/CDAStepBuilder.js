@@ -141,6 +141,7 @@ class CdaToFhirStepBuilder {
         this._loadSections(step.config);
         this._checkOOBVersion(step.config);
         this._loadTransformDescriptions();
+        this._initNarrativePicker(step.config);
 
         return `
 <div id="cdaToFhirBuilder" style="font-size:0.84rem;">
@@ -150,6 +151,7 @@ class CdaToFhirStepBuilder {
         ${this._renderTabButton('sections',    'Sections')}
         ${this._renderTabButton('assembly',    'Assembly')}
         ${this._renderTabButton('terminology', 'Terminology')}
+        ${this._renderTabButton('narrative',   'Narrative Fields')}
         ${this._renderTabButton('advanced',    'Advanced')}
     </div>
     <div id="cdaToFhirTab-general"     style="${this._activeTab === 'general'     ? '' : 'display:none'}">
@@ -163,6 +165,9 @@ class CdaToFhirStepBuilder {
     </div>
     <div id="cdaToFhirTab-terminology" style="${this._activeTab === 'terminology' ? '' : 'display:none'}">
         ${this._renderTerminologyTab(step.config)}
+    </div>
+    <div id="cdaToFhirTab-narrative"   style="${this._activeTab === 'narrative'   ? '' : 'display:none'}">
+        ${this._renderNarrativeTab(step.config)}
     </div>
     <div id="cdaToFhirTab-advanced"    style="${this._activeTab === 'advanced'    ? '' : 'display:none'}">
         ${this._renderAdvancedTab(step.config)}
@@ -282,7 +287,7 @@ class CdaToFhirStepBuilder {
         // underline became literally the same color as the background the
         // instant a tab was clicked, i.e. invisible, even though the very
         // first render (before any click) looked correct.
-        ['general', 'sections', 'assembly', 'terminology', 'advanced'].forEach(t => {
+        ['general', 'sections', 'assembly', 'terminology', 'narrative', 'advanced'].forEach(t => {
             const panel = document.getElementById('cdaToFhirTab-' + t);
             const btn   = document.getElementById('cdaToFhirTabBtn-' + t);
             if (panel) panel.style.display = (t === tabName) ? '' : 'none';
@@ -721,6 +726,90 @@ class CdaToFhirStepBuilder {
         ${group('Code System OID → URI', OID_RULES)}
         ${group('Structural Wiring', WIRING_RULES)}
         ${group('Status Mapping', STATUS_RULES)}`;
+    }
+
+    // ── Narrative Fields tab ──────────────────────────────────────────────────
+    // Controls which fields render in each resource type's auto-generated
+    // narrative (resource.text.div) for CDA-sourced resources. Storage is
+    // per-(interfaceId, documentType) — interface_cda_mappings.custom_mapping_config
+    // ["narrative_fields"] — via controllers/cda_narrative_fields_controller.go.
+    // Populated asynchronously by _initNarrativePicker() (see render()), same
+    // deferred-then-populate-by-ID pattern as _loadSections()/_checkOOBVersion().
+
+    _renderNarrativeTab(cfg) {
+        return `
+        <div style="font-size:0.79rem;color:#475569;margin-bottom:0.9rem;
+                    background:linear-gradient(135deg,#eff6ff 0%,#fdf2f8 100%);
+                    border:1px solid #dbeafe;border-radius:6px;padding:0.6rem 0.75rem;">
+            Controls which fields appear in each resource type's human-readable summary
+            (<code>resource.text.div</code>). Every populated field shows by default —
+            uncheck fields you want hidden for this interface's CDA documents.
+        </div>
+        <div id="cdaToFhirNarrFieldsSections" style="display:flex;flex-direction:column;gap:6px;"></div>
+        <div style="margin-top:10px;">
+            <button type="button" id="cdaToFhirNarrFieldsSaveBtn" class="btn btn-secondary" style="font-size:0.8rem;padding:0.4rem 0.8rem;">
+                <i class="fas fa-save"></i> Save Narrative Fields
+            </button>
+            <span id="cdaToFhirNarrFieldsStatus" style="margin-left:8px;font-size:11px;color:#6b7280;"></span>
+        </div>`;
+    }
+
+    // Resource types this engine can meaningfully narrate for CDA-sourced
+    // documents — the same 17-type set fhir_narrative registers dedicated
+    // shape-aware rendering for (services/fhir_narrative). /api/cda/schema/sections
+    // has no per-section resourceType field to derive this list dynamically
+    // from, unlike HL7's manifest.AllowedResources hint, so this is a fixed
+    // catalog rather than a per-document derivation — deliberately broader
+    // than any single document type produces so every configurable type is
+    // reachable from this one panel.
+    static NARRATIVE_RESOURCE_TYPES = [
+        'AllergyIntolerance', 'Condition', 'MedicationStatement', 'Immunization',
+        'Procedure', 'Patient', 'Encounter', 'Coverage', 'CarePlan', 'Goal',
+        'FamilyMemberHistory', 'ServiceRequest', 'Practitioner', 'Organization',
+        'Location', 'CareTeam', 'DeviceUseStatement',
+    ];
+
+    _initNarrativePicker(cfg) {
+        if (typeof NarrativeFieldsPicker === 'undefined') return;
+        const interfaceId = window.pipelineBuilder?.pipeline?.interfaceId;
+        const docType = (cfg.documentType !== 'auto' && cfg.documentType) || 'CCD';
+        const narrUrl = `/api/cda/narrative-fields?interfaceId=${encodeURIComponent(interfaceId || '')}&docType=${encodeURIComponent(docType)}`;
+
+        this._narrPicker = new NarrativeFieldsPicker({
+            instanceId: `cda-to-fhir-${this._step ? this._step.id : 'new'}`,
+            sectionsEl: null, // resolved lazily below since the tab may not be in the DOM yet
+            statusEl: null,
+            getConfig: async () => {
+                if (!interfaceId) return {};
+                const res = await fetch(narrUrl, { credentials: 'include' }).then(r => r.json());
+                return res.narrativeFields || {};
+            },
+            onSave: async (payload) => {
+                if (!interfaceId) return { success: false, error: 'Save the interface before configuring narrative fields.' };
+                return fetch(`/api/cda/narrative-fields/${encodeURIComponent(interfaceId)}/${encodeURIComponent(docType)}`, {
+                    method: 'PATCH',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                }).then(r => r.json());
+            },
+        });
+
+        // The narrative tab's DOM nodes don't exist until render() returns and
+        // the browser paints — bind sectionsEl/statusEl and render on the next
+        // tick (mirrors _loadSections()'s fetch-then-populate-by-ID pattern,
+        // just without a fetch in between since NARRATIVE_RESOURCE_TYPES is
+        // static).
+        setTimeout(() => {
+            const sectionsEl = document.getElementById('cdaToFhirNarrFieldsSections');
+            const statusEl = document.getElementById('cdaToFhirNarrFieldsStatus');
+            const saveBtn = document.getElementById('cdaToFhirNarrFieldsSaveBtn');
+            if (!sectionsEl || !this._narrPicker) return;
+            this._narrPicker.sectionsEl = sectionsEl;
+            this._narrPicker.statusEl = statusEl;
+            this._narrPicker.render(CdaToFhirStepBuilder.NARRATIVE_RESOURCE_TYPES);
+            if (saveBtn) saveBtn.addEventListener('click', () => this._narrPicker.save());
+        }, 0);
     }
 
     // ── Advanced tab ──────────────────────────────────────────────────────────

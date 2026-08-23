@@ -16,6 +16,7 @@ import (
 	"log"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 
 	"ezhealthkonnect/fhir"
 	"ezhealthkonnect/fhir/r4"
+	fhirnarrative "ezhealthkonnect/services/fhir_narrative"
 	"ezhealthkonnect/hl7" // For composite field parsing
 	"ezhealthkonnect/services/hl7assembly"
 	"ezhealthkonnect/services/manifest"
@@ -138,6 +140,12 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 	resourceTypes := s.extractResourceTypes(fieldMappings)
 	log.Printf("🎯 Will create resources: %v", resourceTypes)
 
+	// Per-interface narrative field configuration (which fields render in each
+	// resource type's text.div) — nil when unset, meaning "render everything"
+	// (the default). Loaded once and threaded through every narrative call in
+	// this Transform() invocation.
+	narrativeFieldConfig := s.loadNarrativeFieldConfig(ctx, request.InterfaceID, messageType)
+
 	// Extract HL7 segments once for all resources
 	enhancedSegments := s.extractEnhancedSegments(request.ParsedHL7Data)
 	if enhancedSegments == nil {
@@ -173,22 +181,12 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 		resourceMappings := s.filterMappingsForResource(fieldMappings, resourceType)
 		log.Printf("📊 Processing %d mappings for %s", len(resourceMappings), resourceType)
 
-		// Create resource using atomic mappings
-		resource, warnings, errors, mappedCount := s.createResourceFromAtomicMappings(
-			resourceType,
-			schema,
-			enhancedSegments,
-			resourceMappings,
+		resources, warnings, errors, mappedCount := s.buildResourcesForType(
+			resourceType, schema, resourceMappings, enhancedSegments, request.ParsedHL7Data, narrativeFieldConfig,
 		)
-
-		if resource != nil {
-			allResources = append(allResources, resource)
-		}
-
+		allResources = append(allResources, resources...)
 		allWarnings = append(allWarnings, warnings...)
 		allErrors = append(allErrors, errors...)
-
-		// Track successfully mapped fields
 		stats.TotalFieldsMapped += mappedCount
 	}
 
@@ -416,6 +414,29 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 			// maps to intent via valueMap, but some senders omit ORC.1 entirely. Default to
 			// "order" per the HL7-to-FHIR IG, which treats a missing ORC.1 as an implicit
 			// new order.
+			if intentVal, hasIntent := r["intent"]; !hasIntent || intentVal == "" {
+				r["intent"] = "order"
+			}
+
+		case "MedicationRequest":
+			// status (1..1, required). RDE^O11's template maps this from ORC.5
+			// (Order Status, Table 0038) — but ORC is frequently omitted or sent
+			// without a status code. Default to "unknown" when absent/invalid,
+			// matching the same posture as Encounter.status elsewhere in this file.
+			validMRStatus := map[string]bool{
+				"active": true, "on-hold": true, "cancelled": true, "completed": true,
+				"entered-in-error": true, "stopped": true, "draft": true, "unknown": true,
+			}
+			if st, ok := r["status"].(string); !ok || !validMRStatus[strings.ToLower(st)] {
+				r["status"] = "unknown"
+			} else {
+				r["status"] = strings.ToLower(st)
+			}
+			// intent (1..1, required). Mirrors the ServiceRequest.intent default
+			// above — ORC.1 (Order Control Code, Table 0119) maps to intent via
+			// valueMap, but a missing/unrecognized ORC.1 defaults to "order" per
+			// the HL7-to-FHIR IG (a missing order-control code is treated as an
+			// implicit new order).
 			if intentVal, hasIntent := r["intent"]; !hasIntent || intentVal == "" {
 				r["intent"] = "order"
 			}
@@ -1363,7 +1384,8 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 		case "Patient", "DiagnosticReport", "Observation", "Encounter", "MessageHeader",
 			"Practitioner", "PractitionerRole", "RelatedPerson", "Coverage", "Condition":
 			if _, hasText := r["text"]; hasText {
-				narrative := s.generateNarrative(rt, r)
+				rtSchema, _ := s.loadFHIRSchema(rt, request.TargetProfile, request.FHIRVersion)
+				narrative := s.generateNarrative(rt, r, rtSchema, narrativeFieldConfig)
 				r["text"] = map[string]interface{}{
 					"status": "generated",
 					"div":    strings.TrimSpace(narrative),
@@ -1589,6 +1611,7 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 	schema *fhir.FHIRSchema,
 	enhancedSegments map[string]interface{},
 	mappings []FieldMapping,
+	narrativeFieldConfig fhirnarrative.NarrativeFieldConfig,
 ) (map[string]interface{}, []string, []string, int) {
 
 	var warnings []string
@@ -1603,6 +1626,15 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 	}
 
 	mappedFieldCount := 0
+
+	// fhirPathSetBy tracks which mapping (as "SEGMENT.field") last wrote each
+	// FHIR path within THIS resource build, so a genuine collision (two
+	// mappings from the same or different segments both targeting the same
+	// output field — e.g. EVN.2 and PV1.44 both → Encounter.period.start) is
+	// visible as a warning instead of silently overwriting with no trace.
+	// Does not decide which mapping wins — that's still whichever runs last
+	// in `mappings` order; see segmentMergePriority for controlling that order.
+	fhirPathSetBy := make(map[string]string)
 
 	// Process each atomic mapping
 	for i, mapping := range mappings {
@@ -1748,6 +1780,16 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 			continue
 		}
 
+		thisSource := mapping.SegmentName + "." + mapping.HL7Field
+		if priorSource, collided := fhirPathSetBy[mapping.FHIRElementPath]; collided && priorSource != thisSource {
+			warnings = append(warnings, fmt.Sprintf(
+				"%s.%s was set by both %s and %s — %s's value wins (last mapping processed)",
+				resourceType, mapping.FHIRElementPath, priorSource, thisSource, thisSource))
+			log.Printf("⚠️  Field collision: %s.%s set by both %s and %s — %s wins",
+				resourceType, mapping.FHIRElementPath, priorSource, thisSource, thisSource)
+		}
+		fhirPathSetBy[mapping.FHIRElementPath] = thisSource
+
 		mappedFieldCount++
 		log.Printf("✅ Successfully mapped %s.%s → %s.%s",
 			mapping.SegmentName, mapping.HL7Field, resourceType, mapping.FHIRElementPath)
@@ -1762,7 +1804,7 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 	// ✅ Generate human-readable narrative based on mapped data
 	textPath := fmt.Sprintf("%s.text", resourceType)
 	if _, exists := schema.Elements[textPath]; exists {
-		narrative := s.generateNarrative(resourceType, resource)
+		narrative := s.generateNarrative(resourceType, resource, schema, narrativeFieldConfig)
 		// Remove any leading/trailing whitespace
 		narrative = strings.TrimSpace(narrative)
 		log.Printf("🔍 Generated narrative length: %d chars, first 100: %s", len(narrative), narrative[:min(100, len(narrative))])
@@ -1786,6 +1828,92 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 	log.Printf("✅ Created %s with %d mapped fields", resourceType, mappedFieldCount)
 	return resource, warnings, errors, mappedFieldCount
 }
+
+// buildResourcesForType builds every resource instance of resourceType from
+// resourceMappings, splitting by driving HL7 segment so that:
+//
+//   - A segment in segmentSpawnsSeparateResource (NK1, GT1, AL1, DG1, PR1, IN1,
+//     ROL, RXA, FT1) produces one resource PER OCCURRENCE, built from ONLY that
+//     occurrence's fields — a repeating segment can never silently collapse to
+//     its last occurrence, and two DIFFERENT segments mapped to the same
+//     resource type (e.g. NK1 next-of-kin + GT1 guarantor both → RelatedPerson)
+//     can never bleed into each other's fields.
+//   - Any other segment (EVN, PV1, MSH, ...) combines all its mappings into ONE
+//     resource built from the deduped enhancedSegments map — so Encounter
+//     (EVN+PV1) and MessageHeader (MSH+EVN+MFE) still get a single merged
+//     resource, not split into multiples. Merge order follows
+//     segmentMergePriority (e.g. PV1 processed after EVN, so PV1 wins on any
+//     field both target) rather than the template's raw mapping array order.
+//
+// Returns every built resource plus the same (warnings, errors, mappedCount)
+// shape createResourceFromAtomicMappings already returns, aggregated across
+// however many resource instances were built.
+func (s *HL7FHIRTransformServiceV3) buildResourcesForType(
+	resourceType string,
+	schema *fhir.FHIRSchema,
+	resourceMappings []FieldMapping,
+	enhancedSegments map[string]interface{},
+	parsedHL7Data map[string]interface{},
+	narrativeFieldConfig fhirnarrative.NarrativeFieldConfig,
+) (resources []map[string]interface{}, allWarnings []string, allErrors []string, totalMapped int) {
+
+	segmentGroupOrder := make([]string, 0, 4)
+	mappingsBySegment := make(map[string][]FieldMapping)
+	for _, m := range resourceMappings {
+		if _, seen := mappingsBySegment[m.SegmentName]; !seen {
+			segmentGroupOrder = append(segmentGroupOrder, m.SegmentName)
+		}
+		mappingsBySegment[m.SegmentName] = append(mappingsBySegment[m.SegmentName], m)
+	}
+
+	buildOne := func(segMap map[string]interface{}, segMappings []FieldMapping, idSuffix string) {
+		resource, warnings, errors, mappedCount := s.createResourceFromAtomicMappings(
+			resourceType, schema, segMap, segMappings, narrativeFieldConfig,
+		)
+		if resource != nil {
+			if idSuffix != "" {
+				if idStr, ok := resource["id"].(string); ok {
+					resource["id"] = idStr + "-" + idSuffix
+				}
+			}
+			resources = append(resources, resource)
+		}
+		allWarnings = append(allWarnings, warnings...)
+		allErrors = append(allErrors, errors...)
+		totalMapped += mappedCount
+	}
+
+	var mergeSegNames []string
+	for _, segName := range segmentGroupOrder {
+		if !segmentSpawnsSeparateResource[segName] {
+			mergeSegNames = append(mergeSegNames, segName)
+			continue
+		}
+
+		occurrences := hl7assembly.ExtractSegmentGroup(parsedHL7Data, segName)
+		for _, occ := range occurrences {
+			occSegments := withSegmentOccurrence(enhancedSegments, segName, occ)
+			buildOne(occSegments, mappingsBySegment[segName], strconv.Itoa(occ.SegmentIndex))
+		}
+	}
+
+	if len(mergeSegNames) > 0 {
+		// Stable sort by segmentMergePriority — a higher-priority segment's
+		// mappings are appended last, so its values win on any fhirPath both
+		// segments target (last-write-wins in createResourceFromAtomicMappings).
+		sort.SliceStable(mergeSegNames, func(i, j int) bool {
+			return segmentMergePriority[mergeSegNames[i]] < segmentMergePriority[mergeSegNames[j]]
+		})
+		var mergedMappings []FieldMapping
+		for _, segName := range mergeSegNames {
+			mergedMappings = append(mergedMappings, mappingsBySegment[segName]...)
+		}
+		buildOne(enhancedSegments, mergedMappings, "")
+	}
+
+	return resources, allWarnings, allErrors, totalMapped
+}
+
 func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messageType, profile string, request ...*TransformRequest) ([]FieldMapping, *ContextLinks, error) {
 	// Determine up-front whether this interface uses the live OOB template.
 	// OOB interfaces must always fall through to STEP 2 so that template updates
@@ -1986,6 +2114,9 @@ func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messag
 // OOB interfaces must bypass stale embedded_mappings / transformation_mapping
 // snapshots so that live OOB template changes take effect immediately.
 func (s *HL7FHIRTransformServiceV3) isInterfacePureOOB(ctx context.Context, interfaceID, messageType string) bool {
+	if s.db == nil {
+		return false // conservative default — matches the "be conservative on error" behavior below
+	}
 	var usesStandard bool
 	err := s.db.QueryRowContext(ctx, `
 		SELECT uses_standard_template
@@ -2030,6 +2161,37 @@ func (s *HL7FHIRTransformServiceV3) loadResourcePolicy(ctx context.Context, inte
 		return nil
 	}
 	return config.ResourcePolicy
+}
+
+// loadNarrativeFieldConfig reads the "narrative_fields" key from
+// interface_message_mappings.custom_mapping_config — the per-interface override
+// of which fields render in each resource type's narrative (resource.text.div).
+// Returns nil when the interface has no custom config or no narrative_fields
+// key, which fhir_narrative.Generate treats as "render every populated field."
+// Mirrors loadResourcePolicy's exact query/unmarshal shape — same column, same
+// (interface_id, message_type) scoping, different JSON key.
+func (s *HL7FHIRTransformServiceV3) loadNarrativeFieldConfig(ctx context.Context, interfaceID, messageType string) fhirnarrative.NarrativeFieldConfig {
+	if interfaceID == "" || s.db == nil {
+		return nil
+	}
+	query := `
+		SELECT custom_mapping_config
+		FROM interface_message_mappings
+		WHERE interface_id = $1 AND message_type = $2
+		  AND custom_mapping_config IS NOT NULL
+		LIMIT 1
+	`
+	var configBytes []byte
+	if err := s.db.QueryRowContext(ctx, query, interfaceID, messageType).Scan(&configBytes); err != nil {
+		return nil
+	}
+	var config struct {
+		NarrativeFields fhirnarrative.NarrativeFieldConfig `json:"narrative_fields"`
+	}
+	if err := json.Unmarshal(configBytes, &config); err != nil {
+		return nil
+	}
+	return config.NarrativeFields
 }
 
 // loadOptionalSegmentConfig reads the "optional_segments" key from
@@ -2192,6 +2354,9 @@ func (s *HL7FHIRTransformServiceV3) loadInterfaceSpecificMappingsByID(ctx contex
 // getInterfaceMessageType returns the message_type configured for an interface.
 // Returns empty string if the interface is not found or has no message type.
 func (s *HL7FHIRTransformServiceV3) getInterfaceMessageType(ctx context.Context, interfaceID string) string {
+	if s.db == nil {
+		return ""
+	}
 	var msgType string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT COALESCE(message_type, '') FROM interfaces WHERE id = $1`, interfaceID,
@@ -2585,6 +2750,71 @@ var wellKnownSegmentToType = map[string]string{
 	"PR1": "Procedure",
 	"ROL": "PractitionerRole",
 	"GT1": "RelatedPerson",
+}
+
+// segmentSpawnsSeparateResource lists the HL7 segments where the HL7 v2-to-FHIR
+// IG treats each occurrence as its own distinct real-world entity — the segment
+// can repeat within a message, and each repetition must become an independent
+// FHIR resource instance, never merged with another occurrence of the same
+// segment or with a different segment mapped to the same resource type. This is
+// a per-segment fact (true regardless of which message type carries the
+// segment), not a per-message-type list, so it generalizes to every message
+// type/event without per-trigger maintenance.
+//
+// Segments intentionally NOT listed here keep the pre-existing merge-into-one-
+// resource behavior: EVN+PV1 both contribute to a single Encounter, MSH+EVN+MFE
+// to a single MessageHeader, etc. AIG/AIL/AIP (SIU) also repeat but their
+// occurrences are meant to become entries in one Appointment's participant[]
+// array (see transform_profile_composites.go's "forEach" composite), not
+// separate Appointment resources — deliberately excluded, not an oversight.
+// OBX/OBR/ORC are excluded because dedicated segment processors
+// (OBRProcessor et al.) already rebuild those resource types array-aware and
+// run after this stage, replacing whatever the generic path produces.
+var segmentSpawnsSeparateResource = map[string]bool{
+	"NK1": true, // next-of-kin → RelatedPerson
+	"GT1": true, // guarantor → RelatedPerson
+	"AL1": true, // allergy → AllergyIntolerance
+	"DG1": true, // diagnosis → Condition
+	"PR1": true, // procedure → Procedure
+	"IN1": true, // insurance → Coverage
+	"ROL": true, // role → PractitionerRole
+	"RXA": true, // administered medication → Immunization
+	"FT1": true, // financial transaction → ChargeItem
+}
+
+// segmentMergePriority controls processing order within a merged (non-spawning)
+// resource build — e.g. EVN+PV1 both feeding one Encounter. Field-setting is
+// last-write-wins, so a HIGHER priority segment's mappings are deliberately
+// processed LAST, guaranteeing its values win over a lower-priority segment's
+// on any FHIR path both segments map into (e.g. Encounter.period.start from
+// both EVN.2 and PV1.44). This makes the winner a deliberate, documented
+// decision instead of an accident of the template JSON's mapping array order.
+// Segments not listed default to priority 0 and keep their original relative
+// order among themselves (stable sort) — this table only needs an entry for
+// segments that actually collide with another merged segment.
+//
+//	EVN < PV1: PV1 (visit-level detail) wins over EVN (event metadata) on any
+//	shared Encounter field — user-directed 2026-08-22.
+var segmentMergePriority = map[string]int{
+	"EVN": 0,
+	"PV1": 1,
+}
+
+// withSegmentOccurrence returns a shallow copy of enhancedSegments with
+// segmentName's entry replaced by a single occurrence (JSON-shaped the same
+// way extractHL7ValueAtomic already expects). Used to build one resource per
+// occurrence of a repeating segment without touching any existing extraction
+// or resource-building code.
+func withSegmentOccurrence(enhancedSegments map[string]interface{}, segmentName string, occ hl7.EnhancedSegment) map[string]interface{} {
+	occMap := enhancedSegmentToMap(occ)
+	out := make(map[string]interface{}, len(enhancedSegments)+1)
+	for k, v := range enhancedSegments {
+		out[k] = v
+	}
+	if occMap != nil {
+		out[segmentName] = occMap
+	}
+	return out
 }
 
 // extractContextLinks parses the "context" and per-resource "contextLinks" blocks
@@ -3074,6 +3304,7 @@ func mergeMappings(base []FieldMapping, delta *MappingDelta) []FieldMapping {
 	for i, fm := range result {
 		indexed[hl7PathKey(fm)] = i
 	}
+	removedIdx := make(map[int]bool) // indices into result dropped by a "remove" action
 
 	for _, ov := range delta.Overrides {
 		switch ov.Action {
@@ -3136,17 +3367,23 @@ func mergeMappings(base []FieldMapping, delta *MappingDelta) []FieldMapping {
 
 		case "remove":
 			if idx, ok := indexed[ov.HL7Path]; ok {
-				// Nil-out the entry; compact below.
-				result[idx] = FieldMapping{} // sentinel: SegmentName == ""
+				removedIdx[idx] = true
 				delete(indexed, ov.HL7Path)
 			}
 		}
 	}
 
-	// Compact: remove sentinel entries.
+	// Compact: drop only the indices "remove" actually marked. A static_value
+	// mapping legitimately has SegmentName == "" (no HL7 source) — filtering
+	// on that field, as an earlier version of this function did via a
+	// zero-value sentinel, silently dropped every static_value "add" override
+	// alongside genuine removals.
+	if len(removedIdx) == 0 {
+		return result
+	}
 	compact := result[:0]
-	for _, fm := range result {
-		if fm.SegmentName != "" {
+	for i, fm := range result {
+		if !removedIdx[i] {
 			compact = append(compact, fm)
 		}
 	}

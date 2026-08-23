@@ -27,7 +27,6 @@
 package hl7assembly
 
 import (
-	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -587,7 +586,7 @@ func buildImmunizationFromGroup(
 	// ── Narrative ─────────────────────────────────────────────────────────────
 	imm["text"] = map[string]interface{}{
 		"status": "generated",
-		"div":    buildImmunizationNarrative(imm),
+		"div":    sharedNarrativeGenerator.Generate(imm, nil, nil),
 	}
 
 	return imm, supportingObs
@@ -763,71 +762,6 @@ func extractLA2Display(la2 string) string {
 	return ""
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Narrative builder
-// ──────────────────────────────────────────────────────────────────────────────
-
-func buildImmunizationNarrative(imm map[string]interface{}) string {
-	var b strings.Builder
-	b.WriteString(`<div xmlns="http://www.w3.org/1999/xhtml">`)
-	b.WriteString(`<table class="grid" style="border-collapse:collapse;width:100%;">`)
-	b.WriteString(`<thead><tr style="background:#f0f0f0;">`)
-	b.WriteString(`<th colspan="2" style="padding:8px;text-align:left;">Immunization</th>`)
-	b.WriteString(`</tr></thead><tbody>`)
-
-	row := func(label, value string) {
-		if value == "" {
-			return
-		}
-		b.WriteString(`<tr><td style="padding:4px 8px;border:1px solid #ddd;font-weight:bold;">`)
-		b.WriteString(escapeXML(label))
-		b.WriteString(`</td><td style="padding:4px 8px;border:1px solid #ddd;">`)
-		b.WriteString(escapeXML(value))
-		b.WriteString(`</td></tr>`)
-	}
-
-	if id, ok := imm["id"].(string); ok {
-		row("ID", id)
-	}
-	if status, ok := imm["status"].(string); ok {
-		row("Status", status)
-	}
-	if vc, ok := imm["vaccineCode"].(map[string]interface{}); ok {
-		if txt, ok2 := vc["text"].(string); ok2 {
-			row("Vaccine", txt)
-		} else if codings, ok2 := vc["coding"].([]interface{}); ok2 && len(codings) > 0 {
-			if c, ok3 := codings[0].(map[string]interface{}); ok3 {
-				row("Vaccine", fmt.Sprintf("%v", c["code"]))
-			}
-		}
-	}
-	if occ, ok := imm["occurrenceDateTime"].(string); ok {
-		row("Administered", occ)
-	}
-	if lot, ok := imm["lotNumber"].(string); ok {
-		row("Lot Number", lot)
-	}
-	if mfr, ok := imm["manufacturer"].(map[string]interface{}); ok {
-		if d, ok2 := mfr["display"].(string); ok2 {
-			row("Manufacturer", d)
-		}
-	}
-	if route, ok := imm["route"].(map[string]interface{}); ok {
-		if txt, ok2 := route["text"].(string); ok2 {
-			row("Route", txt)
-		}
-	}
-	if site, ok := imm["site"].(map[string]interface{}); ok {
-		if txt, ok2 := site["text"].(string); ok2 {
-			row("Site", txt)
-		}
-	}
-	if subj, ok := imm["patient"].(map[string]interface{}); ok {
-		if ref, ok2 := subj["reference"].(string); ok2 {
-			row("Patient", ref)
-		}
-	}
-
-	b.WriteString(`</tbody></table></div>`)
-	return b.String()
-}
+// Immunization narrative generation — see sharedNarrativeGenerator in
+// assembly.go. Used to have its own hand-written builder here; now delegates
+// to services/fhir_narrative's dedicated Immunization builder.

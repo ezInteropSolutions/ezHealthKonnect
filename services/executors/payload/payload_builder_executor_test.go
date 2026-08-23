@@ -12,7 +12,7 @@ import (
 
 func runPayloadBuilder(t *testing.T, config map[string]interface{}, inputData map[string]interface{}) map[string]interface{} {
 	t.Helper()
-	executor := NewPayloadBuilderExecutor()
+	executor := NewPayloadBuilderExecutor(nil)
 	step := &models.TransformationStep{
 		StepName: "Test Payload Builder",
 		StepType: "payload.builder",

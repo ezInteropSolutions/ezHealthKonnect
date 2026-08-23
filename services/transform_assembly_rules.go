@@ -141,20 +141,33 @@ func (s *HL7FHIRTransformServiceV3) applyOneAssemblyRule(
 		}
 
 	case "focus":
-		// Append { reference: "TargetType/id" } to source.focus[] when not present.
-		targetID := assemblyFindID(resources, rule.TargetResource)
-		if targetID == "" {
+		// Append { reference: "TargetType/id" } to source.focus[] for EVERY matching
+		// TargetResource instance, not just the first — a resource type can now spawn
+		// multiple instances (e.g. IN1→Coverage, ROL→PractitionerRole repeat-instancing),
+		// and each must get its own focus link, same collection pattern as "result" below.
+		var targetIDs []string
+		for _, r := range resources {
+			if rt, _ := r["resourceType"].(string); rt != rule.TargetResource {
+				continue
+			}
+			if id, _ := r["id"].(string); id != "" {
+				targetIDs = append(targetIDs, id)
+			}
+		}
+		if len(targetIDs) == 0 {
 			return resources
 		}
-		ref := map[string]interface{}{"reference": rule.TargetResource + "/" + targetID}
 		for _, r := range resources {
 			if rt, _ := r["resourceType"].(string); rt != rule.SourceResource {
 				continue
 			}
 			focus, _ := r[rule.ReferencePath].([]interface{})
-			if !assemblyRefPresent(focus, targetID) {
-				r[rule.ReferencePath] = append(focus, ref)
+			for _, targetID := range targetIDs {
+				if !assemblyRefPresent(focus, targetID) {
+					focus = append(focus, map[string]interface{}{"reference": rule.TargetResource + "/" + targetID})
+				}
 			}
+			r[rule.ReferencePath] = focus
 		}
 
 	case "result":

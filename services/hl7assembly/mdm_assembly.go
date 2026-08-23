@@ -24,7 +24,6 @@ package hl7assembly
 
 import (
 	"encoding/base64"
-	"fmt"
 	"log"
 	"strings"
 
@@ -271,7 +270,7 @@ func AssembleMDMDocument(
 	// ── Narrative ─────────────────────────────────────────────────────────────
 	docRef["text"] = map[string]interface{}{
 		"status": "generated",
-		"div":    buildDocRefNarrative(docRef),
+		"div":    sharedNarrativeGenerator.Generate(docRef, nil, nil),
 	}
 
 	// ── Rebuild resource list ─────────────────────────────────────────────────
@@ -399,54 +398,6 @@ func xcnToRef(xcn string) map[string]interface{} {
 	return ref
 }
 
-// buildDocRefNarrative generates a minimal FHIR-compliant XHTML narrative for a
-// DocumentReference resource.
-func buildDocRefNarrative(dr map[string]interface{}) string {
-	var b strings.Builder
-	b.WriteString(`<div xmlns="http://www.w3.org/1999/xhtml">`)
-	b.WriteString(`<table class="grid" style="border-collapse:collapse;width:100%;">`)
-	b.WriteString(`<thead><tr style="background:#f0f0f0;">`)
-	b.WriteString(`<th colspan="2" style="padding:8px;text-align:left;">DocumentReference</th>`)
-	b.WriteString(`</tr></thead><tbody>`)
-
-	row := func(label, value string) {
-		if value == "" {
-			return
-		}
-		b.WriteString(`<tr><td style="padding:4px 8px;border:1px solid #ddd;font-weight:bold;">`)
-		b.WriteString(escapeXML(label))
-		b.WriteString(`</td><td style="padding:4px 8px;border:1px solid #ddd;">`)
-		b.WriteString(escapeXML(value))
-		b.WriteString(`</td></tr>`)
-	}
-
-	if id, ok := dr["id"].(string); ok {
-		row("ID", id)
-	}
-	if status, ok := dr["status"].(string); ok {
-		row("Status", status)
-	}
-	if ds, ok := dr["docStatus"].(string); ok {
-		row("Doc Status", ds)
-	}
-	if t, ok := dr["type"].(map[string]interface{}); ok {
-		if txt, ok2 := t["text"].(string); ok2 {
-			row("Type", txt)
-		} else if codings, ok2 := t["coding"].([]interface{}); ok2 && len(codings) > 0 {
-			if c, ok3 := codings[0].(map[string]interface{}); ok3 {
-				row("Type", fmt.Sprintf("%v", c["code"]))
-			}
-		}
-	}
-	if d, ok := dr["date"].(string); ok {
-		row("Date", d)
-	}
-	if subj, ok := dr["subject"].(map[string]interface{}); ok {
-		if ref, ok2 := subj["reference"].(string); ok2 {
-			row("Subject", ref)
-		}
-	}
-
-	b.WriteString(`</tbody></table></div>`)
-	return b.String()
-}
+// DocumentReference narrative generation — see sharedNarrativeGenerator in
+// assembly.go. Used to have its own hand-written builder here; now delegates
+// to services/fhir_narrative's generic renderer.

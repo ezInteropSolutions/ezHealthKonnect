@@ -31,9 +31,16 @@ dist/
 # Docs and non-runtime files
 *.md
 docs/
-architecture/
 connectivity/
 *.txt
+# architecture/*.md IS read at runtime by services/ai/knowledge_ingestion.go's
+# IngestAppDocs (AI knowledge-base ingestion) — re-include it despite the
+# blanket *.md rule above. This directory was previously fully excluded here,
+# meaning that ingestion path was a silent no-op in any deployment relying on
+# the built image rather than a bind mount (see the Dockerfile's
+# "COPY architecture/" step, added for the same reason).
+!architecture/**/*.md
+!architecture/**/*.json
 *.log
 *.docx
 *.png

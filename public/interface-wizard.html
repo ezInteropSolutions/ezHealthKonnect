@@ -1051,6 +1051,27 @@
                                     </div>
                                 </div>
 
+                                <!-- Narrative Field Configuration -->
+                                <div id="narr-fields-panel" style="display:none;margin:12px 0;padding:14px 16px;background:#f8faff;border:1px solid #e0e7ff;border-radius:8px">
+                                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                                        <span style="font-size:13px;font-weight:700;color:#1e3a8a">Narrative Fields</span>
+                                        <span id="narr-fields-badge" style="display:none;font-size:10px;background:#1e3a8a;color:#fff;border-radius:99px;padding:1px 7px;font-weight:600"></span>
+                                    </div>
+                                    <p style="font-size:11px;color:#6b7280;margin:0 0 10px;line-height:1.5">
+                                        Controls which fields appear in each resource type's human-readable summary
+                                        (<code>resource.text.div</code>). <strong>Every populated field shows by default</strong> —
+                                        uncheck fields you want hidden for this interface. Collapsed by default; expand a resource
+                                        type to customize it.
+                                    </p>
+                                    <div id="narr-fields-sections" style="display:flex;flex-direction:column;gap:6px"></div>
+                                    <div style="margin-top:10px">
+                                        <button id="narr-fields-save-btn" class="config-btn secondary" onclick="window.step4FHIR.saveNarrativeFields()" style="font-size:11px;padding:5px 14px">
+                                            Save Narrative Fields
+                                        </button>
+                                        <span id="narr-fields-status" style="margin-left:8px;font-size:11px;color:#6b7280"></span>
+                                    </div>
+                                </div>
+
                                 <!-- Transformation Results Container -->
                                 <div id="fhir-transformation-results" class="fhir-transformation-results">
                                     <div class="transformation-placeholder">
@@ -1623,6 +1644,10 @@
 
     <!-- Wizard Navigation with FHIR Step Skip Logic -->
     <script src="js/core/wizard-navigation.js"></script>
+
+    <!-- Shared narrative field picker (also used by the pipeline builder's
+         hl7_fhir_transform/cda.to_fhir/fhir.build step panels) -->
+    <script src="/js/shared/NarrativeFieldsPicker.js"></script>
 
     <!-- Step 4 FHIR Transformation Module -->
     <script src="js/step4-fhir-transform.js"></script>

@@ -518,89 +518,19 @@ Pipeline Builder UI: drag-and-drop visual editor at /pipeline-builder.html?inter
   - Save button commits the pipeline to the database`,
 	},
 
-	// ── Step Types Reference ──────────────────────────────────────────────────
-	{
-		ref: "EHK_Step_Types_Core",
-		content: `ezHealthKonnect Pipeline Step Types — Core Mapping
-
-step_type: field_mapping
-  Maps fields from source to target format.
-  Config: { "mappings": [{"source": "PID.3", "target": "Patient.identifier[0].value"}] }
-  Supports: HL7 paths (PID.3), FHIR paths (Patient.name[0].given), JSON paths (data.key)
-  Transforms: date_format, code_lookup, concatenate, split, uppercase, lowercase, default_value
-
-step_type: enrichment.script
-  Executes a user-written JavaScript function named transform(input).
-  Input object structure:
-    input.enhancedSegments  — HL7 segments as nested objects (e.g. input.enhancedSegments.PID)
-    input._metadata         — message ID, type, interface ID, priority
-    input._routing          — routing decisions (set nextStep or nextSteps array)
-    input[anyKey]           — data set by previous steps is available here
-  Must return the modified input object.
-  Example:
-    function transform(input) {
-        var pid = input.enhancedSegments.PID;
-        var lastName = pid.fields.find(f => f.key === "PID.5").value.split("^")[0];
-        input.patientLastName = lastName;
-        return input;
-    }
-
-step_type: enrichment.api
-  Calls an external REST API and merges the response into the pipeline data.
-  Config: { "url": "https://api.example.com/lookup", "method": "GET",
-            "headers": {}, "responseField": "apiResult",
-            "inputMapping": {"patientId": "PID.3"} }
-
-step_type: enrichment.database
-  Queries a database and adds results to the pipeline data.
-  Config: { "connectionType": "postgresql", "query": "SELECT * FROM patients WHERE mrn = $1",
-            "params": ["PID.3"], "resultField": "dbLookup" }`,
-	},
-
-	{
-		ref: "EHK_Step_Types_Control",
-		content: `ezHealthKonnect Pipeline Step Types — Control Flow
-
-step_type: conditional (If-Then-Else)
-  Evaluates a condition and routes to different steps.
-  Config:
-    condition: { "field": "MSH.9.1", "operator": "equals", "value": "ADT" }
-    thenAction: { "action": "route_to_step", "targetStepId": "<uuid>" }
-    elseAction: { "action": "route_to_step", "targetStepId": "<uuid>" }
-  Operators: equals, not_equals, contains, starts_with, ends_with, greater_than,
-             less_than, is_empty, is_not_empty, regex_match
-
-step_type: switch_case (Switch/Case)
-  Routes to different steps based on a field value (like a switch statement).
-  Config:
-    field: "MSH.9.1"
-    cases: [
-      { "value": "ADT", "action": "route_to_step", "targetStepIds": ["step-a", "step-b"] },
-      { "value": "ORU", "action": "route_to_step", "targetStepId": "step-c" }
-    ]
-    defaultAction: { "action": "route_to_step", "targetStepId": "step-default" }
-
-step_type: data_masking
-  Masks PHI fields by replacing with hashed/redacted values.
-  Config: { "fields": ["PID.5", "PID.7", "PID.11"], "strategy": "hash" }
-  Strategies: hash (SHA-256 prefix), redact (replace with ***), pseudonymize (deterministic)
-
-step_type: remove_duplicates
-  Deduplicates messages based on a key field within a time window.
-  Config: { "keyField": "MSH.10", "windowSeconds": 3600 }
-
-step_type: format_conversion
-  Converts between message formats.
-  Config: { "from": "hl7_v2", "to": "fhir_r4", "resourceType": "Patient" }
-
-step_type: fhir_validation
-  Validates a FHIR resource against the R4 profile.
-  Config: { "resourceType": "Bundle", "failOnError": false }
-
-step_type: connector.inbound / connector.outbound
-  Wires an inbound or outbound connector into the pipeline.
-  Config: { "connectorType": "tcp_mllp_inbound", "config": { "host": "0.0.0.0", "port": 2575 } }`,
-	},
+	// NOTE: step-type-specific entries (field_mapping/enrichment.*, conditional/
+	// switch_case, data_masking, remove_duplicates, connector.inbound/outbound,
+	// fhir_validation) used to live here as hand-written Go string literals.
+	// Removed — that content had already drifted from the real step schema
+	// (e.g. field_mapping's example used {"source","target"} instead of the
+	// actual {"hl7Field","fhirPath"} keys) and covered none of the CDA/format-
+	// builder step families. Pipeline-step documentation is now sourced from
+	// the real, continuously-maintained public/js/pipeline/documentation/
+	// registry via IngestPipelineStepDocs (pipeline_step_docs_ingestion.go),
+	// wired into IngestAppDocs below — one source of truth instead of two.
+	// format_conversion (previously documented here) never had a real
+	// executor anywhere in the Go codebase and was dropped entirely, not
+	// migrated.
 
 	// ── Connectors Reference ──────────────────────────────────────────────────
 	{
@@ -1051,47 +981,11 @@ DFT — Detailed Financial Transaction
   DFT^P03  Post Detail Financial Transaction → FHIR: ChargeItem`,
 	},
 
-	// ── Script Step Config (short reference — avoids LLM context overflow) ────
-	{
-		ref: "EHK_Step_Types_Script_Config",
-		content: `ezHealthKonnect — enrichment.script Step Configuration
-
-Step type: enrichment.script
-Purpose: run custom JavaScript to transform the message in-flight.
-
-Minimal config:
-{
-  "script": "function transform(input) {\n  return input;\n}",
-  "outputField": "result",
-  "timeout": 5000
-}
-
-Full config fields:
-  script        string   JavaScript source. Must define function transform(input){...}
-  outputField   string   Where to write the return value (dot-path, e.g. "result" or "patient.name")
-  timeout       number   Max execution time in milliseconds (default 5000)
-  onError       string   "suppress" (default) or "rethrow"
-
-Input object passed to transform():
-  input.enhancedSegments   map of HL7 segments (PID, MSH, PV1, OBX, etc.)
-  input.segmentOrder       array of segment keys in message order
-  input.messageType        { code, event, structure } e.g. { code:"ADT", event:"A01" }
-  input._metadata          pipeline metadata (interfaceId, messageId, receivedAt)
-  input.<outputField>      any value set by a previous step
-
-Return value: the modified input object (or a new object).
-The return value is merged back into the pipeline data under outputField.
-
-Example — extract patient last name:
-function transform(input) {
-  var pid = input.enhancedSegments && input.enhancedSegments["PID"];
-  if (!pid) return input;
-  var pid5 = (pid.fields || []).find(function(f){ return f.key === "PID.5"; });
-  var lastName = pid5 ? pid5.value.split("^")[0] : "";
-  input.patientLastName = lastName;
-  return input;
-}`,
-	},
+	// NOTE: EHK_Step_Types_Script_Config (enrichment.script config reference)
+	// removed for the same reason as the block above — fully superseded by
+	// public/js/pipeline/documentation/EnrichmentStepsDocs.js's
+	// pre.enrichment.script entry (aliased from enrichment.script), now
+	// ingested via IngestPipelineStepDocs.
 
 	// ── HL7 ACK Codes ─────────────────────────────────────────────────────────
 	{

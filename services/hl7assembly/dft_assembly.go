@@ -27,7 +27,6 @@
 package hl7assembly
 
 import (
-	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -381,7 +380,7 @@ func buildChargeItemFromFT1(
 	// narrative
 	ci["text"] = map[string]interface{}{
 		"status": "generated",
-		"div":    buildChargeItemNarrative(ci),
+		"div":    sharedNarrativeGenerator.Generate(ci, nil, nil),
 	}
 
 	return ci
@@ -491,7 +490,7 @@ func buildProcedureFromPR1(
 	// narrative
 	proc["text"] = map[string]interface{}{
 		"status": "generated",
-		"div":    buildProcedureNarrative(proc),
+		"div":    sharedNarrativeGenerator.Generate(proc, nil, nil),
 	}
 
 	return proc
@@ -579,7 +578,7 @@ func buildConditionFromDG1(
 	// narrative
 	cond["text"] = map[string]interface{}{
 		"status": "generated",
-		"div":    buildConditionNarrative(cond),
+		"div":    sharedNarrativeGenerator.Generate(cond, nil, nil),
 	}
 
 	return cond, condID
@@ -625,139 +624,9 @@ func ft1ChargeItemID(ft1 hl7.EnhancedSegment) string {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Narrative builders
+// Narrative generation — see sharedNarrativeGenerator in assembly.go. ChargeItem,
+// Procedure, and Condition narratives used to have their own hand-written
+// builders here; all three now delegate to services/fhir_narrative (Procedure
+// and Condition get that package's dedicated builders; ChargeItem renders
+// generically).
 // ──────────────────────────────────────────────────────────────────────────────
-
-func buildChargeItemNarrative(ci map[string]interface{}) string {
-	var b strings.Builder
-	b.WriteString(`<div xmlns="http://www.w3.org/1999/xhtml">`)
-	b.WriteString(`<table class="grid" style="border-collapse:collapse;width:100%;">`)
-	b.WriteString(`<thead><tr style="background:#f0f0f0;">`)
-	b.WriteString(`<th colspan="2" style="padding:8px;text-align:left;">ChargeItem</th>`)
-	b.WriteString(`</tr></thead><tbody>`)
-
-	row := func(label, value string) {
-		if value == "" {
-			return
-		}
-		b.WriteString(`<tr><td style="padding:4px 8px;border:1px solid #ddd;font-weight:bold;">`)
-		b.WriteString(escapeXML(label))
-		b.WriteString(`</td><td style="padding:4px 8px;border:1px solid #ddd;">`)
-		b.WriteString(escapeXML(value))
-		b.WriteString(`</td></tr>`)
-	}
-
-	if id, ok := ci["id"].(string); ok {
-		row("ID", id)
-	}
-	if status, ok := ci["status"].(string); ok {
-		row("Status", status)
-	}
-	if code, ok := ci["code"].(map[string]interface{}); ok {
-		if txt, ok2 := code["text"].(string); ok2 {
-			row("Code", txt)
-		} else if codings, ok2 := code["coding"].([]interface{}); ok2 && len(codings) > 0 {
-			if c, ok3 := codings[0].(map[string]interface{}); ok3 {
-				row("Code", fmt.Sprintf("%v", c["code"]))
-			}
-		}
-	}
-	if occ, ok := ci["occurrenceDateTime"].(string); ok {
-		row("Date", occ)
-	}
-	if subj, ok := ci["subject"].(map[string]interface{}); ok {
-		if ref, ok2 := subj["reference"].(string); ok2 {
-			row("Subject", ref)
-		}
-	}
-
-	b.WriteString(`</tbody></table></div>`)
-	return b.String()
-}
-
-func buildProcedureNarrative(proc map[string]interface{}) string {
-	var b strings.Builder
-	b.WriteString(`<div xmlns="http://www.w3.org/1999/xhtml">`)
-	b.WriteString(`<table class="grid" style="border-collapse:collapse;width:100%;">`)
-	b.WriteString(`<thead><tr style="background:#f0f0f0;">`)
-	b.WriteString(`<th colspan="2" style="padding:8px;text-align:left;">Procedure</th>`)
-	b.WriteString(`</tr></thead><tbody>`)
-
-	row := func(label, value string) {
-		if value == "" {
-			return
-		}
-		b.WriteString(`<tr><td style="padding:4px 8px;border:1px solid #ddd;font-weight:bold;">`)
-		b.WriteString(escapeXML(label))
-		b.WriteString(`</td><td style="padding:4px 8px;border:1px solid #ddd;">`)
-		b.WriteString(escapeXML(value))
-		b.WriteString(`</td></tr>`)
-	}
-
-	if id, ok := proc["id"].(string); ok {
-		row("ID", id)
-	}
-	if status, ok := proc["status"].(string); ok {
-		row("Status", status)
-	}
-	if code, ok := proc["code"].(map[string]interface{}); ok {
-		if txt, ok2 := code["text"].(string); ok2 {
-			row("Code", txt)
-		}
-	}
-	if dt, ok := proc["performedDateTime"].(string); ok {
-		row("Performed", dt)
-	}
-	if subj, ok := proc["subject"].(map[string]interface{}); ok {
-		if ref, ok2 := subj["reference"].(string); ok2 {
-			row("Subject", ref)
-		}
-	}
-
-	b.WriteString(`</tbody></table></div>`)
-	return b.String()
-}
-
-func buildConditionNarrative(cond map[string]interface{}) string {
-	var b strings.Builder
-	b.WriteString(`<div xmlns="http://www.w3.org/1999/xhtml">`)
-	b.WriteString(`<table class="grid" style="border-collapse:collapse;width:100%;">`)
-	b.WriteString(`<thead><tr style="background:#f0f0f0;">`)
-	b.WriteString(`<th colspan="2" style="padding:8px;text-align:left;">Condition</th>`)
-	b.WriteString(`</tr></thead><tbody>`)
-
-	row := func(label, value string) {
-		if value == "" {
-			return
-		}
-		b.WriteString(`<tr><td style="padding:4px 8px;border:1px solid #ddd;font-weight:bold;">`)
-		b.WriteString(escapeXML(label))
-		b.WriteString(`</td><td style="padding:4px 8px;border:1px solid #ddd;">`)
-		b.WriteString(escapeXML(value))
-		b.WriteString(`</td></tr>`)
-	}
-
-	if id, ok := cond["id"].(string); ok {
-		row("ID", id)
-	}
-	if code, ok := cond["code"].(map[string]interface{}); ok {
-		if txt, ok2 := code["text"].(string); ok2 {
-			row("Diagnosis", txt)
-		} else if codings, ok2 := code["coding"].([]interface{}); ok2 && len(codings) > 0 {
-			if c, ok3 := codings[0].(map[string]interface{}); ok3 {
-				row("Diagnosis", fmt.Sprintf("%v %v", c["code"], c["display"]))
-			}
-		}
-	}
-	if dt, ok := cond["recordedDate"].(string); ok {
-		row("Recorded", dt)
-	}
-	if subj, ok := cond["subject"].(map[string]interface{}); ok {
-		if ref, ok2 := subj["reference"].(string); ok2 {
-			row("Subject", ref)
-		}
-	}
-
-	b.WriteString(`</tbody></table></div>`)
-	return b.String()
-}

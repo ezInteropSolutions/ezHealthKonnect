@@ -298,6 +298,13 @@ func main() {
 			retentionSvc := services.NewRetentionEnforcementService(db, 0, objectStorageService)
 			retentionSvc.Start(context.Background())
 
+			// BULK REPROCESS: background worker for the Messages page's "select all N
+			// matching / requeue" action (V213 migration). Polls bulk_reprocess_jobs and
+			// processes active jobs in checkpointed batches — see
+			// services/bulk_reprocess_service.go's doc comment for the full design.
+			bulkReprocessSvc := services.NewBulkReprocessService(db, processingEngine)
+			bulkReprocessSvc.Start(context.Background())
+
 			// Rebuild HL7→FHIR OOB templates for all IG-covered message types.
 			// Runs in the background so it never delays server startup.
 			// Triggered every boot so new IG seed data (e.g. V115 anchors) is
@@ -760,7 +767,11 @@ func main() {
 						hadExisting = true
 					}
 				}
-				div := narrativeGen.Generate(resource)
+				var narrativeSchema *fhir.FHIRSchema
+				if cp, ok := r4.GetRegistry().Get("R4", fmt.Sprintf("%v", resource["resourceType"]), "base"); ok {
+					narrativeSchema = fhir.BuildLegacySchemaShape(cp)
+				}
+				div := narrativeGen.Generate(resource, narrativeSchema, nil)
 				c.JSON(http.StatusOK, gin.H{
 					"success":   true,
 					"narrative": div,
@@ -778,6 +789,10 @@ func main() {
 			// ADDED: Optional segment block toggles (per-interface opt-in mappings)
 			optionalSegCtrl := controllers.NewOptionalSegmentsController(db)
 			optionalSegCtrl.RegisterRoutes(fhirGroup)
+
+			// ADDED: Narrative field picker catalog (per-interface narrative_fields config)
+			narrativeFieldsCtrl := controllers.NewNarrativeFieldsController()
+			narrativeFieldsCtrl.RegisterRoutes(fhirGroup)
 
 			// ADDED: CDA Schema Browser + Mapping Delta APIs (/api/cda/*)
 			// Shares the same CDA schema loader and mapper used by the cda.to_fhir executor.
@@ -815,6 +830,13 @@ func main() {
 				cdaDocCtrl := controllers.NewCDADocumentController(cdaDocumentStore, cdaParserForStore)
 				cdaDocCtrl.RegisterRoutes(api.Group("/cda/documents"))
 				log.Printf("✅ CDA Document Controller registered (/api/cda/documents)")
+
+				// Narrative field configuration for cda.to_fhir steps (per
+				// interface + document_type) — CDA-side mirror of
+				// optional-segments' narrative_fields support.
+				cdaNarrativeFieldsCtrl := controllers.NewCDANarrativeFieldsController(db)
+				cdaNarrativeFieldsCtrl.RegisterRoutes(api.Group("/cda"))
+				log.Printf("✅ CDA Narrative Fields Controller registered (/api/cda/narrative-fields)")
 			}
 
 			// ADDED: FHIR Schema Browser API (/api/fhir/*) — backs the
@@ -1577,16 +1599,21 @@ func main() {
 
 					// Build parsedHL7Data map from the enhanced result.
 					//
-					// "segmentGroups" — used by hl7assembly.ExtractSegmentGroup.
-					//   Must be map[string][]EnhancedSegment (slices per segment type).
-					//   parsed.EnhancedSegments is map[string]EnhancedSegment (one per type),
-					//   so we wrap each segment in a single-element slice.
+					// "segmentGroups" — used by hl7assembly.ExtractSegmentGroup and the
+					//   Transform() repeat-instancing path (multiple NK1/AL1/DG1/... occurrences
+					//   must each become their own resource, not collapse to one). The parser
+					//   already produces this as parsed.SegmentGroups — use it directly instead
+					//   of wrapping the deduped parsed.EnhancedSegments (which would silently
+					//   collapse every repeating segment back down to its last occurrence).
 					//
 					// "enhancedSegments" — used by the V3 field-mapper (extractEnhancedSegments).
 					//   Accepts the original flat map[string]EnhancedSegment.
-					segmentGroups := make(map[string][]hl7.EnhancedSegment, len(parsed.EnhancedSegments))
-					for k, v := range parsed.EnhancedSegments {
-						segmentGroups[k] = []hl7.EnhancedSegment{v}
+					segmentGroups := parsed.SegmentGroups
+					if segmentGroups == nil {
+						segmentGroups = make(map[string][]hl7.EnhancedSegment, len(parsed.EnhancedSegments))
+						for k, v := range parsed.EnhancedSegments {
+							segmentGroups[k] = []hl7.EnhancedSegment{v}
+						}
 					}
 					parsedMap := map[string]interface{}{
 						"segmentGroups":    segmentGroups,

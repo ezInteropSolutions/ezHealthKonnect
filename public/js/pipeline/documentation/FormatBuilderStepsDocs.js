@@ -54,6 +54,7 @@
                     'Build a FHIR resource from a database query\'s result rows (via a Database Enrichment step)',
                     'Assemble a multi-resource Bundle from a non-CDA, non-HL7 source system by chaining several fhir.build steps into one Payload Builder (FHIR Bundle mode) step',
                     'Populate a field conditionally (e.g. "if source code system is LOINC do X, else do Y") by computing/normalizing the value in an upstream if_then_else or switch_case step\'s set_value/set_field action, then reading the normalized result here with an ordinary sourcePath — no per-field conditional logic exists (or is needed) inside fhir.build itself; see the troubleshooting entry below for a worked example.',
+                    'Control which fields appear in this resource\'s auto-generated narrative (resource.text.div) via the Narrative Fields section — single-resource-type mode, pre-scoped to this step\'s own resourceType, sharing the same per-(interface, message type) storage the interface wizard and this step\'s core.mapping/cda.to_fhir siblings use.',
                 ],
                 example: {
                     resourceType: 'Patient',
@@ -108,6 +109,11 @@
                         issue: 'I need "if source field A has value X, populate this field one way, else populate it another way" — fhir.build\'s field row has no condition/predicate option',
                         cause: 'This is by design, not a gap: conditional branching already has a mature, general home at the pipeline level (if_then_else / switch_case step types), and duplicating that logic into fhir.build\'s own field-row schema would fragment the same concept across two step types instead of composing them.',
                         fix: 'Add an if_then_else (or switch_case) step BEFORE this one. Its condition evaluates the source field, and its set_value action (e.g. {action: "set_value", targetField: "message.maritalStatusNormalized", value: "M"}) writes the resolved value onto a plain message.* field. Then this step\'s field row just reads it normally: {targetPath: "maritalStatus", sourcePath: "message.maritalStatusNormalized"} — no conditional logic needed here at all, since the upstream step already resolved which value applies.',
+                    },
+                    {
+                        issue: 'Narrative Fields section shows "Save the interface before configuring narrative fields"',
+                        cause: 'Narrative field visibility is saved via a PATCH to /api/fhir/optional-segments/:interfaceId/:messageType — the step needs a resolved interface_id (from step.config.interface_id or the pipeline\'s own interfaceId) to know where to save.',
+                        fix: 'Save the interface (and pipeline) first, then reopen this step\'s configuration to set narrative field visibility.',
                     },
                 ],
                 stepOutput: {

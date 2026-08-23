@@ -1934,6 +1934,16 @@ class PropertiesPanel {
                     ">
                         <i class="fas fa-microscope"></i> Assembly
                     </button>
+                    <button class="config-tab" data-tab="narrative" style="
+                        padding: 0.5rem 1rem;
+                        border: none;
+                        background: none;
+                        cursor: pointer;
+                        color: #64748b;
+                        font-weight: 500;
+                    ">
+                        <i class="fas fa-align-left"></i> Narrative Fields
+                    </button>
                 </div>
 
                 <!-- Tab 1: Visual Mapping -->
@@ -2085,6 +2095,27 @@ class PropertiesPanel {
                 <!-- Tab 5: Assembly -->
                 <div class="config-tab-content" data-tab-content="assembly" style="display: none;">
                     ${this._renderAssemblyTab(step)}
+                </div>
+
+                <!-- Tab: Narrative Fields — which fields render in each resource
+                     type's auto-generated narrative (resource.text.div). Same
+                     storage/endpoints the interface wizard's Step 4 panel uses
+                     (interface_message_mappings.custom_mapping_config, keyed by
+                     this same interfaceId+messageType) — see
+                     public/js/shared/NarrativeFieldsPicker.js. -->
+                <div class="config-tab-content" data-tab-content="narrative" style="display: none;">
+                    <p style="font-size:12px;color:#6b7280;margin:0 0 10px;line-height:1.5;">
+                        Controls which fields appear in each resource type's human-readable summary
+                        (<code>resource.text.div</code>). Every populated field shows by default —
+                        uncheck fields you want hidden for this interface.
+                    </p>
+                    <div id="narrFieldsSections-${step.id}" style="display:flex;flex-direction:column;gap:6px;"></div>
+                    <div style="margin-top:10px;">
+                        <button id="narrFieldsSaveBtn-${step.id}" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                            <i class="fas fa-save"></i> Save Narrative Fields
+                        </button>
+                        <span id="narrFieldsStatus-${step.id}" style="margin-left:8px;font-size:11px;color:#6b7280;"></span>
+                    </div>
                 </div>
             </div>
         `;
@@ -2883,6 +2914,47 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 }
             });
         });
+
+        // === Narrative Fields tab (hl7_fhir_transform steps only — the
+        // section only exists in the DOM when createMappingConfigSection
+        // rendered it) === Same storage/endpoints as the interface wizard's
+        // Step 4 panel (see public/js/shared/NarrativeFieldsPicker.js).
+        const narrSectionsEl = form.querySelector(`#narrFieldsSections-${step.id}`);
+        if (narrSectionsEl && typeof NarrativeFieldsPicker !== 'undefined') {
+            const interfaceId = step.config?.interface_id || this.builder.pipeline?.interfaceId;
+            const messageType = step.config?.message_type || this.builder.pipeline?.messageType || 'ADT^A01';
+            const optSegUrl = `/api/fhir/optional-segments?messageType=${encodeURIComponent(messageType)}` +
+                (interfaceId ? `&interfaceId=${encodeURIComponent(interfaceId)}` : '');
+
+            const picker = new NarrativeFieldsPicker({
+                instanceId: `pipeline-hl7fhir-${step.id}`,
+                sectionsEl: narrSectionsEl,
+                statusEl: form.querySelector(`#narrFieldsStatus-${step.id}`),
+                getConfig: async () => {
+                    const res = await fetch(optSegUrl, { credentials: 'include' }).then(r => r.json());
+                    return res.narrativeFields || {};
+                },
+                onSave: async (payload) => {
+                    if (!interfaceId) return { success: false, error: 'Save the interface before configuring narrative fields.' };
+                    return fetch(`/api/fhir/optional-segments/${encodeURIComponent(interfaceId)}/${encodeURIComponent(messageType)}`, {
+                        method: 'PATCH',
+                        credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ narrative_fields: payload }),
+                    }).then(r => r.json());
+                },
+            });
+
+            fetch(optSegUrl, { credentials: 'include' })
+                .then(r => r.json())
+                .then(res => picker.render(res.narrativeResourceTypes || []))
+                .catch(() => {});
+
+            const narrSaveBtn = form.querySelector(`#narrFieldsSaveBtn-${step.id}`);
+            if (narrSaveBtn) {
+                narrSaveBtn.addEventListener('click', () => picker.save());
+            }
+        }
 
         // === Assembly tab: master toggle dims/enables individual rule rows ===
         const assemblyMaster = form.querySelector('#assemblyMasterToggle');

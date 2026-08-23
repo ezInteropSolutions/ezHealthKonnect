@@ -1133,23 +1133,68 @@ func (pe *ProcessingEngine) TransformInterfaceMessages(
 //
 // Content priority: raw_content_uri (object storage) → raw_message (DB column).
 // The pipeline is executed asynchronously; status is updated to "processing" immediately.
+// This is the single-message UI entry point (fire-and-forget, caller doesn't wait for
+// the pipeline). For bulk reprocessing under caller-controlled concurrency, see
+// ReprocessMessageSync below — both share the same reprocessMessageWork implementation.
 func (pe *ProcessingEngine) ReprocessMessage(interfaceID, messageID string) error {
+	lookup, err := pe.reprocessLookupAndMark(interfaceID, messageID)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, "message_id", messageID)
+		ctx = context.WithValue(ctx, "interface_id", interfaceID)
+		pe.reprocessMessageWork(ctx, interfaceID, messageID, lookup)
+	}()
+
+	return nil
+}
+
+// ReprocessMessageSync re-runs the transformation pipeline for a message and BLOCKS
+// until it completes, returning a terminal error if reprocessing failed. Intended for
+// callers that already own their own bounded concurrency (the bulk-reprocess worker
+// submits these into a backpressure.WorkerPool and waits on a WaitGroup) — calling
+// ReprocessMessage in a tight loop would NOT bound concurrency, since it launches its
+// own goroutine and returns immediately regardless of how long the pipeline takes.
+func (pe *ProcessingEngine) ReprocessMessageSync(interfaceID, messageID string) error {
+	lookup, err := pe.reprocessLookupAndMark(interfaceID, messageID)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, "message_id", messageID)
+	ctx = context.WithValue(ctx, "interface_id", interfaceID)
+	return pe.reprocessMessageWork(ctx, interfaceID, messageID, lookup)
+}
+
+// reprocessLookup holds the row data ReprocessMessage/ReprocessMessageSync both need
+// before handing off to reprocessMessageWork.
+type reprocessLookup struct {
+	rawContentURI, rawMessage, msgType, srcType string
+}
+
+// reprocessLookupAndMark loads the existing message row and marks it "processing".
+// Shared by both the async and sync reprocess entry points.
+func (pe *ProcessingEngine) reprocessLookupAndMark(interfaceID, messageID string) (reprocessLookup, error) {
 	if !pe.IsRunning() {
-		return fmt.Errorf("processing engine is not running — activate the interface first")
+		return reprocessLookup{}, fmt.Errorf("processing engine is not running — activate the interface first")
 	}
 
 	tableName := fmt.Sprintf("messages_intf_%s", sanitizeInterfaceID(interfaceID))
-	var rawContentURI, rawMessage, msgType, srcType string
+	var l reprocessLookup
 	err := pe.db.QueryRow(
 		fmt.Sprintf(`SELECT COALESCE(raw_content_uri,''), COALESCE(raw_message,''), COALESCE(message_type,''), COALESCE(source_type,'')
 		             FROM %s WHERE message_id = $1`, tableName),
 		messageID,
-	).Scan(&rawContentURI, &rawMessage, &msgType, &srcType)
+	).Scan(&l.rawContentURI, &l.rawMessage, &l.msgType, &l.srcType)
 	if err != nil {
-		return fmt.Errorf("message %s not found: %w", messageID, err)
+		return reprocessLookup{}, fmt.Errorf("message %s not found: %w", messageID, err)
 	}
 
-	// Mark in-progress before launching goroutine so the UI updates immediately.
+	// Mark in-progress before the pipeline runs so the UI updates immediately.
 	// Reset delivery_status to 'pending' so the pipeline's 'not_required' flip works
 	// if there is no connector.outbound step, and delivery_attempts is NOT incremented
 	// here — only the OutboundConnectorExecutor increments it on actual delivery attempt.
@@ -1159,143 +1204,147 @@ func (pe *ProcessingEngine) ReprocessMessage(interfaceID, messageID string) erro
 		"delivery_status":    "pending",
 	})
 
-	go func() {
-		ctx := context.Background()
-		ctx = context.WithValue(ctx, "message_id", messageID)
-		ctx = context.WithValue(ctx, "interface_id", interfaceID)
+	return l, nil
+}
 
-		// Create a logger so re-run activity is visible in the message logs tab.
-		logger := pe.createLogger(interfaceID, messageID, "", msgType)
-		// Flush whatever this goroutine itself logs (covers every early-return path
-		// below where the pipeline is never reached — same pattern and rationale as
-		// storeAndParse's own defer; see ProcessingLogger.Flush's doc comment).
-		if logger != nil {
-			defer logger.Flush()
-		}
-		if logger != nil {
-			logger.Info(services.LogCategoryConnection, "Reprocess started", map[string]interface{}{
-				"message_type": msgType,
-				"trigger":      "manual_reprocess",
-			})
-		}
+// reprocessMessageWork does the actual content-resolve → parse → pipeline-execute work
+// for a reprocess, shared by both ReprocessMessage (async) and ReprocessMessageSync
+// (blocking). Returns a terminal error whenever the message ends up "failed" so a
+// caller with its own bookkeeping (the bulk worker) can count successes/failures
+// without re-deriving them from the DB.
+func (pe *ProcessingEngine) reprocessMessageWork(ctx context.Context, interfaceID, messageID string, l reprocessLookup) error {
+	msgType, srcType := l.msgType, l.srcType
 
-		// Resolve raw content — object storage first, then DB column.
-		content := ""
-		if pe.objectStorage != nil && rawContentURI != "" {
-			if data, readErr := pe.objectStorage.GetRawMessageByURI(ctx, rawContentURI); readErr == nil {
-				content = string(data)
-				if logger != nil {
-					logger.Info(services.LogCategoryConnection, "Raw content loaded from object storage", map[string]interface{}{
-						"uri":         rawContentURI,
-						"content_len": len(content),
-					})
-				}
-			} else {
-				log.Printf("⚠️  [reprocess] object storage read failed for %s: %v — trying raw_message column", messageID, readErr)
-				if logger != nil {
-					logger.Warning(services.LogCategoryConnection, "Object storage read failed — falling back to DB column", map[string]interface{}{
-						"error": readErr.Error(),
-					})
-				}
-			}
-		}
-		if content == "" {
-			content = rawMessage
-			if content != "" && logger != nil {
-				logger.Info(services.LogCategoryConnection, "Raw content loaded from database column", map[string]interface{}{
+	// Create a logger so re-run activity is visible in the message logs tab.
+	logger := pe.createLogger(interfaceID, messageID, "", msgType)
+	// Flush whatever this call itself logs (covers every early-return path below
+	// where the pipeline is never reached — same pattern and rationale as
+	// storeAndParse's own defer; see ProcessingLogger.Flush's doc comment).
+	if logger != nil {
+		defer logger.Flush()
+	}
+	if logger != nil {
+		logger.Info(services.LogCategoryConnection, "Reprocess started", map[string]interface{}{
+			"message_type": msgType,
+			"trigger":      "manual_reprocess",
+		})
+	}
+
+	// Resolve raw content — object storage first, then DB column.
+	content := ""
+	if pe.objectStorage != nil && l.rawContentURI != "" {
+		if data, readErr := pe.objectStorage.GetRawMessageByURI(ctx, l.rawContentURI); readErr == nil {
+			content = string(data)
+			if logger != nil {
+				logger.Info(services.LogCategoryConnection, "Raw content loaded from object storage", map[string]interface{}{
+					"uri":         l.rawContentURI,
 					"content_len": len(content),
 				})
 			}
-		}
-		if content == "" {
-			errMsg := "Reprocess failed: no raw content found in storage or database"
+		} else {
+			log.Printf("⚠️  [reprocess] object storage read failed for %s: %v — trying raw_message column", messageID, readErr)
 			if logger != nil {
-				logger.Error(services.LogCategoryConnection, errMsg, nil)
+				logger.Warning(services.LogCategoryConnection, "Object storage read failed — falling back to DB column", map[string]interface{}{
+					"error": readErr.Error(),
+				})
+			}
+		}
+	}
+	if content == "" {
+		content = l.rawMessage
+		if content != "" && logger != nil {
+			logger.Info(services.LogCategoryConnection, "Raw content loaded from database column", map[string]interface{}{
+				"content_len": len(content),
+			})
+		}
+	}
+	if content == "" {
+		errMsg := "Reprocess failed: no raw content found in storage or database"
+		if logger != nil {
+			logger.Error(services.LogCategoryConnection, errMsg, nil)
+		}
+		pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
+			"last_error_message": errMsg,
+		})
+		return fmt.Errorf("%s", errMsg)
+	}
+
+	if logger != nil {
+		logger.LogParsingStart(msgType)
+	}
+
+	var result *models.ParserResult
+
+	// Mirror the storeAndParse fast-paths so re-run uses the same parser as
+	// the original message delivery.
+	if srcType == "http_fhir" {
+		// FHIR fast-path: content is already a JSON FHIR bundle — no HL7 parsing.
+		fhirParser := parsers.NewFHIRParserService()
+		pr := fhirParser.Parse(content)
+		if !pr.Success {
+			errMsg := "Reprocess FHIR parse failed: " + pr.Error
+			if logger != nil {
+				logger.Error(services.LogCategoryParsing, errMsg, nil)
 			}
 			pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
 				"last_error_message": errMsg,
 			})
-			return
+			return fmt.Errorf("%s", errMsg)
 		}
-
+		fhirParsedJSON := pr.ParsedJSON
+		fhirParsedJSON["_format"] = string(models.FormatFHIR)
+		if len(pr.EnhancedFields) > 0 {
+			fhirParsedJSON["enhancedFields"] = pr.EnhancedFields
+		}
+		result = &models.ParserResult{
+			Success:    true,
+			Format:     models.FormatFHIR,
+			ParsedJSON: fhirParsedJSON,
+			Metadata: models.ParserMetadata{
+				MessageType: msgType,
+				ParsedAt:    time.Now(),
+			},
+		}
 		if logger != nil {
-			logger.LogParsingStart(msgType)
+			logger.LogParsingComplete(msgType, 0, len(fhirParsedJSON))
 		}
-
-		var result *models.ParserResult
-
-		// Mirror the storeAndParse fast-paths so re-run uses the same parser as
-		// the original message delivery.
-		if srcType == "http_fhir" {
-			// FHIR fast-path: content is already a JSON FHIR bundle — no HL7 parsing.
-			fhirParser := parsers.NewFHIRParserService()
-			pr := fhirParser.Parse(content)
-			if !pr.Success {
-				errMsg := "Reprocess FHIR parse failed: " + pr.Error
-				if logger != nil {
-					logger.Error(services.LogCategoryParsing, errMsg, nil)
-				}
-				pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
-					"last_error_message": errMsg,
-				})
-				return
-			}
-			fhirParsedJSON := pr.ParsedJSON
-			fhirParsedJSON["_format"] = string(models.FormatFHIR)
-			if len(pr.EnhancedFields) > 0 {
-				fhirParsedJSON["enhancedFields"] = pr.EnhancedFields
-			}
-			result = &models.ParserResult{
-				Success:    true,
-				Format:     models.FormatFHIR,
-				ParsedJSON: fhirParsedJSON,
-				Metadata: models.ParserMetadata{
-					MessageType: msgType,
-					ParsedAt:    time.Now(),
-				},
-			}
+	} else {
+		if pe.parserService == nil {
+			errMsg := "Reprocess failed: parser service unavailable"
 			if logger != nil {
-				logger.LogParsingComplete(msgType, 0, len(fhirParsedJSON))
+				logger.Error(services.LogCategoryParsing, errMsg, nil)
 			}
-		} else {
-			if pe.parserService == nil {
-				errMsg := "Reprocess failed: parser service unavailable"
-				if logger != nil {
-					logger.Error(services.LogCategoryParsing, errMsg, nil)
-				}
-				pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
-					"last_error_message": errMsg,
-				})
-				return
-			}
-			var parseErr error
-			result, parseErr = pe.parserService.ParseToJSON(ctx, messageID, interfaceID, content)
-			if parseErr != nil {
-				errMsg := "Reprocess parse failed: " + parseErr.Error()
-				if logger != nil {
-					logger.LogParsingError(msgType, parseErr.Error(), 0)
-				}
-				pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
-					"last_error_message": errMsg,
-				})
-				return
-			}
-			if logger != nil {
-				parsedLen := 0
-				if result != nil {
-					parsedLen = len(result.ParsedJSON)
-				}
-				logger.LogParsingComplete(msgType, result.ParsingTime.Milliseconds(), parsedLen)
-			}
+			pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
+				"last_error_message": errMsg,
+			})
+			return fmt.Errorf("%s", errMsg)
 		}
+		var parseErr error
+		result, parseErr = pe.parserService.ParseToJSON(ctx, messageID, interfaceID, content)
+		if parseErr != nil {
+			errMsg := "Reprocess parse failed: " + parseErr.Error()
+			if logger != nil {
+				logger.LogParsingError(msgType, parseErr.Error(), 0)
+			}
+			pe.updateMessageStatus(interfaceID, messageID, "failed", map[string]interface{}{
+				"last_error_message": errMsg,
+			})
+			return fmt.Errorf("%s", errMsg)
+		}
+		if logger != nil {
+			parsedLen := 0
+			if result != nil {
+				parsedLen = len(result.ParsedJSON)
+			}
+			logger.LogParsingComplete(msgType, result.ParsingTime.Milliseconds(), parsedLen)
+		}
+	}
 
-		log.Printf("🔄 [reprocess] Re-running pipeline for message %s (type: %s, source: %s)", messageID, msgType, srcType)
-		// No clean original filename stored for a reprocess (only the DB row's own
-		// messageID survives) -- messageID already embeds it for file-based sources
-		// (file_listener.go's generateFileMessageID), so it's a reasonable fallback.
-		pe.executeTransformationPipelineWithLogger(ctx, interfaceID, messageID, msgType, messageID, result, logger)
-	}()
-
+	log.Printf("🔄 [reprocess] Re-running pipeline for message %s (type: %s, source: %s)", messageID, msgType, srcType)
+	// No clean original filename stored for a reprocess (only the DB row's own
+	// messageID survives) -- messageID already embeds it for file-based sources
+	// (file_listener.go's generateFileMessageID), so it's a reasonable fallback.
+	pe.executeTransformationPipelineWithLogger(ctx, interfaceID, messageID, msgType, messageID, result, logger)
 	return nil
 }
 

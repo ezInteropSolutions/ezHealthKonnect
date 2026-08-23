@@ -17,6 +17,7 @@ package payload
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -54,10 +55,11 @@ type fhirBundleConfig struct {
 type PayloadBuilderExecutor struct {
 	*executors.BaseExecutor
 	narrativeGen *fhirnarrative.FHIRNarrativeGenerator
+	db           *sql.DB // for loadNarrativeFieldConfig; nil-safe (no config lookup without it)
 }
 
 // NewPayloadBuilderExecutor creates a new PayloadBuilderExecutor.
-func NewPayloadBuilderExecutor() *PayloadBuilderExecutor {
+func NewPayloadBuilderExecutor(db *sql.DB) *PayloadBuilderExecutor {
 	return &PayloadBuilderExecutor{
 		BaseExecutor: executors.NewBaseExecutor("payload.builder", models.ExecutorMetadata{
 			Name:        "Payload Builder",
@@ -67,7 +69,41 @@ func NewPayloadBuilderExecutor() *PayloadBuilderExecutor {
 			Category:    "Output",
 		}),
 		narrativeGen: fhirnarrative.NewFHIRNarrativeGenerator(),
+		db:           db,
 	}
+}
+
+// loadNarrativeFieldConfig reads the "narrative_fields" key from
+// interface_message_mappings.custom_mapping_config — the same per-(interface,
+// message_type) override HL7-sourced resources use (see
+// HL7FHIRTransformServiceV3.loadNarrativeFieldConfig,
+// services/hl7_fhir_transform_service_v3.go). Deliberately the SAME table/key
+// a fhir.build-sourced resource shares this config with any HL7-sourced
+// resource in the same interface+message_type — narrative rendering is a
+// property of "this resource type, for this interface", not of which upstream
+// step happened to build it.
+func (e *PayloadBuilderExecutor) loadNarrativeFieldConfig(ctx context.Context, interfaceID, messageType string) fhirnarrative.NarrativeFieldConfig {
+	if interfaceID == "" || e.db == nil {
+		return nil
+	}
+	var configBytes []byte
+	err := e.db.QueryRowContext(ctx, `
+		SELECT custom_mapping_config
+		FROM interface_message_mappings
+		WHERE interface_id = $1 AND message_type = $2
+		  AND custom_mapping_config IS NOT NULL
+		LIMIT 1
+	`, interfaceID, messageType).Scan(&configBytes)
+	if err != nil {
+		return nil
+	}
+	var config struct {
+		NarrativeFields fhirnarrative.NarrativeFieldConfig `json:"narrative_fields"`
+	}
+	if err := json.Unmarshal(configBytes, &config); err != nil {
+		return nil
+	}
+	return config.NarrativeFields
 }
 
 // payloadBuilderConfig is the config stored in transformation_steps.config.
@@ -124,7 +160,16 @@ func (e *PayloadBuilderExecutor) Execute(
 	case "field_builder":
 		payload, contentType, err = e.buildFromFieldMappings(inputData, cfg)
 	case "fhir_bundle":
-		payload, contentType, err = e.buildFHIRBundle(inputData, cfg)
+		interfaceID, _ := step.Config["interface_id"].(string)
+		if interfaceID == "" {
+			interfaceID, _ = inputData["interface_id"].(string)
+		}
+		messageType, _ := step.Config["message_type"].(string)
+		if messageType == "" {
+			messageType, _ = inputData["message_type"].(string)
+		}
+		narrativeFieldConfig := e.loadNarrativeFieldConfig(ctx, interfaceID, messageType)
+		payload, contentType, err = e.buildFHIRBundle(inputData, cfg, narrativeFieldConfig)
 	default:
 		payload, contentType, err = e.buildPassThrough(inputData, cfg)
 	}
@@ -323,6 +368,7 @@ func setNestedValue(obj map[string]interface{}, path string, val interface{}) {
 func (e *PayloadBuilderExecutor) buildFHIRBundle(
 	inputData map[string]interface{},
 	cfg payloadBuilderConfig,
+	narrativeFieldConfig fhirnarrative.NarrativeFieldConfig,
 ) (string, string, error) {
 	bc := cfg.FHIRBundle
 
@@ -397,7 +443,7 @@ func (e *PayloadBuilderExecutor) buildFHIRBundle(
 				continue
 			}
 		}
-		narrative := e.narrativeGen.Generate(r)
+		narrative := e.narrativeGen.Generate(r, nil, narrativeFieldConfig)
 		if narrative != "" {
 			r["text"] = map[string]interface{}{
 				"status": "generated",

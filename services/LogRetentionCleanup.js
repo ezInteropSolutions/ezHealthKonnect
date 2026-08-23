@@ -79,8 +79,8 @@ class LogRetentionCleanupService {
                 await client.connect();
                 const db = client.db('ezhealthkonnect');
 
-                for (const interface of interfaces) {
-                    const deleted = await this.cleanupInterfaceLogs(db, interface);
+                for (const iface of interfaces) {
+                    const deleted = await this.cleanupInterfaceLogs(db, iface);
                     totalDeleted += deleted;
                 }
 
@@ -101,9 +101,9 @@ class LogRetentionCleanupService {
     /**
      * Cleanup logs for a single interface
      */
-    async cleanupInterfaceLogs(db, interface) {
+    async cleanupInterfaceLogs(db, iface) {
         try {
-            const collectionName = `processing_logs_intf_${interface.id.replace(/-/g, '_')}`;
+            const collectionName = `processing_logs_intf_${iface.id.replace(/-/g, '_')}`;
             const collection = db.collection(collectionName);
 
             // Check if collection exists
@@ -113,13 +113,13 @@ class LogRetentionCleanupService {
                 return 0;
             }
 
-            const retentionDays = interface.log_retention_days || 30;
+            const retentionDays = iface.log_retention_days || 30;
             const cutoffDate = new Date();
             cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 
             let deleteFilter;
 
-            if (interface.retain_error_logs_forever) {
+            if (iface.retain_error_logs_forever) {
                 // Delete only non-error logs older than retention period
                 deleteFilter = {
                     timestamp: { $lt: cutoffDate },
@@ -135,13 +135,13 @@ class LogRetentionCleanupService {
             const result = await collection.deleteMany(deleteFilter);
 
             if (result.deletedCount > 0) {
-                console.log(`   🧹 ${interface.name}: Deleted ${result.deletedCount} logs (retention: ${retentionDays} days)`);
+                console.log(`   🧹 ${iface.name}: Deleted ${result.deletedCount} logs (retention: ${retentionDays} days)`);
             }
 
             return result.deletedCount;
 
         } catch (error) {
-            console.error(`   ❌ Failed to cleanup logs for ${interface.name}:`, error.message);
+            console.error(`   ❌ Failed to cleanup logs for ${iface.name}:`, error.message);
             return 0;
         }
     }

@@ -653,6 +653,255 @@ class MessageController {
         }
     }
 
+    // ------------------------------------------------------------------
+    // BULK REPROCESS (V213) — "select all N matching / requeue" on the
+    // Messages page. The actual work happens in the Go background worker
+    // (services/bulk_reprocess_service.go); these endpoints only ever create
+    // a job row or read one back — never loop over messages themselves, so
+    // none of them can hang regardless of how many messages match.
+    // ------------------------------------------------------------------
+
+    // Shared ownership + table-resolution step every bulk-reprocess endpoint needs.
+    // Returns null (after writing the error response itself) if the interface
+    // doesn't belong to this user, so callers can just `if (!ctx) return;`.
+    async _resolveOwnedInterfaceTable(req, res) {
+        const { interfaceId } = req.body?.interfaceId ? req.body : req.query;
+        const userId = req.session.user.id;
+        if (!interfaceId) {
+            res.status(400).json({ success: false, error: 'interfaceId is required' });
+            return null;
+        }
+        const rows = await this.database.sequelize.query(
+            `SELECT id FROM interfaces WHERE id = :interfaceId AND user_id = :userId`,
+            { replacements: { interfaceId, userId }, type: this.database.sequelize.QueryTypes.SELECT }
+        );
+        if (rows.length === 0) {
+            res.status(404).json({ success: false, error: 'Interface not found or access denied' });
+            return null;
+        }
+        const tableName = this.tableManager.getInterfaceTableName(interfaceId);
+        return { interfaceId, userId, tableName };
+    }
+
+    // POST /api/messages/bulk-reprocess/count — fast match count for the current
+    // filter, so the UI can show "N matching" before the user commits to a job.
+    async getBulkReprocessCount(req, res) {
+        try {
+            await this.ensureDatabase();
+            const ctx = await this._resolveOwnedInterfaceTable(req, res);
+            if (!ctx) return;
+
+            const { status, messageType, dateFrom, dateTo } = req.query;
+            const { whereClause, replacements } = this.tableManager.buildFilterWhere({ status, messageType, dateFrom, dateTo });
+
+            const result = await this.database.sequelize.query(
+                `SELECT COUNT(*) as total FROM ${ctx.tableName} ${whereClause}`,
+                { replacements, type: this.database.sequelize.QueryTypes.SELECT }
+            );
+            res.json({ success: true, data: { count: parseInt(result[0].total, 10) } });
+        } catch (error) {
+            console.error('❌ Bulk Reprocess Count Error:', error);
+            res.status(500).json({ success: false, error: 'Failed to count matching messages' });
+        }
+    }
+
+    // Explicit checkbox-driven selections are capped — this mode is for "these
+    // specific few I picked," not a substitute for filter-mode at real scale.
+    static BULK_REPROCESS_MAX_EXPLICIT_IDS = 5000;
+
+    // POST /api/messages/bulk-reprocess — creates a job and returns instantly.
+    // All the actual reprocessing happens later, in the background worker.
+    async createBulkReprocessJob(req, res) {
+        try {
+            await this.ensureDatabase();
+            const ctx = await this._resolveOwnedInterfaceTable(req, res);
+            if (!ctx) return;
+
+            const { ids, filter } = req.body;
+            const userId = req.session.user.id;
+
+            let selectionMode, totalMatched, filterJson = null, idsArray = null;
+
+            if (Array.isArray(ids) && ids.length > 0) {
+                if (ids.length > MessageController.BULK_REPROCESS_MAX_EXPLICIT_IDS) {
+                    return res.status(400).json({
+                        success: false,
+                        error: `Explicit selection is capped at ${MessageController.BULK_REPROCESS_MAX_EXPLICIT_IDS} messages — use "select all matching filter" for larger batches`
+                    });
+                }
+                selectionMode = 'ids';
+                idsArray = ids;
+                totalMatched = ids.length;
+            } else if (filter && typeof filter === 'object') {
+                selectionMode = 'filter';
+                filterJson = filter;
+                const { whereClause, replacements } = this.tableManager.buildFilterWhere(filter);
+                const countResult = await this.database.sequelize.query(
+                    `SELECT COUNT(*) as total FROM ${ctx.tableName} ${whereClause}`,
+                    { replacements, type: this.database.sequelize.QueryTypes.SELECT }
+                );
+                totalMatched = parseInt(countResult[0].total, 10);
+            } else {
+                return res.status(400).json({ success: false, error: 'Either ids (non-empty array) or filter (object) is required' });
+            }
+
+            if (totalMatched === 0) {
+                return res.status(400).json({ success: false, error: 'No messages match this selection' });
+            }
+
+            // explicitIds is passed as a JSON string, not the raw JS array: Sequelize's
+            // raw-query `replacements` auto-expands an array replacement into a
+            // comma-separated list of SQL literals (built for "IN (:list)" usage), which
+            // is the opposite of what a single TEXT[] column value needs and throws
+            // "INSERT has more expressions than target columns". Postgres's own JSON
+            // parsing (jsonb_array_elements_text) converts it to a real array safely,
+            // with no manual string-escaping on the JS side.
+            const jobRows = await this.database.sequelize.query(`
+                INSERT INTO bulk_reprocess_jobs
+                    (interface_id, table_name, selection_mode, filter, explicit_ids, total_matched, created_by_user_id)
+                VALUES
+                    (:interfaceId, :tableName, :selectionMode, :filter,
+                     CASE WHEN :explicitIds IS NULL THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(:explicitIds::jsonb)) END,
+                     :totalMatched, :userId)
+                RETURNING id, total_matched, status, created_at
+            `, {
+                replacements: {
+                    interfaceId: ctx.interfaceId,
+                    tableName: ctx.tableName,
+                    selectionMode,
+                    filter: filterJson ? JSON.stringify(filterJson) : null,
+                    explicitIds: idsArray ? JSON.stringify(idsArray) : null,
+                    totalMatched,
+                    userId
+                },
+                type: this.database.sequelize.QueryTypes.INSERT
+            });
+
+            const job = jobRows[0][0];
+            res.json({
+                success: true,
+                data: {
+                    jobId: job.id,
+                    totalMatched: job.total_matched,
+                    status: job.status,
+                    createdAt: job.created_at
+                }
+            });
+        } catch (error) {
+            console.error('❌ Create Bulk Reprocess Job Error:', error);
+            res.status(500).json({ success: false, error: 'Failed to create bulk reprocess job' });
+        }
+    }
+
+    // GET /api/messages/bulk-reprocess/:jobId — lightweight poll target, one row lookup.
+    async getBulkReprocessJob(req, res) {
+        try {
+            await this.ensureDatabase();
+            const { jobId } = req.params;
+            const userId = req.session.user.id;
+
+            const rows = await this.database.sequelize.query(`
+                SELECT j.id, j.interface_id, j.status, j.total_matched, j.processed_count,
+                       j.succeeded_count, j.failed_count, j.error_summary,
+                       j.created_at, j.started_at, j.completed_at
+                FROM bulk_reprocess_jobs j
+                JOIN interfaces i ON i.id = j.interface_id
+                WHERE j.id = :jobId AND i.user_id = :userId
+            `, { replacements: { jobId, userId }, type: this.database.sequelize.QueryTypes.SELECT });
+
+            if (rows.length === 0) {
+                return res.status(404).json({ success: false, error: 'Job not found' });
+            }
+            const j = rows[0];
+            res.json({
+                success: true,
+                data: {
+                    jobId: j.id,
+                    interfaceId: j.interface_id,
+                    status: j.status,
+                    totalMatched: j.total_matched,
+                    processedCount: j.processed_count,
+                    succeededCount: j.succeeded_count,
+                    failedCount: j.failed_count,
+                    errorSummary: typeof j.error_summary === 'string' ? JSON.parse(j.error_summary) : j.error_summary,
+                    createdAt: j.created_at,
+                    startedAt: j.started_at,
+                    completedAt: j.completed_at
+                }
+            });
+        } catch (error) {
+            console.error('❌ Get Bulk Reprocess Job Error:', error);
+            res.status(500).json({ success: false, error: 'Failed to load job status' });
+        }
+    }
+
+    // POST /api/messages/bulk-reprocess/:jobId/cancel — sets a flag; the worker
+    // stops between batches (never mid-batch), so this doesn't need to wait either.
+    async cancelBulkReprocessJob(req, res) {
+        try {
+            await this.ensureDatabase();
+            const { jobId } = req.params;
+            const userId = req.session.user.id;
+
+            const result = await this.database.sequelize.query(`
+                UPDATE bulk_reprocess_jobs j
+                SET cancel_requested = true
+                FROM interfaces i
+                WHERE j.id = :jobId AND j.interface_id = i.id AND i.user_id = :userId
+                  AND j.status IN ('queued','running')
+                RETURNING j.id
+            `, { replacements: { jobId, userId }, type: this.database.sequelize.QueryTypes.UPDATE });
+
+            if (!result[0] || result[0].length === 0) {
+                return res.status(404).json({ success: false, error: 'Job not found or already finished' });
+            }
+            res.json({ success: true, message: 'Cancellation requested' });
+        } catch (error) {
+            console.error('❌ Cancel Bulk Reprocess Job Error:', error);
+            res.status(500).json({ success: false, error: 'Failed to cancel job' });
+        }
+    }
+
+    // GET /api/messages/bulk-reprocess?interfaceId= — recent/active jobs for the
+    // job panel, so progress stays visible across page navigation/reload.
+    async listBulkReprocessJobs(req, res) {
+        try {
+            await this.ensureDatabase();
+            const { interfaceId } = req.query;
+            const userId = req.session.user.id;
+            if (!interfaceId) {
+                return res.status(400).json({ success: false, error: 'interfaceId is required' });
+            }
+
+            const rows = await this.database.sequelize.query(`
+                SELECT j.id, j.status, j.total_matched, j.processed_count,
+                       j.succeeded_count, j.failed_count, j.created_at, j.completed_at
+                FROM bulk_reprocess_jobs j
+                JOIN interfaces i ON i.id = j.interface_id
+                WHERE j.interface_id = :interfaceId AND i.user_id = :userId
+                ORDER BY j.created_at DESC
+                LIMIT 20
+            `, { replacements: { interfaceId, userId }, type: this.database.sequelize.QueryTypes.SELECT });
+
+            res.json({
+                success: true,
+                data: rows.map(j => ({
+                    jobId: j.id,
+                    status: j.status,
+                    totalMatched: j.total_matched,
+                    processedCount: j.processed_count,
+                    succeededCount: j.succeeded_count,
+                    failedCount: j.failed_count,
+                    createdAt: j.created_at,
+                    completedAt: j.completed_at
+                }))
+            });
+        } catch (error) {
+            console.error('❌ List Bulk Reprocess Jobs Error:', error);
+            res.status(500).json({ success: false, error: 'Failed to list jobs' });
+        }
+    }
+
     /**
      * Delete a message
      */

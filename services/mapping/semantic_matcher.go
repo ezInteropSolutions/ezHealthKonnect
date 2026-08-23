@@ -197,8 +197,9 @@ var knownAnchorsR4 = map[string][]Candidate{
 	"NK1.3": {{FHIRPath: "RelatedPerson.relationship[0]", FHIRType: "CodeableConcept", Confidence: 0.92, Source: "anchor"}},
 	"NK1.4": {{FHIRPath: "RelatedPerson.address[0]", FHIRType: "Address", Confidence: 0.88, Source: "anchor"}},
 	"NK1.5": {{FHIRPath: "RelatedPerson.telecom[0]", FHIRType: "ContactPoint", Confidence: 0.88, Source: "anchor"}},
-	"NK1.7": {{FHIRPath: "RelatedPerson.period.start", FHIRType: "dateTime", Confidence: 0.82, Source: "anchor"}},
-	"NK1.8": {{FHIRPath: "RelatedPerson.period.end", FHIRType: "dateTime", Confidence: 0.82, Source: "anchor"}},
+	"NK1.7": {}, // Contact Role (CE) — coded concept with no clean RelatedPerson target; was previously (incorrectly) wired to period.start (a dateTime), corrupting the field
+	"NK1.8": {{FHIRPath: "RelatedPerson.period.start", FHIRType: "dateTime", Confidence: 0.82, Source: "anchor"}}, // Start Date (DT)
+	"NK1.9": {{FHIRPath: "RelatedPerson.period.end", FHIRType: "dateTime", Confidence: 0.82, Source: "anchor"}},   // End Date (DT)
 
 	// ── IN1 ───────────────────────────────────────────────────────────────
 	// IN1.1 is SI (sequence integer, set-id) — not a business identifier; value scalar is appropriate
@@ -499,8 +500,9 @@ var knownAnchorsR5 = map[string][]Candidate{
 	"NK1.3": {{FHIRPath: "RelatedPerson.relationship[0]", FHIRType: "CodeableConcept", Confidence: 0.92, Source: "anchor"}},
 	"NK1.4": {{FHIRPath: "RelatedPerson.address[0]", FHIRType: "Address", Confidence: 0.88, Source: "anchor"}},
 	"NK1.5": {{FHIRPath: "RelatedPerson.telecom[0]", FHIRType: "ContactPoint", Confidence: 0.88, Source: "anchor"}},
-	"NK1.7": {{FHIRPath: "RelatedPerson.period.start", FHIRType: "dateTime", Confidence: 0.82, Source: "anchor"}},
-	"NK1.8": {{FHIRPath: "RelatedPerson.period.end", FHIRType: "dateTime", Confidence: 0.82, Source: "anchor"}},
+	"NK1.7": {}, // Contact Role (CE) — coded concept with no clean RelatedPerson target (same fix as R4)
+	"NK1.8": {{FHIRPath: "RelatedPerson.period.start", FHIRType: "dateTime", Confidence: 0.82, Source: "anchor"}}, // Start Date (DT)
+	"NK1.9": {{FHIRPath: "RelatedPerson.period.end", FHIRType: "dateTime", Confidence: 0.82, Source: "anchor"}},   // End Date (DT)
 
 	// ── IN1 ── R5: subscriberId→subscriberIdentifier (Identifier); IN1.2 CE→CodeableConcept; IN1.3 CWE→Identifier
 	"IN1.1":  {{FHIRPath: "Coverage.identifier[0].value", FHIRType: "string", Confidence: 0.88, Source: "anchor"}},   // SI (sequence int) → scalar ok
