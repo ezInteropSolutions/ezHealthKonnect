@@ -8,13 +8,39 @@
  */
 
 const { test: setup } = require('@playwright/test');
-const { login }       = require('./helpers/auth');
+const { login, ADMIN_EMAIL, ADMIN_PASSWORD } = require('./helpers/auth');
 const path            = require('path');
 const fs              = require('fs');
 
 const AUTH_FILE = path.resolve(__dirname, '../../.auth/user.json');
 
+// A fresh database (e.g. a new CI Postgres volume) seeds admin@ezhealthkonnect.com
+// but immediately locks it (V146__Lock_Placeholder_Admin.sql) with an unusable
+// password hash until the first-run setup wizard runs — see setupController.js /
+// middleware/setupCheck.js. Complete it here, once, before any login is attempted,
+// using the same admin credentials the rest of the suite expects.
+async function completeFirstRunSetupIfNeeded(page) {
+    const status = await page.request.get('/api/setup/status');
+    const { setupRequired } = await status.json();
+    if (!setupRequired) return;
+
+    const res = await page.request.post('/api/setup/complete', {
+        data: {
+            orgName:   'ezHealthKonnect E2E',
+            firstName: 'System',
+            lastName:  'Administrator',
+            email:     ADMIN_EMAIL,
+            password:  ADMIN_PASSWORD,
+        },
+    });
+    if (!res.ok()) {
+        const body = await res.text();
+        throw new Error(`First-run setup failed (${res.status()}): ${body.slice(0, 300)}`);
+    }
+}
+
 setup('authenticate admin user', async ({ page }) => {
+    await completeFirstRunSetupIfNeeded(page);
     await login(page);
 
     // Persist cookies + localStorage so dependent projects start authenticated
