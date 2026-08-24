@@ -285,7 +285,14 @@ jobs:
         # is optional at install time") and degrade gracefully without them.
         # docker-compose.ci.yml swaps the ollama service's Windows-only
         # ${USERPROFILE} bind mount (undefined on this Linux runner) for a
-        # named volume — the only difference from local dev.
+        # named volume. app's own HOST_DATA_PATH/CCD_INBOX_PATH mounts default
+        # to Windows-only paths too (for local dev convenience) but are already
+        # env-overridable, so no compose file changes are needed for them —
+        # just point them at valid Linux paths here. Docker auto-creates a
+        # bind-mount source directory that doesn't exist yet.
+        env:
+          HOST_DATA_PATH: /tmp/ci-host-data
+          CCD_INBOX_PATH: /tmp/ci-ccd-inbox
         run: |
           docker compose -f docker-compose.yml -f docker-compose.ci.yml \
             up -d postgres minio ollama flyway app

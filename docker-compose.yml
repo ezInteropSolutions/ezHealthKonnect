@@ -209,8 +209,9 @@ services:
       # Inside the container the files appear at:  /mnt/host/
       - ${HOST_DATA_PATH:-C:/Users/Public}:/mnt/host
       # CCD/CDA file drop folder — files placed in C:\Projects\test on Windows
-      # appear at /data/ccd/inbox inside the container
-      - C:/Projects/test:/data/ccd/inbox
+      # (or $CCD_INBOX_PATH, if set) appear at /data/ccd/inbox inside the container.
+      # Override via .env for non-Windows hosts (e.g. CI) — see docker-compose.ci.yml.
+      - ${CCD_INBOX_PATH:-C:/Projects/test}:/data/ccd/inbox
 
     # Wait for PostgreSQL, MinIO, and migrations to complete
     depends_on:

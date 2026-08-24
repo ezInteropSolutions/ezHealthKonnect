@@ -1,5 +1,12 @@
 # Stage 1: Compile Go binary
-FROM golang:1.25-alpine AS gobuilder
+#
+# --platform=$BUILDPLATFORM + explicit GOOS/GOARCH cross-compiles natively on
+# the build host instead of emulating the target arch via QEMU. Go's toolchain
+# cross-compiles for free; there's no reason to pay for (or risk) emulation.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS gobuilder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 RUN apk upgrade --no-cache && apk add --no-cache git
 
@@ -9,10 +16,18 @@ COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 
 COPY . .
-RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o go-api .
+RUN go mod tidy && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o go-api .
 
 # Stage 2: Install Node.js production dependencies
-FROM node:22-alpine AS nodebuilder
+#
+# --platform=$BUILDPLATFORM runs npm natively on the build host rather than
+# under QEMU emulation for the target arch — under emulation, `npm ci` on
+# node:22-alpine reliably crashes with SIGILL (exit 132) building linux/arm64
+# on an amd64 runner. Safe here because every prod dependency (see
+# package.json) is pure JS with no native/prebuilt-binary addons — the
+# resulting node_modules is architecture-independent and copied as-is into
+# the target-platform runtime image in Stage 3.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS nodebuilder
 
 RUN apk upgrade --no-cache
 
