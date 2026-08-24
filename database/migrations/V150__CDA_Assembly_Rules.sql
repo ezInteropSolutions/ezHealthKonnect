@@ -183,7 +183,8 @@ INSERT INTO cda_fhir_templates (
     'field_mapping',
     'OOB Discharge Summary C-CDA 2.1 → FHIR R4 US Core 6.1.0. Covers encounter, discharge diagnosis, procedures, medications, results, discharge instructions, and care plan.',
     '["Patient","Encounter","Condition","Procedure","MedicationStatement","Observation","CarePlan"]'::jsonb,
-    $template${
+    $template$
+{
   "sections": {
     "allergiesAndIntolerances": {
       "fhirResource": "AllergyIntolerance",
@@ -286,7 +287,8 @@ INSERT INTO cda_fhir_templates (
     'field_mapping',
     'OOB Referral Note C-CDA 2.1 → FHIR R4 US Core 6.1.0. Covers reason for referral, problems, medications, assessment, plan, and social history.',
     '["Patient","Condition","MedicationStatement","Observation","CarePlan","ServiceRequest"]'::jsonb,
-    $template${
+    $template$
+{
   "sections": {
     "reasonForReferral": {
       "fhirResource": "ServiceRequest",

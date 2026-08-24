@@ -9,6 +9,11 @@ useDefault = true
 # investigate it (see the Task 4 security audit) rather than silencing it.
 [allowlist]
 description = "Known false positives, not real secrets"
+# regexTarget = "line": without this, allowlist regexes only match against the
+# isolated matched secret text (e.g. just "0xB8E7_4CE2_3E93_D0D7"), not the
+# surrounding line — so a regex written with identifying context (like the
+# variable name below) would never match anything and silently do nothing.
+regexTarget = "line"
 regexes = [
   '''nullKeyMarker uint64 = 0xB8E7_4CE2_3E93_D0D7''', # services/executors/transform/remove_duplicates_executor.go — sentinel constant, not a key
   '''conversational''',                                # marketing/make_daily_prompt_template.md — matched "linkedin-client-id" rule on an ordinary word

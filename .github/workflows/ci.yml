@@ -201,21 +201,29 @@ jobs:
         run: npm test
 
   # ── Secret scanning ──────────────────────────────────────────────────────────
-  # Scans commits since the last successful scan (not full history — see
-  # .gitleaks.toml's comment for why a full-history scan isn't useful as an
-  # ongoing gate: it re-flags old, already-reviewed example values in docs).
+  # Scans the current working tree (--no-git), not git history — this is what
+  # actually avoids re-flagging old, already-reviewed example values that still
+  # exist in current files (see .gitleaks.toml's allowlist for the two known
+  # ones), with no "since last successful scan" state to track ourselves.
+  #
+  # gitleaks/gitleaks-action@v2 (the previous approach here) started requiring
+  # a paid GITLEAKS_LICENSE for this kind of use — switched to invoking the
+  # free, open-source (Apache-2.0) gitleaks CLI binary directly instead, same
+  # underlying scanner and the same .gitleaks.toml config, no license needed.
   scan-secrets:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
 
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gitleaks detect --source . --no-git -v --redact
 
   # ── FHIR US Core profile validation ──────────────────────────────────────────
   validate-fhir:
