@@ -98,7 +98,12 @@ jobs:
             url=$(jq -r --arg id "$id" '.[] | select(.id==$id) | .download_url' schemas/catalog.json)
             echo "Installing $id from $url"
             curl -sSL "$url" -o "/tmp/$id.zip"
-            unzip -q -o "/tmp/$id.zip" -d schemas/
+            # These release zips were built on Windows and store backslash
+            # path separators, which unzip extracts correctly (verified against
+            # the real archives) but still flags with exit code 1 ("warning
+            # error", not a real failure) — tolerate exactly that code, not
+            # any other, so a genuinely corrupt/truncated download still fails.
+            unzip -q -o "/tmp/$id.zip" -d schemas/ || { code=$?; [ "$code" -le 1 ] || exit "$code"; }
           done
 
       - name: Run Flyway migrations
@@ -307,7 +312,12 @@ jobs:
             url=$(jq -r --arg id "$id" '.[] | select(.id==$id) | .download_url' schemas/catalog.json)
             echo "Installing $id from $url"
             curl -sSL "$url" -o "/tmp/$id.zip"
-            unzip -q -o "/tmp/$id.zip" -d schemas/
+            # These release zips were built on Windows and store backslash
+            # path separators, which unzip extracts correctly (verified against
+            # the real archives) but still flags with exit code 1 ("warning
+            # error", not a real failure) — tolerate exactly that code, not
+            # any other, so a genuinely corrupt/truncated download still fails.
+            unzip -q -o "/tmp/$id.zip" -d schemas/ || { code=$?; [ "$code" -le 1 ] || exit "$code"; }
           done
 
       - name: Start app stack
