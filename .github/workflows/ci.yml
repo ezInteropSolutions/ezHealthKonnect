@@ -104,6 +104,14 @@ jobs:
             # error", not a real failure) — tolerate exactly that code, not
             # any other, so a genuinely corrupt/truncated download still fails.
             unzip -q -o "/tmp/$id.zip" -d schemas/ || { code=$?; [ "$code" -le 1 ] || exit "$code"; }
+            # Same Windows-build issue: explicit directory entries in these
+            # zips carry broken permission bits (e.g. drw-r-Sr-- — missing the
+            # execute bit a directory needs to be traversable/writable at all).
+            # Root bypasses this, which is how local verification missed it —
+            # the actual runner user cannot. Normalize after every extraction;
+            # `+X` only affects directories/already-executable files, never
+            # the schema .gz data files themselves.
+            chmod -R a+rX schemas/
           done
 
       - name: Run Flyway migrations
@@ -318,6 +326,14 @@ jobs:
             # error", not a real failure) — tolerate exactly that code, not
             # any other, so a genuinely corrupt/truncated download still fails.
             unzip -q -o "/tmp/$id.zip" -d schemas/ || { code=$?; [ "$code" -le 1 ] || exit "$code"; }
+            # Same Windows-build issue: explicit directory entries in these
+            # zips carry broken permission bits (e.g. drw-r-Sr-- — missing the
+            # execute bit a directory needs to be traversable/writable at all).
+            # Root bypasses this, which is how local verification missed it —
+            # the actual runner user cannot. Normalize after every extraction;
+            # `+X` only affects directories/already-executable files, never
+            # the schema .gz data files themselves.
+            chmod -R a+rX schemas/
           done
 
       - name: Start app stack
