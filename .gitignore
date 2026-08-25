@@ -10,6 +10,10 @@ schemas/fhir/R4/valuesets/
 schemas/fhir/R5/
 schemas/hl7/
 
+# Local dev-only bind-mount targets — default HOST_DATA_PATH/CCD_INBOX_PATH
+# destinations in docker-compose.yml (portable across Windows/Linux/Mac)
+.devdata/
+
 # Claude / AI tooling
 .claude/
 

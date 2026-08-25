@@ -82,6 +82,25 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
+      - name: Install schema packages (HL7 v2.5.1 + FHIR R4 base/US Core)
+        # schemas/hl7/, schemas/fhir/R4/{resources,profiles,valuesets}/ are
+        # gitignored (see schemas/catalog.json + services/schema/
+        # schema_package_manager.go: "the app ships with NO schemas bundled").
+        # A fresh CI checkout has none of them, so hl7/real_schema_parser.go's
+        # loader — which every real HL7-parse/FHIR-build test goes through —
+        # finds nothing and every validation code path silently no-ops. Fetch
+        # the same public release assets a real install downloads via the
+        # Settings UI, straight from the URLs already recorded in
+        # schemas/catalog.json (single source of truth, not re-hardcoded here).
+        run: |
+          set -euo pipefail
+          for id in fhir-r4-base fhir-r4-us-core hl7-v2-25; do
+            url=$(jq -r --arg id "$id" '.[] | select(.id==$id) | .download_url' schemas/catalog.json)
+            echo "Installing $id from $url"
+            curl -sSL "$url" -o "/tmp/$id.zip"
+            unzip -q -o "/tmp/$id.zip" -d schemas/
+          done
+
       - name: Run Flyway migrations
         # Mirrors docker-compose.yml's flyway service (same URL shape, user/
         # password, baselineOnMigrate/placeholderReplacement flags, repair+
@@ -274,6 +293,23 @@ jobs:
           npm ci --prefer-offline
           npx playwright install --with-deps chromium
 
+      - name: Install schema packages (HL7 v2.5.1 + FHIR R4 base/US Core)
+        # Same gap as test-go's identically-named step: schemas/hl7/ and
+        # schemas/fhir/R4/{resources,profiles,valuesets}/ are gitignored, and
+        # docker-compose.yml bind-mounts ./schemas into the app container — so
+        # without this, the container starts with an empty schema dir and every
+        # validation-dependent Playwright spec (hl7-reader-validation.spec.js,
+        # etc.) fails the same way the Go tests do. Must run before the stack
+        # starts since the mount is read at container start, not on every request.
+        run: |
+          set -euo pipefail
+          for id in fhir-r4-base fhir-r4-us-core hl7-v2-25; do
+            url=$(jq -r --arg id "$id" '.[] | select(.id==$id) | .download_url' schemas/catalog.json)
+            echo "Installing $id from $url"
+            curl -sSL "$url" -o "/tmp/$id.zip"
+            unzip -q -o "/tmp/$id.zip" -d schemas/
+          done
+
       - name: Start app stack
         # Deliberately starts only postgres/minio/ollama/flyway/app — skips
         # ollama-init, which pulls llama3.2:3b + nomic-embed-text (multi-GB) on
@@ -283,19 +319,11 @@ jobs:
         # ollama-init's completion, so the app starts fine with no models
         # pulled — AI features are documented as optional (CLAUDE.md: "ezCompanion
         # is optional at install time") and degrade gracefully without them.
-        # docker-compose.ci.yml swaps the ollama service's Windows-only
-        # ${USERPROFILE} bind mount (undefined on this Linux runner) for a
-        # named volume. app's own HOST_DATA_PATH/CCD_INBOX_PATH mounts default
-        # to Windows-only paths too (for local dev convenience) but are already
-        # env-overridable, so no compose file changes are needed for them —
-        # just point them at valid Linux paths here. Docker auto-creates a
-        # bind-mount source directory that doesn't exist yet.
-        env:
-          HOST_DATA_PATH: /tmp/ci-host-data
-          CCD_INBOX_PATH: /tmp/ci-ccd-inbox
+        # docker-compose.yml's ollama/HOST_DATA_PATH/CCD_INBOX_PATH mounts all
+        # default to portable, OS-agnostic paths (named volume / repo-local
+        # .devdata/ dirs) — no CI-specific overrides needed here anymore.
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.ci.yml \
-            up -d postgres minio ollama flyway app
+          docker compose -f docker-compose.yml up -d postgres minio ollama flyway app
 
       - name: Wait for app readiness
         run: |
@@ -308,7 +336,7 @@ jobs:
             sleep 5
           done
           echo "App did not become ready in time"
-          docker compose -f docker-compose.yml -f docker-compose.ci.yml logs app --tail 200
+          docker compose -f docker-compose.yml logs app --tail 200
           exit 1
 
       - name: Run Playwright suite
@@ -326,4 +354,4 @@ jobs:
 
       - name: Dump app logs on failure
         if: failure()
-        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml logs app --tail 500
+        run: docker compose -f docker-compose.yml logs app --tail 500

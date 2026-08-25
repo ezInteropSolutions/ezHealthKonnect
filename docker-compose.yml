@@ -52,8 +52,12 @@ services:
     restart: unless-stopped
     ports:
       - "11434:11434"
+    # Defaults to the named volume below (works identically on Windows/Linux/Mac,
+    # no host path needed). Set OLLAMA_MODELS_PATH in .env to bind-mount an
+    # existing native Ollama cache instead (e.g. Windows: C:/Users/you/.ollama)
+    # and skip re-downloading models you already have.
     volumes:
-      - ${USERPROFILE}/.ollama:/root/.ollama
+      - ${OLLAMA_MODELS_PATH:-ollama_data}:/root/.ollama
     environment:
       - OLLAMA_KEEP_ALIVE=24h
     # GPU support: uncomment the block below and ensure nvidia-container-toolkit is installed
@@ -82,7 +86,7 @@ services:
       ollama:
         condition: service_healthy
     volumes:
-      - ${USERPROFILE}/.ollama:/root/.ollama
+      - ${OLLAMA_MODELS_PATH:-ollama_data}:/root/.ollama
     environment:
       - OLLAMA_HOST=http://ollama:11434
     entrypoint: >
@@ -203,15 +207,18 @@ services:
       - ./go.sum:/app/go.sum
       - ./test-results:/app/test-results      # Test/sample files dropped here are accessible in container
       # ── Host file access for File Parser step ──────────────────────────────
-      # Set HOST_DATA_PATH in your .env file (or export it) to mount a Windows
+      # Set HOST_DATA_PATH in your .env file (or export it) to mount any local
       # folder into the container so the File Parser can read your local files.
-      # Example .env:  HOST_DATA_PATH=C:/Users/ShanawazKhan/Documents/HealthData
-      # Inside the container the files appear at:  /mnt/host/
-      - ${HOST_DATA_PATH:-C:/Users/Public}:/mnt/host
-      # CCD/CDA file drop folder — files placed in C:\Projects\test on Windows
-      # (or $CCD_INBOX_PATH, if set) appear at /data/ccd/inbox inside the container.
-      # Override via .env for non-Windows hosts (e.g. CI) — see docker-compose.ci.yml.
-      - ${CCD_INBOX_PATH:-C:/Projects/test}:/data/ccd/inbox
+      # Example .env (Windows): HOST_DATA_PATH=C:/Users/you/Documents/HealthData
+      # Example .env (Linux):   HOST_DATA_PATH=/home/you/health-data
+      # Defaults to a repo-local, gitignored folder so this works out of the box
+      # on any OS with zero setup. Inside the container: /mnt/host/
+      - ${HOST_DATA_PATH:-./.devdata/host-mount}:/mnt/host
+      # CCD/CDA file drop folder. Same portable-default pattern as above —
+      # override CCD_INBOX_PATH in .env to point at wherever you actually drop
+      # CCD/CDA files (e.g. C:/Projects/test on Windows). Inside the container:
+      # /data/ccd/inbox
+      - ${CCD_INBOX_PATH:-./.devdata/ccd-inbox}:/data/ccd/inbox
 
     # Wait for PostgreSQL, MinIO, and migrations to complete
     depends_on:
@@ -246,6 +253,11 @@ volumes:
 
   # MinIO persistent data (object storage for raw messages, parsed content, logs)
   minio_data:
+    driver: local
+
+  # Ollama model cache — default target for the ollama/ollama-init services'
+  # volume mount (see OLLAMA_MODELS_PATH override above)
+  ollama_data:
     driver: local
 
 
