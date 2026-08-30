@@ -46,16 +46,23 @@ RUN apk upgrade --no-cache && apk add --no-cache curl && \
     # node:22-alpine ships with npm 10.9.x, which bundles several transitive
     # deps with known CVEs (picomatch CVE-2026-33671, plus tar CVE-2026-59873/
     # 59874/73566, brace-expansion CVE-2026-13149/14257/69152, ip-address
-    # CVE-2026-69192, sigstore CVE-2026-48815 — found via Trivy image scan).
-    # npm cannot self-upgrade on Alpine. Since our container never invokes npm
-    # at runtime (app.js/server.js only use the already-installed node_modules
-    # copied in below), removing these bundled copies is safe and fixes the
-    # vulnerabilities at the image level rather than suppressing the scan.
+    # CVE-2026-69192, sigstore CVE-2026-48815, pacote CVE-2026-9496 — found via
+    # Trivy image scan). npm cannot self-upgrade on Alpine. Since our container
+    # never invokes npm at runtime (app.js/server.js only use the
+    # already-installed node_modules copied in below), removing these bundled
+    # copies is safe and fixes the vulnerabilities at the image level rather
+    # than suppressing the scan.
+    # pacote is nested twice — npm's own dependency resolution keeps a second,
+    # differently-versioned copy inside @npmcli/metavuln-calculator because it
+    # needs an incompatible pacote range from npm's own top-level one. Both
+    # copies are independently vulnerable and must both be removed.
     rm -rf /usr/local/lib/node_modules/npm/node_modules/picomatch \
            /usr/local/lib/node_modules/npm/node_modules/tar \
            /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
            /usr/local/lib/node_modules/npm/node_modules/ip-address \
-           /usr/local/lib/node_modules/npm/node_modules/sigstore
+           /usr/local/lib/node_modules/npm/node_modules/sigstore \
+           /usr/local/lib/node_modules/npm/node_modules/pacote \
+           /usr/local/lib/node_modules/npm/node_modules/@npmcli/metavuln-calculator/node_modules/pacote
 
 WORKDIR /app
 
