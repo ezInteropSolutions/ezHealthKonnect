@@ -64,11 +64,10 @@ func (k *KnowledgeIngestionService) IngestPipelineStepDocs(ctx context.Context, 
 		result.FilesScanned++
 		text := renderStepDocToText(stepType, file.Registry[stepType])
 		n, err := k.embedding.IngestText(ctx, "pipeline_step_docs", stepType, "generated:pipeline_step_docs", text, nil)
+		result.ChunksStored += n // count whatever succeeded even if some chunks in this entry failed
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", stepType, err))
-			continue
 		}
-		result.ChunksStored += n
 	}
 
 	aliases := make([]string, 0, len(file.Aliases))
@@ -86,11 +85,10 @@ func (k *KnowledgeIngestionService) IngestPipelineStepDocs(ctx context.Context, 
 		result.FilesScanned++
 		text := fmt.Sprintf("'%s' is a legacy/alias name for the '%s' step.\n\n%s", alias, target, renderStepDocToText(target, doc))
 		n, err := k.embedding.IngestText(ctx, "pipeline_step_docs", alias, "generated:pipeline_step_docs", text, nil)
+		result.ChunksStored += n // count whatever succeeded even if some chunks in this entry failed
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("alias %s: %v", alias, err))
-			continue
 		}
-		result.ChunksStored += n
 	}
 
 	log.Printf("✅ AI KB — Pipeline Step Docs: %d entries, %d chunks, %d errors",

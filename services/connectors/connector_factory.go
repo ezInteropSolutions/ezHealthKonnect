@@ -92,11 +92,15 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	f.RegisterInbound("tcp_mllp", NewTCPMLLPInboundConnector)              // Alias for V45 migration compatibility
 	f.RegisterOutbound("tcp_mllp_outbound", NewTCPMLLPOutboundConnector)
 
-	// HTTP — generic outbound and FHIR-aware inbound/outbound
+	// HTTP — generic outbound, FHIR-aware inbound/outbound, and a genuinely
+	// separate generic (non-FHIR) HTTP/REST inbound receiver. http_rest_inbound
+	// and http_rest used to be aliased to the FHIR connector (a mistake — see
+	// http_rest_inbound.go's file header for the full story); they now have
+	// their own real implementation.
 	f.RegisterInbound("http_fhir_inbound", NewHTTPFHIRInboundConnector)    // FHIR-aware HTTP receiver (Phase A canonical name)
-	f.RegisterInbound("http_rest_inbound", NewHTTPFHIRInboundConnector)    // Alias for V45 migration compatibility
-	f.RegisterInbound("http_rest", NewHTTPFHIRInboundConnector)            // Alias for V45 migration compatibility
-	f.RegisterInbound("http", NewHTTPFHIRInboundConnector)                 // Alias for http connectivity
+	f.RegisterInbound("http_rest_inbound", NewHTTPRestInboundConnector)    // Generic (non-FHIR) HTTP receiver
+	f.RegisterInbound("http_rest", NewHTTPRestInboundConnector)            // Alias for http_rest_inbound
+	f.RegisterInbound("http", NewHTTPFHIRInboundConnector)                 // Legacy generic alias — the one real interface using it is actually FHIR-shaped (verified before this change)
 	f.RegisterOutbound("http_outbound", NewHTTPOutboundConnector)          // Generic HTTP delivery (non-FHIR)
 	f.RegisterOutbound("http", NewHTTPOutboundConnector)                   // Alias for http connectivity
 	f.RegisterOutbound("http_rest", NewHTTPOutboundConnector)              // Alias for destination type compatibility
@@ -110,7 +114,7 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	f.RegisterInbound("postgresql_inbound", NewPostgreSQLInboundConnector)
 	f.RegisterOutbound("postgresql_outbound", NewPostgreSQLOutboundConnector)
 
-	// Database Connectors - MySQL (full implementation in mysql_inbound.go)
+	// Database Connectors - MySQL (full implementation: mysql_inbound.go, mysql_outbound.go)
 	f.RegisterInbound("mysql_inbound", NewMySQLInboundConnector)
 	f.RegisterOutbound("mysql_outbound", NewMySQLOutboundConnector)
 
@@ -126,11 +130,11 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	f.RegisterInbound("oracle_inbound", NewOracleInboundConnector)
 	f.RegisterOutbound("oracle_outbound", NewOracleOutboundConnector)
 
-	// Cloud Data Warehouse Connectors - Snowflake
+	// Cloud Data Warehouse Connectors - Snowflake (full implementation both directions: snowflake_inbound.go, snowflake_outbound.go)
 	f.RegisterInbound("snowflake_inbound", NewSnowflakeInboundConnector)
 	f.RegisterOutbound("snowflake_outbound", NewSnowflakeOutboundConnector)
 
-	// Cloud Data Warehouse Connectors - Databricks
+	// Cloud Data Warehouse Connectors - Databricks (full implementation both directions: databricks_inbound.go, databricks_outbound.go)
 	f.RegisterInbound("databricks_inbound", NewDatabricksInboundConnector)
 	f.RegisterOutbound("databricks_outbound", NewDatabricksOutboundConnector)
 
@@ -158,7 +162,7 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	f.RegisterInbound("rabbitmq_inbound", NewRabbitMQInboundConnector)
 	f.RegisterOutbound("rabbitmq_outbound", NewRabbitMQOutboundConnector)
 
-	// Message Queue Connectors - Kafka (full implementation in kafka_inbound.go)
+	// Message Queue Connectors - Kafka (full implementation: kafka_inbound.go, kafka_outbound.go)
 	f.RegisterInbound("kafka_inbound", NewKafkaInboundConnector)
 	f.RegisterOutbound("kafka_outbound", NewKafkaOutboundConnector)
 
@@ -166,11 +170,11 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	f.RegisterInbound("redis_inbound", NewRedisInboundConnector)
 	f.RegisterOutbound("redis_outbound", NewRedisOutboundConnector)
 
-	// Cloud Storage Connectors - AWS S3 (full implementation in aws_s3_inbound.go)
+	// Cloud Storage Connectors - AWS S3 (full implementation: aws_s3_inbound.go, aws_s3_outbound.go)
 	f.RegisterInbound("aws_s3_inbound", NewAWSS3InboundConnector)
 	f.RegisterOutbound("aws_s3_outbound", NewAWSS3OutboundConnector)
 
-	// Cloud Storage Connectors - Azure Blob
+	// Cloud Storage Connectors - Azure Blob (full implementation both directions: azure_blob_inbound.go, azure_blob_outbound.go)
 	f.RegisterInbound("azure_blob_inbound", NewAzureBlobInboundConnector)
 	f.RegisterOutbound("azure_blob_outbound", NewAzureBlobOutboundConnector)
 

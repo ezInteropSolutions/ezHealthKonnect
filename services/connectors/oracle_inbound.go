@@ -41,7 +41,7 @@ import (
 
 	"ezhealthkonnect/models"
 
-	_ "github.com/sijms/go-ora/v2" // Registers "oracle" driver
+	go_ora "github.com/sijms/go-ora/v2"
 )
 
 const (
@@ -70,6 +70,7 @@ func NewOracleInboundConnector() InboundConnector {
 			"supports_incremental":      true,
 			"supports_after_processing": true,
 			"supports_reconnect":        true,
+			"supports_windows_auth":     true, // go-ora's native AUTH TYPE=OS — see buildWindowsAuthDSN
 		},
 	}
 	return &OracleInboundConnector{
@@ -113,6 +114,11 @@ func (o *OracleInboundConnector) Initialize(config []byte) error {
 // buildDSN constructs the go-ora connection URL.
 //
 //	oracle://user:pass@host:port/service_name
+//
+// When auth_type is "windows", delegates to buildWindowsAuthDSN instead —
+// go-ora's own OS-authentication mechanism (AUTH TYPE=OS), not a generic
+// feature built here. Unverified against a real domain-joined Oracle server
+// in this environment; see buildWindowsAuthDSN's own doc comment.
 func (o *OracleInboundConnector) buildDSN() string {
 	host := o.config.Host
 	if host == "" {
@@ -123,6 +129,10 @@ func (o *OracleInboundConnector) buildDSN() string {
 		port = 1521
 	}
 
+	if o.config.AuthType == "windows" {
+		return o.buildWindowsAuthDSN(host, port)
+	}
+
 	dsn := fmt.Sprintf("oracle://%s:%s@%s:%d/%s",
 		o.config.Username, o.config.Password, host, port, o.config.Database)
 
@@ -131,6 +141,41 @@ func (o *OracleInboundConnector) buildDSN() string {
 	}
 
 	return dsn
+}
+
+// buildWindowsAuthDSN builds a DSN using go-ora's native OS-authentication
+// support (confirmed via the driver's own documentation — not a hand-rolled
+// mechanism): AUTH TYPE=OS delegates the actual login to the Windows domain
+// controller via NTLM/NTS rather than a username+password pair sent to
+// Oracle. AUTH SERV=NTS is required when connecting from a non-Windows host
+// (this backend always runs in a Linux container — see go.mod/Dockerfile) —
+// the driver only sets it automatically when running on Windows itself.
+//
+// NOTE — cannot be verified against a real Windows-domain-joined Oracle
+// server in this environment (no such infrastructure available). Verified
+// only that go-ora's BuildUrl + these exact option keys are the driver's own
+// documented mechanism, and that the resulting DSN parses/opens without
+// error. Treat actual authentication against a real domain as unverified
+// until tried against one.
+func (o *OracleInboundConnector) buildWindowsAuthDSN(host string, port int) string {
+	options := map[string]string{
+		"AUTH TYPE": "OS",
+		"AUTH SERV": "NTS",
+	}
+	if o.config.OSUser != "" {
+		options["OS USER"] = o.config.OSUser
+	}
+	if o.config.OSPassword != "" {
+		options["OS PASS"] = o.config.OSPassword
+	}
+	if o.config.Domain != "" {
+		options["DOMAIN"] = o.config.Domain
+	}
+	if o.config.SSLMode == "require" {
+		options["SSL"] = "true"
+		options["SSL VERIFY"] = "false"
+	}
+	return go_ora.BuildUrl(host, port, o.config.Database, "", "", options)
 }
 
 // reconnect closes the existing connection and re-opens a fresh one.
@@ -205,6 +250,9 @@ func (o *OracleInboundConnector) Validate() error {
 	}
 	if o.config.Database == "" {
 		return fmt.Errorf("database (service name) is required")
+	}
+	if o.config.AuthType == "windows" && o.config.OSPassword == "" {
+		return fmt.Errorf("os_password is required when auth_type is 'windows'")
 	}
 	return nil
 }

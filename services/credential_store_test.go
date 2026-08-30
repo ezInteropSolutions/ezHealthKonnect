@@ -996,6 +996,161 @@ func TestEncryptDecryptConfigFields_PostgreSQLEnrichmentStep(t *testing.T) {
 	}
 }
 
+// ─── Nested config (connector.outbound/inbound real shape) ──────────
+//
+// A connector.outbound/connector.inbound step's real config shape is
+// {connectorType, config: {host, password, ...}, contentField, ...} -- the
+// actual credentials live one level down inside the nested "config" map, not
+// alongside "connectorType" at the top level. EncryptConfigFields/
+// DecryptConfigFields used to only walk the top level, so these nested
+// credentials were silently never encrypted. These tests cover the fix.
+
+func TestEncryptConfigFields_EncryptsNestedConnectorCredential(t *testing.T) {
+	cs := newTestStore(t)
+	stepConfig := map[string]interface{}{
+		"connectorType": "mysql_outbound",
+		"config": map[string]interface{}{
+			"host":     "mysql.internal",
+			"port":     float64(3306),
+			"username": "app_user",
+			"password": "sup3r-secret-db-pass",
+		},
+		"contentField": "message",
+	}
+
+	result, err := cs.EncryptConfigFields(stepConfig)
+	if err != nil {
+		t.Fatalf("EncryptConfigFields: %v", err)
+	}
+
+	if result["connectorType"] != "mysql_outbound" {
+		t.Errorf("connectorType should be unchanged, got %v", result["connectorType"])
+	}
+
+	nested, ok := result["config"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("config should still be a map[string]interface{}, got %T", result["config"])
+	}
+	if nested["host"] != "mysql.internal" {
+		t.Errorf("nested host should be unchanged, got %v", nested["host"])
+	}
+	if nested["port"] != float64(3306) {
+		t.Errorf("nested port should be unchanged, got %v", nested["port"])
+	}
+
+	encPassword, ok := nested["password"].(string)
+	if !ok || !strings.HasPrefix(encPassword, encryptedMarker) {
+		t.Fatalf("nested password should be encrypted, got %v", nested["password"])
+	}
+	if encPassword == "sup3r-secret-db-pass" {
+		t.Error("nested password must not equal plaintext after encryption")
+	}
+
+	// The original input map must not be mutated.
+	origNested := stepConfig["config"].(map[string]interface{})
+	if origNested["password"] != "sup3r-secret-db-pass" {
+		t.Error("original input map must not be mutated by EncryptConfigFields")
+	}
+}
+
+func TestEncryptDecryptConfigFields_NestedConnectorCredential_RoundTrip(t *testing.T) {
+	cs := newTestStore(t)
+	stepConfig := map[string]interface{}{
+		"connectorType": "snowflake_outbound",
+		"config": map[string]interface{}{
+			"account":  "xy12345",
+			"username": "svc_user",
+			"password": "snowflake-secret",
+		},
+	}
+
+	encrypted, err := cs.EncryptConfigFields(stepConfig)
+	if err != nil {
+		t.Fatalf("EncryptConfigFields: %v", err)
+	}
+	decrypted, err := cs.DecryptConfigFields(encrypted)
+	if err != nil {
+		t.Fatalf("DecryptConfigFields: %v", err)
+	}
+
+	nested, ok := decrypted["config"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("decrypted config should still be a map[string]interface{}, got %T", decrypted["config"])
+	}
+	if nested["password"] != "snowflake-secret" {
+		t.Errorf("nested password round-trip failed: got %v", nested["password"])
+	}
+	if nested["account"] != "xy12345" {
+		t.Errorf("nested non-sensitive field should be unchanged, got %v", nested["account"])
+	}
+}
+
+func TestEncryptConfigFields_EncryptsCredentialsInsideArrayOfObjects(t *testing.T) {
+	cs := newTestStore(t)
+	input := map[string]interface{}{
+		"connectors": []interface{}{
+			map[string]interface{}{"name": "primary", "token": "token-one"},
+			map[string]interface{}{"name": "secondary", "token": "token-two"},
+		},
+	}
+
+	result, err := cs.EncryptConfigFields(input)
+	if err != nil {
+		t.Fatalf("EncryptConfigFields: %v", err)
+	}
+
+	arr, ok := result["connectors"].([]interface{})
+	if !ok || len(arr) != 2 {
+		t.Fatalf("connectors should remain a 2-element slice, got %T len=%v", result["connectors"], arr)
+	}
+	first := arr[0].(map[string]interface{})
+	second := arr[1].(map[string]interface{})
+
+	if first["name"] != "primary" || second["name"] != "secondary" {
+		t.Error("non-sensitive fields inside array elements should be unchanged")
+	}
+	firstTok, _ := first["token"].(string)
+	secondTok, _ := second["token"].(string)
+	if !strings.HasPrefix(firstTok, encryptedMarker) || !strings.HasPrefix(secondTok, encryptedMarker) {
+		t.Errorf("tokens inside array elements should be encrypted, got %v / %v", firstTok, secondTok)
+	}
+	if firstTok == secondTok {
+		t.Error("each encryption should use a distinct nonce, producing different ciphertext")
+	}
+
+	decrypted, err := cs.DecryptConfigFields(result)
+	if err != nil {
+		t.Fatalf("DecryptConfigFields: %v", err)
+	}
+	decArr := decrypted["connectors"].([]interface{})
+	if decArr[0].(map[string]interface{})["token"] != "token-one" {
+		t.Error("array element 0 token round-trip failed")
+	}
+	if decArr[1].(map[string]interface{})["token"] != "token-two" {
+		t.Error("array element 1 token round-trip failed")
+	}
+}
+
+func TestEncryptConfigFields_NonMapNestedValue_LeftUnchanged(t *testing.T) {
+	// A Go-native map[string]string (as opposed to map[string]interface{}) can
+	// never actually occur after a real encoding/json.Unmarshal into an
+	// interface{}, but the function must not panic or crash on unexpected
+	// nested types -- it should just pass them through untouched.
+	cs := newTestStore(t)
+	input := map[string]interface{}{
+		"resultMapping": map[string]string{"password": "not-json-shaped"},
+	}
+
+	result, err := cs.EncryptConfigFields(input)
+	if err != nil {
+		t.Fatalf("EncryptConfigFields should not error on an unexpected nested type: %v", err)
+	}
+	rm, ok := result["resultMapping"].(map[string]string)
+	if !ok || rm["password"] != "not-json-shaped" {
+		t.Errorf("non-map[string]interface{} nested value should pass through unchanged, got %v", result["resultMapping"])
+	}
+}
+
 // min helper (local to avoid conflict with hl7_fhir_transform_service_v3.go)
 func credStoreMin(a, b int) int {
 	if a < b {

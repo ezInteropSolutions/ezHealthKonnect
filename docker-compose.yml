@@ -194,6 +194,9 @@ services:
       - ./scripts:/app/scripts
       - ./processing:/app/processing      # Go processing engine code
       - ./architecture:/app/architecture  # AI knowledge-base source docs (*.md + generated/pipeline_step_docs.json)
+      - ./docs:/app/docs                  # AI knowledge-base source docs (INSTALL_GUIDE.md, RUNBOOK.md)
+      - ./installer/ONE_CLICK_INSTALLER_GUIDE.md:/app/installer/ONE_CLICK_INSTALLER_GUIDE.md  # AI knowledge-base source doc
+      - ./SYSTEM_DOCUMENTATION.md:/app/SYSTEM_DOCUMENTATION.md  # AI knowledge-base master reference doc
       # ✅ CRITICAL: These were missing in your broken config
       - ./hl7:/app/hl7                    # Go HL7 parsing code
       - ./schemas:/app/schemas             # HL7 and FHIR schema files (writable for package installs)

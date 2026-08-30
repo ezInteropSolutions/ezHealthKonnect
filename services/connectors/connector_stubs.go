@@ -14,23 +14,10 @@ package connectors
 // NewTCPMLLPOutboundConnector — IMPLEMENTED in tcp_mllp_outbound.go
 // See services/connectors/tcp_mllp_outbound.go for the full TCP/MLLP outbound connector.
 
-// NewHTTPRESTInboundConnector creates an HTTP REST API inbound connector
-func NewHTTPRESTInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "http_rest_inbound",
-		DisplayName:        "HTTP/REST API Endpoint",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron": false,
-			"supports_tls":  true,
-			"supports_auth": true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewHTTPRestInboundConnector — IMPLEMENTED in http_rest_inbound.go
+// (dead orphaned stub NewHTTPRESTInboundConnector, same type_name but never
+// referenced by connector_factory.go, removed here — found while auditing
+// connector status for CLAUDE.md accuracy)
 
 // NewHTTPOutboundConnector - MOVED to http_outbound.go (full implementation)
 // See services/connectors/http_outbound.go for the complete HTTP outbound connector
@@ -60,25 +47,7 @@ func NewHTTPRESTInboundConnector() InboundConnector {
 // -----------------------------------------------------------------------------
 
 // NewMySQLInboundConnector — IMPLEMENTED in mysql_inbound.go
-
-// NewMySQLOutboundConnector creates a MySQL outbound connector
-func NewMySQLOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "mysql_outbound",
-		DisplayName:        "MySQL Database Writer",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":   true,
-			"supports_tls":     true,
-			"supports_replace": true,
-			"supports_pool":    true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewMySQLOutboundConnector — IMPLEMENTED in mysql_outbound.go
 
 // -----------------------------------------------------------------------------
 // Database Connectors - SQL Server (2)
@@ -111,95 +80,18 @@ func NewMySQLOutboundConnector() OutboundConnector {
 // Cloud Data Warehouse Connectors - Snowflake (2)
 // -----------------------------------------------------------------------------
 
-// NewSnowflakeInboundConnector creates a Snowflake inbound connector
-func NewSnowflakeInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "snowflake_inbound",
-		DisplayName:        "Snowflake Data Warehouse Reader",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":             true,
-			"supports_oauth":            true,
-			"supports_key_pair_auth":    true,
-			"supports_incremental":      true,
-			"supports_after_processing": true,
-			"supports_warehouse_mgmt":   true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
-
-// NewSnowflakeOutboundConnector creates a Snowflake outbound connector
-func NewSnowflakeOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "snowflake_outbound",
-		DisplayName:        "Snowflake Data Warehouse Writer",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":           true,
-			"supports_oauth":           true,
-			"supports_key_pair_auth":   true,
-			"supports_merge":           true,
-			"supports_pool":            true,
-			"supports_warehouse_mgmt":  true,
-			"supports_stage_copy":      true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewSnowflakeInboundConnector — IMPLEMENTED in snowflake_inbound.go
+// NewSnowflakeOutboundConnector — IMPLEMENTED in snowflake_outbound.go
+// Supports INSERT and MERGE INTO (upsert) write modes via the official
+// gosnowflake/v2 driver, username/password auth only (key-pair auth rejected
+// with a clear error, not silently ignored — see file header).
 
 // -----------------------------------------------------------------------------
 // Cloud Data Warehouse Connectors - Databricks (2)
 // -----------------------------------------------------------------------------
 
-// NewDatabricksInboundConnector creates a Databricks inbound connector
-func NewDatabricksInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "databricks_inbound",
-		DisplayName:        "Databricks SQL Warehouse Reader",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":             true,
-			"supports_pat_auth":         true,
-			"supports_oauth":            true,
-			"supports_incremental":      true,
-			"supports_after_processing": true,
-			"supports_delta_lake":       true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
-
-// NewDatabricksOutboundConnector creates a Databricks outbound connector
-func NewDatabricksOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "databricks_outbound",
-		DisplayName:        "Databricks SQL Warehouse Writer",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":       true,
-			"supports_pat_auth":    true,
-			"supports_oauth":       true,
-			"supports_merge":       true,
-			"supports_pool":        true,
-			"supports_delta_lake":  true,
-			"supports_unity_cat":   true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewDatabricksInboundConnector — IMPLEMENTED in databricks_inbound.go
+// NewDatabricksOutboundConnector — IMPLEMENTED in databricks_outbound.go
 
 // -----------------------------------------------------------------------------
 // Cloud Data Warehouse Connectors - BigQuery (2)
@@ -458,25 +350,7 @@ func NewRabbitMQOutboundConnector() OutboundConnector {
 // -----------------------------------------------------------------------------
 
 // NewKafkaInboundConnector — IMPLEMENTED in kafka_inbound.go
-
-// NewKafkaOutboundConnector creates a Kafka outbound connector
-func NewKafkaOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "kafka_outbound",
-		DisplayName:        "Kafka Producer",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":       true,
-			"supports_sasl":        true,
-			"supports_compression": true,
-			"supports_acks":        true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewKafkaOutboundConnector — IMPLEMENTED in kafka_outbound.go
 
 // -----------------------------------------------------------------------------
 // Message Queue Connectors - Redis (2)
@@ -509,66 +383,17 @@ func NewRedisOutboundConnector() OutboundConnector {
 // -----------------------------------------------------------------------------
 
 // NewAWSS3InboundConnector — IMPLEMENTED in aws_s3_inbound.go
-
-// NewAWSS3OutboundConnector creates an AWS S3 outbound connector
-func NewAWSS3OutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "aws_s3_outbound",
-		DisplayName:        "AWS S3 Bucket Writer",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":      true,
-			"supports_iam_role":   true,
-			"supports_encryption": true,
-			"supports_kms":        true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewAWSS3OutboundConnector — IMPLEMENTED in aws_s3_outbound.go
 
 // -----------------------------------------------------------------------------
 // Cloud Storage Connectors - Azure Blob (2)
 // -----------------------------------------------------------------------------
 
-// NewAzureBlobInboundConnector creates an Azure Blob inbound connector
-func NewAzureBlobInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "azure_blob_inbound",
-		DisplayName:        "Azure Blob Storage Reader",
-		Version:            "1.0.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":             true,
-			"supports_after_processing": true,
-			"supports_patterns":         true,
-			"supports_https":            true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
+// NewAzureBlobInboundConnector — IMPLEMENTED in azure_blob_inbound.go
 
-// NewAzureBlobOutboundConnector creates an Azure Blob outbound connector
-func NewAzureBlobOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "azure_blob_outbound",
-		DisplayName:        "Azure Blob Storage Writer",
-		Version:            "1.0.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch":        true,
-			"supports_https":        true,
-			"supports_access_tiers": true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewAzureBlobOutboundConnector — IMPLEMENTED in azure_blob_outbound.go
+// Supports connection-string and shared-key (account_name+account_key) auth,
+// via the official Azure SDK for Go.
 
 // -----------------------------------------------------------------------------
 // Cloud Storage Connectors - Google Cloud Storage (2)

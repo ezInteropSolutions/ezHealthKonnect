@@ -83,15 +83,23 @@ func (f *FileWriterConnector) Initialize(config []byte) error {
 	}
 	log.Printf("🔍 Filename pattern set to: %s", f.filenamePattern)
 
-	// Create subdirectories
+	// Create subdirectories — "create_subdirectories" is the connectivity_types
+	// schema's old (pre-fix) key name; kept as a fallback for defense in depth
+	// even though no real saved config currently uses it.
 	if createSub, ok := cfg["create_subdirs"].(bool); ok {
 		f.createSubdirs = createSub
 	} else if createSub, ok := cfg["createSubdirs"].(bool); ok {
 		f.createSubdirs = createSub
+	} else if createSub, ok := cfg["create_subdirectories"].(bool); ok {
+		f.createSubdirs = createSub
 	}
 
-	// Encoding
+	// Encoding — "file_encoding" is the connectivity_types schema's old
+	// (pre-fix) key name; kept as a fallback for defense in depth even though
+	// no real saved config currently uses it.
 	if enc, ok := cfg["encoding"].(string); ok && enc != "" {
+		f.encoding = enc
+	} else if enc, ok := cfg["file_encoding"].(string); ok && enc != "" {
 		f.encoding = enc
 	}
 

@@ -2,8 +2,18 @@
 // Stores user feedback on AI responses and triggers KB improvement for positives.
 //
 // Feedback loop:
-//   User 👍 on Q&A          → IngestConfirmedAnswer    (Q+A added to KB)
-//   User 👍 on script gen   → IngestConfirmedScript    (description+script added to KB)
+//   User 👍 on Q&A          → stored for admin review only, NOT added to the shared KB.
+//                             (Removed 2026-08-29: the raw question text is free-form user
+//                             input and can contain PHI a user typed in — e.g. a patient
+//                             name in "why did patient Jane Doe's message fail" — with no
+//                             redaction step. Once embedded, that text is retrievable by
+//                             any other user's future question, forever. Unlike script
+//                             confirmation below, there's no safe "just keep the pattern"
+//                             reduction for natural-language text, so this path was turned
+//                             off rather than partially fixed.)
+//   User 👍 on script gen   → IngestConfirmedScript    (description+script added to KB —
+//                             safe because only a short code-shape preview is kept, never
+//                             the real sample message the script was tested against)
 //   User 👍 on mapping      → IngestConfirmedMapping   (already handled in wizard)
 //   User 👎 on anything     → stored for admin review, NOT ingested
 //
@@ -113,16 +123,13 @@ func (s *FeedbackService) Save(ctx context.Context, fb FeedbackRecord) (string, 
 }
 
 // improveKB runs asynchronously — ingests positive responses into the knowledge base.
+// "ask" (plain Q&A) is deliberately NOT handled here — see the Feedback loop comment
+// at the top of this file for why.
 func (s *FeedbackService) improveKB(ctx context.Context, feedbackID string, fb FeedbackRecord) {
 	var ingested bool
 	var err error
 
 	switch fb.Endpoint {
-	case "ask":
-		if fb.PromptPreview != "" && fb.ResponsePreview != "" {
-			err = s.operational.IngestConfirmedAnswer(ctx, fb.PromptPreview, fb.ResponsePreview, fb.InterfaceID)
-			ingested = err == nil
-		}
 	case "generate-script":
 		if fb.PromptPreview != "" && fb.ResponsePreview != "" {
 			err = s.operational.IngestConfirmedScript(ctx, fb.PromptPreview, fb.ResponsePreview, fb.InterfaceID)
@@ -338,19 +345,10 @@ func (s *FeedbackService) SubmitToTeam(ctx context.Context, summary FeedbackSumm
 }
 
 // ─── KB improvement helpers ───────────────────────────────────────────────────
-// These add confirmed Q&A pairs and working scripts to the knowledge base,
-// so the same model produces better answers for similar future questions.
-
-// IngestConfirmedAnswer adds a user-validated Q&A pair to the KB.
-func (o *OperationalIngestionService) IngestConfirmedAnswer(ctx context.Context, question, answer, interfaceID string) error {
-	text := fmt.Sprintf("Q: %s\nA: %s", question, answer)
-	meta := map[string]interface{}{
-		"type":         "confirmed_answer",
-		"interface_id": interfaceID,
-	}
-	_, err := o.embedding.IngestText(ctx, "operational", "confirmed_qa", "feedback", text, meta)
-	return err
-}
+// Adds confirmed working scripts to the knowledge base, so the same model
+// produces better script suggestions for similar future requests. There is no
+// confirmed-Q&A equivalent — see the Feedback loop comment at the top of this
+// file for why plain-text Q&A pairs aren't safe to embed this way.
 
 // IngestConfirmedScript adds a user-validated script description+code pair to the KB.
 func (o *OperationalIngestionService) IngestConfirmedScript(ctx context.Context, description, script, interfaceID string) error {

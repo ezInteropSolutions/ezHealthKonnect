@@ -266,6 +266,13 @@ type AIConfig struct {
 	// model may propose actions (retry a message, activate/deactivate an interface)
 	// that a human must approve before they execute. Off by default.
 	AgentModeEnabled bool `json:"agent_mode_enabled"`
+	// HybridRetrievalEnabled adds lexical (keyword/full-text) search alongside RAG's
+	// existing dense vector search, fused via Reciprocal Rank Fusion — improves
+	// retrieval for exact-token questions (segment paths, error strings, connector
+	// names) that pure semantic search can rank below a merely-similar chunk. Off by
+	// default; when off, retrieval behavior is byte-for-byte identical to before this
+	// setting existed. See services/ai/rag_service.go.
+	HybridRetrievalEnabled bool `json:"hybrid_retrieval_enabled"`
 }
 
 // OllamaProviderCfg configures the local Ollama instance.
@@ -319,7 +326,13 @@ func OllamaModelCatalog() []OllamaModelInfo {
 			Name: "nomic-embed-text", DisplayName: "Nomic Embed Text",
 			ParamsBillion: 0.137, RAMRequiredGB: 1, CPUTokensPerSec: 0,
 			UseCases: []string{"embeddings"}, EmbedOnly: true,
-			Notes: "Required for RAG knowledge base. Always pull this model.",
+			Notes: "Required for RAG knowledge base. Always pull this model (docker-compose's ollama-init pulls it unconditionally on first boot).",
+		},
+		{
+			Name: "embeddinggemma", DisplayName: "EmbeddingGemma",
+			ParamsBillion: 0.3, RAMRequiredGB: 1, CPUTokensPerSec: 0,
+			UseCases: []string{"embeddings"}, EmbedOnly: true, Recommended: true,
+			Notes: "Higher RAG retrieval accuracy than nomic-embed-text, especially for exact-token questions (segment paths, error strings, connector names) — measured Recall@3 95.2% vs 66.7% on real knowledge-base content (2026-08-30). Same 768 dimensions, drop-in compatible. ~175ms slower per query.",
 		},
 		{
 			Name: "llama3.2:1b", DisplayName: "Llama 3.2 (1B)",

@@ -39,15 +39,12 @@ type inboundStubCase struct {
 // http_rest_inbound, file_listener, and postgresql_inbound have custom Initialize and
 // are tested separately below.
 var allStubInboundCases = []inboundStubCase{
-	// sqlserver_inbound and oracle_inbound are IMPLEMENTED — see implementedInboundCases below.
-	{"snowflake_inbound", NewSnowflakeInboundConnector, "snowflake_inbound", true},
-	{"databricks_inbound", NewDatabricksInboundConnector, "databricks_inbound", true},
+	// sqlserver_inbound, oracle_inbound, azure_blob_inbound, databricks_inbound, and snowflake_inbound are IMPLEMENTED — see implementedInboundCases below.
 	{"bigquery_inbound", NewBigQueryInboundConnector, "bigquery_inbound", true},
 	{"redshift_inbound", NewRedshiftInboundConnector, "redshift_inbound", true},
 	{"synapse_inbound", NewSynapseInboundConnector, "synapse_inbound", true},
 	{"clickhouse_inbound", NewClickHouseInboundConnector, "clickhouse_inbound", true},
 	{"timescaledb_inbound", NewTimescaleDBInboundConnector, "timescaledb_inbound", true},
-	{"azure_blob_inbound", NewAzureBlobInboundConnector, "azure_blob_inbound", true},
 	{"gcs_inbound", NewGCSInboundConnector, "gcs_inbound", true},
 	{"ftp_inbound", NewFTPInboundConnector, "ftp_inbound", true},
 }
@@ -64,6 +61,9 @@ var implementedInboundCases = []inboundStubCase{
 	{"aws_s3_inbound", NewAWSS3InboundConnector, "aws_s3_inbound", true},
 	{"sqlserver_inbound", NewSQLServerInboundConnector, "sqlserver_inbound", true},
 	{"oracle_inbound", NewOracleInboundConnector, "oracle_inbound", true},
+	{"azure_blob_inbound", NewAzureBlobInboundConnector, "azure_blob_inbound", true},
+	{"databricks_inbound", NewDatabricksInboundConnector, "databricks_inbound", true},
+	{"snowflake_inbound", NewSnowflakeInboundConnector, "snowflake_inbound", true},
 }
 
 // -----------------------------------------------------------------------------
@@ -203,10 +203,6 @@ func TestStubInboundConnectors_InitializeWithTypicalConfig(t *testing.T) {
 			"bucket": "my-hl7-bucket", "region": "us-east-1",
 			"prefix": "inbound/", "access_key_id": "AKIA...", "secret_access_key": "secret",
 		},
-		"azure_blob_inbound": {
-			"account_name": "myaccount", "container": "hl7-messages",
-			"connection_string": "DefaultEndpointsProtocol=https;...",
-		},
 		"gcs_inbound": {
 			"project_id": "my-project", "bucket": "hl7-bucket",
 			"prefix": "inbound/", "credentials_json": `{"type":"service_account"}`,
@@ -214,16 +210,6 @@ func TestStubInboundConnectors_InitializeWithTypicalConfig(t *testing.T) {
 		"ftp_inbound": {
 			"host": "ftp.example.com", "port": 21.0, "username": "ftpuser",
 			"password": "secret", "directory": "/hl7/inbound", "file_pattern": "*.hl7",
-		},
-		"snowflake_inbound": {
-			"account": "myorg.snowflakecomputing.com", "warehouse": "COMPUTE_WH",
-			"database": "EHR", "schema": "PUBLIC", "username": "loader",
-			"password": "secret", "query": "SELECT * FROM MESSAGES",
-		},
-		"databricks_inbound": {
-			"host": "dbc-xxx.azuredatabricks.net", "token": "dapi...",
-			"http_path": "/sql/1.0/warehouses/abc", "catalog": "ehr",
-			"schema": "public", "query": "SELECT * FROM messages",
 		},
 		"bigquery_inbound": {
 			"project_id": "my-project", "dataset": "ehr",

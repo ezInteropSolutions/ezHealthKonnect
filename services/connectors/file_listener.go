@@ -135,8 +135,12 @@ func (f *FileListenerConnector) Initialize(config []byte) error {
 		f.archivePath = archPath
 	}
 
-	// Encoding
+	// Encoding — "file_encoding" is a legacy key name from before the
+	// connectivity_types schema was corrected to match this field; kept as a
+	// fallback so the one real interface saved under the old name keeps working.
 	if enc, ok := cfg["encoding"].(string); ok && enc != "" {
+		f.encoding = enc
+	} else if enc, ok := cfg["file_encoding"].(string); ok && enc != "" {
 		f.encoding = enc
 	}
 

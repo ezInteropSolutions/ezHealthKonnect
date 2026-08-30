@@ -85,6 +85,14 @@ COPY database/        ./database/
 # in any deployment relying on the built image rather than a bind mount.
 COPY architecture/    ./architecture/
 
+# Same reasoning as architecture/ above, for the doc sources IngestAppDocs also
+# walks/reads: docs/ (INSTALL_GUIDE.md, RUNBOOK.md), installer/*.md (only the
+# guide doc — installer/ also holds unrelated build assets/dist output that
+# don't belong in the runtime image), and the root-level master reference doc.
+COPY docs/                                ./docs/
+COPY installer/ONE_CLICK_INSTALLER_GUIDE.md ./installer/ONE_CLICK_INSTALLER_GUIDE.md
+COPY SYSTEM_DOCUMENTATION.md              ./SYSTEM_DOCUMENTATION.md
+
 # Go binary (compiled in gobuilder)
 COPY --from=gobuilder /app/go-api ./go-api
 

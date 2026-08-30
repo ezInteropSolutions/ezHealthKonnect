@@ -24,23 +24,29 @@ schemas/
 logs/
 uploads/
 
-# Installer (not part of the app image)
+# Installer (not part of the app image) — dist/assets/web/test hold real
+# build output, kept excluded; the one guide doc is re-included below.
 installer/
 dist/
 
 # Docs and non-runtime files
 *.md
-docs/
 connectivity/
 *.txt
-# architecture/*.md IS read at runtime by services/ai/knowledge_ingestion.go's
-# IngestAppDocs (AI knowledge-base ingestion) — re-include it despite the
-# blanket *.md rule above. This directory was previously fully excluded here,
-# meaning that ingestion path was a silent no-op in any deployment relying on
-# the built image rather than a bind mount (see the Dockerfile's
-# "COPY architecture/" step, added for the same reason).
+# architecture/*.md, docs/*.md, installer/ONE_CLICK_INSTALLER_GUIDE.md, and
+# SYSTEM_DOCUMENTATION.md ARE read at runtime by
+# services/ai/knowledge_ingestion.go's IngestAppDocs (AI knowledge-base
+# ingestion) — re-included here despite the blanket *.md/installer/ rules
+# above. These were previously fully excluded, meaning that ingestion path
+# was a silent no-op in any deployment relying on the built image rather than
+# a bind mount (see the Dockerfile's "COPY architecture/" step, added for the
+# same reason — docs/, installer/, and SYSTEM_DOCUMENTATION.md have matching
+# COPY lines there too now).
 !architecture/**/*.md
 !architecture/**/*.json
+!docs/**/*.md
+!installer/ONE_CLICK_INSTALLER_GUIDE.md
+!SYSTEM_DOCUMENTATION.md
 *.log
 *.docx
 *.png

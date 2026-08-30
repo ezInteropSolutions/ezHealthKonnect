@@ -695,7 +695,11 @@
 
     // ── Feedback widget ────────────────────────────────────────────────────────
     // Appended after every assistant response. Sends thumbs up/down + optional comment.
-    // Positive responses are also ingested into the local KB to improve future answers.
+    // Feedback is stored for admin review only — it is never fed back into the shared
+    // knowledge base (a comment here can end up containing real patient details if the
+    // user pastes an example message to explain what went wrong, so it must stay in the
+    // same admin-only place regular feedback already lives, not somewhere every user's
+    // future question can retrieve it from).
 
     function appendFeedbackWidget(msgEl, opts) {
         // opts: { endpoint, promptPreview, responsePreview, sessionId, interfaceId, pipelineId, stepId }
@@ -713,6 +717,7 @@
         const commentBox = document.createElement('div');
         commentBox.style.cssText = 'display:none;margin-top:6px;';
         commentBox.innerHTML = `
+            <div style="background:#fff7ed;border-left:3px solid #f97316;color:#92400e;font-size:11px;padding:5px 8px;border-radius:4px;margin-bottom:4px;">&#9888;&#65039; Describe the issue in general terms — don't paste real patient details.</div>
             <textarea placeholder="What was wrong? (optional — helps improve AI)" rows="2"
               style="width:100%;font-size:12px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;resize:none;box-sizing:border-box;color:#374151"></textarea>
             <button style="margin-top:4px;font-size:11px;padding:3px 10px;border:1px solid #d1d5db;border-radius:4px;background:#f9fafb;cursor:pointer">Send</button>

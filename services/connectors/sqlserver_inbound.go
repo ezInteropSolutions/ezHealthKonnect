@@ -68,8 +68,10 @@ func NewSQLServerInboundConnector() InboundConnector {
 			"supports_encryption":       true,
 			"supports_incremental":      true,
 			"supports_after_processing": true,
-			"supports_windows_auth":     true,
 			"supports_reconnect":        true,
+			// supports_windows_auth deliberately omitted -- buildDSN() has no
+			// Windows-authentication code path; the claim was aspirational,
+			// not backed by real code (found during the inbound schema audit).
 		},
 	}
 	return &SQLServerInboundConnector{

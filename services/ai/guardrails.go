@@ -13,9 +13,42 @@ package ai
 
 import "strings"
 
-// lowConfidencePrefix is prepended to LLM answers when RAG returns 0 chunks,
-// signalling to the user that the answer is not grounded in product documentation.
+// lowConfidencePrefix is prepended to LLM answers when RAG found nothing
+// relevant, signalling to the user that the answer is not grounded in
+// product documentation.
 const lowConfidencePrefix = "_I don't have specific product documentation on this — here's my best guidance:_\n\n"
+
+// minRelevantSimilarity is the pgvector cosine-similarity floor (see
+// RetrievedChunk.Similarity, rag_service.go) below which the single best
+// retrieved chunk is treated as "not actually relevant" rather than "the
+// closest thing that happened to be in the database" — the retrieval query
+// always returns its topK nearest rows regardless of how weak the match is,
+// so a chunk-count check alone can't tell the difference.
+//
+// Calibrated empirically against this deployment's real ai_knowledge_chunks
+// data (nomic-embed-text embeddings), not picked arbitrarily:
+//   - a well-covered question ("how does the hl7.build step work") scored ~0.71-0.74
+//   - a completely unrelated question ("cookie recipe") scored ~0.49-0.50
+//   - a genuinely healthcare-topical question with no dedicated content behind
+//     it (a "clinical flow" narrative — see architecture discussion) still
+//     scored ~0.65-0.69, close to the well-covered case
+//
+// This floor is deliberately set to only catch the first gap (clearly
+// unrelated questions), not the third case (topically-relevant questions
+// without a specific answer) — a higher floor would risk flagging genuinely
+// good, topically-relevant answers as low-confidence too. Revisit with more
+// real usage data if false negatives (off-topic questions still marked
+// confident) or false positives (good answers marked low-confidence) show up.
+const minRelevantSimilarity = 0.55
+
+// isLowConfidence reports whether chunks' best match is too weak to be
+// considered a real answer to the question — either no chunks came back at
+// all, or the closest one is below minRelevantSimilarity. chunks must already
+// be ordered by similarity descending (as both RAGService.Retrieve and
+// RAGService.QueryCapped/Query return them).
+func isLowConfidence(chunks []RetrievedChunk) bool {
+	return len(chunks) == 0 || chunks[0].Similarity < minRelevantSimilarity
+}
 
 // guardrailRule matches a question and returns a pre-written answer.
 type guardrailRule struct {

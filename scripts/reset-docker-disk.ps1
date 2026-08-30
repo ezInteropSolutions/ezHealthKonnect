@@ -288,6 +288,11 @@ function Run-Restore {
         alpine sh -c "cd /data && tar xzf /backup/$($latestMinio.Name)"
     Write-OK "MinIO restored"
 
+    Write-Step "Clearing ALL build cache before rebuild (keeps VHDX lean)"
+    & { $ErrorActionPreference = "SilentlyContinue"; docker builder prune -a -f 2>&1 | Out-Null }
+    & { $ErrorActionPreference = "SilentlyContinue"; docker image prune -f 2>&1 | Out-Null }
+    Write-OK "Build cache cleared"
+
     Write-Step "Rebuilding app image"
     Set-Location $ComposeDir
     docker compose build app
@@ -295,10 +300,9 @@ function Run-Restore {
     Write-Step "Starting the stack"
     docker compose up -d
 
-    Write-Step "Pruning build cache and dangling images"
-    & { $ErrorActionPreference = "SilentlyContinue"; docker builder prune -f 2>&1 | Out-Null }
+    Write-Step "Pruning dangling images after build"
     & { $ErrorActionPreference = "SilentlyContinue"; docker image prune -f 2>&1 | Out-Null }
-    Write-OK "Build cache and dangling images cleared"
+    Write-OK "Dangling images cleared"
 
     Start-Sleep -Seconds 5
     Write-Host ""

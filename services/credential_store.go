@@ -304,8 +304,18 @@ func (cs *CredentialStore) MaskSensitiveFields(config json.RawMessage) json.RawM
 // Wire-format: sensitive field values are stored as "ENC:v1:<base64>".
 // The same ENC:v1: prefix is used as for blob encryption so the existing
 // Encrypt/Decrypt primitives handle both cases.
+//
+// Both methods walk the FULL config tree, not just the top level. This matters
+// for connector.outbound/connector.inbound steps, whose step.Config shape is
+// {connectorType, config: {host, password, ...}, contentField, ...} — the
+// actual connector credentials live one level down, inside the nested "config"
+// map, not at the top level alongside "connectorType". A step-type-specific
+// special case wasn't used deliberately: recursion covers any current or
+// future step type whose config happens to nest a credential, without needing
+// an allowlist of "step types with nested config" that would go stale.
 
-// EncryptConfigFields encrypts the values of sensitive keys in a step config map.
+// EncryptConfigFields encrypts the values of sensitive keys anywhere in a step
+// config map, including inside nested maps and arrays of maps.
 // Returns a new map — the input is never mutated.
 // Values already prefixed with ENC:v1: are skipped (idempotent), as are empty or
 // non-string values.
@@ -314,29 +324,53 @@ func (cs *CredentialStore) EncryptConfigFields(m map[string]interface{}) (map[st
 	if cs == nil || len(m) == 0 {
 		return m, nil
 	}
+	return cs.encryptMapRecursive(m)
+}
 
+func (cs *CredentialStore) encryptMapRecursive(m map[string]interface{}) (map[string]interface{}, error) {
 	result := make(map[string]interface{}, len(m))
 	for k, v := range m {
-		result[k] = v // default: copy as-is
-
-		if !isSensitiveKey(k) {
-			continue
-		}
-		s, ok := v.(string)
-		if !ok || s == "" || strings.HasPrefix(s, encryptedMarker) {
-			continue // non-string, empty, or already encrypted → skip
-		}
-
-		enc, err := cs.Encrypt([]byte(s))
+		encV, err := cs.encryptValueRecursive(k, v)
 		if err != nil {
 			return nil, fmt.Errorf("EncryptConfigFields: key %q: %w", k, err)
 		}
-		result[k] = enc
+		result[k] = encV
 	}
 	return result, nil
 }
 
-// DecryptConfigFields decrypts any ENC:v1:-prefixed string values in a step config map.
+// encryptValueRecursive dispatches on the runtime type of v: nested JSON
+// objects/arrays (always map[string]interface{}/[]interface{} after a real
+// encoding/json.Unmarshal into an interface{}) are walked recursively; a
+// string is encrypted only if its OWN key name looks sensitive; anything else
+// (numbers, bools, nil, or a non-JSON-shaped Go type from a hand-built test
+// fixture) passes through unchanged.
+func (cs *CredentialStore) encryptValueRecursive(key string, v interface{}) (interface{}, error) {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		return cs.encryptMapRecursive(val)
+	case []interface{}:
+		out := make([]interface{}, len(val))
+		for i, item := range val {
+			encItem, err := cs.encryptValueRecursive(key, item)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = encItem
+		}
+		return out, nil
+	case string:
+		if !isSensitiveKey(key) || val == "" || strings.HasPrefix(val, encryptedMarker) {
+			return val, nil
+		}
+		return cs.Encrypt([]byte(val))
+	default:
+		return v, nil
+	}
+}
+
+// DecryptConfigFields decrypts any ENC:v1:-prefixed string values anywhere in a
+// step config map, including inside nested maps and arrays of maps.
 // Returns a new map — the input is never mutated.
 // Decryption applies to ALL string values starting with ENC:v1:, regardless of key
 // name, so anything encrypted by EncryptConfigFields (or by the JS equivalent in
@@ -347,23 +381,47 @@ func (cs *CredentialStore) DecryptConfigFields(m map[string]interface{}) (map[st
 	if cs == nil || len(m) == 0 {
 		return m, nil
 	}
+	return cs.decryptMapRecursive(m)
+}
 
+func (cs *CredentialStore) decryptMapRecursive(m map[string]interface{}) (map[string]interface{}, error) {
 	result := make(map[string]interface{}, len(m))
 	for k, v := range m {
-		result[k] = v // default: copy as-is
-
-		s, ok := v.(string)
-		if !ok || !strings.HasPrefix(s, encryptedMarker) {
-			continue // not an encrypted value
-		}
-
-		plain, err := cs.Decrypt(s)
+		decV, err := cs.decryptValueRecursive(v)
 		if err != nil {
 			return nil, fmt.Errorf("DecryptConfigFields: key %q: %w", k, err)
 		}
-		result[k] = string(plain)
+		result[k] = decV
 	}
 	return result, nil
+}
+
+func (cs *CredentialStore) decryptValueRecursive(v interface{}) (interface{}, error) {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		return cs.decryptMapRecursive(val)
+	case []interface{}:
+		out := make([]interface{}, len(val))
+		for i, item := range val {
+			decItem, err := cs.decryptValueRecursive(item)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = decItem
+		}
+		return out, nil
+	case string:
+		if !strings.HasPrefix(val, encryptedMarker) {
+			return val, nil
+		}
+		plain, err := cs.Decrypt(val)
+		if err != nil {
+			return nil, err
+		}
+		return string(plain), nil
+	default:
+		return v, nil
+	}
 }
 
 // ── Logging helper ────────────────────────────────────────────

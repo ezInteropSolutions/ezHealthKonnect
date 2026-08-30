@@ -317,10 +317,9 @@ Last Seen: %s`,
 				"interface_id": interfaceID,
 				"count":        count,
 			})
+		result.ChunksStored += n // count whatever succeeded even if some chunks in this entry failed
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("embed error for %s: %v", interfaceID, err))
-		} else {
-			result.ChunksStored += n
 		}
 	}
 

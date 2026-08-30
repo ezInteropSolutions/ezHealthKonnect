@@ -992,12 +992,13 @@ func (sc *SettingsController) GetAISettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"enabled":              cfg.Enabled,
-			"ollama":               cfg.Ollama,
-			"queue":                cfg.Queue,
-			"feedback_webhook_url": cfg.FeedbackWebhookURL,
-			"agent_mode_enabled":   cfg.AgentModeEnabled,
-			"catalog":              services.OllamaModelCatalog(),
+			"enabled":                  cfg.Enabled,
+			"ollama":                   cfg.Ollama,
+			"queue":                    cfg.Queue,
+			"feedback_webhook_url":     cfg.FeedbackWebhookURL,
+			"agent_mode_enabled":       cfg.AgentModeEnabled,
+			"hybrid_retrieval_enabled": cfg.HybridRetrievalEnabled,
+			"catalog":                  services.OllamaModelCatalog(),
 		},
 	})
 }

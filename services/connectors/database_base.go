@@ -60,9 +60,16 @@ type DatabaseInboundConfig struct {
 	Region         string `json:"region"`          // Cloud region
 	HTTPPath       string `json:"http_path"`       // Databricks HTTP path
 	Token          string `json:"token"`           // Access token (Databricks)
-	AuthType       string `json:"auth_type"`       // oauth, password, token, key_pair
+	AuthType       string `json:"auth_type"`       // oauth, password, token, key_pair, windows (Oracle OS auth)
 	PrivateKey     string `json:"private_key"`     // Key pair authentication
 	PrivateKeyPass string `json:"private_key_pass"` // Key passphrase
+
+	// Oracle Windows/OS Authentication (auth_type: "windows") — go-ora's native
+	// AUTH TYPE=OS mechanism (NTS), not a generic feature; see oracle_inbound.go
+	// and oracle_outbound.go's buildDSN() for the only consumers.
+	OSUser     string `json:"os_user"`     // Windows username (optional — driver uses logon user if omitted)
+	OSPassword string `json:"os_password"` // Windows password
+	Domain     string `json:"domain"`      // Windows domain name (optional)
 }
 
 // DatabaseOutboundConfig represents common database outbound configuration
@@ -96,9 +103,16 @@ type DatabaseOutboundConfig struct {
 	Region         string `json:"region"`
 	HTTPPath       string `json:"http_path"`
 	Token          string `json:"token"`
-	AuthType       string `json:"auth_type"`
+	AuthType       string `json:"auth_type"` // oauth, password, token, key_pair, windows (Oracle OS auth)
 	PrivateKey     string `json:"private_key"`
 	PrivateKeyPass string `json:"private_key_pass"`
+
+	// Oracle Windows/OS Authentication (auth_type: "windows") — go-ora's native
+	// AUTH TYPE=OS mechanism (NTS), not a generic feature; see
+	// oracle_outbound.go's buildDSN() for the only consumer.
+	OSUser     string `json:"os_user"`
+	OSPassword string `json:"os_password"`
+	Domain     string `json:"domain"`
 }
 
 // BaseDatabaseInbound provides common inbound database functionality

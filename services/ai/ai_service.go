@@ -992,8 +992,8 @@ func (s *AIService) AskQuestion(ctx context.Context, input AskInput) (string, []
 		return "", chunks, err
 	}
 
-	// Confidence signal: when RAG found no relevant chunks, flag the answer as ungrounded.
-	if len(chunks) == 0 {
+	// Confidence signal: when RAG found nothing relevant, flag the answer as ungrounded.
+	if isLowConfidence(chunks) {
 		answer = lowConfidencePrefix + answer
 	}
 
@@ -1043,8 +1043,8 @@ func (s *AIService) AskQuestionStream(ctx context.Context, input AskInput, onTok
 		chunks, _ = s.rag.Retrieve(ctx, input.Question, 3, filterSourceTypesForContext(input.RequestContext)) // non-fatal
 	}
 
-	// Confidence signal: stream a caveat first when no KB context was found.
-	if len(chunks) == 0 {
+	// Confidence signal: stream a caveat first when nothing relevant was found.
+	if isLowConfidence(chunks) {
 		_ = onToken(lowConfidencePrefix)
 	}
 
@@ -1218,10 +1218,14 @@ func truncate(s string, maxLen int) string {
 // general questions asked with no interface/message-type context never
 // regress. Today the only reliable signal is an HL7-shaped MessageType
 // (e.g. "ADT^A01"); FHIR/X12/CDA contexts don't populate this field the
-// same way, so we don't guess for them.
+// same way, so we don't guess for them. pipeline_step_docs/ccd/fhir_r4 stay
+// in the filtered set even for a pure-HL7 message type, because a real
+// HL7-triggered pipeline routinely has downstream cda.build/fhir.build/
+// hl7.build steps whose own documentation and target-format knowledge
+// (CCD, FHIR R4) would otherwise be silently excluded from retrieval.
 func filterSourceTypesForContext(reqCtx RequestContext) []string {
 	if strings.Contains(reqCtx.MessageType, "^") {
-		return []string{"hl7_v2", "ig_anchors", "ig_assemblyrules", "ig_valuesets", "operational", "app_docs"}
+		return []string{"hl7_v2", "ig_anchors", "ig_assemblyrules", "ig_valuesets", "operational", "app_docs", "pipeline_step_docs", "ccd", "fhir_r4"}
 	}
 	return nil
 }

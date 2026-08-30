@@ -32,8 +32,22 @@ function isSensitiveConfigKey(key) {
 }
 
 /**
- * Encrypts sensitive field values in a step config object.
- * Returns a shallow copy — the original is not mutated.
+ * Encrypts sensitive field values anywhere in a step config object, including
+ * inside nested objects and arrays of objects. Returns a deep-enough copy —
+ * the original is not mutated (every object on a changed path gets a fresh
+ * copy; unchanged scalar leaves are shared, same as Go's mirror-image
+ * EncryptConfigFields/encryptMapRecursive in credential_store.go).
+ *
+ * Recursion matters for connector.outbound/connector.inbound steps: their
+ * config shape is {connectorType, config: {host, password, ...}, contentField,
+ * ...} — the actual connector credentials live one level down inside the
+ * nested "config" object, not alongside "connectorType" at the top level. A
+ * flat, top-level-only pass (the original implementation) never reaches them,
+ * so passwords/keys saved through the pipeline builder UI were stored in
+ * plaintext despite this function running on every save. Recursing generically
+ * covers this and any other step type that nests a credential, without an
+ * allowlist of "step types with nested config" that would go stale.
+ *
  * Passthrough if APP_CREDENTIAL_KEY is not set (dev mode).
  * Idempotent: values already starting with 'ENC:v1:' are skipped.
  */
@@ -51,20 +65,34 @@ function encryptSensitiveConfigFields(config) {
         return config;
     }
 
-    const result = Object.assign({}, config);
-    for (const [k, v] of Object.entries(result)) {
-        if (!isSensitiveConfigKey(k)) continue;
-        if (typeof v !== 'string' || v === '' || v.startsWith('ENC:v1:')) continue;
+    function encryptString(key, value) {
+        if (!isSensitiveConfigKey(key) || value === '' || value.startsWith('ENC:v1:')) return value;
 
         // AES-256-GCM: layout must match Go's gcm.Seal output:
         //   nonce(12) || ciphertext(N) || tag(16)  →  base64  →  'ENC:v1:' prefix
         const nonce = crypto.randomBytes(12);
         const cipher = crypto.createCipheriv('aes-256-gcm', credKey, nonce);
-        const enc = Buffer.concat([cipher.update(v, 'utf8'), cipher.final()]);
+        const enc = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
         const tag = cipher.getAuthTag(); // 16 bytes
-        result[k] = 'ENC:v1:' + Buffer.concat([nonce, enc, tag]).toString('base64');
+        return 'ENC:v1:' + Buffer.concat([nonce, enc, tag]).toString('base64');
     }
-    return result;
+
+    function encryptValue(key, value) {
+        if (Array.isArray(value)) return value.map(item => encryptValue(key, item));
+        if (value && typeof value === 'object') return encryptObject(value);
+        if (typeof value === 'string') return encryptString(key, value);
+        return value;
+    }
+
+    function encryptObject(obj) {
+        const result = Object.assign({}, obj);
+        for (const [k, v] of Object.entries(result)) {
+            result[k] = encryptValue(k, v);
+        }
+        return result;
+    }
+
+    return encryptObject(config);
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -1011,3 +1039,8 @@ exports.executeValidationStep  = (req, res) => _proxyStepExec(req, res, 'validat
 exports.executeEnrichmentStep  = (req, res) => _proxyStepExec(req, res, 'enrichment');
 exports.executeMappingStep     = (req, res) => _proxyStepExec(req, res, 'mapping');
 exports.executeCustomStep      = (req, res) => _proxyStepExec(req, res, 'custom');
+
+// Exported for unit testing only (tests/unit/controllers/pipelineController.credentials.test.js).
+// Not part of the HTTP-facing controller API.
+exports.encryptSensitiveConfigFields = encryptSensitiveConfigFields;
+exports.isSensitiveConfigKey = isSensitiveConfigKey;

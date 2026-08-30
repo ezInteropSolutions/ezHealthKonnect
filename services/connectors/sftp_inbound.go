@@ -1,9 +1,16 @@
 // services/connectors/sftp_inbound.go
-// SFTP Inbound Connector — polls a remote directory for new files via SSH exec.
+// SFTP Inbound Connector — polls a remote directory for new files.
 //
-// The connector connects over SSH and uses shell commands (find, cat, mv/rm) to
-// discover, download, and optionally archive/delete processed files.
-// This approach requires no additional Go dependencies beyond golang.org/x/crypto/ssh.
+// Uses the real SFTP protocol via github.com/pkg/sftp (built on top of the
+// same golang.org/x/crypto/ssh connection already established) — NOT shell
+// commands over SSH exec. An earlier version of this connector ran shell
+// commands (find/cat/rm/mkdir+mv) over an SSH session; that requires the
+// remote server to allow arbitrary shell command execution for the SFTP
+// user. Confirmed via a live test against a standard, properly-locked-down
+// SFTP server (see sftp_outbound.go's file header for the exact error and
+// what it means) that this fails outright against real SFTP-only servers.
+// The real SFTP protocol (what this file now uses) is exactly what such
+// servers exist to serve.
 //
 // Configuration:
 //
@@ -14,7 +21,7 @@
 //	key_content       string   PEM private key (string form)
 //	auth_type         string   "password" | "key" (default: "password")
 //	remote_dir        string   Directory to poll (default: "/inbox")
-//	file_pattern      string   Shell glob pattern for files (default: "*.hl7")
+//	file_pattern      string   Glob pattern for files (default: "*.hl7")
 //	poll_interval_sec int      Polling interval in seconds (default: 30)
 //	after_processing  string   "delete" | "archive" | "none" (default: "archive")
 //	archive_dir       string   Directory to move processed files to (default: "/inbox/processed")
@@ -24,17 +31,19 @@
 package connectors
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
 	"ezhealthkonnect/models"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -67,7 +76,7 @@ func NewSFTPInboundConnector() InboundConnector {
 	metadata := ConnectorMetadata{
 		TypeName:           "sftp_inbound",
 		DisplayName:        "SFTP File Poller",
-		Version:            "1.0.0",
+		Version:            "2.0.0",
 		Category:           "inbound",
 		Mode:               "pull",
 		ImplementationLang: "go",
@@ -184,7 +193,7 @@ func (c *SFTPInboundConnector) Validate() error {
 	return nil
 }
 
-// TestConnection verifies SSH connectivity.
+// TestConnection verifies SFTP connectivity and that remote_dir is accessible.
 func (c *SFTPInboundConnector) TestConnection(ctx context.Context) error {
 	conn, err := c.dialSSHInbound(ctx)
 	if err != nil {
@@ -192,11 +201,16 @@ func (c *SFTPInboundConnector) TestConnection(ctx context.Context) error {
 	}
 	defer conn.Close()
 
-	// Verify the remote directory exists
-	out, err := sshExec(conn, fmt.Sprintf("test -d %s && echo ok", c.remoteDir), c.connectTimeout)
-	if err != nil || strings.TrimSpace(out) != "ok" {
+	sftpClient, err := sftp.NewClient(conn)
+	if err != nil {
 		return NewConnectorError(c.GetMetadata().TypeName, "test_connection",
-			fmt.Errorf("remote_dir '%s' not accessible: %v", c.remoteDir, err), false)
+			fmt.Errorf("SFTP subsystem unavailable: %w", err), true)
+	}
+	defer sftpClient.Close()
+
+	if _, err := sftpClient.Stat(c.remoteDir); err != nil {
+		return NewConnectorError(c.GetMetadata().TypeName, "test_connection",
+			fmt.Errorf("remote_dir %q not accessible: %w", c.remoteDir, err), false)
 	}
 	return nil
 }
@@ -233,7 +247,8 @@ func (c *SFTPInboundConnector) Start(ctx context.Context, messageChan chan<- *mo
 // Internal helpers
 // --------------------------------------------------------------------------
 
-// pollOnce connects, lists files, downloads and processes each one.
+// pollOnce connects, lists files via the real SFTP protocol, downloads and
+// processes each one.
 func (c *SFTPInboundConnector) pollOnce(ctx context.Context, messageChan chan<- *models.InboundMessage) error {
 	conn, err := c.dialSSHInbound(ctx)
 	if err != nil {
@@ -241,29 +256,42 @@ func (c *SFTPInboundConnector) pollOnce(ctx context.Context, messageChan chan<- 
 	}
 	defer conn.Close()
 
-	// List matching files
-	listCmd := fmt.Sprintf("find %s -maxdepth 1 -type f -name '%s' | head -%d",
-		c.remoteDir, c.filePattern, c.maxFilesPerRun)
-	listOut, err := sshExec(conn, listCmd, c.connectTimeout)
+	sftpClient, err := sftp.NewClient(conn)
 	if err != nil {
-		return fmt.Errorf("list files: %w", err)
+		return fmt.Errorf("open SFTP session: %w", err)
+	}
+	defer sftpClient.Close()
+
+	entries, err := sftpClient.ReadDir(c.remoteDir)
+	if err != nil {
+		return fmt.Errorf("list %s: %w", c.remoteDir, err)
 	}
 
-	files := filterNonEmpty(strings.Split(strings.TrimSpace(listOut), "\n"))
-	if len(files) == 0 {
-		return nil
-	}
-
-	log.Printf("[sftp_inbound] found %d file(s) to process", len(files))
-	c.IncrementMessagesReceived()
-
-	for _, filePath := range files {
-		filePath = strings.TrimSpace(filePath)
-		if filePath == "" {
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
 			continue
 		}
+		matched, _ := path.Match(c.filePattern, entry.Name())
+		if matched {
+			names = append(names, entry.Name())
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names) // deterministic processing order
+	if len(names) > c.maxFilesPerRun {
+		names = names[:c.maxFilesPerRun]
+	}
 
-		content, err := c.downloadFile(conn, filePath)
+	log.Printf("[sftp_inbound] found %d file(s) to process", len(names))
+	c.IncrementMessagesReceived()
+
+	for _, name := range names {
+		filePath := path.Join(c.remoteDir, name)
+
+		content, err := sftpDownloadWithTimeout(sftpClient, filePath, c.readTimeout)
 		if err != nil {
 			log.Printf("[sftp_inbound] download error for %s: %v", filePath, err)
 			continue
@@ -278,7 +306,7 @@ func (c *SFTPInboundConnector) pollOnce(ctx context.Context, messageChan chan<- 
 			SourceMetadata: map[string]string{
 				"sftp_host":     c.host,
 				"sftp_path":     filePath,
-				"sftp_filename": path.Base(filePath),
+				"sftp_filename": name,
 			},
 		}
 
@@ -288,8 +316,7 @@ func (c *SFTPInboundConnector) pollOnce(ctx context.Context, messageChan chan<- 
 			return ctx.Err()
 		}
 
-		// Post-processing
-		if err := c.postProcess(conn, filePath); err != nil {
+		if err := c.postProcess(sftpClient, filePath, name); err != nil {
 			log.Printf("[sftp_inbound] post-process error for %s: %v", filePath, err)
 		}
 	}
@@ -297,27 +324,55 @@ func (c *SFTPInboundConnector) pollOnce(ctx context.Context, messageChan chan<- 
 	return nil
 }
 
-// downloadFile fetches remote file content via SSH cat.
-func (c *SFTPInboundConnector) downloadFile(conn *ssh.Client, remotePath string) (string, error) {
-	out, err := sshExec(conn, fmt.Sprintf("cat %s", remotePath), c.readTimeout)
-	if err != nil {
-		return "", fmt.Errorf("cat %s: %w", remotePath, err)
+// sftpDownloadWithTimeout reads a remote file's full content via the real
+// SFTP protocol, bounded by timeout (the blocking read runs in a goroutine so
+// a hung connection is reported as a timeout rather than blocking forever).
+func sftpDownloadWithTimeout(client *sftp.Client, remotePath string, timeout time.Duration) (string, error) {
+	type result struct {
+		content string
+		err     error
 	}
-	return out, nil
+	done := make(chan result, 1)
+	go func() {
+		f, err := client.Open(remotePath)
+		if err != nil {
+			done <- result{"", fmt.Errorf("open %s: %w", remotePath, err)}
+			return
+		}
+		defer f.Close()
+		b, err := io.ReadAll(f)
+		if err != nil {
+			done <- result{"", fmt.Errorf("read %s: %w", remotePath, err)}
+			return
+		}
+		done <- result{string(b), nil}
+	}()
+
+	select {
+	case r := <-done:
+		return r.content, r.err
+	case <-time.After(timeout):
+		return "", fmt.Errorf("download of %s timed out after %s", remotePath, timeout)
+	}
 }
 
-// postProcess moves or deletes the remote file after successful delivery.
-func (c *SFTPInboundConnector) postProcess(conn *ssh.Client, filePath string) error {
+// postProcess moves or deletes the remote file after successful delivery,
+// via the real SFTP protocol (MkdirAll + PosixRename for archive, Remove for
+// delete — PosixRename rather than Rename so re-archiving a same-named file
+// on a retry doesn't hard-fail if the destination already exists).
+func (c *SFTPInboundConnector) postProcess(client *sftp.Client, filePath, filename string) error {
 	switch c.afterProcessing {
 	case "delete":
-		_, err := sshExec(conn, fmt.Sprintf("rm -f %s", filePath), c.connectTimeout)
-		return err
+		return client.Remove(filePath)
 	case "archive":
-		// Ensure archive dir exists then move
-		mkdirCmd := fmt.Sprintf("mkdir -p %s && mv %s %s/",
-			c.archiveDir, filePath, c.archiveDir)
-		_, err := sshExec(conn, mkdirCmd, c.connectTimeout)
-		return err
+		if err := client.MkdirAll(c.archiveDir); err != nil {
+			return fmt.Errorf("mkdir %s: %w", c.archiveDir, err)
+		}
+		destPath := path.Join(c.archiveDir, filename)
+		if err := client.PosixRename(filePath, destPath); err != nil {
+			return fmt.Errorf("move %s -> %s: %w", filePath, destPath, err)
+		}
+		return nil
 	default: // "none"
 		return nil
 	}
@@ -354,28 +409,6 @@ func (c *SFTPInboundConnector) buildSFTPInboundAuthMethods() ([]ssh.AuthMethod, 
 	}
 }
 
-// sshExec runs a command on the SSH connection and returns stdout.
-func sshExec(client *ssh.Client, cmd string, timeout time.Duration) (string, error) {
-	session, err := client.NewSession()
-	if err != nil {
-		return "", fmt.Errorf("new session: %w", err)
-	}
-	defer session.Close()
-
-	var stdout bytes.Buffer
-	session.Stdout = &stdout
-
-	done := make(chan error, 1)
-	go func() { done <- session.Run(cmd) }()
-
-	select {
-	case err := <-done:
-		return stdout.String(), err
-	case <-time.After(timeout):
-		return "", fmt.Errorf("ssh exec timed out after %s: %s", timeout, cmd)
-	}
-}
-
 // generateSFTPMessageID produces a reproducible message ID from the file path.
 func generateSFTPMessageID(filePath string) string {
 	ts := time.Now().UTC().Format("20060102150405")
@@ -383,7 +416,11 @@ func generateSFTPMessageID(filePath string) string {
 	return fmt.Sprintf("sftp_%s_%s", ts, base)
 }
 
-// filterNonEmpty filters empty strings from a slice.
+// filterNonEmpty filters empty/whitespace-only strings from a slice. No
+// longer used by this file directly (file listing now comes from
+// sftp.Client.ReadDir, not shell output that needed splitting/trimming), but
+// kept — it's covered by its own tests in connector_test.go as a standalone
+// utility.
 func filterNonEmpty(ss []string) []string {
 	out := ss[:0]
 	for _, s := range ss {

@@ -1585,6 +1585,24 @@
                         </div>
                     </div>
 
+                    <!-- Hybrid Retrieval -->
+                    <div class="settings-card">
+                        <div class="settings-card-header">
+                            <i class="fas fa-magnifying-glass" style="color:#0ea5e9"></i>
+                            <div><h3>Hybrid Retrieval</h3><p>Adds keyword/full-text search alongside ezCompanion's semantic search, fused together — improves answers for questions containing exact tokens (a segment path like PID.3, an exact error message, a connector name) that pure semantic search can rank below a merely-similar chunk.</p></div>
+                        </div>
+                        <div class="settings-card-body">
+                            <div class="toggle-row">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiHybridRetrievalEnabled">
+                                    <span class="toggle-track"></span>
+                                </label>
+                                <span class="toggle-label">Enable Hybrid Retrieval</span>
+                            </div>
+                            <div class="doc-tip" style="margin-top:10px"><i class="fas fa-circle-info" style="color:#0ea5e9"></i> <span>Off by default. When off, retrieval behaves exactly as before this setting existed.</span></div>
+                        </div>
+                    </div>
+
                     <!-- Ollama Config -->
                     <div class="settings-card">
                         <div class="settings-card-header">
@@ -2927,6 +2945,7 @@ async function loadAISettings() {
         document.getElementById('aiFeedbackWebhookURL').value = d.feedback_webhook_url || '';
         _updateSubmitTeamBtn(d.feedback_webhook_url || '');
         document.getElementById('aiAgentModeEnabled').checked = !!d.agent_mode_enabled;
+        document.getElementById('aiHybridRetrievalEnabled').checked = !!d.hybrid_retrieval_enabled;
 
         if (d.catalog) {
             _aiCatalog = d.catalog;
@@ -3367,6 +3386,7 @@ async function ezcActivateModel(modelName) {
             },
             feedback_webhook_url: current.feedback_webhook_url || '',
             agent_mode_enabled: !!current.agent_mode_enabled,
+            hybrid_retrieval_enabled: !!current.hybrid_retrieval_enabled,
         });
         if (statusEl) statusEl.innerHTML = `<span style="color:#059669">✅ Switched to <strong>${esc(modelName)}</strong> — takes effect on next request.</span>`;
         await loadEZCompanionSection();
@@ -3393,6 +3413,7 @@ async function saveAISettings() {
             },
             feedback_webhook_url: webhookURL,
             agent_mode_enabled: document.getElementById('aiAgentModeEnabled').checked,
+            hybrid_retrieval_enabled: document.getElementById('aiHybridRetrievalEnabled').checked,
         });
         _updateSubmitTeamBtn(webhookURL);
         resetBtn('aiSaveBtn');

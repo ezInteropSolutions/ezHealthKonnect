@@ -41,7 +41,7 @@ import (
 
 	"ezhealthkonnect/models"
 
-	_ "github.com/sijms/go-ora/v2" // Registers "oracle" driver
+	go_ora "github.com/sijms/go-ora/v2"
 )
 
 // OracleOutboundConnector writes messages to an Oracle table.
@@ -61,10 +61,11 @@ func NewOracleOutboundConnector() OutboundConnector {
 		Mode:               "push",
 		ImplementationLang: "go",
 		Capabilities: map[string]bool{
-			"supports_batch":  true,
-			"supports_ssl":    true,
-			"supports_merge":  true,
-			"supports_pool":   true,
+			"supports_batch":        true,
+			"supports_ssl":          true,
+			"supports_merge":        true,
+			"supports_pool":         true,
+			"supports_windows_auth": true, // go-ora's native AUTH TYPE=OS — see buildWindowsAuthDSN
 		},
 	}
 	return &OracleOutboundConnector{
@@ -113,6 +114,11 @@ func (o *OracleOutboundConnector) Initialize(config []byte) error {
 // buildDSN constructs the go-ora connection URL.
 //
 //	oracle://user:pass@host:port/service_name
+//
+// When auth_type is "windows", delegates to buildWindowsAuthDSN instead —
+// see oracle_inbound.go's buildWindowsAuthDSN for the full rationale and the
+// same "unverified against a real domain" caveat (identical mechanism,
+// duplicated here since outbound/inbound don't share a base DSN builder).
 func (o *OracleOutboundConnector) buildDSN() string {
 	host := o.config.Host
 	if host == "" {
@@ -123,6 +129,10 @@ func (o *OracleOutboundConnector) buildDSN() string {
 		port = 1521
 	}
 
+	if o.config.AuthType == "windows" {
+		return o.buildWindowsAuthDSN(host, port)
+	}
+
 	dsn := fmt.Sprintf("oracle://%s:%s@%s:%d/%s",
 		o.config.Username, o.config.Password, host, port, o.config.Database)
 
@@ -131,6 +141,30 @@ func (o *OracleOutboundConnector) buildDSN() string {
 	}
 
 	return dsn
+}
+
+// buildWindowsAuthDSN builds a DSN using go-ora's native OS-authentication
+// support (AUTH TYPE=OS via NTLM/NTS) — see oracle_inbound.go's
+// buildWindowsAuthDSN for the full doc comment; kept in sync with it.
+func (o *OracleOutboundConnector) buildWindowsAuthDSN(host string, port int) string {
+	options := map[string]string{
+		"AUTH TYPE": "OS",
+		"AUTH SERV": "NTS",
+	}
+	if o.config.OSUser != "" {
+		options["OS USER"] = o.config.OSUser
+	}
+	if o.config.OSPassword != "" {
+		options["OS PASS"] = o.config.OSPassword
+	}
+	if o.config.Domain != "" {
+		options["DOMAIN"] = o.config.Domain
+	}
+	if o.config.SSLMode == "require" {
+		options["SSL"] = "true"
+		options["SSL VERIFY"] = "false"
+	}
+	return go_ora.BuildUrl(host, port, o.config.Database, "", "", options)
 }
 
 // Send writes a single message to Oracle.
@@ -342,6 +376,9 @@ func (o *OracleOutboundConnector) Validate() error {
 	}
 	if (o.config.WriteMode == "upsert" || o.config.WriteMode == "update") && o.config.UniqueKey == "" {
 		return fmt.Errorf("unique_key is required when write_mode is upsert or update")
+	}
+	if o.config.AuthType == "windows" && o.config.OSPassword == "" {
+		return fmt.Errorf("os_password is required when auth_type is 'windows'")
 	}
 	return nil
 }

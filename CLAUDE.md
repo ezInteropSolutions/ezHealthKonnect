@@ -655,9 +655,8 @@ type OutboundConnector interface {
 
 ### Phase 2B: Connector Implementation (✅ Complete - May 2026)
 
-**26 connectors fully implemented** in own `.go` files. Stubs remain only for analytics databases, cloud storage outbound, FTP, and Phase 4 healthcare protocols — none required for core HL7/FHIR MVP.
+**26 connectors fully implemented** in own `.go` files as of this phase. **Superseded — see the August 2026 snapshot below**, which reflects 11 further stub→real conversions done in later sessions (MySQL/AWS S3/Kafka outbound, HTTP/REST inbound, Azure Blob/Databricks/Snowflake both directions) that this list predates.
 
-**Fully Implemented Connectors**:
 1. ✅ **TCP/MLLP Inbound** - [tcp_mllp_inbound.go](services/connectors/tcp_mllp_inbound.go)
    - Full MLLP protocol parser (0x0B start, 0x1C/0x0D end)
    - TLS 1.2/1.3 support with certificate configuration
@@ -691,44 +690,61 @@ type OutboundConnector interface {
 21. ✅ **SFTP Inbound** - [sftp_inbound.go](services/connectors/sftp_inbound.go)
 22. ✅ **SFTP Outbound** - [sftp_outbound.go](services/connectors/sftp_outbound.go)
 
-**Stubs (not required for MVP)**:
-- `mysql_outbound` — MySQL write-back
-- Analytics DBs — Snowflake, Databricks, BigQuery, Redshift, Synapse, ClickHouse, TimescaleDB (inbound + outbound)
-- MQ outbound — RabbitMQ, Kafka, Redis (publish/produce)
-- Cloud storage outbound/full — AWS S3 Outbound, Azure Blob, GCS (inbound + outbound)
-- File transfer — FTP inbound/outbound
-- Phase 4 healthcare protocols — FHIR R4 (native), EDI X12, Direct Messaging
+### Connector Status Snapshot (re-verified August 2026)
+
+Re-derived directly from ground truth — `connector_stubs.go`'s remaining stub functions (a stub returns a bare `NewBase{In,Out}boundConnector(metadata)` with no real logic) cross-checked against `connector_factory.go`'s `registerBuiltInConnectors()` — rather than trusting the Phase 2B narrative above, which had drifted out of date across several sessions of connector work. **33 of 53 registered connector types are real** (17 of 26 inbound, 16 of 27 outbound; counts exclude type-name aliases like `tcp_mllp`/`http`/`http_rest`, and `sink_outbound`, which is real but trivial by design — a store-only terminal target with no external I/O).
+
+**Real, beyond the Phase 2B list above** (11 further conversions):
+- `mysql_outbound`, `aws_s3_outbound`, `kafka_outbound` — [mysql_outbound.go](services/connectors/mysql_outbound.go), [aws_s3_outbound.go](services/connectors/aws_s3_outbound.go), [kafka_outbound.go](services/connectors/kafka_outbound.go)
+- `http_rest_inbound` — [http_rest_inbound.go](services/connectors/http_rest_inbound.go) — a genuinely separate, non-FHIR generic HTTP receiver; previously aliased to the FHIR connector, corrected after user feedback (see "HTTP FHIR Receiver vs Generic HTTP/REST Inbound" precedent — any format succeeds via `RawPassthroughParser`, only the FHIR connector validates)
+- `azure_blob_inbound`, `azure_blob_outbound` — [azure_blob_inbound.go](services/connectors/azure_blob_inbound.go), [azure_blob_outbound.go](services/connectors/azure_blob_outbound.go)
+- `databricks_inbound`, `databricks_outbound` — [databricks_inbound.go](services/connectors/databricks_inbound.go), [databricks_outbound.go](services/connectors/databricks_outbound.go) — official `databricks-sql-go` driver, PAT auth only
+- `snowflake_inbound`, `snowflake_outbound` — [snowflake_inbound.go](services/connectors/snowflake_inbound.go), [snowflake_outbound.go](services/connectors/snowflake_outbound.go) — official `gosnowflake/v2` driver, username/password auth only (key-pair/JWT auth explicitly rejected with a clear error, not silently ignored — unverified against any real cloud warehouse account, no test credentials available in this environment)
+
+**Still stubs (20 registered types, unchanged by the above)**:
+- Analytics DBs — BigQuery, Redshift, Synapse, ClickHouse, TimescaleDB (both directions — 10 types)
+- MQ outbound — RabbitMQ, Redis (publish; Kafka outbound is now real, see above)
+- Cloud storage — GCS (both directions)
+- File transfer — FTP (both directions)
+- Phase 4 healthcare protocols — EDI X12, Direct Messaging (both directions)
+- `fhir_r4_inbound`/`fhir_r4_outbound` (native FHIR R4, distinct from the already-real `http_fhir_*` connectors) — stub functions exist in `connector_stubs.go` but are **not registered in the factory at all**, i.e. unreachable via any type name today; a genuinely future Phase 4 item, not an oversight in this audit
+
+**Dead code found and removed during this audit**: `connector_stubs.go` had an orphaned `NewHTTPRESTInboundConnector` (all-caps "REST") stub — same `type_name: "http_rest_inbound"` as the real `NewHTTPRestInboundConnector`, but never referenced by the factory (which registers the mixed-case name) — a leftover from the http_rest_inbound stub→real conversion that never got cleaned up. Removed; zero other references existed (confirmed via repo-wide grep before deleting).
 
 ### Connector Catalog
 
-**Network Connectors (5 of 5 MVP)**:
+**Network Connectors**:
 - tcp_mllp_inbound ✅ / tcp_mllp_outbound ✅
 - http_outbound ✅ / http_fhir_inbound ✅ / http_fhir_outbound ✅
-- http_rest_inbound — stub
+- http_rest_inbound ✅
 
-**File System Connectors (2 of 2 MVP)**:
+**File System Connectors (2 of 2)**:
 - file_listener ✅ / file_writer ✅
 
-**Database Connectors (8 full + 1 stub)**:
+**Database Connectors (10 full)**:
 - postgresql_inbound ✅ / postgresql_outbound ✅
-- mysql_inbound ✅ / mysql_outbound — stub
+- mysql_inbound ✅ / mysql_outbound ✅
 - sqlserver_inbound ✅ / sqlserver_outbound ✅
 - mongodb_inbound ✅ / mongodb_outbound ✅
 - oracle_inbound ✅ / oracle_outbound ✅
-- Analytics DBs (Snowflake, Databricks, BigQuery, Redshift, Synapse, ClickHouse, TimescaleDB) — stubs
+- Analytics DBs (BigQuery, Redshift, Synapse, ClickHouse, TimescaleDB) — stubs
 
-**Message Queue Connectors (3 inbound full, 3 outbound stub)**:
+**Cloud Data Warehouse Connectors (both directions full)**:
+- databricks_inbound ✅ / databricks_outbound ✅
+- snowflake_inbound ✅ / snowflake_outbound ✅
+
+**Message Queue Connectors (3 inbound full, 1 outbound full, 2 outbound stub)**:
 - rabbitmq_inbound ✅ / rabbitmq_outbound — stub
-- kafka_inbound ✅ / kafka_outbound — stub
+- kafka_inbound ✅ / kafka_outbound ✅
 - redis_inbound ✅ / redis_outbound — stub
 
 **Cloud Storage Connectors**:
-- aws_s3_inbound ✅ / aws_s3_outbound — stub
-- azure_blob_inbound — stub / azure_blob_outbound — stub
+- aws_s3_inbound ✅ / aws_s3_outbound ✅
+- azure_blob_inbound ✅ / azure_blob_outbound ✅
 - gcs_inbound — stub / gcs_outbound — stub
 
 **File Transfer Connectors**:
-- sftp_inbound ✅ / sftp_outbound ✅
+- sftp_inbound ✅ / sftp_outbound ✅ (rewritten on the real SFTP protocol via `github.com/pkg/sftp` — the original build used SSH shell-exec, which fails against properly-locked-down SFTP-only servers)
 - ftp_inbound — stub / ftp_outbound — stub
 
 ### Documentation

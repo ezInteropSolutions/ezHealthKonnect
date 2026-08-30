@@ -1,7 +1,9 @@
 /**
- * TransformMiscStepsDocs — Documentation for the remaining flat-namespace steps
+ * TransformMiscStepsDocs — Documentation for the remaining steps not covered
+ * by any other category file
  *
- * file_parser, remove_duplicates, data_masking, plus the legacy post.data_masking alias.
+ * file_parser, remove_duplicates, data_masking (legacy alias: post.data_masking),
+ * payload.builder (legacy alias: payload_builder).
  *
  * Self-registers into StepDocumentationRegistry at load time — this file must be
  * loaded (via <script>) after StepDocumentationRegistry.js and before any step's
@@ -594,7 +596,185 @@
                 ]
             }
         };
+        docs['payload.builder'] = {
+            description: 'Constructs the final outbound wire payload from pipeline data — the last transform step before ' +
+                'an Outbound Connector. Four modes:\n\n' +
+                '  • Simple (pass_through) — resolve one pipeline variable and serialize it. Smart default when source_path ' +
+                'is blank: tries fhirBundle, then fhir_bundle, then message. If the resolved value is already a string ' +
+                '(e.g. a raw HL7 string) it is sent as-is, unserialized.\n' +
+                '  • Template — {{ variable.path }} placeholder substitution in a hand-written template string (JSON, HL7, or any text). ' +
+                'Unresolved variables are replaced with an empty string rather than failing the step.\n' +
+                '  • Field Builder — build an output object from an ordered list of target-path -> source mappings ' +
+                '(literal value or field_ref pipeline path).\n' +
+                '  • FHIR Bundle — resolve one or more pipeline paths, each expected to hold a FHIR resource (or an array of ' +
+                'them), and wrap them into a FHIR R4 Bundle.\n\n' +
+                'FHIR Bundle mode does three things automatically so the caller never has to: (1) generates resource.text.div ' +
+                'narrative for any resource that does not already have one, honoring the same per-interface narrative_fields ' +
+                'config an hl7_fhir_transform-sourced resource would use; (2) assigns every entry a urn:uuid: fullUrl and ' +
+                'rewrites every "ResourceType/id" reference in every resource to match, via the same AssembleEntries logic ' +
+                'the CDA/FHIR document assembler uses; (3) adds entry.request {method, url} blocks automatically for ' +
+                'transaction/batch bundles (PUT when the resource has an id, POST otherwise) — includeRequest only needs to ' +
+                'be set explicitly for a collection/document bundle that should still carry request blocks.\n\n' +
+                'Step output is written to _stepOutput and also exposed at the top level (payload, content_type) so an ' +
+                'Outbound Connector\'s contentField="payload" works without extra config.',
+            useCases: [
+                'Simple mode: send the fhirBundle produced by an hl7_fhir_transform/core.mapping step straight to an HTTP FHIR outbound connector',
+                'Simple mode: forward the raw HL7 message unchanged to a TCP/MLLP outbound connector (source_path="message", value is already a string)',
+                'Template mode: build a custom JSON payload for a third-party REST API, inlining values like {{ PID.5.1 }} or {{ steps.enrich.step_output.mrn }}',
+                'Field Builder mode: assemble a flat JSON object for a billing system from several different upstream steps, without writing a script',
+                'FHIR Bundle mode: assemble a transaction Bundle from a Patient + Encounter + Observation built by earlier fhir.build/cda.to_fhir steps and POST it to a FHIR server',
+                'FHIR Bundle mode: build a document Bundle (Composition first) for a CDA-derived FHIR Document',
+                'FHIR Bundle mode: combine resources produced by more than one upstream branch (e.g. a Patient from cda.to_fhir plus Observations from a separate hl7 branch) into one outbound Bundle'
+            ],
+            example: {
+                mode: 'fhir_bundle',
+                fhirBundle: {
+                    bundleType: 'transaction',
+                    resourcePaths: ['steps.transform.step_output.fhirBundle'],
+                    includeRequest: true
+                }
+            },
+            examples: [
+                {
+                    label: 'Simple — pass through the HL7->FHIR transform output as FHIR R4',
+                    config: { mode: 'pass_through', source_path: 'fhirBundle', output_format: 'fhir_r4' }
+                },
+                {
+                    label: 'Simple — forward the raw inbound HL7 message unchanged',
+                    config: { mode: 'pass_through', source_path: 'message', output_format: 'hl7v2' }
+                },
+                {
+                    label: 'Template — custom JSON for a third-party API',
+                    config: {
+                        mode: 'template',
+                        output_format: 'json',
+                        template: '{"mrn":"{{ PID.3 }}","name":"{{ PID.5.1 }} {{ PID.5.2 }}","source":"{{ steps.enrich.step_output.system }}"}'
+                    }
+                },
+                {
+                    label: 'Field Builder — flat JSON object from mixed literal + field sources',
+                    config: {
+                        mode: 'field_builder',
+                        output_format: 'json',
+                        field_mappings: [
+                            { target: 'patientId', source_type: 'field_ref', source: 'PID.3' },
+                            { target: 'sendingSystem', source_type: 'literal', value: 'ezHealthKonnect' }
+                        ]
+                    }
+                },
+                {
+                    label: 'FHIR Bundle — collection of two resources, no request blocks',
+                    config: {
+                        mode: 'fhir_bundle',
+                        fhirBundle: {
+                            bundleType: 'collection',
+                            resourcePaths: ['steps.map_patient.step_output.resource', 'steps.map_encounter.step_output.resource']
+                        }
+                    }
+                },
+                {
+                    label: 'FHIR Bundle — transaction bundle for a FHIR server POST /',
+                    config: {
+                        mode: 'fhir_bundle',
+                        fhirBundle: {
+                            bundleType: 'transaction',
+                            resourcePaths: ['steps.transform.step_output.fhirBundle'],
+                            includeRequest: true
+                        }
+                    }
+                }
+            ],
+            parameters: [
+                {
+                    name: 'mode',
+                    type: 'enum: pass_through | template | field_builder | fhir_bundle',
+                    required: false,
+                    description: 'Which build strategy to use. Default: pass_through. Determines which of the other config keys apply.'
+                },
+                {
+                    name: 'source_path',
+                    type: 'string',
+                    required: false,
+                    description: 'pass_through only. Pipeline variable to resolve and send as the payload. Leave blank for the smart default: ' +
+                        'tries fhirBundle, then fhir_bundle, then message, in that order. A string value (e.g. raw HL7) is sent as-is; ' +
+                        'any other value is serialized to output_format.'
+                },
+                {
+                    name: 'template',
+                    type: 'string',
+                    required: false,
+                    description: 'template mode only. A string containing {{ variable.path }} placeholders. Each placeholder is resolved ' +
+                        'against the pipeline data (format-agnostic — HL7 field paths, FHIR paths, or plain JSON dot-paths all work) and ' +
+                        'substituted; objects/arrays are JSON-serialized, everything else is stringified. Unresolved placeholders become "".'
+                },
+                {
+                    name: 'field_mappings',
+                    type: 'Array<{ target, source_type, source, value }>',
+                    required: false,
+                    description: 'field_builder mode only. Ordered list of output fields. target is a dot-path in the output object ' +
+                        '(array-index notation like entry[0] is stripped and treated as a plain key in v1). source_type is "literal" ' +
+                        '(uses value) or "field_ref" (resolves source as a pipeline path).'
+                },
+                {
+                    name: 'fhirBundle.bundleType',
+                    type: 'enum: collection | transaction | batch | document',
+                    required: false,
+                    description: 'fhir_bundle mode only. Default: collection. transaction/batch always get entry.request blocks regardless ' +
+                        'of includeRequest. document expects the first resolved resource to be a Composition. Bundle.total is never set for ' +
+                        'these four types (only applies to searchset/history, which this step does not produce).'
+                },
+                {
+                    name: 'fhirBundle.resourcePaths',
+                    type: 'string[]',
+                    required: false,
+                    description: 'fhir_bundle mode only. Ordered pipeline variable paths, each resolving to a FHIR resource map (or a JSON ' +
+                        'string containing one). A path that resolves to nil or a non-resource value is skipped with a warning rather than ' +
+                        'failing the whole step; at least one resource must resolve or the step errors.'
+                },
+                {
+                    name: 'fhirBundle.bundleId',
+                    type: 'string',
+                    required: false,
+                    description: 'fhir_bundle mode only. Optional Bundle.id. Auto-generated ("bundle-<nanoseconds>") when left blank.'
+                },
+                {
+                    name: 'fhirBundle.includeRequest',
+                    type: 'boolean',
+                    required: false,
+                    description: 'fhir_bundle mode only. Adds entry.request {method, url} to every entry — PUT ResourceType/id when the ' +
+                        'resource has an id, otherwise POST ResourceType (with ifNoneExist for batch bundles). Forced true automatically ' +
+                        'for transaction/batch bundleType; only needs to be set explicitly for collection/document.'
+                },
+                {
+                    name: 'output_format',
+                    type: 'enum: fhir_r4 | hl7v2 | json | csv',
+                    required: false,
+                    description: 'pass_through/template/field_builder modes. Controls serialization and the default Content-Type header ' +
+                        '(application/fhir+json, application/hl7-v2, application/json, text/csv respectively). Ignored by fhir_bundle mode, ' +
+                        'which always emits application/fhir+json.'
+                },
+                {
+                    name: 'content_type',
+                    type: 'string',
+                    required: false,
+                    description: 'Explicit MIME type override. When set, replaces the default derived from output_format for every mode ' +
+                        'except fhir_bundle.'
+                }
+            ],
+            stepOutput: {
+                description: 'Available downstream via steps.{namespace}.step_output.*, and also exposed at the top level as payload / ' +
+                    'content_type so an Outbound Connector\'s default contentField="payload" works without extra configuration.',
+                fields: [
+                    { name: 'payload', type: 'string', description: 'The built wire-format payload string, ready to send' },
+                    { name: 'content_type', type: 'string', description: 'MIME type to use for the outbound request/message' },
+                    { name: 'payload_size', type: 'number', description: 'Size of payload in bytes' },
+                    { name: 'output_format', type: 'string', description: 'The output_format this step was configured with' },
+                    { name: 'error', type: 'string', description: 'Present only when the step failed — payload is empty in that case' }
+                ]
+            }
+        };
     Object.keys(docs).forEach((stepType) => StepDocumentationRegistry.register(stepType, docs[stepType]));
 })();
 
 StepDocumentationRegistry.registerAlias('post.data_masking', 'data_masking');
+StepDocumentationRegistry.registerAlias('payload_builder', 'payload.builder');

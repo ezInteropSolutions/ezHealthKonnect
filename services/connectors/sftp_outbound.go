@@ -1,8 +1,19 @@
 // services/connectors/sftp_outbound.go
-// SFTP Outbound Connector — uploads files to a remote SSH/SFTP server.
+// SFTP Outbound Connector — uploads files to a remote SFTP server.
 //
-// File transfer uses the SCP (Secure Copy) protocol over an SSH session,
-// which requires no additional Go dependencies beyond golang.org/x/crypto/ssh.
+// Uses the real SFTP protocol via github.com/pkg/sftp (built on top of the
+// same golang.org/x/crypto/ssh connection already established) — NOT shell
+// commands over SSH exec. An earlier version of this connector hand-rolled
+// the legacy SCP protocol by writing "C0644 <size> <name>\n" headers and
+// running `scp -qt <dir>` as a literal SSH exec command; that requires the
+// remote server to allow arbitrary shell command execution for the SFTP
+// user. Confirmed via a live test against a standard, properly-locked-down
+// SFTP server (the common atmoz/sftp Docker test image, configured the way
+// real production SFTP endpoints — banks, healthcare partners, AWS Transfer
+// Family, etc. — normally are) that this fails outright: the server rejects
+// the exec request with "This service allows sftp connections only." The
+// real SFTP protocol (what this file now uses) is exactly what such servers
+// exist to serve, and works correctly against them.
 //
 // Authentication:
 //
@@ -19,12 +30,20 @@
 //	key_content     string  PEM private key as string (for key auth)
 //	auth_type       string  "password" | "key" (default: "password")
 //	remote_dir      string  Remote directory path (default: "/upload")
+//	filename_pattern string Template for the remote filename, e.g.
+//	                        "{interface_id}/{message_id}_{timestamp}.hl7" —
+//	                        same placeholder convention and sanitizer as
+//	                        aws_s3_outbound.go/azure_blob_outbound.go's
+//	                        key_pattern. Takes priority over filename_field/
+//	                        filename_prefix/file_extension when set. Any
+//	                        subdirectories in the pattern are created
+//	                        automatically via the SFTP client's MkdirAll.
 //	filename_field  string  Message metadata key used as remote filename
-//	filename_prefix string  Static prefix for generated filenames
-//	file_extension  string  Extension added to generated filenames (default: ".dat")
+//	                        (legacy — used only when filename_pattern is unset)
+//	filename_prefix string  Static prefix for generated filenames (legacy)
+//	file_extension  string  Extension added to generated filenames (legacy, default: ".dat")
 //	connect_timeout int     Seconds (default 10)
 //	write_timeout   int     Seconds (default 60)
-//	mode            string  "overwrite" | "append" (default: "overwrite")
 package connectors
 
 import (
@@ -35,36 +54,39 @@ import (
 	"log"
 	"net"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
 	"ezhealthkonnect/models"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
-// SFTPOutboundConnector uploads files to remote SFTP/SCP servers.
+// SFTPOutboundConnector uploads files to remote SFTP servers.
 type SFTPOutboundConnector struct {
 	*BaseOutboundConnector
 
 	// config
-	host           string
-	port           int
-	username       string
-	password       string
-	keyFile        string
-	keyContent     string
-	authType       string
-	remoteDir      string
-	filenameField  string
-	filenamePrefix string
-	fileExtension  string
-	connectTimeout time.Duration
-	writeTimeout   time.Duration
+	host            string
+	port            int
+	username        string
+	password        string
+	keyFile         string
+	keyContent      string
+	authType        string
+	remoteDir       string
+	filenamePattern string
+	filenameField   string
+	filenamePrefix  string
+	fileExtension   string
+	connectTimeout  time.Duration
+	writeTimeout    time.Duration
 
 	// runtime
-	mu         sync.Mutex
-	sshConfig  *ssh.ClientConfig
+	mu        sync.Mutex
+	sshConfig *ssh.ClientConfig
 }
 
 // NewSFTPOutboundConnector creates a production SFTP outbound connector.
@@ -72,13 +94,13 @@ func NewSFTPOutboundConnector() OutboundConnector {
 	metadata := ConnectorMetadata{
 		TypeName:           "sftp_outbound",
 		DisplayName:        "SFTP File Uploader",
-		Version:            "1.0.0",
+		Version:            "2.0.0",
 		Category:           "outbound",
 		Mode:               "push",
 		ImplementationLang: "go",
 		Capabilities: map[string]bool{
 			"supports_batch": true,
-			"supports_tls":   true,  // TLS via SSH
+			"supports_tls":   true, // TLS via SSH
 			"supports_auth":  true,
 		},
 	}
@@ -111,6 +133,7 @@ func (c *SFTPOutboundConnector) Initialize(config []byte) error {
 	if c.remoteDir == "" {
 		c.remoteDir = "/upload"
 	}
+	c.filenamePattern = cfg.GetString("filename_pattern")
 	c.filenameField = cfg.GetString("filename_field")
 	c.filenamePrefix = cfg.GetString("filename_prefix")
 	if c.filenamePrefix == "" {
@@ -175,17 +198,27 @@ func (c *SFTPOutboundConnector) Validate() error {
 	return nil
 }
 
-// TestConnection dials the SSH server without uploading data.
+// TestConnection dials SSH and opens a real SFTP session (not just a bare SSH
+// connection) — this is what actually proves the server accepts SFTP, since
+// an SSH TCP/handshake can succeed even against a server that later rejects
+// the actual file-transfer subsystem for other reasons.
 func (c *SFTPOutboundConnector) TestConnection(ctx context.Context) error {
 	conn, err := c.dialSSH(ctx)
 	if err != nil {
 		return NewConnectorError(c.GetMetadata().TypeName, "test_connection", err, true)
 	}
-	_ = conn.Close()
+	defer conn.Close()
+
+	sftpClient, err := sftp.NewClient(conn)
+	if err != nil {
+		return NewConnectorError(c.GetMetadata().TypeName, "test_connection",
+			fmt.Errorf("SFTP subsystem unavailable: %w", err), true)
+	}
+	defer sftpClient.Close()
 	return nil
 }
 
-// Send uploads the message content as a file via SCP.
+// Send uploads the message content as a file via real SFTP.
 func (c *SFTPOutboundConnector) Send(ctx context.Context, message *models.OutboundMessage) (*DeliveryResult, error) {
 	start := time.Now()
 	typeName := c.GetMetadata().TypeName
@@ -205,7 +238,15 @@ func (c *SFTPOutboundConnector) Send(ctx context.Context, message *models.Outbou
 	}
 	defer conn.Close()
 
-	if err := scpUpload(conn, remotePath, content, c.writeTimeout); err != nil {
+	sftpClient, err := sftp.NewClient(conn)
+	if err != nil {
+		wrapped := fmt.Errorf("open SFTP session: %w", err)
+		c.RecordError(wrapped)
+		return failResult(message.MessageID, start, wrapped), wrapped
+	}
+	defer sftpClient.Close()
+
+	if err := sftpUploadWithTimeout(sftpClient, c.remoteDir, remotePath, content, c.writeTimeout); err != nil {
 		c.RecordError(err)
 		return failResult(message.MessageID, start, err), err
 	}
@@ -260,7 +301,16 @@ func (c *SFTPOutboundConnector) buildAuthMethods() ([]ssh.AuthMethod, error) {
 	}
 }
 
+// resolveFilename builds the remote filename for a message. filename_pattern
+// (a real template — {message_id}/{interface_id}/{timestamp}/{date}/{time},
+// same convention and sanitizer as aws_s3_outbound.go/azure_blob_outbound.go's
+// key_pattern) takes priority when set; the legacy filename_field/prefix/
+// extension behavior is preserved as a fallback for configs that don't set it.
 func (c *SFTPOutboundConnector) resolveFilename(message *models.OutboundMessage) string {
+	if c.filenamePattern != "" {
+		return c.resolvePatternFilename(message)
+	}
+
 	if c.filenameField != "" && message.Metadata != nil {
 		if name, ok := message.Metadata[c.filenameField]; ok && name != "" {
 			return name
@@ -274,57 +324,65 @@ func (c *SFTPOutboundConnector) resolveFilename(message *models.OutboundMessage)
 	return fmt.Sprintf("%s%s_%s%s", c.filenamePrefix, ts, msgID, c.fileExtension)
 }
 
-// scpUpload transfers content to remotePath via SCP protocol over SSH.
-func scpUpload(client *ssh.Client, remotePath string, content []byte, timeout time.Duration) error {
-	session, err := client.NewSession()
-	if err != nil {
-		return fmt.Errorf("ssh new session: %w", err)
+// resolvePatternFilename renders filename_pattern's placeholders for one
+// message, appending an extension inferred from content type when the
+// pattern doesn't already specify one — identical behavior to
+// aws_s3_outbound.go's buildKey/azure_blob_outbound.go's buildBlobName.
+func (c *SFTPOutboundConnector) resolvePatternFilename(message *models.OutboundMessage) string {
+	name := c.filenamePattern
+	now := time.Now()
+
+	replacements := map[string]string{
+		"{timestamp}":    now.Format("20060102_150405"),
+		"{date}":         now.Format("20060102"),
+		"{time}":         now.Format("150405"),
+		"{message_id}":   sanitizeObjectKeySegment(message.MessageID),
+		"{interface_id}": sanitizeObjectKeySegment(message.InterfaceID),
 	}
-	defer session.Close()
-
-	dir := path.Dir(remotePath)
-	filename := path.Base(remotePath)
-
-	stdinPipe, err := session.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("stdin pipe: %w", err)
+	for placeholder, value := range replacements {
+		name = strings.ReplaceAll(name, placeholder, value)
 	}
 
-	var cmdErr error
-	done := make(chan struct{})
+	if path.Ext(name) == "" {
+		name += extensionForContentType(contentTypeOrDefault("", message.ContentType))
+	}
+	return name
+}
+
+// sftpUploadWithTimeout creates any missing subdirectories under remoteDir
+// (filename_pattern can include them, e.g. "{interface_id}/{message_id}.hl7")
+// and writes content to remotePath via the real SFTP protocol, bounded by
+// timeout. The blocking SFTP calls run in a goroutine so a hung connection
+// can still be reported as a timeout rather than blocking Send() forever.
+func sftpUploadWithTimeout(client *sftp.Client, remoteDir, remotePath string, content []byte, timeout time.Duration) error {
+	done := make(chan error, 1)
 	go func() {
-		defer close(done)
-		// Write SCP header: "C0644 <size> <filename>\n"
-		header := fmt.Sprintf("C0644 %d %s\n", len(content), filename)
-		if _, err := io.WriteString(stdinPipe, header); err != nil {
-			cmdErr = fmt.Errorf("scp header write: %w", err)
+		if targetDir := path.Dir(remotePath); targetDir != "." && targetDir != remoteDir {
+			if err := client.MkdirAll(targetDir); err != nil {
+				done <- fmt.Errorf("mkdir -p %s: %w", targetDir, err)
+				return
+			}
+		}
+
+		f, err := client.Create(remotePath)
+		if err != nil {
+			done <- fmt.Errorf("create %s: %w", remotePath, err)
 			return
 		}
-		// Write file content
-		if _, err := io.Copy(stdinPipe, bytes.NewReader(content)); err != nil {
-			cmdErr = fmt.Errorf("scp content write: %w", err)
+		defer f.Close()
+
+		if _, err := io.Copy(f, bytes.NewReader(content)); err != nil {
+			done <- fmt.Errorf("write %s: %w", remotePath, err)
 			return
 		}
-		// Write SCP end marker
-		_, _ = stdinPipe.Write([]byte{0})
-		_ = stdinPipe.Close()
-	}()
-
-	// Run scp receive command on remote: scp -qt <dir>
-	cmdDone := make(chan error, 1)
-	go func() {
-		cmdDone <- session.Run(fmt.Sprintf("scp -qt %s", dir))
+		done <- nil
 	}()
 
 	select {
-	case err := <-cmdDone:
-		<-done
-		if cmdErr != nil {
-			return cmdErr
-		}
+	case err := <-done:
 		return err
 	case <-time.After(timeout):
-		return fmt.Errorf("scp upload timed out after %s", timeout)
+		return fmt.Errorf("SFTP upload timed out after %s", timeout)
 	}
 }
 
@@ -338,4 +396,3 @@ func failResult(messageID string, start time.Time, err error) *DeliveryResult {
 		DurationMs:   time.Since(start).Milliseconds(),
 	}
 }
-
