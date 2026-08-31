@@ -65,7 +65,9 @@ func (s *MirthMigrationService) History(ctx context.Context, limit int) ([]model
 	}
 	defer rows.Close()
 
-	var entries []models.MirthMigrationHistoryEntry
+	// Non-nil so JSON callers (the history endpoint) get [] instead of null
+	// when there's no migration history yet.
+	entries := make([]models.MirthMigrationHistoryEntry, 0)
 	for rows.Next() {
 		var e models.MirthMigrationHistoryEntry
 		var iid, cid, mv, mb, iname sql.NullString
@@ -1052,12 +1054,18 @@ func (s *MirthMigrationService) writeToDatabase(
 	interfaceID := uuid.New().String()
 
 	// ---- 1. Insert interface ----
+	// user_id is NOT NULL (FK to users.id) — must be supplied. userID comes
+	// from the real caller's authenticated session (see
+	// MirthMigrationController.Import's ctrl.userIDFromContext(c)); this used
+	// to omit user_id from the column list entirely, leaving every
+	// Mirth-imported interface without an owner and failing outright once the
+	// NOT NULL constraint was added.
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO interfaces (
-			id, name, description, source_type, target_type, message_type,
+			id, user_id, name, description, source_type, target_type, message_type,
 			status, is_active, version, created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,'draft',false,1,$7,$8)`,
-		interfaceID, name, description, sourceType, targetType, messageType, now, now,
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,'draft',false,1,$8,$9)`,
+		interfaceID, userID, name, description, sourceType, targetType, messageType, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create interface: %w", err)
@@ -1098,13 +1106,22 @@ func (s *MirthMigrationService) writeToDatabase(
 		}
 		configJSON := marshalJSON(config)
 
+		// on_error_strategy is CHECK-constrained to 'fail'/'skip'/'default'
+		// (see models.TransformationStep's own comment and
+		// transformation_steps' chk_error_strategy) — this used to pass the
+		// unrelated 'suppress' value (borrowed from a different feature's
+		// error-handling action naming), which the constraint always
+		// rejected, silently failing every single step insert (caught below
+		// as a per-step warning, so Import() itself still "succeeded" with
+		// StepsCreated always 0). 'skip' matches the actual intent: don't
+		// halt the whole migrated pipeline over one unreviewed JS step.
 		_, err = s.db.ExecContext(ctx, `
 			INSERT INTO transformation_steps (
 				id, pipeline_id, step_name, step_type, sequence, required,
 				timeout_ms, enabled, config, script_type, script_content,
 				on_error_strategy, execution_mode, parent_step_id, container_zone,
 				created_at, updated_at
-			) VALUES ($1,$2,$3,$4,$5,false,30000,true,$6,'javascript',$7,'suppress','sequential',NULL,'pre',$8,$9)`,
+			) VALUES ($1,$2,$3,$4,$5,false,30000,true,$6,'javascript',$7,'skip','sequential',NULL,'pre',$8,$9)`,
 			stepID, pipelineID,
 			fmt.Sprintf("[Mirth] %s", step.Name),
 			step.SuggestedType,

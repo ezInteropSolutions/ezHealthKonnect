@@ -200,6 +200,18 @@ func testDB(t *testing.T) (*sql.DB, func()) {
 	return db, func() { db.Close() }
 }
 
+// testUserID returns the real UUID of the admin user V2__default_config.sql
+// always seeds, since interfaces.user_id is a NOT NULL FK to users.id — a
+// literal placeholder string like "test-user" can't satisfy that constraint.
+func testUserID(t *testing.T, db *sql.DB) string {
+	t.Helper()
+	var id string
+	if err := db.QueryRow(`SELECT id FROM users WHERE email = 'admin@ezhealthkonnect.com'`).Scan(&id); err != nil {
+		t.Skipf("skipping integration test: seeded admin user not found: %v", err)
+	}
+	return id
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // [UNIT] XML parsing
 // ─────────────────────────────────────────────────────────────────────────────
@@ -599,7 +611,7 @@ func TestMirthMigrationIntegration_Import(t *testing.T) {
 		ChannelXML:    validMirthXML,
 		InterfaceName: "Integration Test ADT Channel",
 		Description:   "Created by integration test — safe to delete",
-		UserID:        "test-user",
+		UserID:        testUserID(t, db),
 	}
 	result, err := svc.Import(context.Background(), req)
 	if err != nil {
@@ -653,7 +665,7 @@ func TestMirthMigrationIntegration_SkipSteps(t *testing.T) {
 		ChannelXML:      validMirthXML,
 		InterfaceName:   "Skip Test Channel",
 		Description:     "Integration test — safe to delete",
-		UserID:          "test-user",
+		UserID:          testUserID(t, db),
 		SkipStepIndices: []int{0, 2}, // skip filter rule (0) and mapper step (2)
 	}
 
