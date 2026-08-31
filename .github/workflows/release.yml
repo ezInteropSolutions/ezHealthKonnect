@@ -162,7 +162,7 @@ jobs:
 
           # Runtime directories
           for d in controllers services middleware routes config models \
-                   processing utils public fhir hl7 templates; do
+                   processing utils public fhir hl7 cda templates; do
             [ -d "$d" ] && cp -r "$d" "$BUNDLE_DIR/" || true
           done
 
@@ -255,7 +255,7 @@ jobs:
 
           # Runtime directories
           for d in controllers services middleware routes config models \
-                   processing utils public fhir hl7 templates; do
+                   processing utils public fhir hl7 cda templates; do
             [ -d "$d" ] && cp -r "$d" "$BUNDLE_DIR/" || true
           done
 
