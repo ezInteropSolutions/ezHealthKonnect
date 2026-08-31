@@ -34,14 +34,38 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// internalProxySecret is loaded once at startup from the environment.
+// internalProxySecret holds the resolved secret used by verifyProxySecret.
+//
+// This is intentionally NOT a package-level initializer (it used to be:
+// `var internalProxySecret = func() string { ... os.Getenv(...) ... }()`).
+// Package-level variable initializers run before main() executes a single
+// statement — including before main()'s own godotenv.Load() call — so on any
+// deployment where INTERNAL_PROXY_SECRET/JWT_SECRET exist only inside .env
+// (true for the standalone Windows/Linux installers, which never set these as
+// real OS/service environment variables), an initializer here would always
+// resolve to "" regardless of .env's contents, silently falling back to
+// permissive mode. Worse, if the process happens to inherit an unrelated,
+// stale value for JWT_SECRET from the OS environment, this var would latch
+// onto that forever — no amount of editing .env or restarting the process
+// would change it, since a package initializer only ever runs once, before
+// .env is even read.
+//
+// InitInternalProxySecret must be called explicitly from main(), after
+// godotenv.Load(), so this reads the same environment Node.js's proxy client
+// resolves its header from.
+var internalProxySecret string
+
+// InitInternalProxySecret resolves internalProxySecret from the environment.
 // Falls back to JWT_SECRET so existing deployments work without a new var.
-var internalProxySecret = func() string {
+// Call once from main(), after godotenv.Load() and before the HTTP server
+// starts accepting requests.
+func InitInternalProxySecret() {
 	if s := os.Getenv("INTERNAL_PROXY_SECRET"); s != "" {
-		return s
+		internalProxySecret = s
+		return
 	}
-	return os.Getenv("JWT_SECRET")
-}()
+	internalProxySecret = os.Getenv("JWT_SECRET")
+}
 
 // WarnIfProxySecretMissing logs a prominent warning when no proxy secret is
 // configured. Call once from main() after all services are initialised.

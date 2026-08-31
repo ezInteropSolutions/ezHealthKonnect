@@ -83,6 +83,11 @@ func main() {
 		log.Printf("⚠️  .env not loaded: %v", err)
 	}
 
+	// Resolve the internal-proxy-secret from the now-loaded environment. Must run
+	// after godotenv.Load() — see InitInternalProxySecret's doc comment for why
+	// this can't be a package-level var initializer.
+	InitInternalProxySecret()
+
 	// Record start time
 	startTime = time.Now()
 
