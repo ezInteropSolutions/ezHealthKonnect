@@ -1403,28 +1403,29 @@ test.describe('FHB-E2 Test Pipeline Execution API', () => {
     });
 
     test('FHB-E2-005 real FHIR_Build_Demo pipeline (DB-persisted) builds the same 10-entry Bundle', async ({ request }) => {
+        // V198__FHIR_Build_Demo_Additional_Resources.sql's own header is
+        // explicit: it "no-ops safely if the FHIR_Build_Demo interface/
+        // pipeline doesn't exist in this environment (fresh install without
+        // demo data)" — this interface/pipeline was never actually created by
+        // any migration (V198/199/200 only ever UPDATE it), so a genuinely
+        // fresh database has none. The endpoint reflects that correctly:
+        // 200 OK with an empty pipelines array, not a non-2xx. The skip-guard
+        // used to check only res.ok(), which is true either way — it never
+        // actually skipped on a fresh DB, it just let the test run into a
+        // predictable failure a few lines down. Checking the real payload
+        // fixes that; an inner retry (tried previously) couldn't have helped
+        // since this isn't transient.
         const pipelineCheck = await request.get(`${BASE_URL}/api/pipelines/interface/${FHIR_BUILD_DEMO_INTERFACE_ID}`).catch(() => null);
-        test.skip(!pipelineCheck || !pipelineCheck.ok(), 'FHIR_Build_Demo pipeline not present in this environment (V198/V199 migrations not applied?)');
+        const pipelineBody = pipelineCheck && pipelineCheck.ok() ? await pipelineCheck.json().catch(() => null) : null;
+        const hasPipeline = !!pipelineBody?.pipelines?.length;
+        test.skip(!hasPipeline, 'FHIR_Build_Demo pipeline not present in this environment (never migration-created — see V198\'s own header comment)');
 
-        // One retry on a non-2xx: seen once in CI (never locally) with no
-        // distinguishing error body, most consistent with a transient blip
-        // (DB pool still warming up, a GC pause) rather than a real bug —
-        // the pipeline itself is confirmed present by the skip-guard above.
-        let res = await request.post(`${BASE_URL}/api/fhir/pipeline/test`, {
+        const res = await request.post(`${BASE_URL}/api/fhir/pipeline/test`, {
             data: {
                 pipeline_id: FHIR_BUILD_DEMO_PIPELINE_ID,
                 test_message: FHIR_BUILD_DEMO_SAMPLE_MESSAGE,
             },
         });
-        if (!res.ok()) {
-            await new Promise(r => setTimeout(r, 1000));
-            res = await request.post(`${BASE_URL}/api/fhir/pipeline/test`, {
-                data: {
-                    pipeline_id: FHIR_BUILD_DEMO_PIPELINE_ID,
-                    test_message: FHIR_BUILD_DEMO_SAMPLE_MESSAGE,
-                },
-            });
-        }
         expect(res.ok()).toBeTruthy();
         const body = await res.json();
         expect(body.success).toBe(true);
