@@ -31,6 +31,18 @@ type Connector interface {
 
 	// GetStatus returns current connector status
 	GetStatus() ConnectorStatus
+
+	// SetInterfaceContext attaches the owning interface's ID/name so the
+	// connector's Logger() writes to that interface's own dated log file
+	// (logs/interfaces/{interfaceID}/{yyyy}/{mm}/{dd}/interface.log) instead
+	// of only the global application log. Called by the connector-creation
+	// layer (processing.CreateInputConnector/CreateOutputConnector) after
+	// Initialize succeeds — deliberately separate from Initialize, since most
+	// concrete connectors override Initialize entirely and would otherwise
+	// shadow a base-class implementation placed there. Implemented once on
+	// BaseConnector and inherited by every connector through embedding, so no
+	// per-connector-type code is needed.
+	SetInterfaceContext(interfaceID, interfaceName string)
 }
 
 // InboundConnector interface for receiving messages

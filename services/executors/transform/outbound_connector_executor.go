@@ -220,6 +220,12 @@ func (e *OutboundConnectorExecutor) Execute(
 	}
 	defer connector.Close()
 
+	// Route this connector's own logging into the owning interface's dated
+	// log file (logs/interfaces/{interfaceID}/{yyyy}/{mm}/{dd}/interface.log).
+	if ifaceID, _ := ctx.Value("interface_id").(string); ifaceID != "" {
+		connector.SetInterfaceContext(ifaceID, "")
+	}
+
 	// Get content to send — format-aware serialization via Phase 4 serializer
 	content, resolvedContentType := resolveAndSerializeContent(inputData, config)
 

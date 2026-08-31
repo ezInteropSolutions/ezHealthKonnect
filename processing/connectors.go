@@ -28,6 +28,7 @@ type InputConnector interface {
 	GetMetadata() connectors.ConnectorMetadata
 	Validate() error
 	SupportsCron() bool
+	SetInterfaceContext(interfaceID, interfaceName string)
 }
 
 // OutputConnector - Alias to new framework OutboundConnector
@@ -42,6 +43,7 @@ type OutputConnector interface {
 	GetMetadata() connectors.ConnectorMetadata
 	Validate() error
 	SupportsBatch() bool
+	SetInterfaceContext(interfaceID, interfaceName string)
 }
 
 // ============================================================================
@@ -85,6 +87,12 @@ func CreateInputConnector(typeName string, config interface{}) (InputConnector, 
 		return nil, fmt.Errorf("failed to initialize connector '%s': %w", typeName, err)
 	}
 
+	// Route this connector's own logging into the owning interface's dated
+	// log file — see BaseConnector.SetInterfaceContext for why this has to
+	// be a separate step from Initialize rather than folded into it.
+	interfaceID, interfaceName := extractInterfaceContext(configJSON)
+	connector.SetInterfaceContext(interfaceID, interfaceName)
+
 	// OOB: Validate configuration
 	err = connector.Validate()
 	if err != nil {
@@ -92,6 +100,23 @@ func CreateInputConnector(typeName string, config interface{}) (InputConnector, 
 	}
 
 	return connector, nil
+}
+
+// extractInterfaceContext pulls the "interface_id"/"interface_name" keys that
+// processing/engine.go already injects into every connector.inbound config
+// (innerConfig["interface_id"] = interfaceID / sourceConfig["interface_id"] =
+// interfaceID) before calling CreateInputConnector/CreateOutputConnector.
+// Returns empty strings if either key is absent — SetInterfaceContext treats
+// a blank interfaceID as a no-op.
+func extractInterfaceContext(configJSON []byte) (interfaceID, interfaceName string) {
+	var probe struct {
+		InterfaceID   string `json:"interface_id"`
+		InterfaceName string `json:"interface_name"`
+	}
+	if err := json.Unmarshal(configJSON, &probe); err != nil {
+		return "", ""
+	}
+	return probe.InterfaceID, probe.InterfaceName
 }
 
 // CreateOutputConnector creates an outbound connector using OOB factory
@@ -129,6 +154,12 @@ func CreateOutputConnector(typeName string, config interface{}) (OutputConnector
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize connector '%s': %w", typeName, err)
 	}
+
+	// Route this connector's own logging into the owning interface's dated
+	// log file — see BaseConnector.SetInterfaceContext for why this has to
+	// be a separate step from Initialize rather than folded into it.
+	interfaceID, interfaceName := extractInterfaceContext(configJSON)
+	connector.SetInterfaceContext(interfaceID, interfaceName)
 
 	// OOB: Validate configuration
 	err = connector.Validate()

@@ -6,7 +6,9 @@ package connectors
 import (
 	"context"
 	"ezhealthkonnect/models"
+	ilogger "ezhealthkonnect/services/logger"
 	"encoding/json"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -19,6 +21,14 @@ type BaseConnector struct {
 	statusMu     sync.RWMutex
 	config       ConnectorConfig
 	initialized  bool
+
+	// ilog is the per-interface, date-organized logger for this connector
+	// instance, set via SetInterfaceContext (called by the connector-creation
+	// layer after Initialize succeeds — see that method's doc comment for the
+	// full reserved-key story). Nil when a connector is instantiated without
+	// interface context (e.g. a connector-test/dry-run flow) — Logger() falls
+	// back to the global logger in that case.
+	ilog *slog.Logger
 }
 
 // NewBaseConnector creates a new base connector with common initialization
@@ -59,6 +69,37 @@ func (bc *BaseConnector) Initialize(config []byte) error {
 	bc.initialized = true
 	bc.updateStateUnsafe(StateReady)
 	return nil
+}
+
+// SetInterfaceContext attaches the owning interface's ID/name so Logger()
+// returns that interface's own dated logger instead of the global one. See
+// the Connector interface doc comment for why this is separate from
+// Initialize. A blank interfaceID is a no-op (Logger() keeps falling back to
+// the global logger) rather than registering a bogus empty-ID log file.
+func (bc *BaseConnector) SetInterfaceContext(interfaceID, interfaceName string) {
+	if interfaceID == "" {
+		return
+	}
+	bc.statusMu.Lock()
+	defer bc.statusMu.Unlock()
+	bc.ilog = ilogger.ForInterface(interfaceID, interfaceName)
+}
+
+// Logger returns the per-interface, date-organized logger for this connector
+// instance (logs/interfaces/{interfaceID}/{yyyy}/{mm}/{dd}/interface.log),
+// once SetInterfaceContext has been called. Falls back to the global
+// structured logger when no interface context is available, so callers never
+// need a nil check.
+func (bc *BaseConnector) Logger() *slog.Logger {
+	bc.statusMu.RLock()
+	defer bc.statusMu.RUnlock()
+	if bc.ilog != nil {
+		return bc.ilog
+	}
+	if ilogger.L != nil {
+		return ilogger.L
+	}
+	return slog.Default()
 }
 
 // GetMetadata returns connector metadata

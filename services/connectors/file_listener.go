@@ -172,6 +172,10 @@ func (f *FileListenerConnector) Initialize(config []byte) error {
 
 	log.Printf("✅ File Listener initialized: path=%s, pattern=%s, polling=%v, after=%s",
 		f.directoryPath, f.filePattern, f.pollingInterval, f.afterProcessing)
+	// Note: not also logged via f.Logger() here — SetInterfaceContext runs
+	// after Initialize returns (see the Connector interface doc comment), so
+	// at this point Logger() would still resolve to the global fallback.
+	// From Start() onward (below), SetInterfaceContext has already run.
 
 	// Mark as initialized for base connector validation
 	f.BaseInboundConnector.BaseConnector.initialized = true
@@ -213,6 +217,12 @@ func (f *FileListenerConnector) Start(ctx context.Context, messageChan chan<- *m
 	f.mu.Unlock()
 
 	log.Printf("📂 File Listener: Polling directory %s (pattern: %s)", f.directoryPath, f.filePattern)
+	f.Logger().Info("polling directory",
+		"directory_path", f.directoryPath,
+		"file_pattern", f.filePattern,
+		"recursive", f.recursive,
+		"polling_interval", f.pollingInterval.String(),
+	)
 
 	// Start polling goroutine
 	go f.poll(ctx)
@@ -414,13 +424,21 @@ func (f *FileListenerConnector) processFile(filePath string) {
 	select {
 	case messageChan <- message:
 		log.Printf("✅ File Listener: File %s queued for processing", fileName)
+		f.Logger().Info("file queued for processing",
+			"file_name", fileName,
+			"file_path", filePath,
+			"file_size", len(content),
+			"message_id", message.MessageID,
+		)
 
 		// Apply after-processing action
 		if err := f.afterProcessFile(filePath); err != nil {
 			log.Printf("⚠️ File Listener: After-processing failed for %s: %v", fileName, err)
+			f.Logger().Warn("after-processing failed", "file_name", fileName, "error", err.Error())
 		}
 	default:
 		log.Printf("⚠️ File Listener: Message channel full, skipping file %s", fileName)
+		f.Logger().Warn("message channel full, skipping file", "file_name", fileName)
 	}
 }
 
