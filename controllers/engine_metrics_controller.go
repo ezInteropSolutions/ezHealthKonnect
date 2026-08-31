@@ -49,10 +49,11 @@ type EngineMetricsController struct {
 	db *sql.DB
 }
 
-// NewEngineMetricsController creates a new controller. db is used only to
-// resolve UUIDs (interface_id, step_id) found in metric labels into
-// human-readable names for drill-down detail — no metric data itself comes
-// from the database.
+// NewEngineMetricsController creates a new controller. db resolves UUIDs
+// (interface_id, step_id) found in metric labels into human-readable names
+// for drill-down detail, and backs the one metric — dlq_depth — that reads
+// live from the database instead of the Prometheus registry (see
+// liveDLQDepth for why).
 func NewEngineMetricsController(db *sql.DB) *EngineMetricsController {
 	return &EngineMetricsController{db: db}
 }
@@ -125,7 +126,16 @@ func (ec *EngineMetricsController) GetEngineMetrics(c *gin.Context) {
 	}
 
 	// ── Reliability ──────────────────────────────────────────────────────────
+	// dlq_depth reads live from the DB rather than the ezhk_dlq_depth gauge —
+	// that gauge is only refreshed by MetricsCollector's 5-minute batch pass
+	// (services/metrics_collector.go), so a DLQ backlog that appears between
+	// ticks (or right after the app starts, before the first pass runs) would
+	// under-report on a card labelled "(Current)". Falls back to the gauge if
+	// the query fails, so a transient DB hiccup degrades rather than crashes.
 	dlqDepth := singleValue(byName["ezhk_dlq_depth"])
+	if live, ok := ec.liveDLQDepth(ctx); ok {
+		dlqDepth = live
+	}
 	openStepIDs := labelsAtGaugeValue(byName["ezhk_circuit_breaker_state"], "executor_id", 2)
 	halfOpenCount := countGaugeAtValue(byName["ezhk_circuit_breaker_state"], 1)
 	reliability := gin.H{
@@ -175,6 +185,27 @@ func (ec *EngineMetricsController) resolveInterfaceName(ctx context.Context, int
 		return interfaceID
 	}
 	return name
+}
+
+// liveDLQDepth counts current unresolved DLQ rows directly — the same
+// definition of "unresolved" MetricsCollector.dlqDepths uses (see
+// services/metrics_collector.go), duplicated here rather than shared because
+// that method returns a per-interface map computed as a side effect of its
+// own 5-minute batch pass, not something this per-request handler should
+// depend on or trigger. ok=false on any query error (including a nil db in
+// tests), so the caller can fall back to the gauge's last known value.
+func (ec *EngineMetricsController) liveDLQDepth(ctx context.Context) (value float64, ok bool) {
+	if ec.db == nil {
+		return 0, false
+	}
+	var count int
+	err := ec.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM delivery_dlq WHERE status IN ('pending','retrying')`,
+	).Scan(&count)
+	if err != nil {
+		return 0, false
+	}
+	return float64(count), true
 }
 
 // stepDetail is the drill-down shape returned for a tripped circuit breaker.
