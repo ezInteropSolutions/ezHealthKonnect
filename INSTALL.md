@@ -88,17 +88,17 @@ Windows 10 version 1809 or later (winget must be available). If winget is missin
 
 ### After install (Windows Standalone)
 
-Open **Services** (`services.msc`) — you'll see:
-- `ezhealthkonnect` — Web frontend (Node.js)
-- `ezhealthkonnect-api` — Go API backend
+Open **Services** (`services.msc`) — you'll see one service, **ezHealthKonnect**, running
+both the Go backend and the Node.js frontend (a small start-app.ps1 wrapper starts both and
+keeps them tied together — see `installer/assets/start-app.ps1`).
 
 Or via PowerShell:
 ```powershell
-Get-Service ezhealthkonnect, ezhealthkonnect-api
-Restart-Service ezhealthkonnect, ezhealthkonnect-api
+Get-Service ezhealthkonnect
+Restart-Service ezhealthkonnect
 ```
 
-Logs: `C:\ezHealthKonnect\logs\app.log` and `api.log`
+Logs: `C:\ezHealthKonnect\logs\ezhealthkonnect.out.log` and `ezhealthkonnect.err.log`
 
 ---
 
@@ -148,10 +148,13 @@ sudo -u postgres psql -c "DROP USER ezhealth_user;"
 ```
 
 **Windows Standalone:**
+
+Prefer the installer's own uninstall (`ezHealthKonnect-Setup-Win64.exe --uninstall`, or via
+Add/Remove Programs) — it also drops the database and removes the Add/Remove Programs entry.
+Manual equivalent, if needed:
 ```powershell
-Stop-Service ezhealthkonnect, ezhealthkonnect-api
-C:\ezHealthKonnect\tools\nssm.exe remove ezhealthkonnect confirm
-C:\ezHealthKonnect\tools\nssm.exe remove ezhealthkonnect-api confirm
+C:\ezHealthKonnect\tools\ezhealthkonnect.exe stop
+C:\ezHealthKonnect\tools\ezhealthkonnect.exe uninstall
 Remove-Item -Recurse -Force C:\ezHealthKonnect
 ```
 

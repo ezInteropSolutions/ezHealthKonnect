@@ -123,11 +123,10 @@ Click **Install**. The installer runs up to 10 steps and shows live progress:
 
 When installation completes, the wizard shows a **Go to Platform** button. Click it to open ezHealthKonnect.
 
-The platform is now registered as two Windows services:
-- `ezhealthkonnect` — web frontend (Node.js)
-- `ezhealthkonnect-api` — Go API backend
+The platform is now registered as a single Windows service, `ezhealthkonnect`, which runs both
+the Node.js web frontend and the Go API backend (via a small start-app.ps1 wrapper).
 
-Both services start automatically when Windows boots.
+The service starts automatically when Windows boots.
 
 ---
 
@@ -335,7 +334,7 @@ journalctl -u ezhealthkonnect-api -n 50
 
 **Windows (PowerShell):**
 ```powershell
-Get-Service ezhealthkonnect, ezhealthkonnect-api
+Get-Service ezhealthkonnect
 ```
 
 **Linux:**
@@ -348,7 +347,6 @@ systemctl status ezhealthkonnect ezhealthkonnect-api
 **Windows:**
 ```powershell
 Restart-Service ezhealthkonnect
-Restart-Service ezhealthkonnect-api
 ```
 
 **Linux:**
