@@ -1,6 +1,8 @@
 package builder
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"ezhealthkonnect/hl7"
@@ -250,11 +252,37 @@ func TestNextAllowedSegments_RepeatInPlace_OffersAnotherOfLastRepeatableSegment(
 	}
 }
 
+// TestAvailableVersions_ListsKnownVersionsSortedNumerically builds its own
+// synthetic version directories under t.TempDir() rather than reading
+// testHL7SchemaDir. AvailableVersions is a pure directory-listing function
+// (see field_catalog.go) — which real HL7 dictionary packages happen to be
+// installed is CI-environment state, not part of the contract under test.
+// This test used to assert on "2.3"/"2.7.1" being present in
+// testHL7SchemaDir directly, which only holds when those (multi-hundred-MB,
+// optional) packages are installed — CI's schema-install step deliberately
+// fetches only hl7-v2-25, so the assertion failed there even though the
+// function itself was correct.
 func TestAvailableVersions_ListsKnownVersionsSortedNumerically(t *testing.T) {
-	versions := AvailableVersions(testHL7SchemaDir)
-	for _, v := range []string{"2.3", "2.5.1", "2.7.1"} {
-		if !contains(versions, v) {
-			t.Errorf("AvailableVersions() = %v, expected it to contain %q", versions, v)
+	dir := t.TempDir()
+	for _, name := range []string{"v2.7.1", "V2.3", "2.5.1", "v2.8"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0755); err != nil {
+			t.Fatalf("Mkdir(%s): %v", name, err)
+		}
+	}
+	// A non-directory entry alongside the version dirs must be ignored.
+	if err := os.WriteFile(filepath.Join(dir, "README.txt"), []byte("x"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	versions := AvailableVersions(dir)
+
+	want := []string{"2.3", "2.5.1", "2.7.1", "2.8"}
+	if len(versions) != len(want) {
+		t.Fatalf("AvailableVersions() = %v, want %v", versions, want)
+	}
+	for i, v := range want {
+		if versions[i] != v {
+			t.Errorf("AvailableVersions()[%d] = %q, want %q (full result: %v)", i, versions[i], v, versions)
 		}
 	}
 	for _, v := range versions {
