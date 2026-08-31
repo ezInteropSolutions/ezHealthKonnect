@@ -3,6 +3,7 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,13 @@ const (
 	// WinSW is a reliable GitHub-hosted service wrapper — single exe, no zip extraction needed.
 	winswDownload = "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
 )
+
+// embeddedStartAppPS1 wraps the Go backend + Node frontend under one Windows
+// service — see the script's own header for why this replaced two separate
+// services.
+//
+//go:embed assets/start-app.ps1
+var embeddedStartAppPS1 []byte
 
 // runStandaloneInstallation is the Windows native (no-Docker) install path.
 func runStandaloneInstallation(cfg *Config) {
@@ -122,9 +130,9 @@ func runStandaloneInstallation(cfg *Config) {
 		emit("ok", "Migrations complete")
 	}
 
-	// ── Step 9: Register services ──────────────────────────────────────────
+	// ── Step 9: Register service ────────────────────────────────────────────
 	if cfg.RegisterSvc {
-		emitStep(9, "Registering Windows services")
+		emitStep(9, "Registering Windows service")
 		winswPath, err := ensureWinSW(cfg.InstallDir)
 		if err != nil {
 			emit("warn", "WinSW download failed — skipping service registration: "+err.Error())
@@ -133,7 +141,7 @@ func runStandaloneInstallation(cfg *Config) {
 			if err := registerWindowsServices(winswPath, nodePath, goAPIBin, cfg); err != nil {
 				emit("warn", "Service registration failed: "+err.Error())
 			} else {
-				emit("ok", "Windows services registered (auto-start on boot)")
+				emit("ok", "Windows service registered (auto-start on boot)")
 			}
 		}
 	}
@@ -628,6 +636,14 @@ func writeWinSWConfig(path, id, name, desc, exe, args, workDir, logFile string) 
   <log mode="roll-by-size"><sizeThreshold>10240</sizeThreshold><keepFiles>3</keepFiles></log>
   <startmode>Automatic</startmode>
   <onfailure action="restart" delay="10 sec"/>
+  <!-- Kill start-app.ps1's own children (go-api.exe, node.exe) before the
+       wrapper itself on stop — WinSW's default top-down order can orphan
+       processes more than one level below the wrapped executable
+       (github.com/winsw/winsw#295); false keeps the wrapper alive long
+       enough for WinSW to still find and kill its direct children by PID.
+       start-app.ps1's own finally block is the primary cleanup path — this
+       is a second line of defense, not a replacement for it. -->
+  <stopparentprocessfirst>false</stopparentprocessfirst>
 </service>`, id, name, desc, exe, args, workDir, logFile)
 	return os.WriteFile(path, []byte(content), 0644)
 }
@@ -661,7 +677,7 @@ func installWinSWService(winswPath, toolsDir, id, name, desc, exe, args, workDir
 		return "", fmt.Errorf("write config %s: %w", svcCfg, err)
 	}
 
-	removeService(id)
+	removeService(toolsDir, id, false)
 
 	// WinSW v2: run "<id>.exe install" with no arguments — it finds <id>.xml itself.
 	if out, err := exec.Command(svcExe, "install").CombinedOutput(); err != nil {
@@ -670,42 +686,54 @@ func installWinSWService(winswPath, toolsDir, id, name, desc, exe, args, workDir
 	return svcExe, nil
 }
 
+// standaloneServiceID is the single Windows service ID covering both the Go
+// backend and the Node frontend (see start-app.ps1's own header for why this
+// replaced two independently-restartable services).
+const standaloneServiceID = "ezhealthkonnect"
+
+// registerWindowsServices installs ONE WinSW service that runs start-app.ps1,
+// which in turn starts go-api.exe and node.exe/server.js as its own children
+// and keeps them tied together (see start-app.ps1). goAPIBin is unused here —
+// start-app.ps1 always resolves go-api.exe relative to its own location — but
+// kept as a parameter so callers still pass (and can assert on) the binary's
+// real path before registration.
 func registerWindowsServices(winswPath, nodePath, goAPIBin string, cfg *Config) error {
+	if _, err := os.Stat(goAPIBin); err != nil {
+		return fmt.Errorf("go-api binary not found at %s: %w", goAPIBin, err)
+	}
+
 	toolsDir := filepath.Join(cfg.InstallDir, "tools")
 	logsDir := filepath.Join(cfg.InstallDir, "logs")
 	os.MkdirAll(logsDir, 0755) //nolint:errcheck
 
-	// ── Go API service ──────────────────────────────────────────────────────
-	apiExe, err := installWinSWService(winswPath, toolsDir,
-		"ezhealthkonnect-api",
-		"ezHealthKonnect Go API", "ezHealthKonnect HL7/FHIR Go Backend",
-		goAPIBin, "",
+	scriptPath := filepath.Join(cfg.InstallDir, "start-app.ps1")
+	if err := os.WriteFile(scriptPath, embeddedStartAppPS1, 0644); err != nil {
+		return fmt.Errorf("write start-app.ps1: %w", err)
+	}
+
+	powershellPath, err := exec.LookPath("powershell.exe")
+	if err != nil {
+		return fmt.Errorf("powershell.exe not found on PATH: %w", err)
+	}
+
+	// nodePath and scriptPath can both contain spaces (Node's default install
+	// path is "C:\Program Files\nodejs\node.exe") — quote them individually
+	// rather than relying on the whole <arguments> string being one token.
+	args := fmt.Sprintf(`-NoProfile -ExecutionPolicy Bypass -File "%s" -NodePath "%s"`, scriptPath, nodePath)
+
+	svcExe, err := installWinSWService(winswPath, toolsDir,
+		standaloneServiceID,
+		"ezHealthKonnect", "ezHealthKonnect HL7/FHIR Integration Engine (Go backend + Node.js frontend)",
+		powershellPath, args,
 		cfg.InstallDir, logsDir,
 	)
 	if err != nil {
 		return err
 	}
 
-	// ── Node.js frontend service ────────────────────────────────────────────
-	serverJS := filepath.Join(cfg.InstallDir, "server.js")
-	appExe, err := installWinSWService(winswPath, toolsDir,
-		"ezhealthkonnect",
-		"ezHealthKonnect Web", "ezHealthKonnect Web Frontend",
-		nodePath, serverJS,
-		cfg.InstallDir, logsDir,
-	)
-	if err != nil {
-		return err
-	}
-
-	// Start services
-	emit("info", "Starting services...")
-	if out, err := exec.Command(apiExe, "start").CombinedOutput(); err != nil {
-		emit("warn", fmt.Sprintf("Could not start go-api: %s", strings.TrimSpace(string(out))))
-	}
-	time.Sleep(3 * time.Second)
-	if out, err := exec.Command(appExe, "start").CombinedOutput(); err != nil {
-		emit("warn", fmt.Sprintf("Could not start node: %s", strings.TrimSpace(string(out))))
+	emit("info", "Starting service...")
+	if out, err := exec.Command(svcExe, "start").CombinedOutput(); err != nil {
+		emit("warn", fmt.Sprintf("Could not start ezHealthKonnect service: %s", strings.TrimSpace(string(out))))
 	}
 
 	return nil
@@ -745,21 +773,52 @@ func removeUninstallRegistry() {
 	exec.Command("reg", "delete", `HKLM\`+uninstallRegKey, "/f").Run() //nolint:errcheck
 }
 
-func removeService(name string) {
-	exec.Command("sc", "stop", name).Run()   //nolint:errcheck
-	exec.Command("sc", "delete", name).Run() //nolint:errcheck
+// removeService stops and removes a WinSW-wrapped Windows service, preferring
+// the service's own WinSW wrapper (tools/<id>.exe) over raw `sc` commands.
+// This used to be `sc stop` immediately followed by `sc delete` with every
+// error discarded (`.Run()`, no check) — `sc stop` only requests a stop and
+// returns immediately, so `sc delete` frequently ran against a service still
+// in STOP_PENDING and failed, silently, leaving the service still registered
+// (visible in services.msc) after a supposedly-complete uninstall. WinSW's
+// own "stop" command blocks until the process has actually exited, and
+// "uninstall" cleanly removes the SCM registration and event-log source.
+// Falls back to raw `sc` only if the wrapper binary itself is missing (e.g.
+// a partial/corrupted prior install), since something must still attempt to
+// clear any leftover SCM registration in that case.
+//
+// verbose gates whether failures are reported via emit("warn", ...): false
+// for the defensive cleanup installWinSWService does before every install
+// (where "service not found" is the normal, expected outcome, not a
+// problem), true for runStandaloneUninstall (where the whole point is to
+// know if something didn't actually come off).
+func removeService(toolsDir, id string, verbose bool) {
+	report := func(action string, out []byte, err error) {
+		if err != nil && verbose {
+			emit("warn", fmt.Sprintf("%s %s: %s", action, id, strings.TrimSpace(string(out))))
+		}
+	}
+
+	svcExe := filepath.Join(toolsDir, id+".exe")
+	if _, statErr := os.Stat(svcExe); statErr == nil {
+		out, err := exec.Command(svcExe, "stop").CombinedOutput()
+		report("stopping", out, err)
+		out, err = exec.Command(svcExe, "uninstall").CombinedOutput()
+		report("removing", out, err)
+		return
+	}
+
+	out, err := exec.Command("sc", "stop", id).CombinedOutput()
+	report("sc stop", out, err)
+	out, err = exec.Command("sc", "delete", id).CombinedOutput()
+	report("sc delete", out, err)
 }
 
-// runStandaloneUninstall stops services, drops the database, and removes all files.
+// runStandaloneUninstall stops the service, drops the database, and removes all files.
 func runStandaloneUninstall(cfg *Config) {
-	const svcAPI = "ezhealthkonnect-api"
-	const svcApp = "ezhealthkonnect"
-
-	// ── 1. Stop services before touching anything else ─────────────────────
-	emit("info", "── Stopping and removing Windows services")
-	removeService(svcAPI)
-	removeService(svcApp)
-	emit("ok", "Services stopped and removed")
+	// ── 1. Stop the service before touching anything else ──────────────────
+	emit("info", "── Stopping and removing Windows service")
+	removeService(filepath.Join(cfg.InstallDir, "tools"), standaloneServiceID, true)
+	emit("ok", "Service stopped and removed")
 
 	// ── 2. Drop database + user ────────────────────────────────────────────
 	// Read credentials from the installed .env so we use exactly what was
