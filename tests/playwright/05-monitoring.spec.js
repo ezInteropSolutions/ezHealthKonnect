@@ -124,8 +124,20 @@ test.describe('Monitoring', () => {
         // never actually used, so this test failed on every run where a real
         // alert existed (i.e. exactly the case it's meant to verify renders
         // correctly).
+        //
+        // The emptyMsg locator used to be a single comma-joined string mixing
+        // a plain CSS class with an inline text= engine
+        // ('.alerts-empty, text=/.../i'), which Playwright can't parse as CSS
+        // ("Unexpected token '='") — isVisible().catch(() => false) silently
+        // swallowed that parse error as "not visible" every time. In practice
+        // this test only ever passed because hasAlerts was true on whichever
+        // database happened to have real alert history; on a fresh database
+        // with zero alerts, both sides came back false and it failed. .or()
+        // combines two real locators instead of concatenating selector text.
         const alertRows = page.locator('.alert-row');
-        const emptyMsg  = page.locator('.alerts-empty, text=/no alerts|all clear|no active alerts/i').first();
+        const emptyMsg  = page.locator('.alerts-empty')
+            .or(page.getByText(/no alerts|all clear|no active alerts/i))
+            .first();
         const hasAlerts = (await alertRows.count()) > 0;
         const hasEmpty  = await emptyMsg.isVisible().catch(() => false);
         expect(hasAlerts || hasEmpty).toBe(true);

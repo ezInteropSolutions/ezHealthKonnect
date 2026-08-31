@@ -162,9 +162,16 @@ test.describe('Settings', () => {
         if (await saveBtn.isVisible().catch(() => false)) {
             await saveBtn.click();
             await page.waitForTimeout(500);
-            const errorMsg = page.locator(
-                '.error, .invalid-feedback, [class*="error"], text=/match|mismatch|confirm/i'
-            ).first();
+            // A comma-joined string mixing plain CSS with an inline text=
+            // engine ('.a, .b, text=/.../i') isn't valid CSS and throws a
+            // parse error Playwright can't recover from — .catch(() => false)
+            // was silently converting that into "not visible" rather than a
+            // real check. .or() combines separate locators instead of
+            // concatenating selector text (see TC-MON-010's fix for the same
+            // bug caught failing outright, not just masked).
+            const errorMsg = page.locator('.error, .invalid-feedback, [class*="error"]')
+                .or(page.getByText(/match|mismatch|confirm/i))
+                .first();
             const hasError = await errorMsg.isVisible({ timeout: 3000 }).catch(() => false);
             // Either shows error OR the form stayed on the page (didn't navigate away)
             const stillOnSettings = page.url().includes('settings.html');
@@ -224,13 +231,19 @@ test.describe('Settings', () => {
         await saveBtn.click();
         await page.waitForTimeout(1000);
 
-        // Success toast, alert, or confirmation message
-        const successMsg = page.locator(
-            '.toast, .alert-success, [class*="success"], text=/saved|updated|applied/i'
-        ).first();
-        const errorMsg = page.locator(
-            '.alert-danger, [class*="error"], text=/error|failed/i'
-        ).first();
+        // Success toast, alert, or confirmation message. .or() combines
+        // separate locators rather than concatenating a plain CSS selector
+        // with an inline text= engine into one comma-joined string — the
+        // latter isn't valid CSS and throws a parse error that
+        // isVisible().catch(() => false) below would silently mask as "not
+        // visible" (see TC-MON-010's fix for the same bug caught failing
+        // outright, not just masked).
+        const successMsg = page.locator('.toast, .alert-success, [class*="success"]')
+            .or(page.getByText(/saved|updated|applied/i))
+            .first();
+        const errorMsg = page.locator('.alert-danger, [class*="error"]')
+            .or(page.getByText(/error|failed/i))
+            .first();
         const hasSuccess = await successMsg.isVisible({ timeout: 3000 }).catch(() => false);
         const hasError   = await errorMsg.isVisible({ timeout: 3000 }).catch(() => false);
         // Accept: success toast, error message, OR still on settings page (silent save without toast)

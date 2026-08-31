@@ -232,8 +232,15 @@ test.describe('Interfaces', () => {
         await search.fill('zzzznotamatch99999');
         await page.waitForTimeout(800);
         const filteredCount = await cards.count();
-        // Either 0 results or an empty state message
-        const emptyState = page.locator('[class*="empty"], [class*="no-result"], text=/no interfaces/i');
+        // Either 0 results or an empty state message. .or() combines separate
+        // locators rather than concatenating a plain CSS selector with an
+        // inline text= engine into one comma-joined string — the latter isn't
+        // valid CSS and throws a parse error that isVisible().catch(() =>
+        // false) below would silently mask as "not visible" (see
+        // TC-MON-010's fix for the same bug caught failing outright, not
+        // just masked).
+        const emptyState = page.locator('[class*="empty"], [class*="no-result"]')
+            .or(page.getByText(/no interfaces/i));
         const isFiltered = filteredCount === 0 || await emptyState.isVisible().catch(() => false);
         expect(isFiltered).toBe(true);
     });
