@@ -12,7 +12,7 @@
  * TC-ENGM-006  Refresh Now button reloads data without error
  * TC-ENGM-007  No horizontal overflow at 1280px
  * TC-ENGM-008  DLQ Depth card shows a "critical" status pill and links to admin-dlq.html
- *              (live DLQ backlog from earlier load tests exceeds the 25-message threshold)
+ *              (needs >25 pending delivery_dlq rows — seeded below, DATABASE_URL-gated)
  * TC-ENGM-009  Active Interfaces and Active Connectors cards link to interfaces.html
  * TC-ENGM-010  Circuit Breakers Open card names the tripped step + owning interface
  *              (requires a deliberately-tripped breaker — see comment at test site)
@@ -21,8 +21,61 @@
  */
 
 const { test, expect } = require('@playwright/test');
+const { Client } = require('pg');
+
+// TC-ENGM-008 needs the DLQ Depth card to actually be "critical" — this used
+// to rely on ambient backlog left over from "earlier load tests" on one
+// developer's machine, which a fresh database (CI included) never has. Seeds
+// 30 rows (comfortably over dlqDepthCrit=25 in engine_metrics_controller.go),
+// following the same DATABASE_URL-gated pg.Client pattern already established
+// in admin-dlq.spec.js. This only works because dlq_depth now reads live from
+// the DB (EngineMetricsController.liveDLQDepth) rather than the 5-minute
+// periodic-collector gauge — seeding into the table alone wouldn't have been
+// visible to the page for up to 5 minutes otherwise.
+const DB_URL = process.env.DATABASE_URL;
+const DLQ_FIXTURE_INTERFACE_ID = '9f4a1c3e-2b6d-4e8a-9c5f-1a7b3d6e8f02';
+const DLQ_FIXTURE_ROW_COUNT = 30;
+
+async function seedDLQBacklog() {
+    if (!DB_URL) return;
+    const db = new Client({ connectionString: DB_URL });
+    await db.connect();
+    try {
+        const userRow = await db.query(`SELECT id FROM users WHERE email = 'admin@ezhealthkonnect.com'`);
+        const userId = userRow.rows[0]?.id;
+        if (!userId) return;
+
+        await db.query(`
+            INSERT INTO interfaces
+                (id, user_id, name, source_type, target_type, message_type, status, is_active, version, created_at, updated_at)
+            VALUES ($1::uuid, $2::uuid, 'E2E DLQ Depth Fixture', 'hl7v2', 'fhir', 'ADT^A01', 'active', true, 1, NOW(), NOW())
+            ON CONFLICT (id) DO NOTHING`, [DLQ_FIXTURE_INTERFACE_ID, userId]);
+
+        const countRes = await db.query(
+            `SELECT COUNT(*) FROM delivery_dlq WHERE interface_id = $1::uuid AND status = 'pending'`,
+            [DLQ_FIXTURE_INTERFACE_ID]);
+        if (parseInt(countRes.rows[0].count, 10) >= DLQ_FIXTURE_ROW_COUNT) return;
+
+        for (let i = 0; i < DLQ_FIXTURE_ROW_COUNT; i++) {
+            await db.query(`
+                INSERT INTO delivery_dlq
+                    (message_id, interface_id, connector_type, payload, content_type,
+                     error_message, attempt_count, next_retry_at, status, redrive_mode)
+                VALUES ($1, $2::uuid, 'http_outbound', '{"test":true}', 'application/json',
+                        'simulated failure for TC-ENGM-008', 1, NOW() + INTERVAL '24 hours', 'pending', 'from_failed_step')
+                ON CONFLICT DO NOTHING`,
+                [`dlq-depth-fixture-${i}`, DLQ_FIXTURE_INTERFACE_ID]);
+        }
+    } finally {
+        await db.end();
+    }
+}
 
 test.describe('Engine Metrics', () => {
+
+    test.beforeAll(async () => {
+        await seedDLQBacklog();
+    });
 
     test.beforeEach(async ({ page }) => {
         await page.goto('/engine-metrics.html');
@@ -88,6 +141,7 @@ test.describe('Engine Metrics', () => {
 
     // ── TC-ENGM-008 ──────────────────────────────────────────────────────────────
     test('TC-ENGM-008 DLQ Depth card shows critical status and links to admin-dlq.html', async ({ page }) => {
+        test.skip(!DB_URL, 'No DATABASE_URL — cannot seed the DLQ backlog this test needs');
         const dlqCard = page.locator('.kpi-card', { hasText: 'DLQ Depth (Current)' });
         await expect(dlqCard).toBeVisible();
         await expect(dlqCard.locator('.status-pill')).toHaveText(/critical/i);

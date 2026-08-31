@@ -368,6 +368,13 @@ jobs:
       - name: Run Playwright suite
         env:
           BASE_URL: http://localhost:3000
+          # Without this, every spec that seeds/reads via a direct DB
+          # connection (admin-dlq.spec.js's 20 tests, bulk-reprocess-e2e.spec.js)
+          # silently test.skip()s its entire suite — CI was giving zero
+          # coverage on either, not passing coverage. Same connection string
+          # already used by the Go test suite step above (postgres service
+          # published to the runner host, so localhost is correct here too).
+          DATABASE_URL: postgres://ezhealth_user:secure_password_change_me@localhost:5432/ezhealthkonnect?sslmode=disable
         run: npx playwright test --project=chromium
 
       - name: Upload Playwright report
