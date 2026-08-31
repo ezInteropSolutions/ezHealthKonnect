@@ -197,13 +197,20 @@ func (tr *TerminologyRegistry) ContainsEx(valueSetURL, code string) (inSet, know
 // legacyContains checks the small set of hardcoded codes that were present
 // before the file-based registry was introduced.  It is only reached when a
 // ValueSet URL is absent from the compiled .gz files.
+//
+// FHIR codes are case-sensitive by spec (the file-based path above already
+// respects each ValueSet's own caseInsensitive flag, which is false for every
+// code system represented here), so this does a direct, case-sensitive
+// lookup against legacyCodes — whose keys are all already lowercase to match
+// the real code casing. It used to fold the input to lowercase before
+// comparing, which silently accepted spec-invalid variants like
+// administrative-gender's "MALE".
 func (tr *TerminologyRegistry) legacyContains(url, code string) (inSet, known bool) {
 	codes, ok := legacyCodes[url]
 	if !ok {
 		return false, false
 	}
-	c := strings.ToLower(code)
-	return codes[c] || codes[code], true
+	return codes[code], true
 }
 
 // legacyCodes is the original hardcoded table — kept as a last-resort fallback.
