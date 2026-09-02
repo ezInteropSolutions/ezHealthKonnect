@@ -1,0 +1,20 @@
+{
+  "id": "N1",
+  "name": "Party Identification",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "entityIdentifierCode", "dataType": "ID" },
+    { "pos": "02", "key": "name", "dataType": "AN" },
+    { "pos": "03", "key": "identificationCodeQualifier", "dataType": "ID" },
+    { "pos": "04", "key": "identificationCode", "dataType": "AN" }
+  ],
+  "syntaxRules": [
+    { "type": "R", "positions": ["02", "03"] },
+    { "type": "P", "positions": ["03", "04"] }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment. N105/N106 are marked usage=\"N\" (Not Used) in both real occurrences (1000A payer, 1000B payee) in this IG. N101 is code-restricted per loop: \"PR\" for 1000A, \"PE\" for 1000B — confirming the sibling-loop disambiguation edi/loop_engine.go already relies on (see that file's own doc comment).",
+    "syntaxRules (R0203, P0304) sourced from the same PyX12 XML's own <syntax> notes."
+  ]
+}

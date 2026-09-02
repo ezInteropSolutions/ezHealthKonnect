@@ -1,0 +1,21 @@
+{
+  "id": "N4",
+  "name": "Geographic Location",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "cityName", "dataType": "AN" },
+    { "pos": "02", "key": "stateOrProvinceCode", "dataType": "ID" },
+    { "pos": "03", "key": "postalCode", "dataType": "ID" },
+    { "pos": "04", "key": "countryCode", "dataType": "ID" },
+    { "pos": "07", "key": "countrySubdivisionCode", "dataType": "ID" }
+  ],
+  "syntaxRules": [
+    { "type": "E", "positions": ["03", "07"] },
+    { "type": "C", "positions": ["07", "04"] }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment. N405/N406 (Location Qualifier/Identifier) are marked usage=\"N\" (Not Used) in this IG, and N408 does not exist at all in this IG's own N4 definition (it stops at N407) — this position only exists in later X12 releases, per an earlier version-mismatch finding. Corrects an earlier version of this file that included both N405/406 (added on a prior thoroughness pass) and a nonexistent N408 (inherited from an unversioned Stedi page defaulting to X12 Release 8010).",
+    "syntaxRules: E0207 (at most one of postal code / country subdivision code) and C0704 (if country subdivision code present, country code required) sourced from the same PyX12 XML's own <syntax> notes — C0605 was omitted since it references N406, a position dropped entirely as unused."
+  ]
+}

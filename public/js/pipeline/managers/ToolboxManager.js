@@ -516,6 +516,195 @@ class ToolboxManager {
                     config: {},         // Connector-specific configuration
                     timeoutMs: 30000
                 }
+            }),
+
+            // ============================================
+            // EDI X12 STEPS (835 phase 1)
+            // ============================================
+            new StepTemplate({
+                id: 'edi-parse',
+                name: 'EDI X12 Parse',
+                type: 'edi.parse',
+                description: 'Parse raw X12 EDI content (835) into structured JSON (interchange/header/loops/trailer)',
+                layer: 'core',
+                icon: this.getIconForType('edi.parse'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'raw', outputField: 'parsedEDI', transactionSet: '835' }
+            }),
+            new StepTemplate({
+                id: 'edi-validate',
+                name: 'EDI X12 Validate',
+                type: 'edi.validate',
+                description: 'Re-check raw EDI against the base X12 5010 standard plus your own optional rules — malformed values block, business-rule mismatches only warn',
+                layer: 'core',
+                icon: this.getIconForType('edi.validate'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'raw', outputField: 'ediValidation', customRules: [] }
+            }),
+            new StepTemplate({
+                id: 'edi-map-to-canonical',
+                name: 'EDI Map to Canonical',
+                type: 'edi.map_to_canonical',
+                description: 'No-code field mapping from any source shape (CSV, DB rows, generic JSON) into the canonical JSON edi.build consumes',
+                layer: 'core',
+                icon: this.getIconForType('edi.map_to_canonical'),
+                isSystem: true,
+                defaultConfig: { outputField: 'canonicalEDI', transactionSet: '835', header: [], loops: [] }
+            }),
+            new StepTemplate({
+                id: 'edi-build',
+                name: 'EDI X12 Build',
+                type: 'edi.build',
+                description: 'Build a complete ISA...IEA X12 interchange (835) from canonical JSON',
+                layer: 'core',
+                icon: this.getIconForType('edi.build'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'parsedEDI', transactionSet: '835', outputField: 'ediX12' }
+            }),
+
+            // ============================================
+            // CDA/CCD STEPS
+            // ============================================
+            new StepTemplate({
+                id: 'cda-parse',
+                name: 'CDA/CCD Parse',
+                type: 'cda.parse',
+                description: 'Parse raw CDA/CCD XML into USCDI-keyed JSON',
+                layer: 'core',
+                icon: this.getIconForType('cda.parse'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'raw', outputField: 'parsedCDA' }
+            }),
+            new StepTemplate({
+                id: 'cda-normalize',
+                name: 'CDA Normalizer',
+                type: 'cda.normalize',
+                description: 'Upgrade C32/HITSP template OIDs to C-CDA 2.1 equivalents before parsing (pass-through if already C-CDA 2.1)',
+                layer: 'core',
+                icon: this.getIconForType('cda.normalize'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'raw', outputField: 'raw' }
+            }),
+            new StepTemplate({
+                id: 'cda-to-fhir',
+                name: 'CDA → FHIR R4',
+                type: 'cda.to_fhir',
+                description: 'Convert a parsed CDA/CCD document to a FHIR R4 Bundle (US Core)',
+                layer: 'core',
+                icon: this.getIconForType('cda.to_fhir'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'parsedCDA', bundleType: 'collection', profileMode: 'us-core', onSectionFailure: 'continue', terminologyValidation: false }
+            }),
+            new StepTemplate({
+                id: 'cda-build',
+                name: 'CDA/CCD Build',
+                type: 'cda.build',
+                description: 'Build a C-CDA 2.1 XML document from canonical USCDI-keyed JSON',
+                layer: 'core',
+                icon: this.getIconForType('cda.build'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'parsedCDA', inputFormat: 'canonical', outputField: 'cdaXML', documentType: 'CCD' }
+            }),
+            new StepTemplate({
+                id: 'fhir-to-cda',
+                name: 'FHIR → CDA',
+                type: 'fhir.to_cda',
+                description: 'Convert a FHIR R4 Bundle to a C-CDA 2.1 XML document for delivery to legacy systems',
+                layer: 'core',
+                icon: this.getIconForType('fhir.to_cda'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'fhirBundle', outputField: 'cdaXML', profile: 'C-CDA 2.1' }
+            }),
+            new StepTemplate({
+                id: 'cda-dedupe',
+                name: 'CDA Dedupe',
+                type: 'cda.dedupe',
+                description: 'Remove duplicate clinical facts within one document, or (optionally) across every document ever seen for a patient on this interface',
+                layer: 'core',
+                icon: this.getIconForType('cda.dedupe'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'parsedCDA', sections: [], strategy: 'first', crossMessage: false }
+            }),
+            new StepTemplate({
+                id: 'cda-map-to-canonical',
+                name: 'CDA Map to Canonical',
+                type: 'cda.map_to_canonical',
+                description: 'No-code field mapping from CSV/DB/generic-JSON rows into the canonical USCDI-keyed JSON cda.build consumes',
+                layer: 'core',
+                icon: this.getIconForType('cda.map_to_canonical'),
+                isSystem: true,
+                defaultConfig: { outputField: 'parsedCDA', documentType: 'CCD', header: [], sections: [] }
+            }),
+            new StepTemplate({
+                id: 'cda-section-to-csv',
+                name: 'CDA Section → CSV',
+                type: 'cda.section_to_csv',
+                description: 'Convert parsed CDA/CCD clinical sections into flat, one-row-per-entry CSV output',
+                layer: 'core',
+                icon: this.getIconForType('cda.section_to_csv'),
+                isSystem: true,
+                defaultConfig: { sourceField: '', sections: [], outputPrefix: 'csv_' }
+            }),
+
+            // ============================================
+            // FHIR / HL7 BUILD STEPS
+            // ============================================
+            new StepTemplate({
+                id: 'fhir-build',
+                name: 'FHIR Build',
+                type: 'fhir.build',
+                description: 'Build a FHIR R4 resource or Bundle from source data via a no-code field-mapping UI',
+                layer: 'core',
+                icon: this.getIconForType('fhir.build'),
+                isSystem: true,
+                defaultConfig: { version: 'R4', profile: 'base', outputField: 'fhirResource' }
+            }),
+            new StepTemplate({
+                id: 'hl7-build',
+                name: 'HL7 Build',
+                type: 'hl7.build',
+                description: 'Build an HL7 v2 message from source data via a no-code segment/field-mapping UI',
+                layer: 'core',
+                icon: this.getIconForType('hl7.build'),
+                isSystem: true,
+                defaultConfig: { version: '2.5.1', outputField: 'hl7Message' }
+            }),
+
+            // ============================================
+            // GENERAL PURPOSE STEPS
+            // ============================================
+            new StepTemplate({
+                id: 'payload-builder',
+                name: 'Payload Builder',
+                type: 'payload.builder',
+                description: 'Build an outbound payload (pass-through, template, field-by-field, or a FHIR Bundle) in any target format',
+                layer: 'core',
+                icon: this.getIconForType('payload.builder'),
+                isSystem: true,
+                defaultConfig: { mode: 'pass_through', output_format: 'json' }
+            }),
+            new StepTemplate({
+                id: 'deidentify',
+                name: 'De-identify (HIPAA Safe Harbor)',
+                type: 'deidentify',
+                description: 'Remove or hash the 18 HIPAA Safe Harbor identifiers from HL7v2/FHIR/JSON messages',
+                layer: 'core',
+                icon: this.getIconForType('deidentify'),
+                isSystem: true,
+                defaultConfig: { format: 'auto', auditHash: true }
+            }),
+            new StepTemplate({
+                id: 'pas-envelope-mapping',
+                name: 'PAS Envelope Mapping',
+                type: 'pas_envelope_mapping',
+                description: 'Guided field mapping for a Da Vinci PAS (Prior Authorization Support) envelope — Patient, Coverage, Provider, Service Request',
+                layer: 'core',
+                icon: 'fas fa-file-prescription',
+                isSystem: true,
+                // The builder self-populates its own default PAS field rows on
+                // render (PASEnvelopeBuilder._defaultMappings()) — an empty
+                // config is the correct starting point, not an omission.
+                defaultConfig: {}
             })
         ];
     }
@@ -800,6 +989,38 @@ class ToolboxManager {
             'remove_duplicates': 'fas fa-check-double',
             'normalizer': 'fas fa-exchange-alt',
             'file_parser': 'fas fa-file-csv',
+
+            // ============================================
+            // EDI X12 (835 phase 1)
+            // ============================================
+            'edi.parse': 'fas fa-file-invoice-dollar',
+            'edi.validate': 'fas fa-stamp',
+            'edi.map_to_canonical': 'fas fa-random',
+            'edi.build': 'fas fa-file-export',
+
+            // ============================================
+            // CDA/CCD
+            // ============================================
+            'cda.parse': 'fas fa-file-medical',
+            'cda.normalize': 'fas fa-sync-alt',
+            'cda.to_fhir': 'fas fa-exchange-alt',
+            'cda.build': 'fas fa-notes-medical',
+            'fhir.to_cda': 'fas fa-file-medical-alt',
+            'cda.dedupe': 'fas fa-clone',
+            'cda.map_to_canonical': 'fas fa-sitemap',
+            'cda.section_to_csv': 'fas fa-table',
+
+            // ============================================
+            // FHIR / HL7 BUILD
+            // ============================================
+            'fhir.build': 'fas fa-cubes',
+            'hl7.build': 'fas fa-stream',
+
+            // ============================================
+            // GENERAL PURPOSE
+            // ============================================
+            'payload.builder': 'fas fa-box',
+            'deidentify': 'fas fa-user-shield',
 
             // ============================================
             // LEGACY TYPE NAMES (backward compat)

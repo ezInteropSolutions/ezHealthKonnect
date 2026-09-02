@@ -1,0 +1,13 @@
+{
+  "id": "LQ",
+  "name": "Health Care Remark Codes",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    { "pos": "01", "key": "codeListQualifierCode", "dataType": "ID" },
+    { "pos": "02", "key": "industryCode", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "Stedi X12 EDI segment reference — stedi.com/edi/x12/segment/LQ. Business rule noted but not enforced by this schema (no per-field conditional-requiredness mechanism exists yet): if LQ01 is present, LQ02 is required."
+  ]
+}

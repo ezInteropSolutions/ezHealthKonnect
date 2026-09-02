@@ -1,0 +1,13 @@
+{
+  "id": "TRN",
+  "name": "Reassociation Trace Number",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "traceTypeCode", "dataType": "ID" },
+    { "pos": "02", "key": "checkOrEFTTraceNumber", "dataType": "AN" },
+    { "pos": "03", "key": "payerIdentifier", "dataType": "AN" },
+    { "pos": "04", "key": "originatingCompanySupplementalCode", "dataType": "AN" }
+  ],
+  "sourceRefs": ["Stedi X12 EDI segment reference — stedi.com/edi/x12/segment/TRN"]
+}

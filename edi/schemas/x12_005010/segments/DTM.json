@@ -1,0 +1,13 @@
+{
+  "id": "DTM",
+  "name": "Date/Time Reference",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    { "pos": "01", "key": "dateTimeQualifier", "dataType": "ID" },
+    { "pos": "02", "key": "date", "dataType": "DT" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment. DTM03-06 (Time, Time Code, Date Time Period Format Qualifier, Date Time Period) are marked usage=\"N\" (Not Used) at EVERY one of the 5 real DTM occurrences in this IG (header, 2100 x3, 2110) — checked exhaustively. Supersedes an earlier version that added 04-06 back on a prior thoroughness pass without this per-occurrence check."
+  ]
+}

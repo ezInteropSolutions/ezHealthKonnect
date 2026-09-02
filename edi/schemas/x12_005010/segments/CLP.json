@@ -1,0 +1,24 @@
+{
+  "id": "CLP",
+  "name": "Claim Payment Information",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "patientControlNumber", "dataType": "AN" },
+    { "pos": "02", "key": "claimStatusCode", "dataType": "ID" },
+    { "pos": "03", "key": "totalClaimChargeAmount", "dataType": "R" },
+    { "pos": "04", "key": "claimPaymentAmount", "dataType": "R" },
+    { "pos": "05", "key": "patientResponsibilityAmount", "dataType": "R" },
+    { "pos": "06", "key": "claimFilingIndicatorCode", "dataType": "ID" },
+    { "pos": "07", "key": "payerClaimControlNumber", "dataType": "AN" },
+    { "pos": "08", "key": "facilityTypeCode", "dataType": "AN" },
+    { "pos": "09", "key": "claimFrequencyCode", "dataType": "ID" },
+    { "pos": "11", "key": "diagnosisRelatedGroupCode", "dataType": "ID" },
+    { "pos": "12", "key": "diagnosisRelatedGroupWeight", "dataType": "R" },
+    { "pos": "13", "key": "dischargeFraction", "dataType": "R" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment. CLP10 (Patient Status Code) and CLP14 (Yes/No Condition or Response Code) are marked usage=\"N\" (Not Used) by this specific Implementation Guide even though the base X12 5010 standard defines them; this schema omits N positions entirely rather than modeling forbidden fields. The segment ends at position 14 in 5010/X221 — no CLP15/16 exist in this IG at all.",
+    "SUPERSEDES an earlier version of this file built from Stedi's generic (unversioned, defaulting to X12 Release 8010) segment page, which showed a materially different and incorrect 11-16 range (Health Care Code Information composite, Percentage, Exchange Rate, Source of Payment Typology Code) — a real version-mismatch bug caught during a user-requested thoroughness re-verification pass."
+  ]
+}

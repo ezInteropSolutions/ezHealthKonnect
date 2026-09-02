@@ -57,6 +57,30 @@ var canonicalValueTransforms = map[string]canonicalValueTransformEntry{
 		fn:          canonicalDateTimeToCDA,
 		description: "Converts an ISO 8601/RFC 3339 timestamp to CDA's YYYYMMDDHHMMSS format.",
 	},
+	"date_to_x12": {
+		// Reuses canonicalDateToCDA's own function unchanged -- its output
+		// format (CCYYMMDD) is byte-for-byte identical to X12's own DT data
+		// type (edi/datatypes.go's TypeDT), despite the function's CDA-era
+		// name; a second wrapper function would just be indirection.
+		fn:          canonicalDateToCDA,
+		description: "Converts a date string (YYYY-MM-DD, MM/DD/YYYY, or M/D/YYYY) to X12's CCYYMMDD format.",
+	},
+	"time_to_x12": {
+		fn:          canonicalTimeToX12,
+		description: "Converts a time string (HH:MM or HH:MM:SS) to X12's HHMM format.",
+	},
+}
+
+// canonicalTimeLayouts is tried in order for time_to_x12.
+var canonicalTimeLayouts = []string{"15:04:05", "15:04"}
+
+func canonicalTimeToX12(v string) (string, bool) {
+	for _, layout := range canonicalTimeLayouts {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t.Format("1504"), true
+		}
+	}
+	return v, false
 }
 
 // canonicalDateLayouts is tried in order; "2006-01-02" (ISO) is
@@ -107,7 +131,7 @@ func applyCanonicalTransform(name, value string) string {
 	}
 	entry, ok := canonicalValueTransforms[name]
 	if !ok {
-		log.Printf("⚠️  [cda.map_to_canonical] unknown transform %q — passing value through unchanged", name)
+		log.Printf("⚠️  [map_to_canonical] unknown transform %q — passing value through unchanged", name)
 		return value
 	}
 	result, ok := entry.fn(value)
@@ -121,6 +145,9 @@ func applyCanonicalTransform(name, value string) string {
 // cda.map_to_canonical mapping UI's Transform picker
 // (controllers/cda_schema_controller.go's GetCanonicalTransforms), mirroring
 // services/cda_fhir.DeclarativeTransformRegistry.AllDescriptions() exactly.
+// The registry itself is shared with edi.map_to_canonical too (see
+// date_to_x12/time_to_x12 above) — this exported function stays CDA-endpoint-
+// named only because that's its one real caller today.
 func CanonicalTransformDescriptions() map[string]string {
 	out := make(map[string]string, len(canonicalValueTransforms))
 	for name, entry := range canonicalValueTransforms {

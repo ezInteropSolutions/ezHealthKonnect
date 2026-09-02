@@ -1,0 +1,11 @@
+{
+  "id": "SE",
+  "name": "Transaction Set Trailer",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "count", "dataType": "N0" },
+    { "pos": "02", "key": "control", "dataType": "AN" }
+  ],
+  "sourceRefs": ["Standard X12 transaction-set trailer — stable across all X12 transaction sets and versions, not 835-specific"]
+}

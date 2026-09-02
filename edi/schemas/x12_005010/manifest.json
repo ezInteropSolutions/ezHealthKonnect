@@ -1,0 +1,10 @@
+{
+  "specVersion": "005010",
+  "transactionSets": {
+    "835": {
+      "file": "835.json",
+      "functionalIdentifierCode": "HP",
+      "name": "Health Care Claim Payment/Advice"
+    }
+  }
+}

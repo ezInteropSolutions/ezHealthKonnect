@@ -182,9 +182,17 @@ func (fd *FormatDetector) isXML(content string) bool {
 }
 
 func (fd *FormatDetector) isEDI(content string) bool {
-	return strings.HasPrefix(content, "ISA") &&
-		strings.Contains(content, "GS") &&
-		strings.Contains(content, "ST")
+	trimmed := strings.TrimSpace(content)
+	if strings.HasPrefix(trimmed, "ISA") && strings.Contains(content, "GS") && strings.Contains(content, "ST") {
+		return true
+	}
+	// Bare transaction set (no ISA/GS envelope) — the shape
+	// processing/batch_splitter.go's splitEDITransactions produces for each
+	// part of a multi-transaction-set interchange. edi.parse doesn't depend
+	// on this (it reads its configured source field directly and handles
+	// both shapes itself); this only matters for content-sniffing call
+	// sites outside the pipeline.
+	return strings.HasPrefix(trimmed, "ST") && strings.Contains(content, "SE")
 }
 
 func (fd *FormatDetector) isCSV(content string) bool {

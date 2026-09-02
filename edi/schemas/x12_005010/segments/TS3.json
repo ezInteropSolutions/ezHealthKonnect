@@ -1,0 +1,25 @@
+{
+  "id": "TS3",
+  "name": "Provider Summary Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "providerIdentifier", "dataType": "AN" },
+    { "pos": "02", "key": "facilityTypeCode", "dataType": "AN" },
+    { "pos": "03", "key": "fiscalPeriodDate", "dataType": "DT" },
+    { "pos": "04", "key": "totalClaimCount", "dataType": "R" },
+    { "pos": "05", "key": "totalClaimChargeAmount", "dataType": "R" },
+    { "pos": "13", "key": "totalMSPPayerAmount", "dataType": "R" },
+    { "pos": "15", "key": "totalNonLabChargeAmount", "dataType": "R" },
+    { "pos": "17", "key": "totalHCPCSReportedChargeAmount", "dataType": "R" },
+    { "pos": "18", "key": "totalHCPCSPayableAmount", "dataType": "R" },
+    { "pos": "20", "key": "totalProfessionalComponentAmount", "dataType": "R" },
+    { "pos": "21", "key": "totalMSPPatientLiabilityMetAmount", "dataType": "R" },
+    { "pos": "22", "key": "totalPatientReimbursementAmount", "dataType": "R" },
+    { "pos": "23", "key": "totalPIPClaimCount", "dataType": "R" },
+    { "pos": "24", "key": "totalPIPAdjustmentAmount", "dataType": "R" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment, with real semantic names for every usable position (14 of the segment's 24 defined positions; the remaining 10 — mostly generic 'Monetary Amount' placeholders in the base X12 dictionary — are marked usage=\"N\" in this IG and are correctly omitted, not guessed at). Supersedes an earlier version of this file that used generic positional keys (amount1, amount2, ...) because only Stedi's data-type-only summary was available at the time; real labels are now sourced."
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "LX",
+  "name": "Header Number",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "assignedNumber", "dataType": "N0" }
+  ],
+  "sourceRefs": ["Stedi X12 EDI segment reference — stedi.com/edi/x12/segment/LX"]
+}

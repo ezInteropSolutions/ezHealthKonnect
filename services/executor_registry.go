@@ -157,6 +157,12 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(transform.NewCDASectionToCSVExecutor())    // cda.section_to_csv
 	er.Register(transform.NewCDADedupeExecutor(er.db))     // cda.dedupe
 
+	// EDI X12 transform executors (835 phase 1)
+	er.Register(transform.NewEDIParseExecutor())            // edi.parse
+	er.Register(transform.NewEDIValidateExecutor())         // edi.validate
+	er.Register(transform.NewEDIMapToCanonicalExecutor())   // edi.map_to_canonical
+	er.Register(transform.NewEDIBuildExecutor())            // edi.build
+
 	// FHIR transform executors
 	er.Register(transform.NewFHIRBuildExecutor()) // fhir.build
 

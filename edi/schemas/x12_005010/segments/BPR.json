@@ -1,0 +1,34 @@
+{
+  "id": "BPR",
+  "name": "Financial Information",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "transactionHandlingCode", "dataType": "ID" },
+    { "pos": "02", "key": "totalActualProviderPaymentAmount", "dataType": "R" },
+    { "pos": "03", "key": "creditOrDebitFlagCode", "dataType": "ID" },
+    { "pos": "04", "key": "paymentMethodCode", "dataType": "ID" },
+    { "pos": "05", "key": "paymentFormatCode", "dataType": "ID" },
+    { "pos": "06", "key": "senderDFIIDNumberQualifier", "dataType": "ID" },
+    { "pos": "07", "key": "senderDFIIdentificationNumber", "dataType": "AN" },
+    { "pos": "08", "key": "senderAccountNumberQualifier", "dataType": "ID" },
+    { "pos": "09", "key": "senderAccountNumber", "dataType": "AN" },
+    { "pos": "10", "key": "originatingCompanyIdentifier", "dataType": "AN" },
+    { "pos": "11", "key": "originatingCompanySupplementalCode", "dataType": "AN" },
+    { "pos": "12", "key": "receiverDFIIDNumberQualifier", "dataType": "ID" },
+    { "pos": "13", "key": "receiverDFIIdentificationNumber", "dataType": "AN" },
+    { "pos": "14", "key": "receiverAccountNumberQualifier", "dataType": "ID" },
+    { "pos": "15", "key": "receiverAccountNumber", "dataType": "AN" },
+    { "pos": "16", "key": "paymentEffectiveDate", "dataType": "DT" }
+  ],
+  "syntaxRules": [
+    { "type": "P", "positions": ["06", "07"] },
+    { "type": "C", "positions": ["08", "09"] },
+    { "type": "P", "positions": ["12", "13"] },
+    { "type": "C", "positions": ["14", "15"] }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment. BPR17-21 (Business Function Code, and a second DFI/account-number block) are ALL marked usage=\"N\" (Not Used) by this Implementation Guide and are omitted entirely, correcting an earlier version of this file built from Stedi's unversioned (X12 Release 8010, not 5010) generic segment page which showed them as ordinary optional fields.",
+    "syntaxRules sourced from the same PyX12 XML's own <syntax> notes (P0607, C0809, P1213, C1415) — two further notes (P1819, C2021) were omitted since they reference positions 18-21, which don't exist in this IG's own usable BPR at all."
+  ]
+}

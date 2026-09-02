@@ -15,6 +15,7 @@ import (
 	"ezhealthkonnect/services/backpressure"
 	cdaSchemaLoader "ezhealthkonnect/cda"
 	cdacoverage "ezhealthkonnect/services/cda_coverage"
+	"ezhealthkonnect/edi"
 	cdafhir "ezhealthkonnect/services/cda_fhir"
 	cdastorage "ezhealthkonnect/services/cda_storage"
 	cdaterminology "ezhealthkonnect/services/cda_terminology"
@@ -864,6 +865,22 @@ func main() {
 				hl7SchemaCtrl := controllers.NewHL7SchemaController(filepath.Join(cfg.GetSchemaDirectory(), "hl7"))
 				hl7SchemaCtrl.RegisterRoutes(api.Group("/hl7"))
 				log.Printf("✅ HL7 Schema Controller registered (/api/hl7/message-types, /api/hl7/segments, /api/hl7/canonical-fields)")
+			}
+
+			// ADDED: EDI X12 Schema Browser API (/api/edi/*) — backs
+			// EDIStepBuilder.js's custom-rule picker and
+			// edi.map_to_canonical's segment/loop field mapper. Constructs
+			// its own loader the same per-consumer way the CDA block above
+			// does (not shared) — a nil loader just means these two
+			// endpoints return 503, not a crash.
+			{
+				ediLoader, ediLoaderErr := edi.NewX12SchemaLoader("./edi/schemas/x12_005010")
+				if ediLoaderErr != nil {
+					log.Printf("⚠️  [edi] Schema loader unavailable: %v — /api/edi/schema endpoints will return 503", ediLoaderErr)
+				}
+				ediSchemaCtrl := controllers.NewEDISchemaController(ediLoader)
+				ediSchemaCtrl.RegisterRoutes(api.Group("/edi"))
+				log.Printf("✅ EDI Schema Controller registered (/api/edi/schema/segments, /api/edi/schema/transaction-sets/:id/loops)")
 			}
 
 			// ── OOB template rebuild ─────────────────────────────────────────────

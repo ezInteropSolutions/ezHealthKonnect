@@ -416,6 +416,7 @@ app.use('/api/mllp', forwardToGo);        // NEW: MLLP connectivity routes
 app.use('/api/connectivity', forwardToGo); // Connector types + interface connectivity
 app.use('/api/zsegments',   forwardToGo); // Enterprise Z-segment mapping configuration
 app.use('/api/cda', forwardToGo);          // CDA schema browser + mapping delta APIs
+app.use('/api/edi', forwardToGo);          // EDI X12 schema browser API
 // NOTE: /api/ai routes are registered after session middleware below (require req.session.user)
 app.use('/api/code-templates', forwardToGo); // Code Template Libraries (JS function injection into script steps)
 // /api/git is registered below (after session middleware, with requireAuth)

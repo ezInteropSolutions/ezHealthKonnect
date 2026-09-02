@@ -1,0 +1,25 @@
+{
+  "id": "PER",
+  "name": "Administrative Communications Contact",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    { "pos": "01", "key": "contactFunctionCode", "dataType": "ID" },
+    { "pos": "02", "key": "name", "dataType": "AN" },
+    { "pos": "03", "key": "communicationNumberQualifier1", "dataType": "ID" },
+    { "pos": "04", "key": "communicationNumber1", "dataType": "AN" },
+    { "pos": "05", "key": "communicationNumberQualifier2", "dataType": "ID" },
+    { "pos": "06", "key": "communicationNumber2", "dataType": "AN" },
+    { "pos": "07", "key": "communicationNumberQualifier3", "dataType": "ID" },
+    { "pos": "08", "key": "communicationNumber3", "dataType": "AN" }
+  ],
+  "syntaxRules": [
+    { "type": "P", "positions": ["03", "04"] },
+    { "type": "P", "positions": ["05", "06"] },
+    { "type": "P", "positions": ["07", "08"] }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment. PER09 (Contact Inquiry Reference) is marked usage=\"N\" (Not Used) at EVERY one of the 4 real PER occurrences in this IG (1000A business/technical/web contacts, 2100 claim contact) — checked exhaustively. Corrects an earlier version that added PER09 back on a prior thoroughness pass without this per-occurrence check. Note: this IG's own \"Technical Contact\" occurrence of PER in 1000A is actually usage=required, not situational — this shared segment definition stays situational since other real occurrences of PER genuinely are optional, a known architectural trade-off of the shared-segment-library design (see edi/schema_types.go's own docs).",
+    "syntaxRules: three P (paired) rules — each communication-number-qualifier/communication-number pair must be populated together or not at all — sourced from the same PyX12 XML's own <syntax> notes."
+  ]
+}

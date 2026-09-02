@@ -1,0 +1,34 @@
+{
+  "id": "PLB",
+  "name": "Provider Level Adjustment",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    { "pos": "01", "key": "referenceIdentification", "dataType": "AN" },
+    { "pos": "02", "key": "fiscalPeriodDate", "dataType": "DT" }
+  ],
+  "repeats": [
+    {
+      "key": "adjustments",
+      "startPos": 3,
+      "groupSize": 2,
+      "maxGroups": 6,
+      "groupFields": [
+        {
+          "pos": "1",
+          "key": "adjustmentIdentifier",
+          "composite": {
+            "subElements": [
+              { "pos": "1", "key": "reasonCode", "dataType": "ID" },
+              { "pos": "2", "key": "referenceIdentification", "dataType": "AN" }
+            ]
+          }
+        },
+        { "pos": "2", "key": "amount", "dataType": "R" }
+      ]
+    }
+  ],
+  "sourceRefs": [
+    "Stedi X12 EDI segment reference — stedi.com/edi/x12/segment/PLB: 6 repeating adjustment-identifier/amount pairs (PLB03-04 through PLB13-14); the odd-position adjustment identifier is itself a composite (industry/reason code + optional reference identification) — the motivating real case for edi/loop_engine.go's composite-within-repeat-group support, added during this same implementation pass"
+  ]
+}

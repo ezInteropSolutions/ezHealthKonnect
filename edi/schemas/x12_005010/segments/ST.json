@@ -1,0 +1,12 @@
+{
+  "id": "ST",
+  "name": "Transaction Set Header",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "transactionSetIdentifierCode", "dataType": "ID", "fixedValue": "835" },
+    { "pos": "02", "key": "transactionSetControlNumber", "dataType": "AN" },
+    { "pos": "03", "key": "implementationConventionReference", "dataType": "AN" }
+  ],
+  "sourceRefs": ["Stedi X12 EDI segment reference — stedi.com/edi/x12/segment/ST"]
+}

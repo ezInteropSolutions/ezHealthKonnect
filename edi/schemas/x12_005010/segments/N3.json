@@ -1,0 +1,11 @@
+{
+  "id": "N3",
+  "name": "Party Location",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "addressInformation1", "dataType": "AN", "minLength": 1, "maxLength": 55 },
+    { "pos": "02", "key": "addressInformation2", "dataType": "AN", "minLength": 1, "maxLength": 55 }
+  ],
+  "sourceRefs": ["Stedi X12 EDI segment reference — stedi.com/edi/x12/segment/N3"]
+}

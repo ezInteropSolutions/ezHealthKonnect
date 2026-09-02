@@ -1,0 +1,14 @@
+{
+  "id": "RDM",
+  "name": "Remittance Delivery Method",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "reportTransmissionCode", "dataType": "ID" },
+    { "pos": "02", "key": "name", "dataType": "AN" },
+    { "pos": "03", "key": "communicationNumber", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment. RDM04 and RDM05 (both C040 composites) are marked usage=\"N\" (Not Used) in this IG — this segment collapses to just 3 usable elements. Corrects an earlier version of this file that modeled both composites in full (added specifically to demonstrate the composite-in-repeat mechanism, but that mechanism's real motivating case is PLB, which does genuinely use it; RDM never needed it here)."
+  ]
+}

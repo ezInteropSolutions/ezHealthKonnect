@@ -1,0 +1,33 @@
+{
+  "id": "MIA",
+  "name": "Medicare Inpatient Adjudication",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "coveredDaysCount", "dataType": "R" },
+    { "pos": "02", "key": "ppsOperatingOutlierAmount", "dataType": "R" },
+    { "pos": "03", "key": "lifetimePsychiatricDaysCount", "dataType": "R" },
+    { "pos": "04", "key": "claimDRGAmount", "dataType": "R" },
+    { "pos": "05", "key": "remarkCode1", "dataType": "AN" },
+    { "pos": "06", "key": "disproportionateShareAmount", "dataType": "R" },
+    { "pos": "07", "key": "mspPassThroughAmount", "dataType": "R" },
+    { "pos": "08", "key": "ppsCapitalAmount", "dataType": "R" },
+    { "pos": "09", "key": "ppsCapitalFSPDRGAmount", "dataType": "R" },
+    { "pos": "10", "key": "ppsCapitalHSPDRGAmount", "dataType": "R" },
+    { "pos": "11", "key": "ppsCapitalDSHDRGAmount", "dataType": "R" },
+    { "pos": "12", "key": "oldCapitalAmount", "dataType": "R" },
+    { "pos": "13", "key": "ppsCapitalIMEAmount", "dataType": "R" },
+    { "pos": "14", "key": "ppsOperatingHospitalSpecificDRGAmount", "dataType": "R" },
+    { "pos": "15", "key": "costReportDayCount", "dataType": "R" },
+    { "pos": "16", "key": "ppsOperatingFederalSpecificDRGAmount", "dataType": "R" },
+    { "pos": "17", "key": "ppsCapitalOutlierAmount", "dataType": "R" },
+    { "pos": "18", "key": "ppsCapitalIndirectMedicalEducationAmount", "dataType": "R" },
+    { "pos": "19", "key": "professionalComponentNotPayableAmount", "dataType": "R" },
+    { "pos": "20", "key": "remarkCode2", "dataType": "AN" },
+    { "pos": "21", "key": "remarkCode3", "dataType": "AN" },
+    { "pos": "22", "key": "remarkCode4", "dataType": "AN" },
+    { "pos": "23", "key": "remarkCode5", "dataType": "AN" },
+    { "pos": "24", "key": "ppsCapitalExceptionAmount", "dataType": "R" }
+  ],
+  "sourceRefs": ["Stedi X12 EDI segment reference — stedi.com/edi/x12/segment/MIA"]
+}

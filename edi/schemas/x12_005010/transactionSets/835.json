@@ -1,0 +1,48 @@
+{
+  "transactionSetId": "835",
+  "version": "005010X221A1",
+  "_sourceRefs": [
+    "Stedi X12 EDI 835 transaction set reference — stedi.com/edi/hipaa/transaction-set/835-W1 (loop hierarchy, cardinalities, and which segments belong to which loop) — LOOP STRUCTURE independently confirmed correct against PyX12 below, byte-for-byte, on every loop and segment presence.",
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — a mature, IG-specific (not generic-X12) open-source map file, downloaded and read directly (not AI-summarized) after an earlier summarized fetch of the same file hallucinated structure (SVD/2111/2112/RMR) that doesn't exist in the real file — confirmed by direct grep/read of the raw XML. This is now the PRIMARY source for element-level usage (required/situational/not-used) across every segment file in this directory, since it's the only source that captures IG-specific constraints a generic X12-release page can't show.",
+    "CMS/Medicare's own official 835 companion guide (CGS Administrators, a Medicare Administrative Contractor) was also sourced during this work, but — as companion guides deliberately do for HIPAA-mandated transactions — it documents only Medicare-specific deviations from the base standard, not the full segment/loop structure itself, so it did not directly contribute structural facts to this file.",
+    "Correction history: an initial thoroughness re-pass (comparing this file's own content against its own earlier Stedi fetches) caught 4 missing segments (CUR, PER at 2100, RDM, LQ). A SECOND pass, prompted by user pushback asking whether a repeat would find more, used PyX12 as an independent cross-check and found a deeper issue: several early Stedi fetches used unversioned URLs that silently defaulted to X12 Release 8010 instead of 5010, most seriously corrupting CLP08-16 (wrong field names/positions entirely). Every segment file in this directory was re-verified line-by-line against PyX12's real XML and corrected; segments already confirmed correct (CAS, PLB, MIA, MOA, N3, LX, SE/GE/IEA) needed no changes. TA1 (Interchange Acknowledgement) was found in PyX12 between GE and IEA but is deliberately NOT modeled — it's a receiver-side response segment, not part of what a sender embeds in their own outbound 835."
+  ],
+  "headerSegmentIds": ["ST", "BPR", "TRN", "CUR", "REF", "DTM"],
+  "loops": [
+    {
+      "id": "1000A",
+      "name": "Payer Identification",
+      "repeat": "1",
+      "segmentIds": ["N1", "N3", "N4", "REF", "PER"]
+    },
+    {
+      "id": "1000B",
+      "name": "Payee Identification",
+      "repeat": "1",
+      "segmentIds": ["N1", "N3", "N4", "REF", "RDM"]
+    },
+    {
+      "id": "2000",
+      "name": "Header Number",
+      "repeat": ">1",
+      "segmentIds": ["LX", "TS3", "TS2"],
+      "loops": [
+        {
+          "id": "2100",
+          "name": "Claim Payment Information",
+          "repeat": ">1",
+          "segmentIds": ["CLP", "NM1", "MIA", "MOA", "REF", "DTM", "PER", "AMT", "QTY", "CAS"],
+          "loops": [
+            {
+              "id": "2110",
+              "name": "Service Payment Information",
+              "repeat": ">1",
+              "segmentIds": ["SVC", "DTM", "CAS", "REF", "AMT", "QTY", "LQ"]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trailerSegmentIds": ["PLB", "SE"]
+}

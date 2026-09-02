@@ -1,0 +1,13 @@
+{
+  "id": "AMT",
+  "name": "Monetary Amount Information",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    { "pos": "01", "key": "amountQualifierCode", "dataType": "ID" },
+    { "pos": "02", "key": "amount", "dataType": "R" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment. AMT03 (Credit/Debit Flag Code) is marked usage=\"N\" (Not Used) at both real AMT occurrences in this IG (2100 claim-level, 2110 service-level). Corrects an earlier version that added AMT03 back on a prior thoroughness pass."
+  ]
+}

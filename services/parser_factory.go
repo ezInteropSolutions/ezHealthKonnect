@@ -10,6 +10,7 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/parsers"
 	cdaparser "ezhealthkonnect/services/parsers/cda"
+	edix12parser "ezhealthkonnect/services/parsers/edix12"
 )
 
 // MessageParser interface - all parsers implement this
@@ -44,6 +45,10 @@ func (pf *ParserFactory) registerParsers() {
 	// Register CDA/CCD parser — gracefully skipped if schema dir is missing.
 	pf.RegisterCDAParser("./cda/schemas")
 
+	// Register X12 EDI parser (835 phase 1) — gracefully skipped if schema
+	// dir is missing, same convention as the CDA parser above.
+	pf.RegisterEDIX12Parser("./edi/schemas/x12_005010")
+
 	// Raw passthrough for every format without a dedicated structured parser.
 	// FHIR is deliberately NOT included here — it's handled entirely by
 	// http_fhir_inbound's own connector-level path (processing/
@@ -51,13 +56,13 @@ func (pf *ParserFactory) registerParsers() {
 	// where FHIR-specific validation belongs; registering a passthrough for
 	// FormatFHIR here would never actually be reached by that path, but could
 	// be misleading if some other caller ever looked it up expecting real
-	// FHIR parsing. Everything else (Unknown/JSON/XML/CSV/EDI) previously had
+	// FHIR parsing. Everything else (Unknown/JSON/XML/CSV) previously had
 	// no parser at all, meaning GetParser failed outright for any connector
-	// that isn't format-locked to HL7v2/CDA/FHIR — see raw_parser.go's file
-	// header for the full rationale.
+	// that isn't format-locked to HL7v2/CDA/FHIR/EDI — see raw_parser.go's
+	// file header for the full rationale.
 	for _, format := range []models.MessageFormat{
 		models.FormatUnknown, models.FormatJSON, models.FormatXML,
-		models.FormatCSV, models.FormatEDI, models.FormatHL7v3,
+		models.FormatCSV, models.FormatHL7v3,
 	} {
 		pf.parsers[format] = parsers.NewRawPassthroughParser(format)
 	}
@@ -77,6 +82,21 @@ func (pf *ParserFactory) RegisterCDAParser(schemaDir string) error {
 	}
 	pf.parsers[models.FormatCCDA] = svc
 	log.Printf("✅ CDA parser registered (schema: %s)", schemaDir)
+	return nil
+}
+
+// RegisterEDIX12Parser initialises and registers the X12 EDI parser (835
+// phase 1) using schema files from schemaDir (e.g. "./edi/schemas/x12_005010").
+// Returns nil and logs a warning if the schema directory is missing or invalid —
+// existing HL7/CDA/FHIR processing is unaffected. Mirrors RegisterCDAParser exactly.
+func (pf *ParserFactory) RegisterEDIX12Parser(schemaDir string) error {
+	svc, err := edix12parser.NewFromSchemaDir(schemaDir)
+	if err != nil {
+		log.Printf("⚠️  EDI X12 parser not registered: %v", err)
+		return err
+	}
+	pf.parsers[models.FormatEDI] = svc
+	log.Printf("✅ EDI X12 parser registered (schema: %s)", schemaDir)
 	return nil
 }
 

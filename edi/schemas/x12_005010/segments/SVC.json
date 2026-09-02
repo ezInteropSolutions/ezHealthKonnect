@@ -1,0 +1,45 @@
+{
+  "id": "SVC",
+  "name": "Service Payment Information",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "procedureCode",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "qualifier", "dataType": "ID" },
+          { "pos": "2", "key": "code", "dataType": "AN" },
+          { "pos": "3", "key": "modifier1", "dataType": "AN" },
+          { "pos": "4", "key": "modifier2", "dataType": "AN" },
+          { "pos": "5", "key": "modifier3", "dataType": "AN" },
+          { "pos": "6", "key": "modifier4", "dataType": "AN" }
+        ]
+      }
+    },
+    { "pos": "02", "key": "chargeAmount", "dataType": "R" },
+    { "pos": "03", "key": "paidAmount", "dataType": "R" },
+    { "pos": "04", "key": "revenueCode", "dataType": "AN" },
+    { "pos": "05", "key": "unitsOfServicePaidCount", "dataType": "R" },
+    {
+      "pos": "06",
+      "key": "originalProcedureCode",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "qualifier", "dataType": "ID" },
+          { "pos": "2", "key": "code", "dataType": "AN" },
+          { "pos": "3", "key": "modifier1", "dataType": "AN" },
+          { "pos": "4", "key": "modifier2", "dataType": "AN" },
+          { "pos": "5", "key": "modifier3", "dataType": "AN" },
+          { "pos": "6", "key": "modifier4", "dataType": "AN" },
+          { "pos": "7", "key": "description", "dataType": "AN" }
+        ]
+      }
+    },
+    { "pos": "07", "key": "originalUnitsOfServiceCount", "dataType": "R" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment. Both SVC01 and SVC06 use the C003 composite, but with DIFFERENT usable sub-elements in this IG: SVC01's own sub-07 (Description) and sub-08 (Product/Service ID) are both usage=\"N\", so SVC01 keeps only 6 sub-elements; SVC06's sub-08 is also \"N\" but its sub-07 (Procedure Code Description) is genuinely usage=\"S\" here, so SVC06 keeps 7. Corrects an earlier version that modeled both composites identically at 8 sub-elements each."
+  ]
+}

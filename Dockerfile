@@ -107,6 +107,14 @@ COPY --from=gobuilder /app/go-api ./go-api
 COPY cda/         ./cda/
 COPY uscdi/       ./uscdi/
 
+# EDI X12 schema files — read by Go binary at runtime for 835 parsing/
+# building (edi.parse/validate/map_to_canonical/build + the EDI schema
+# browser API). Was missing entirely until a real container smoke test
+# caught it: NewX12SchemaLoader("./edi/schemas/x12_005010") compiles and
+# passes every go test (which runs against the full source tree, not this
+# image), but silently 503s in a real deployed container without this line.
+COPY edi/         ./edi/
+
 # Runtime directories (overlaid by named volumes in production)
 RUN mkdir -p schemas logs uploads
 

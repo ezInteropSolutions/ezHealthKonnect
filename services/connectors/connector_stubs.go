@@ -511,44 +511,9 @@ func NewFHIRR4OutboundConnector() OutboundConnector {
 		"both are routed to the full HTTPFHIROutboundConnector via factory")
 }
 
-// NewEDIX12InboundConnector creates an EDI X12 inbound connector (stub)
-func NewEDIX12InboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "edi_x12_inbound",
-		DisplayName:        "EDI X12 Inbound",
-		Version:            "0.9.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":    true,
-			"supports_sftp":    true,
-			"supports_http":    true,
-			"supports_as2":     true,
-			"supports_999_ack": true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
-
-// NewEDIX12OutboundConnector creates an EDI X12 outbound connector (stub)
-func NewEDIX12OutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "edi_x12_outbound",
-		DisplayName:        "EDI X12 Outbound",
-		Version:            "0.9.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch": true,
-			"supports_sftp":  true,
-			"supports_http":  true,
-			"supports_as2":   true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, true)
-}
+// NewEDIX12InboundConnector / NewEDIX12OutboundConnector are now real
+// implementations — see services/connectors/edi_x12_inbound.go and
+// edi_x12_outbound.go. Removed from this stub file 2026-09-01.
 
 // NewDirectMessagingInboundConnector creates a DirectTrust SMTP+SMIME inbound connector (stub)
 func NewDirectMessagingInboundConnector() InboundConnector {

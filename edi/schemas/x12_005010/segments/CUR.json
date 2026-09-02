@@ -1,0 +1,13 @@
+{
+  "id": "CUR",
+  "name": "Foreign Currency Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "entityIdentifierCode", "dataType": "ID", "fixedValue": "PR" },
+    { "pos": "02", "key": "currencyCode", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment. Every position from CUR03 onward (Exchange Rate, the second Entity/Currency pair, and all 5 repeating date/time-qualifier trios from CUR07-21) is marked usage=\"N\" (Not Used) by this Implementation Guide — this segment collapses to just 2 usable elements. Supersedes an earlier version of this file that modeled a full 21-element segment with a 5-trio repeat group, built from Stedi's generic (X12 Release 8010) page before the version-mismatch issue was caught; the repeat-group MECHANISM itself remains a validated, reusable capability (see CAS/PLB), it simply isn't needed here."
+  ]
+}
