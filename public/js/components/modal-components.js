@@ -368,8 +368,11 @@
                                     </div>
                                 </div>
 
-                                <!-- CDA Coverage Audit config -->
-                                <div class="form-group" style="margin-top: 16px;">
+                                <!-- CDA Coverage Audit config — only meaningful for CCD-inbound
+                                     interfaces (message_type === 'CCD', the same convention
+                                     messages.js's isCDA check uses); hidden for everything else by
+                                     populateEditForm below, not just disclaimed in the copy. -->
+                                <div class="form-group" id="editCdaCoverageAuditSection" style="margin-top: 16px; display: none;">
                                     <div style="background: linear-gradient(to right, #fefce8, #fff7ed); border-left: 3px solid #f59e0b; padding: 14px; border-radius: 6px;">
                                         <label style="display: flex; align-items: center; cursor: pointer; margin-bottom: 4px;">
                                             <input type="checkbox" id="editCdaCoverageAuditEnabled"
@@ -619,6 +622,16 @@
         if (dlqExpires) dlqExpires.value = dlq.expires_after_hours != null ? dlq.expires_after_hours : '';
 
         // CDA Coverage Audit config — NULL (or JSON null) = disabled (default, V207/V209).
+        // The whole section only applies to CCD-inbound interfaces (message_type
+        // === 'CCD', the same convention messages.js's own isCDA check uses) —
+        // shown/hidden here rather than left visible-with-a-disclaimer for every
+        // interface type, since the setting is meaningless (and was previously
+        // still save-able, writing a config that just never took effect) for a
+        // non-CDA source.
+        const coverageSection = document.getElementById('editCdaCoverageAuditSection');
+        const isCCDInterface = (interfaceData.message_type || interfaceData.messageType) === 'CCD';
+        if (coverageSection) coverageSection.style.display = isCCDInterface ? 'block' : 'none';
+
         const coverageConfig = interfaceData.cda_coverage_audit_config;
         const coverageEnabledEl = document.getElementById('editCdaCoverageAuditEnabled');
         const isCoverageEnabled = !!(coverageConfig && typeof coverageConfig === 'object' && coverageConfig.enabled);

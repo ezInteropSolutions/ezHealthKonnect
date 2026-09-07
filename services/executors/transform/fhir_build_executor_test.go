@@ -590,6 +590,212 @@ func TestFHIRBuild_Organization_NameAndIdentifier(t *testing.T) {
 	}
 }
 
+// ===============================================================
+// NESTED repeatingGroups TESTS (EDI Phase 5)
+//
+// Added to build ExplanationOfBenefit.item[].adjudication[] from an X12 835
+// service line with no script: two fixed entries (submitted/benefit amounts)
+// written as ordinary indexed fields on the item row, followed by N further
+// entries built from a NESTED repeatingGroup whose rows come from CAS
+// occurrences' own adjustment trios (field_utils.go's "[*]" wildcard-flatten
+// path support, added alongside this) — appended after the fixed entries,
+// never overwriting them.
+// ===============================================================
+
+// TestFHIRBuild_NestedRepeatingGroup_AppendsAfterFixedIndexedFields verifies
+// a nested repeatingGroup's own rows are appended after entries the parent
+// row's ordinary Fields already wrote at the SAME targetPath, rather than
+// overwriting them — the mechanism startingIndex/applyRepeatingGroup provide.
+func TestFHIRBuild_NestedRepeatingGroup_AppendsAfterFixedIndexedFields(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "ExplanationOfBenefit",
+		"repeatingGroups": []interface{}{
+			map[string]interface{}{
+				"targetPath": "item",
+				"rowsPath":   "items",
+				"fields": []interface{}{
+					// Two FIXED entries written directly via literal bracket
+					// indices — the "submitted"/"benefit" adjudication entries
+					// every item gets regardless of adjustments.
+					map[string]interface{}{"targetPath": "adjudication[0].category.coding[0].code", "literalValue": "submitted"},
+					map[string]interface{}{"targetPath": "adjudication[0].amount.value", "sourcePath": "chargeAmount", "transform": "cda_decimal_string_to_number"},
+					map[string]interface{}{"targetPath": "adjudication[1].category.coding[0].code", "literalValue": "benefit"},
+					map[string]interface{}{"targetPath": "adjudication[1].amount.value", "sourcePath": "paidAmount", "transform": "cda_decimal_string_to_number"},
+				},
+				"repeatingGroups": []interface{}{
+					map[string]interface{}{
+						"targetPath": "adjudication",
+						"rowsPath":   "extraAdjustments", // plain rowsPath, no wildcard -- isolates the append mechanism from wildcard-flatten
+						"fields": []interface{}{
+							map[string]interface{}{"targetPath": "category.coding[0].code", "sourcePath": "reasonCode"},
+							map[string]interface{}{"targetPath": "amount.value", "sourcePath": "amount", "transform": "cda_decimal_string_to_number"},
+						},
+					},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"items": []interface{}{
+			map[string]interface{}{
+				"chargeAmount": "100.00",
+				"paidAmount":   "80.00",
+				"extraAdjustments": []interface{}{
+					map[string]interface{}{"reasonCode": "45", "amount": "20.00"},
+				},
+			},
+		},
+	}
+
+	output := runFHIRBuild(t, config, inputData)
+	resource := fhirResourceFrom(t, output, "fhirResource")
+
+	items, ok := resource["item"].([]interface{})
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected 1 item, got %v", resource["item"])
+	}
+	item := items[0].(map[string]interface{})
+	adjudication, ok := item["adjudication"].([]interface{})
+	if !ok || len(adjudication) != 3 {
+		t.Fatalf("expected 3 adjudication entries (2 fixed + 1 appended), got %v", item["adjudication"])
+	}
+
+	first := adjudication[0].(map[string]interface{})
+	if code := first["category"].(map[string]interface{})["coding"].([]interface{})[0].(map[string]interface{})["code"]; code != "submitted" {
+		t.Errorf("adjudication[0].category.coding[0].code = %v, want submitted (must survive being overwritten by the nested group)", code)
+	}
+	second := adjudication[1].(map[string]interface{})
+	if code := second["category"].(map[string]interface{})["coding"].([]interface{})[0].(map[string]interface{})["code"]; code != "benefit" {
+		t.Errorf("adjudication[1].category.coding[0].code = %v, want benefit", code)
+	}
+	third := adjudication[2].(map[string]interface{})
+	if code := third["category"].(map[string]interface{})["coding"].([]interface{})[0].(map[string]interface{})["code"]; code != "45" {
+		t.Errorf("adjudication[2].category.coding[0].code = %v, want 45 (the nested group's own row, appended after the 2 fixed entries)", code)
+	}
+}
+
+// TestFHIRBuild_NestedRepeatingGroup_WildcardFlattenSource is the real EDI
+// Phase 5 shape: a service line with 2 CAS occurrences (2 and 1 adjustment
+// trios respectively) flattens, via "CAS[*].adjustments", into 3 further
+// adjudication entries appended after the 2 fixed submitted/benefit ones --
+// end to end, no script, no second RowsPath lookup needed.
+func TestFHIRBuild_NestedRepeatingGroup_WildcardFlattenSource(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "ExplanationOfBenefit",
+		"repeatingGroups": []interface{}{
+			map[string]interface{}{
+				"targetPath": "item",
+				"rowsPath":   "items",
+				"fields": []interface{}{
+					map[string]interface{}{"targetPath": "adjudication[0].category.coding[0].code", "literalValue": "submitted"},
+					map[string]interface{}{"targetPath": "adjudication[0].amount.value", "sourcePath": "chargeAmount", "transform": "cda_decimal_string_to_number"},
+					map[string]interface{}{"targetPath": "adjudication[1].category.coding[0].code", "literalValue": "benefit"},
+					map[string]interface{}{"targetPath": "adjudication[1].amount.value", "sourcePath": "paidAmount", "transform": "cda_decimal_string_to_number"},
+				},
+				"repeatingGroups": []interface{}{
+					map[string]interface{}{
+						"targetPath": "adjudication",
+						"rowsPath":   "CAS[*].adjustments",
+						"fields": []interface{}{
+							map[string]interface{}{"targetPath": "category.coding[0].code", "sourcePath": "reasonCode"},
+							map[string]interface{}{"targetPath": "amount.value", "sourcePath": "amount", "transform": "cda_decimal_string_to_number"},
+						},
+					},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"items": []interface{}{
+			map[string]interface{}{
+				"chargeAmount": "100.00",
+				"paidAmount":   "80.00",
+				"CAS": []interface{}{
+					map[string]interface{}{
+						"claimAdjustmentGroupCode": "CO",
+						"adjustments": []interface{}{
+							map[string]interface{}{"reasonCode": "45", "amount": "15.00"},
+							map[string]interface{}{"reasonCode": "97", "amount": "5.00"},
+						},
+					},
+					map[string]interface{}{
+						"claimAdjustmentGroupCode": "PR",
+						"adjustments": []interface{}{
+							map[string]interface{}{"reasonCode": "1", "amount": "20.00"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	output := runFHIRBuild(t, config, inputData)
+	resource := fhirResourceFrom(t, output, "fhirResource")
+
+	items := resource["item"].([]interface{})
+	item := items[0].(map[string]interface{})
+	adjudication, ok := item["adjudication"].([]interface{})
+	if !ok || len(adjudication) != 5 {
+		t.Fatalf("expected 5 adjudication entries (2 fixed + 3 flattened from 2 CAS occurrences), got %d: %v", len(adjudication), item["adjudication"])
+	}
+
+	wantReasonAt := map[int]string{2: "45", 3: "97", 4: "1"}
+	for idx, wantReason := range wantReasonAt {
+		entry := adjudication[idx].(map[string]interface{})
+		code := entry["category"].(map[string]interface{})["coding"].([]interface{})[0].(map[string]interface{})["code"]
+		if code != wantReason {
+			t.Errorf("adjudication[%d].category.coding[0].code = %v, want %q", idx, code, wantReason)
+		}
+	}
+}
+
+// TestFHIRBuild_NestedRepeatingGroup_NoFixedEntries_StartsAtZero is a
+// regression guard: when the parent row's Fields never touch the nested
+// group's TargetPath at all, startingIndex must still return 0 (not panic on
+// a missing key), same as top-level repeatingGroups behaved before nesting
+// was added.
+func TestFHIRBuild_NestedRepeatingGroup_NoFixedEntries_StartsAtZero(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "ExplanationOfBenefit",
+		"repeatingGroups": []interface{}{
+			map[string]interface{}{
+				"targetPath": "item",
+				"rowsPath":   "items",
+				"repeatingGroups": []interface{}{
+					map[string]interface{}{
+						"targetPath": "adjudication",
+						"rowsPath":   "adjustments",
+						"fields": []interface{}{
+							map[string]interface{}{"targetPath": "category.coding[0].code", "sourcePath": "reasonCode"},
+						},
+					},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"items": []interface{}{
+			map[string]interface{}{
+				"adjustments": []interface{}{
+					map[string]interface{}{"reasonCode": "2"},
+				},
+			},
+		},
+	}
+
+	output := runFHIRBuild(t, config, inputData)
+	resource := fhirResourceFrom(t, output, "fhirResource")
+	items := resource["item"].([]interface{})
+	item := items[0].(map[string]interface{})
+	adjudication, ok := item["adjudication"].([]interface{})
+	if !ok || len(adjudication) != 1 {
+		t.Fatalf("expected exactly 1 adjudication entry starting at index 0, got %v", item["adjudication"])
+	}
+}
+
 // TestFHIRBuild_Location_NameAndStatus verifies Location builds its
 // plain-string name and status fields.
 func TestFHIRBuild_Location_NameAndStatus(t *testing.T) {
@@ -611,5 +817,325 @@ func TestFHIRBuild_Location_NameAndStatus(t *testing.T) {
 	}
 	if got := resource["name"]; got != "Emergency Department" {
 		t.Errorf("name = %v, want Emergency Department", got)
+	}
+}
+
+// TestFHIRBuild_GetOutputVariables_ReflectsConfiguredOutputField proves the
+// field picker (payload.builder's Resource Paths, wired via
+// StepVariablesProvider -> GET /api/pipeline/reference-variables ->
+// GetOutputVariables) reports THIS step's own real outputField/resourceType,
+// not the hardcoded "fhirResource" default -- a step author who renames
+// outputField (e.g. the EDI 835 template's "message.paymentReconciliation")
+// would otherwise have the picker silently suggest a path that doesn't
+// exist anywhere in the pipeline's actual data.
+func TestFHIRBuild_GetOutputVariables_ReflectsConfiguredOutputField(t *testing.T) {
+	executor := NewFHIRBuildExecutor()
+
+	step := &models.TransformationStep{
+		StepName: "Build PaymentReconciliation",
+		StepType: "fhir.build",
+		Enabled:  true,
+		Config: map[string]interface{}{
+			"resourceType": "PaymentReconciliation",
+			"outputField":  "message.paymentReconciliation",
+		},
+	}
+	vars := executor.GetOutputVariables(step)
+	if len(vars) != 1 {
+		t.Fatalf("expected exactly 1 declared variable, got %d: %+v", len(vars), vars)
+	}
+	if vars[0].Path != "message.paymentReconciliation" {
+		t.Errorf("Path = %q, want %q", vars[0].Path, "message.paymentReconciliation")
+	}
+	if vars[0].Name != "PaymentReconciliation Resource" {
+		t.Errorf("Name = %q, want it to mention the configured resourceType", vars[0].Name)
+	}
+}
+
+// TestFHIRBuild_GetOutputVariables_DefaultsWhenConfigEmpty covers a fresh
+// step with no config yet (e.g. just dragged onto the canvas) -- must fall
+// back to the same "fhirResource" default Execute() itself uses, not panic
+// or return an empty path.
+func TestFHIRBuild_GetOutputVariables_DefaultsWhenConfigEmpty(t *testing.T) {
+	executor := NewFHIRBuildExecutor()
+	step := &models.TransformationStep{StepName: "New Step", StepType: "fhir.build", Enabled: true}
+
+	vars := executor.GetOutputVariables(step)
+	if len(vars) != 1 || vars[0].Path != "fhirResource" {
+		t.Fatalf("expected default path %q, got %+v", "fhirResource", vars)
+	}
+}
+
+// ── Conditional field/row population ────────────────────────────────────────
+
+func TestFHIRBuild_FieldCondition_FalseOmitsOnlyThatField(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "Patient",
+		"fields": []interface{}{
+			map[string]interface{}{"targetPath": "birthDate", "sourcePath": "dob"},
+			map[string]interface{}{
+				"targetPath": "deceasedBoolean", "literalValue": "true",
+				"condition": map[string]interface{}{"field": "status", "operator": "equals", "value": "deceased"},
+			},
+		},
+	}
+	inputData := map[string]interface{}{"dob": "1980-01-01", "status": "active"}
+
+	output := runFHIRBuild(t, config, inputData)
+	resource := fhirResourceFrom(t, output, "fhirResource")
+
+	if resource["birthDate"] != "1980-01-01" {
+		t.Errorf("birthDate = %v, want 1980-01-01 (unconditional field must still be written)", resource["birthDate"])
+	}
+	if _, present := resource["deceasedBoolean"]; present {
+		t.Errorf("deceasedBoolean should be absent when its condition is false, got %v", resource["deceasedBoolean"])
+	}
+}
+
+func TestFHIRBuild_FieldCondition_RowFallsBackToTopLevel(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "ExplanationOfBenefit",
+		"repeatingGroups": []interface{}{
+			map[string]interface{}{
+				"targetPath": "item",
+				"rowsPath":   "items",
+				"fields": []interface{}{
+					map[string]interface{}{"targetPath": "sequence", "sourcePath": "seq", "transform": "cda_decimal_string_to_number"},
+					map[string]interface{}{
+						// "country" exists only on the ROOT inputData, not on
+						// each item row -- proves conditionMet's topLevel
+						// fallback (mergeWithFallback) actually works here.
+						"targetPath": "category.coding[0].code", "literalValue": "us-only",
+						"condition": map[string]interface{}{"field": "country", "operator": "equals", "value": "US"},
+					},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"country": "US",
+		"items":   []interface{}{map[string]interface{}{"seq": "1"}},
+	}
+
+	output := runFHIRBuild(t, config, inputData)
+	resource := fhirResourceFrom(t, output, "fhirResource")
+
+	items, ok := resource["item"].([]interface{})
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected 1 item, got %v", resource["item"])
+	}
+	item := items[0].(map[string]interface{})
+	code := item["category"].(map[string]interface{})["coding"].([]interface{})[0].(map[string]interface{})["code"]
+	if code != "us-only" {
+		t.Errorf("category.coding[0].code = %v, want us-only (condition should resolve 'country' from topLevel, not the row)", code)
+	}
+}
+
+// TestFHIRBuild_RepeatingGroup_RowCondition_SkipsCASTrioWithEmptyReasonCode is
+// the real motivating case: an EDI 835 CAS segment has up to 6 adjustment
+// trios, most of which are blank padding in any real claim. Condition lets
+// the blank ones be dropped while the populated ones stay in the same
+// adjudication[] list, in order.
+func TestFHIRBuild_RepeatingGroup_RowCondition_SkipsCASTrioWithEmptyReasonCode(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "ExplanationOfBenefit",
+		"repeatingGroups": []interface{}{
+			map[string]interface{}{
+				"targetPath": "adjudication",
+				"rowsPath":   "trios",
+				// A blank X12 element resolves as an empty string, not a
+				// missing key, so "not_equals" against "" (not "not_exists")
+				// is the rule that matches real EDI data.
+				"condition": map[string]interface{}{"field": "reasonCode", "operator": "not_equals", "value": ""},
+				"fields": []interface{}{
+					map[string]interface{}{"targetPath": "category.coding[0].code", "sourcePath": "reasonCode"},
+					map[string]interface{}{"targetPath": "amount.value", "sourcePath": "amount", "transform": "cda_decimal_string_to_number"},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"trios": []interface{}{
+			map[string]interface{}{"reasonCode": "1", "amount": "50.00"},  // populated -- keep
+			// reasonCode blank but amount non-empty: without the new
+			// Condition gate, applyFieldRow would still write amount.value
+			// (0 is not isEmptyFieldValue), leaving a non-empty subObj that
+			// the pre-existing "skip if len(subObj)==0" check would NOT
+			// catch on its own -- this is what actually proves Condition is
+			// doing the work, not the old empty-row fallback.
+			map[string]interface{}{"reasonCode": "", "amount": "0.00"},
+			map[string]interface{}{"reasonCode": "45", "amount": "10.00"}, // populated -- keep
+			map[string]interface{}{"reasonCode": "", "amount": "0.00"},
+		},
+	}
+
+	output := runFHIRBuild(t, config, inputData)
+	resource := fhirResourceFrom(t, output, "fhirResource")
+
+	adjudication, ok := resource["adjudication"].([]interface{})
+	if !ok || len(adjudication) != 2 {
+		t.Fatalf("expected 2 adjudication entries (blank trios dropped), got %v", resource["adjudication"])
+	}
+	first := adjudication[0].(map[string]interface{})
+	if code := first["category"].(map[string]interface{})["coding"].([]interface{})[0].(map[string]interface{})["code"]; code != "1" {
+		t.Errorf("adjudication[0] reasonCode = %v, want 1", code)
+	}
+	second := adjudication[1].(map[string]interface{})
+	if code := second["category"].(map[string]interface{})["coding"].([]interface{})[0].(map[string]interface{})["code"]; code != "45" {
+		t.Errorf("adjudication[1] reasonCode = %v, want 45 (order preserved, blank rows skipped in place)", code)
+	}
+}
+
+func TestFHIRBuild_RepeatingGroup_GroupCondition_FalseSkipsEntireListNotJustRows(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "PaymentReconciliation",
+		"repeatingGroups": []interface{}{
+			map[string]interface{}{
+				"targetPath":     "detail",
+				"rowsPath":       "claims",
+				"groupCondition": map[string]interface{}{"field": "isMultiClaim", "operator": "equals", "value": true},
+				"fields": []interface{}{
+					map[string]interface{}{"targetPath": "amount.value", "sourcePath": "amount", "transform": "cda_decimal_string_to_number"},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"isMultiClaim": false,
+		"claims":       []interface{}{map[string]interface{}{"amount": "100.00"}},
+	}
+
+	output := runFHIRBuild(t, config, inputData)
+	resource := fhirResourceFrom(t, output, "fhirResource")
+
+	if _, present := resource["detail"]; present {
+		t.Errorf("expected 'detail' to be entirely absent when groupCondition is false, got %v", resource["detail"])
+	}
+}
+
+// TestFHIRBuild_RepeatingGroup_GroupConditionAndRowCondition_BothApplyTogether
+// proves the two-field design is load-bearing: a single condition field
+// (HL7-style) could not express "only build this list when a claim-level
+// flag holds, AND within it, drop any row whose amount is zero" -- that's a
+// conjunction of two independent checks at two independent points.
+func TestFHIRBuild_RepeatingGroup_GroupConditionAndRowCondition_BothApplyTogether(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "PaymentReconciliation",
+		"repeatingGroups": []interface{}{
+			map[string]interface{}{
+				"targetPath":     "detail",
+				"rowsPath":       "claims",
+				"groupCondition": map[string]interface{}{"field": "isMultiClaim", "operator": "equals", "value": true},
+				"condition":      map[string]interface{}{"field": "amount", "operator": "not_equals", "value": "0.00"},
+				"fields": []interface{}{
+					map[string]interface{}{"targetPath": "amount.value", "sourcePath": "amount", "transform": "cda_decimal_string_to_number"},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"isMultiClaim": true,
+		"claims": []interface{}{
+			map[string]interface{}{"amount": "100.00"},
+			map[string]interface{}{"amount": "0.00"}, // group applies, but this row is filtered
+		},
+	}
+
+	output := runFHIRBuild(t, config, inputData)
+	resource := fhirResourceFrom(t, output, "fhirResource")
+
+	detail, ok := resource["detail"].([]interface{})
+	if !ok || len(detail) != 1 {
+		t.Fatalf("expected exactly 1 detail entry (group built, one row filtered), got %v", resource["detail"])
+	}
+}
+
+// TestFHIRBuild_NestedRepeatingGroup_ConditionSeesGenuineTopLevelField proves
+// topLevel is threaded unchanged through recursion: a condition on the
+// INNERMOST of two nested repeatingGroups can still see a field that exists
+// only on the true root inputData -- not on the outer row, not on the inner
+// row -- which was structurally impossible before topLevel was threaded
+// through applyFieldRow/applyRepeatingGroup.
+func TestFHIRBuild_NestedRepeatingGroup_ConditionSeesGenuineTopLevelField(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "ExplanationOfBenefit",
+		"repeatingGroups": []interface{}{
+			map[string]interface{}{
+				"targetPath": "item",
+				"rowsPath":   "items",
+				"fields": []interface{}{
+					map[string]interface{}{"targetPath": "sequence", "sourcePath": "seq", "transform": "cda_decimal_string_to_number"},
+				},
+				"repeatingGroups": []interface{}{
+					map[string]interface{}{
+						"targetPath": "adjudication",
+						"rowsPath":   "adjustments",
+						"condition":  map[string]interface{}{"field": "region", "operator": "equals", "value": "NC"},
+						"fields": []interface{}{
+							map[string]interface{}{"targetPath": "amount.value", "sourcePath": "amount", "transform": "cda_decimal_string_to_number"},
+						},
+					},
+				},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"region": "NC", // ROOT-only field -- absent from both items[] and adjustments[]
+		"items": []interface{}{
+			map[string]interface{}{
+				"seq":         "1",
+				"adjustments": []interface{}{map[string]interface{}{"amount": "20.00"}},
+			},
+		},
+	}
+
+	output := runFHIRBuild(t, config, inputData)
+	resource := fhirResourceFrom(t, output, "fhirResource")
+
+	items := resource["item"].([]interface{})
+	item := items[0].(map[string]interface{})
+	adjudication, ok := item["adjudication"].([]interface{})
+	if !ok || len(adjudication) != 1 {
+		t.Fatalf("expected 1 adjudication entry -- innermost condition should resolve 'region' via topLevel fallback, got %v", item["adjudication"])
+	}
+}
+
+// TestFHIRBuild_Condition_PredicateBracketSourcePath_ResolvesConsistentlyWithFieldMapping
+// is the test that would have caught the original GetNestedValue/GetFieldValue
+// mismatch: native []map[string]interface{} data (the shape EDI's parser
+// actually produces, not []interface{}) with a predicate-bracket path used as
+// a CONDITION field, proving conditionMet resolves it the same way an
+// ordinary sourcePath on the identical shape already does.
+func TestFHIRBuild_Condition_PredicateBracketSourcePath_ResolvesConsistentlyWithFieldMapping(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "ExplanationOfBenefit",
+		"fields": []interface{}{
+			map[string]interface{}{
+				"targetPath": "provider.display",
+				"sourcePath": "NM1[entityIdentifierCode=82].nameLastOrOrganizationName",
+				"condition":  map[string]interface{}{"field": "NM1[entityIdentifierCode=82].nameLastOrOrganizationName", "operator": "exists"},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"NM1": []map[string]interface{}{
+			{"entityIdentifierCode": "QC", "nameLastOrOrganizationName": "Doe"},
+			{"entityIdentifierCode": "82", "nameLastOrOrganizationName": "Smith Clinic"},
+		},
+	}
+
+	output := runFHIRBuild(t, config, inputData)
+	resource := fhirResourceFrom(t, output, "fhirResource")
+
+	display := resource["provider"].(map[string]interface{})["display"]
+	if display != "Smith Clinic" {
+		t.Errorf("provider.display = %v, want Smith Clinic (condition's predicate-bracket path must resolve the same as the ordinary sourcePath does)", display)
 	}
 }

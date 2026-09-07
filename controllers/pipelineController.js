@@ -642,14 +642,16 @@ exports.savePipeline = async (req, res) => {
                         step.position_y !== undefined ? step.position_y : null,
                         step.parent_conditional_step_id || step.parentConditionalStepId || null,
                         sanitizeBranchType(rawBranch),    // $16 — validates against branch_type_check
-                        step.case_value || step.caseValue || null
+                        step.case_value || step.caseValue || null,
+                        step.step_alias || step.stepAlias || null,
+                        step.description || null
                 ];
                 console.log(`🔍 INSERT binds[$12=on_error_strategy="${insertBinds[11]}", $16=branch_type="${insertBinds[15]}", $4=step_type="${insertBinds[3]}", raw_on_error="${rawOnError}", raw_branch="${rawBranch}"]`);
                 await sequelize.query(`
                     INSERT INTO transformation_steps
-                        (id, pipeline_id, step_name, step_type, sequence, required, timeout_ms, enabled, config, script_type, script_content, on_error_strategy, position_x, position_y, parent_conditional_step_id, branch_type, case_value, created_at, updated_at)
+                        (id, pipeline_id, step_name, step_type, sequence, required, timeout_ms, enabled, config, script_type, script_content, on_error_strategy, position_x, position_y, parent_conditional_step_id, branch_type, case_value, step_alias, description, created_at, updated_at)
                     VALUES
-                        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+                        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
                 `, {
                     bind: insertBinds,
                     type: QueryTypes.INSERT,
@@ -835,7 +837,7 @@ const STEPS_SELECT = `
     SELECT
         id::text, pipeline_id::text, step_name, step_type, sequence,
         required, timeout_ms, enabled, config, script_type, script_content,
-        on_error_strategy, position_x, position_y,
+        on_error_strategy, position_x, position_y, description,
         parent_conditional_step_id::text, branch_type, case_value, step_alias,
         created_at, updated_at
     FROM transformation_steps
@@ -957,13 +959,14 @@ exports.clonePipeline = async (req, res) => {
                 `INSERT INTO transformation_steps
                      (id, pipeline_id, step_name, step_type, sequence, required, timeout_ms, enabled,
                       config, script_type, script_content, on_error_strategy, position_x, position_y,
-                      parent_conditional_step_id, branch_type, case_value, step_alias, created_at, updated_at)
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NOW(),NOW())`,
+                      parent_conditional_step_id, branch_type, case_value, step_alias, description, created_at, updated_at)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),NOW())`,
                 { bind: [uuidv4(), newId, step.step_name, step.step_type, step.sequence,
                          step.required, step.timeout_ms, step.enabled,
                          JSON.stringify(step.config || {}), step.script_type, step.script_content,
                          step.on_error_strategy, step.position_x, step.position_y,
-                         step.parent_conditional_step_id, step.branch_type, step.case_value, step.step_alias] }
+                         step.parent_conditional_step_id, step.branch_type, step.case_value, step.step_alias,
+                         step.description] }
             );
         }
         res.json({ success: true, pipeline_id: newId, message: 'Pipeline cloned' });

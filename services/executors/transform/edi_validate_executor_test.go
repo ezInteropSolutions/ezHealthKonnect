@@ -277,3 +277,104 @@ func TestEDIValidateExecutor_CustomRule_UnknownElementKey_SkippedGracefully(t *t
 		}
 	}
 }
+
+// hasOOBPERPairIssue reports whether result carries the OOB Paired-rule
+// warning for PER's communicationNumberQualifier1/communicationNumber1 pair
+// (positions 03/04) -- the real, naturally-occurring OOB warning the
+// unmodified blueCrossNC sample carries (its own PER line is
+// "PER*CX*TE*8005554844~": PER03=8005554844 present, PER04 absent).
+func hasOOBPERPairIssue(issues []validator.Issue) bool {
+	for _, issue := range issues {
+		if issue.Path == "PER" && issue.Source == "" && issue.Severity == "warning" {
+			return true
+		}
+	}
+	return false
+}
+
+// TestEDIValidateExecutor_DisabledRules_SuppressesOOBWarning proves
+// disabledRules actually removes a real, naturally-occurring OOB warning
+// (not a synthetic one) from a real, unedited sample, while leaving
+// Valid=true unaffected either way (it was warning-severity to begin with).
+func TestEDIValidateExecutor_DisabledRules_SuppressesOOBWarning(t *testing.T) {
+	exec := newTestEDIValidateExecutor(t)
+	raw := readValidateSample(t, "blue_cross_nc_sample.txt")
+
+	// Baseline: no overrides -- the OOB warning fires.
+	baselineStep := &models.TransformationStep{
+		StepName: "Test Validate EDI", StepType: "edi.validate", Enabled: true,
+		Config: map[string]interface{}{"sourceField": "raw"},
+	}
+	baselineOutput, err := exec.Execute(context.Background(), baselineStep, map[string]interface{}{"raw": raw})
+	if err != nil {
+		t.Fatalf("baseline Execute failed: %v", err)
+	}
+	baselineResult := baselineOutput["ediValidation"].(*validator.Result)
+	if !hasOOBPERPairIssue(baselineResult.Issues) {
+		t.Fatalf("expected the baseline (no overrides) run to carry the OOB PER 03/04 paired-rule warning, got: %+v", baselineResult.Issues)
+	}
+
+	// Same sample, this rule disabled -- positions given in REVERSE order
+	// ("04","03") to also prove positionsEqual is order-independent, not
+	// just a happy-path exact-order match.
+	disabledStep := &models.TransformationStep{
+		StepName: "Test Validate EDI", StepType: "edi.validate", Enabled: true,
+		Config: map[string]interface{}{
+			"sourceField": "raw",
+			"disabledRules": []interface{}{
+				map[string]interface{}{"segmentId": "PER", "type": "P", "positions": []interface{}{"04", "03"}},
+			},
+		},
+	}
+	disabledOutput, err := exec.Execute(context.Background(), disabledStep, map[string]interface{}{"raw": raw})
+	if err != nil {
+		t.Fatalf("disabled-rule Execute failed: %v", err)
+	}
+	disabledResult := disabledOutput["ediValidation"].(*validator.Result)
+	if hasOOBPERPairIssue(disabledResult.Issues) {
+		t.Errorf("expected the OOB PER 03/04 paired-rule warning to be suppressed, got: %+v", disabledResult.Issues)
+	}
+	if !disabledResult.Valid {
+		t.Errorf("expected Valid=true unaffected by disabling a warning-severity rule, got Valid=false: %+v", disabledResult.Issues)
+	}
+
+	// The shared, cached spec must never be mutated by this request -- a
+	// second baseline run afterwards must still see the warning.
+	secondBaselineOutput, err := exec.Execute(context.Background(), baselineStep, map[string]interface{}{"raw": raw})
+	if err != nil {
+		t.Fatalf("second baseline Execute failed: %v", err)
+	}
+	secondBaselineResult := secondBaselineOutput["ediValidation"].(*validator.Result)
+	if !hasOOBPERPairIssue(secondBaselineResult.Issues) {
+		t.Errorf("expected the OOB warning to still fire on a later, override-free run (shared spec must not leak the earlier disable) — got: %+v", secondBaselineResult.Issues)
+	}
+}
+
+// TestEDIValidateExecutor_DisabledRules_NoMatch_SkippedGracefully verifies a
+// disabledRules entry that doesn't match any real OOB rule (wrong type,
+// unknown segment) is silently skipped rather than erroring — same
+// degrade-gracefully convention the custom-rule tests above already
+// establish for stale/mistaken config.
+func TestEDIValidateExecutor_DisabledRules_NoMatch_SkippedGracefully(t *testing.T) {
+	exec := newTestEDIValidateExecutor(t)
+	raw := readValidateSample(t, "blue_cross_nc_sample.txt")
+
+	step := &models.TransformationStep{
+		StepName: "Test Validate EDI", StepType: "edi.validate", Enabled: true,
+		Config: map[string]interface{}{
+			"sourceField": "raw",
+			"disabledRules": []interface{}{
+				map[string]interface{}{"segmentId": "PER", "type": "R", "positions": []interface{}{"03", "04"}}, // real segment, wrong type
+				map[string]interface{}{"segmentId": "ZZZ", "type": "P", "positions": []interface{}{"01", "02"}}, // unknown segment
+			},
+		},
+	}
+	output, err := exec.Execute(context.Background(), step, map[string]interface{}{"raw": raw})
+	if err != nil {
+		t.Fatalf("expected no error for non-matching disabledRules entries, got: %v", err)
+	}
+	result := output["ediValidation"].(*validator.Result)
+	if !hasOOBPERPairIssue(result.Issues) {
+		t.Errorf("expected the real OOB PER 03/04 warning to still fire since no disabledRules entry actually matched it, got: %+v", result.Issues)
+	}
+}

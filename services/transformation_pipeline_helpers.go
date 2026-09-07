@@ -548,6 +548,36 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 					execCtx.Message["enriched"] = enriched
 					log.Printf("🔍 [DEBUG] Preserved enriched data with keys: %v", getMapKeys(enriched))
 				}
+
+				// Preserve every other top-level field the step computed. The
+				// "outputField" convention shared by edi.parse, edi.validate,
+				// cda.parse, fhir.build, hl7.build etc. (services/executors/field_utils.go's
+				// GetFieldValue/UpdateFieldValue contract) writes its result as a bare
+				// outputData[cfg.OutputField] sibling of "message", not nested inside it —
+				// only fhir.build's OWN default ("message.paymentReconciliation"-style
+				// dotted outputField) happens to land inside output["message"] and survive
+				// the two special cases above. Every other bare top-level field (e.g.
+				// edi.parse's default "parsedEDI") was silently dropped here, so the next
+				// step's inputData never saw it even though the executor's own inputData→
+				// outputData contract treats it as first-class. inputData itself always
+				// carries "message"/"_metadata"/"_variableContext"/"steps" as reserved
+				// envelope keys (see executeStepWithContext) and every executor's own
+				// outputData construction copies those straight through unchanged, so they
+				// must stay excluded here or a stale snapshot would echo back into Message.
+				reservedOutputKeys := map[string]bool{
+					"message": true, "enriched": true,
+					"_metadata": true, "_variableContext": true, "_routing": true,
+					"_stepOutput": true, "_executionDetails": true, "steps": true,
+				}
+				for k, v := range output {
+					if reservedOutputKeys[k] {
+						continue
+					}
+					if execCtx.Message == nil {
+						execCtx.Message = make(map[string]interface{})
+					}
+					execCtx.Message[k] = v
+				}
 			}
 		}
 

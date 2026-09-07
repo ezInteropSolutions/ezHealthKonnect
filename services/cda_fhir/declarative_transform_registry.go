@@ -144,6 +144,7 @@ func (r *DeclarativeTransformRegistry) registerBuiltins() {
 	r.register("string_direct", "Passes the value straight through unchanged, applying the row's value map (if any) first.", declarativeStringDirect)
 	r.register("string_prefix", "Prepends a fixed literal prefix (valueMap.prefix) to the resolved value — e.g. \"Patient/\" + id for a *.reference field.", declarativeStringPrefix)
 	r.register("cda_decimal_string_to_number", "Converts a CDA decimal attribute string (e.g. \".5\") into a real JSON number, since FHIR decimal fields reject a bare string.", declarativeCDADecimalStringToNumber)
+	r.register("x12_date_to_fhir_date", "Converts an X12 DT-type date string (CCYYMMDD, e.g. \"20260115\") into a FHIR date (YYYY-MM-DD), since FHIR date fields reject the unpunctuated X12 form.", declarativeX12DateToFHIRDate)
 	r.register("cda_code_to_codeable_concept", "Converts a CDA coded element (code, display name, code system) into a structured FHIR CodeableConcept.", declarativeCodeToCodeableConcept)
 	r.register("cda_quantity_to_fhir", "Converts a CDA physical quantity (value + unit) into a FHIR Quantity.", declarativeQuantityToFHIR)
 	r.register("cda_timerange_to_onset", "Converts a CDA effectiveTime low/high range into a single FHIR onsetDateTime or onsetPeriod.", declarativeTimeRangeToOnset)
@@ -313,6 +314,29 @@ func declarativeCDADecimalStringToNumber(value interface{}, _ map[string]string)
 		return nil, nil
 	}
 	return f, nil
+}
+
+// declarativeX12DateToFHIRDate reformats an X12 DT-type value (always
+// CCYYMMDD — 8 digits, no separators, per edi/datatypes.go's DT handling)
+// into a FHIR "date" string (YYYY-MM-DD). Added for EDI Phase 5's
+// 835->ExplanationOfBenefit/PaymentReconciliation mapping: fields like
+// BPR16 (payment effective date) or a DTM segment's own date element need
+// exactly this reformat and nothing else — unlike cda_time_to_fhir_date,
+// there's no CDA-shaped {value, ...} object to remarshal here, just a bare
+// 8-digit string, so this doesn't reuse that transform's own machinery.
+// Anything that isn't exactly 8 digits is left unwritten (nil, not a
+// malformed date) rather than guessed at.
+func declarativeX12DateToFHIRDate(value interface{}, _ map[string]string) (interface{}, error) {
+	s, ok := value.(string)
+	if !ok || len(s) != 8 {
+		return nil, nil
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return nil, nil
+		}
+	}
+	return s[0:4] + "-" + s[4:6] + "-" + s[6:8], nil
 }
 
 func declarativeCodeToCodeableConcept(value interface{}, _ map[string]string) (interface{}, error) {

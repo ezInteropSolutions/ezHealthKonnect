@@ -13,6 +13,13 @@
 class PayloadBuilderBuilder {
     constructor(propertiesPanel) {
         this.panel = propertiesPanel;
+        // {input, search} pairs for every FieldPathSearchComponent this
+        // builder has attached -- tracked individually (not a single
+        // attach-everything-then-rerender pass like FHIRBuildBuilder uses)
+        // because this builder mutates the DOM surgically on add/remove
+        // rather than doing a full outerHTML rerender; see _attachFieldSearch/
+        // _detachFieldSearch.
+        this._fieldSearches = [];
     }
 
     // ── Public builder contract ──────────────────────────────────────────────
@@ -90,7 +97,44 @@ class PayloadBuilderBuilder {
     }
 
     destroy() {
-        // No AC components to clean up in v1
+        this._fieldSearches.forEach(fs => { try { fs.search.destroy(); } catch (e) { /* no-op */ } });
+        this._fieldSearches = [];
+    }
+
+    // ── Private: no-code field-path picker wiring ────────────────────────────
+    // Same FieldPathSearchComponent + StepVariablesProvider mechanism
+    // fhir.build/hl7.build's own field pickers use -- turns a plain path
+    // input into a searchable dropdown of every earlier step's declared
+    // output paths (config-time, via each executor's own GetOutputVariables)
+    // plus, once available, real paths observed from a Test Pipeline run.
+    // Without this, every path in this step (source_path, resourcePaths,
+    // field_ref values) was a bare text box the user had to already know the
+    // exact dot-path convention to fill in correctly.
+
+    _attachFieldSearch(input) {
+        if (!input || typeof FieldPathSearchComponent === 'undefined') return;
+        const getStepVars = () => {
+            if (this.panel && typeof this.panel.getStepVariablesForSearch === 'function') {
+                return this.panel.getStepVariablesForSearch();
+            }
+            return [];
+        };
+        const search = new FieldPathSearchComponent(input, {
+            onSelect: (path) => { input.value = path; },
+            placeholder: input.placeholder || 'Search pipeline fields or enter custom path...',
+            allowCustom: true,
+            showCategories: true,
+            includeHL7Fields: false,
+            getStepVariables: getStepVars,
+        });
+        this._fieldSearches.push({ input, search });
+    }
+
+    _detachFieldSearch(input) {
+        const idx = this._fieldSearches.findIndex(fs => fs.input === input);
+        if (idx === -1) return;
+        try { this._fieldSearches[idx].search.destroy(); } catch (e) { /* no-op */ }
+        this._fieldSearches.splice(idx, 1);
     }
 
     // ── Private: HTML construction ───────────────────────────────────────────
@@ -373,6 +417,7 @@ class PayloadBuilderBuilder {
                 }
             });
         }
+        this._attachFieldSearch(customInput);
 
         // Add mapping row button
         const addBtn = root.querySelector('#pb-add-mapping');
@@ -440,9 +485,12 @@ class PayloadBuilderBuilder {
 
     _wireRowEvents(row) {
         if (!row) return;
-        row.querySelector('.pb-remove-row')?.addEventListener('click', () => row.remove());
+        const valInput = row.querySelector('.pb-map-value');
+        row.querySelector('.pb-remove-row')?.addEventListener('click', () => {
+            this._detachFieldSearch(valInput);
+            row.remove();
+        });
         const typeSelect = row.querySelector('.pb-map-type');
-        const valInput   = row.querySelector('.pb-map-value');
         if (typeSelect && valInput) {
             typeSelect.addEventListener('change', () => {
                 valInput.placeholder = typeSelect.value === 'literal'
@@ -450,13 +498,19 @@ class PayloadBuilderBuilder {
                     : 'e.g. PID.5.1 or steps.enrich.mrn';
             });
         }
+        // Attached regardless of Field vs Literal type -- allowCustom means
+        // typing a plain literal still works fine even with the picker active.
+        this._attachFieldSearch(valInput);
     }
 
     _wireResourcePathRowEvents(row) {
         if (!row) return;
+        const input = row.querySelector('.pb-rp-input');
+        this._attachFieldSearch(input);
         const removeBtn = row.querySelector('.pb-rp-remove');
         if (removeBtn) {
             removeBtn.addEventListener('click', () => {
+                this._detachFieldSearch(input);
                 const list = row.closest('#pb-resource-paths-list');
                 row.remove();
                 // Always keep at least one blank row

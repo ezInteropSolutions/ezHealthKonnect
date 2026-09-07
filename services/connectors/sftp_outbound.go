@@ -15,6 +15,13 @@
 // real SFTP protocol (what this file now uses) is exactly what such servers
 // exist to serve, and works correctly against them.
 //
+// The actual SSH/SFTP mechanics (dial, connection test, upload-with-timeout,
+// filename-pattern rendering) live in sftp_uploader.go (dial/auth further
+// shared from sftp_poller.go), shared with edi_x12_outbound.go — this file
+// owns only this connector's own config fields/defaults and its own
+// legacy filename fallback chain (filename_field/filename_prefix/
+// file_extension), which edi_x12_outbound.go doesn't have.
+//
 // Authentication:
 //
 //	password   — username + password
@@ -47,20 +54,15 @@
 package connectors
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log"
-	"net"
 	"path"
-	"strings"
 	"sync"
 	"time"
 
 	"ezhealthkonnect/models"
 
-	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -156,8 +158,12 @@ func (c *SFTPOutboundConnector) Initialize(config []byte) error {
 	}
 	c.writeTimeout = time.Duration(writeSec) * time.Second
 
-	// Build SSH auth
-	authMethods, err := c.buildAuthMethods()
+	// Build SSH auth. keyFile is accepted (see Validate()'s own check) but
+	// reading a key from the local filesystem was never implemented — only
+	// key_content works — matching the pre-existing behavior exactly
+	// (buildSFTPAuthMethods errors the same way this connector's own
+	// removed buildAuthMethods did for an empty key_content).
+	authMethods, err := buildSFTPAuthMethods(c.authType, c.password, c.keyContent)
 	if err != nil {
 		return NewConnectorError(c.GetMetadata().TypeName, "initialize", err, false)
 	}
@@ -203,18 +209,9 @@ func (c *SFTPOutboundConnector) Validate() error {
 // an SSH TCP/handshake can succeed even against a server that later rejects
 // the actual file-transfer subsystem for other reasons.
 func (c *SFTPOutboundConnector) TestConnection(ctx context.Context) error {
-	conn, err := c.dialSSH(ctx)
-	if err != nil {
+	if err := testSFTPConnection(ctx, c.host, c.port, c.sshConfig, c.connectTimeout); err != nil {
 		return NewConnectorError(c.GetMetadata().TypeName, "test_connection", err, true)
 	}
-	defer conn.Close()
-
-	sftpClient, err := sftp.NewClient(conn)
-	if err != nil {
-		return NewConnectorError(c.GetMetadata().TypeName, "test_connection",
-			fmt.Errorf("SFTP subsystem unavailable: %w", err), true)
-	}
-	defer sftpClient.Close()
 	return nil
 }
 
@@ -231,22 +228,7 @@ func (c *SFTPOutboundConnector) Send(ctx context.Context, message *models.Outbou
 	remotePath := path.Join(c.remoteDir, filename)
 	content := []byte(message.Content)
 
-	conn, err := c.dialSSH(ctx)
-	if err != nil {
-		c.RecordError(err)
-		return failResult(message.MessageID, start, err), err
-	}
-	defer conn.Close()
-
-	sftpClient, err := sftp.NewClient(conn)
-	if err != nil {
-		wrapped := fmt.Errorf("open SFTP session: %w", err)
-		c.RecordError(wrapped)
-		return failResult(message.MessageID, start, wrapped), wrapped
-	}
-	defer sftpClient.Close()
-
-	if err := sftpUploadWithTimeout(sftpClient, c.remoteDir, remotePath, content, c.writeTimeout); err != nil {
+	if err := sftpSendFile(ctx, c.host, c.port, c.sshConfig, c.connectTimeout, c.remoteDir, remotePath, content, c.writeTimeout); err != nil {
 		c.RecordError(err)
 		return failResult(message.MessageID, start, err), err
 	}
@@ -263,52 +245,12 @@ func (c *SFTPOutboundConnector) Send(ctx context.Context, message *models.Outbou
 	}, nil
 }
 
-// --------------------------------------------------------------------------
-// Internal helpers
-// --------------------------------------------------------------------------
-
-func (c *SFTPOutboundConnector) dialSSH(ctx context.Context) (*ssh.Client, error) {
-	addr := fmt.Sprintf("%s:%d", c.host, c.port)
-	d := &net.Dialer{Timeout: c.connectTimeout}
-	netConn, err := d.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("ssh tcp dial: %w", err)
-	}
-	sshConn, chans, reqs, err := ssh.NewClientConn(netConn, addr, c.sshConfig)
-	if err != nil {
-		_ = netConn.Close()
-		return nil, fmt.Errorf("ssh handshake: %w", err)
-	}
-	return ssh.NewClient(sshConn, chans, reqs), nil
-}
-
-func (c *SFTPOutboundConnector) buildAuthMethods() ([]ssh.AuthMethod, error) {
-	switch c.authType {
-	case "key":
-		var pemBytes []byte
-		if c.keyContent != "" {
-			pemBytes = []byte(c.keyContent)
-		} else {
-			return nil, fmt.Errorf("key_file reading requires filesystem access — set key_content instead")
-		}
-		signer, err := ssh.ParsePrivateKey(pemBytes)
-		if err != nil {
-			return nil, fmt.Errorf("parse private key: %w", err)
-		}
-		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
-	default: // password
-		return []ssh.AuthMethod{ssh.Password(c.password)}, nil
-	}
-}
-
 // resolveFilename builds the remote filename for a message. filename_pattern
-// (a real template — {message_id}/{interface_id}/{timestamp}/{date}/{time},
-// same convention and sanitizer as aws_s3_outbound.go/azure_blob_outbound.go's
-// key_pattern) takes priority when set; the legacy filename_field/prefix/
-// extension behavior is preserved as a fallback for configs that don't set it.
+// takes priority when set; the legacy filename_field/prefix/extension
+// behavior is preserved as a fallback for configs that don't set it.
 func (c *SFTPOutboundConnector) resolveFilename(message *models.OutboundMessage) string {
 	if c.filenamePattern != "" {
-		return c.resolvePatternFilename(message)
+		return renderFilenamePattern(c.filenamePattern, message, extensionForContentType(contentTypeOrDefault("", message.ContentType)))
 	}
 
 	if c.filenameField != "" && message.Metadata != nil {
@@ -322,68 +264,6 @@ func (c *SFTPOutboundConnector) resolveFilename(message *models.OutboundMessage)
 		msgID = msgID[:8]
 	}
 	return fmt.Sprintf("%s%s_%s%s", c.filenamePrefix, ts, msgID, c.fileExtension)
-}
-
-// resolvePatternFilename renders filename_pattern's placeholders for one
-// message, appending an extension inferred from content type when the
-// pattern doesn't already specify one — identical behavior to
-// aws_s3_outbound.go's buildKey/azure_blob_outbound.go's buildBlobName.
-func (c *SFTPOutboundConnector) resolvePatternFilename(message *models.OutboundMessage) string {
-	name := c.filenamePattern
-	now := time.Now()
-
-	replacements := map[string]string{
-		"{timestamp}":    now.Format("20060102_150405"),
-		"{date}":         now.Format("20060102"),
-		"{time}":         now.Format("150405"),
-		"{message_id}":   sanitizeObjectKeySegment(message.MessageID),
-		"{interface_id}": sanitizeObjectKeySegment(message.InterfaceID),
-	}
-	for placeholder, value := range replacements {
-		name = strings.ReplaceAll(name, placeholder, value)
-	}
-
-	if path.Ext(name) == "" {
-		name += extensionForContentType(contentTypeOrDefault("", message.ContentType))
-	}
-	return name
-}
-
-// sftpUploadWithTimeout creates any missing subdirectories under remoteDir
-// (filename_pattern can include them, e.g. "{interface_id}/{message_id}.hl7")
-// and writes content to remotePath via the real SFTP protocol, bounded by
-// timeout. The blocking SFTP calls run in a goroutine so a hung connection
-// can still be reported as a timeout rather than blocking Send() forever.
-func sftpUploadWithTimeout(client *sftp.Client, remoteDir, remotePath string, content []byte, timeout time.Duration) error {
-	done := make(chan error, 1)
-	go func() {
-		if targetDir := path.Dir(remotePath); targetDir != "." && targetDir != remoteDir {
-			if err := client.MkdirAll(targetDir); err != nil {
-				done <- fmt.Errorf("mkdir -p %s: %w", targetDir, err)
-				return
-			}
-		}
-
-		f, err := client.Create(remotePath)
-		if err != nil {
-			done <- fmt.Errorf("create %s: %w", remotePath, err)
-			return
-		}
-		defer f.Close()
-
-		if _, err := io.Copy(f, bytes.NewReader(content)); err != nil {
-			done <- fmt.Errorf("write %s: %w", remotePath, err)
-			return
-		}
-		done <- nil
-	}()
-
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(timeout):
-		return fmt.Errorf("SFTP upload timed out after %s", timeout)
-	}
 }
 
 // failResult creates a failed DeliveryResult.

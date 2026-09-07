@@ -20,6 +20,7 @@
  * TC-IFACE-016  Empty state message shown when no interfaces match filter
  * TC-IFACE-017  Wizard step progression — filling name and advancing goes to step 2
  * TC-IFACE-018  Wizard "Back" button returns to previous step
+ * TC-IFACE-019  CDA Coverage Audit section shows only for CCD-message-type interfaces
  */
 
 const { test, expect } = require('@playwright/test');
@@ -315,6 +316,54 @@ test.describe('Interfaces', () => {
         await page.waitForTimeout(400);
         // Should be back on step 1 — name input should be visible again
         await expect(nameInput).toBeVisible({ timeout: 5000 });
+    });
+
+    // ── TC-IFACE-019 ─────────────────────────────────────────────────────────────
+    // CDA Coverage Audit is only meaningful for an interface whose inbound
+    // messages actually get parsed as CDA/CCD content — the backend's own
+    // runtime gate (transformation_pipeline_helpers.go) only creates a
+    // coverage tracker when a message's _format resolves to "ccda", regardless
+    // of this UI toggle. Before this fix, the Edit Interface modal showed the
+    // "CDA Coverage Audit" checkbox for every interface, with only a text
+    // disclaimer saying it "only applies when this interface's input is
+    // CDA/CCD" — this test pins the actual visibility gate (message_type ===
+    // 'CCD', the same convention messages.js's own isCDA check uses), not
+    // just the disclaimer copy.
+    test('TC-IFACE-019 CDA Coverage Audit section shows only for CCD-message-type interfaces', async ({ page, request }) => {
+        const unique = Date.now();
+        const createInterface = async (name, messageType) => {
+            const res = await request.post('/api/interfaces', {
+                data: {
+                    name, messageType, description: 'TC-IFACE-019 fixture',
+                    sourceType: '', targetType: '', sourceConfig: {}, targetConfig: {},
+                },
+            });
+            const body = await res.json();
+            expect(body.success, `failed to create fixture interface ${name}: ${JSON.stringify(body)}`).toBe(true);
+            return body.interface?.id || body.id;
+        };
+
+        const ccdId = await createInterface(`TC-IFACE-019 CCD ${unique}`, 'CCD');
+        const nonCcdId = await createInterface(`TC-IFACE-019 ADT ${unique}`, 'ADT^A01');
+
+        // Reload so the page's own interfaces list (fetched once on load,
+        // before these fixtures existed) picks both up.
+        await page.reload();
+        await page.waitForLoadState('domcontentloaded');
+        await page.waitForFunction(
+            (ids) => typeof interfaces !== 'undefined' && ids.every(id => interfaces.some(i => i.id === id)),
+            [ccdId, nonCcdId],
+            { timeout: 10000 }
+        );
+
+        await page.evaluate((id) => window.showEditModal(id), ccdId);
+        await page.waitForSelector('#editModal.show', { timeout: 5000 });
+        await expect(page.locator('#editCdaCoverageAuditSection'), 'CCD interface should show the Coverage Audit section').toBeVisible();
+        await page.evaluate(() => document.getElementById('editModal')?.classList.remove('show'));
+
+        await page.evaluate((id) => window.showEditModal(id), nonCcdId);
+        await page.waitForSelector('#editModal.show', { timeout: 5000 });
+        await expect(page.locator('#editCdaCoverageAuditSection'), 'non-CCD interface should hide the Coverage Audit section').toBeHidden();
     });
 
     // ─── Shared helper ──────────────────────────────────────────────────────────

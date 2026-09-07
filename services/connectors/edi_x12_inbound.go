@@ -1,11 +1,21 @@
 // services/connectors/edi_x12_inbound.go
 // EDI X12 Inbound Connector — polls a remote SFTP directory for X12 files
-// (835 phase 1). Structurally mirrors sftp_inbound.go (real SFTP protocol
-// via github.com/pkg/sftp, not shell-over-SSH — see that file's own header
-// for why) but uses the config key names already live in the
-// connectivity_types catalog for edi_x12_inbound (V69__EMR_Connectivity_Types.sql),
-// not SFTP-generic names — remote_path/polling_interval_seconds instead of
-// remote_dir/poll_interval_sec.
+// (835 phase 1).
+//
+// The actual SSH/SFTP mechanics (dial, auth, directory listing, download,
+// archive/delete, poll loop) live in sftp_poller.go, shared with
+// sftp_inbound.go — a real, confirmed duplication between the two files
+// (this connector was originally built by "structurally mirroring"
+// sftp_inbound.go rather than sharing it — every piece of the actual SSH/
+// SFTP handling was copy-pasted with renamed fields) was extracted into
+// that file during this round. This connector's own fields still hold its
+// own config values directly, using the key names already live in the
+// connectivity_types catalog for edi_x12_inbound
+// (V69__EMR_Connectivity_Types.sql) — remote_path/polling_interval_seconds
+// instead of SFTP-generic remote_dir/poll_interval_sec — plus the
+// phase-1-capability-boundary transport check no other SFTP connector
+// needs; toSFTPPollerConfig() below is the one place they're assembled
+// into the shared config shape.
 //
 // No pre-splitting or transaction-set filtering happens here: a file may
 // contain multiple ST...SE transaction sets, and processing/batch_splitter.go's
@@ -42,14 +52,11 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net"
 	"path"
-	"sort"
 	"time"
 
 	"ezhealthkonnect/models"
 
-	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -167,7 +174,7 @@ func (c *EDIX12InboundConnector) Initialize(config []byte) error {
 	c.readTimeout = time.Duration(readSec) * time.Second
 
 	if c.transport == "sftp" {
-		authMethods, err := c.buildAuthMethods()
+		authMethods, err := buildSFTPAuthMethods(c.authType, c.password, c.keyContent)
 		if err != nil {
 			return NewConnectorError(c.GetMetadata().TypeName, "initialize", err, false)
 		}
@@ -217,24 +224,32 @@ func (c *EDIX12InboundConnector) Validate() error {
 	return nil
 }
 
+// toSFTPPollerConfig assembles this connector's own fields into the shape
+// sftp_poller.go's shared functions take — see sftp_inbound.go's own
+// toSFTPPollerConfig for why this seam exists instead of a shared struct
+// with a shared set of field names.
+func (c *EDIX12InboundConnector) toSFTPPollerConfig() sftpPollerConfig {
+	return sftpPollerConfig{
+		Host:            c.host,
+		Port:            c.port,
+		SSHConfig:       c.sshConfig,
+		RemoteDir:       c.remotePath,
+		FilePattern:     c.filePattern,
+		MaxFilesPerRun:  c.maxFilesPerRun,
+		ConnectTimeout:  c.connectTimeout,
+		ReadTimeout:     c.readTimeout,
+		AfterProcessing: c.afterProcessing,
+		ArchiveDir:      c.archiveDir,
+		SourceType:      "edi_x12_sftp",
+		MessageType:     "EDI",
+		LogPrefix:       "[edi_x12_inbound]",
+	}
+}
+
 // TestConnection verifies SFTP connectivity and that remote_path is accessible.
 func (c *EDIX12InboundConnector) TestConnection(ctx context.Context) error {
-	conn, err := c.dialSSH(ctx)
-	if err != nil {
-		return NewConnectorError(c.GetMetadata().TypeName, "test_connection", err, true)
-	}
-	defer conn.Close()
-
-	sftpClient, err := sftp.NewClient(conn)
-	if err != nil {
-		return NewConnectorError(c.GetMetadata().TypeName, "test_connection",
-			fmt.Errorf("SFTP subsystem unavailable: %w", err), true)
-	}
-	defer sftpClient.Close()
-
-	if _, err := sftpClient.Stat(c.remotePath); err != nil {
-		return NewConnectorError(c.GetMetadata().TypeName, "test_connection",
-			fmt.Errorf("remote_path %q not accessible: %w", c.remotePath, err), false)
+	if retryable, err := testSFTPDirectory(ctx, c.toSFTPPollerConfig()); err != nil {
+		return NewConnectorError(c.GetMetadata().TypeName, "test_connection", err, retryable)
 	}
 	return nil
 }
@@ -244,154 +259,12 @@ func (c *EDIX12InboundConnector) Start(ctx context.Context, messageChan chan<- *
 	c.SetState(StateRunning)
 	log.Printf("[edi_x12_inbound] started polling %s:%s every %s", c.host, c.remotePath, c.pollInterval)
 
-	go func() {
-		ticker := time.NewTicker(c.pollInterval)
-		defer ticker.Stop()
-
-		stopCh := c.GetStopChannel()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-stopCh:
-				return
-			case <-ticker.C:
-				if err := c.pollOnce(ctx, messageChan); err != nil {
-					log.Printf("[edi_x12_inbound] poll error: %v", err)
-					c.RecordError(err)
-				}
-			}
-		}
-	}()
+	runSFTPPollLoop(ctx, c.GetStopChannel(), c.pollInterval, "[edi_x12_inbound]",
+		func(ctx context.Context) error {
+			return pollSFTPOnce(ctx, c.toSFTPPollerConfig(), messageChan, c.IncrementMessagesReceived)
+		},
+		c.RecordError,
+	)
 
 	return nil
-}
-
-// --------------------------------------------------------------------------
-// Internal helpers
-// --------------------------------------------------------------------------
-
-func (c *EDIX12InboundConnector) pollOnce(ctx context.Context, messageChan chan<- *models.InboundMessage) error {
-	conn, err := c.dialSSH(ctx)
-	if err != nil {
-		return fmt.Errorf("ssh dial: %w", err)
-	}
-	defer conn.Close()
-
-	sftpClient, err := sftp.NewClient(conn)
-	if err != nil {
-		return fmt.Errorf("open SFTP session: %w", err)
-	}
-	defer sftpClient.Close()
-
-	entries, err := sftpClient.ReadDir(c.remotePath)
-	if err != nil {
-		return fmt.Errorf("list %s: %w", c.remotePath, err)
-	}
-
-	var names []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		matched, _ := path.Match(c.filePattern, entry.Name())
-		if matched {
-			names = append(names, entry.Name())
-		}
-	}
-	if len(names) == 0 {
-		return nil
-	}
-	sort.Strings(names) // deterministic processing order
-	if len(names) > c.maxFilesPerRun {
-		names = names[:c.maxFilesPerRun]
-	}
-
-	log.Printf("[edi_x12_inbound] found %d file(s) to process", len(names))
-	c.IncrementMessagesReceived()
-
-	for _, name := range names {
-		filePath := path.Join(c.remotePath, name)
-
-		content, err := sftpDownloadWithTimeout(sftpClient, filePath, c.readTimeout)
-		if err != nil {
-			log.Printf("[edi_x12_inbound] download error for %s: %v", filePath, err)
-			continue
-		}
-
-		msg := &models.InboundMessage{
-			MessageID:      generateSFTPMessageID(filePath),
-			Content:        content,
-			SourceType:     "edi_x12_sftp",
-			SourceEndpoint: fmt.Sprintf("%s:%d", c.host, c.port),
-			MessageType:    "EDI",
-			ReceivedAt:     time.Now(),
-			SourceMetadata: map[string]string{
-				"sftp_host":     c.host,
-				"sftp_path":     filePath,
-				"sftp_filename": name,
-			},
-		}
-
-		select {
-		case messageChan <- msg:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-
-		if err := c.postProcess(sftpClient, filePath, name); err != nil {
-			log.Printf("[edi_x12_inbound] post-process error for %s: %v", filePath, err)
-		}
-	}
-
-	return nil
-}
-
-func (c *EDIX12InboundConnector) postProcess(client *sftp.Client, filePath, filename string) error {
-	switch c.afterProcessing {
-	case "delete":
-		return client.Remove(filePath)
-	case "archive":
-		if err := client.MkdirAll(c.archiveDir); err != nil {
-			return fmt.Errorf("mkdir %s: %w", c.archiveDir, err)
-		}
-		destPath := path.Join(c.archiveDir, filename)
-		if err := client.PosixRename(filePath, destPath); err != nil {
-			return fmt.Errorf("move %s -> %s: %w", filePath, destPath, err)
-		}
-		return nil
-	default: // "none"
-		return nil
-	}
-}
-
-func (c *EDIX12InboundConnector) dialSSH(ctx context.Context) (*ssh.Client, error) {
-	addr := fmt.Sprintf("%s:%d", c.host, c.port)
-	d := &net.Dialer{Timeout: c.connectTimeout}
-	netConn, err := d.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("ssh tcp dial: %w", err)
-	}
-	sshConn, chans, reqs, err := ssh.NewClientConn(netConn, addr, c.sshConfig)
-	if err != nil {
-		_ = netConn.Close()
-		return nil, fmt.Errorf("ssh handshake: %w", err)
-	}
-	return ssh.NewClient(sshConn, chans, reqs), nil
-}
-
-func (c *EDIX12InboundConnector) buildAuthMethods() ([]ssh.AuthMethod, error) {
-	switch c.authType {
-	case "key":
-		if c.keyContent == "" {
-			return nil, fmt.Errorf("key_content is required when auth_type is 'key'")
-		}
-		signer, err := ssh.ParsePrivateKey([]byte(c.keyContent))
-		if err != nil {
-			return nil, fmt.Errorf("parse private key: %w", err)
-		}
-		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
-	default:
-		return []ssh.AuthMethod{ssh.Password(c.password)}, nil
-	}
 }

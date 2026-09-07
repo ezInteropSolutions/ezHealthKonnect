@@ -181,6 +181,9 @@ class VisualStep {
         this.onErrorStrategy = data.onErrorStrategy || 'fail';
         this.executionMode = data.executionMode || 'sequential';
         this.description = data.description || '';
+        // User-defined alias for cross-step "steps.<alias>.step_output.*"
+        // addressing (e.g. control.loop child steps, V212 PAS-style scripts).
+        this.stepAlias = data.stepAlias || data.step_alias || null;
         // Auto-assign icon based on step type if not provided
         this.icon = data.icon || this.getIconForType(this.stepType);
         // Canvas position persistence (V39)
@@ -255,6 +258,7 @@ class VisualStep {
             on_error_strategy: this.onErrorStrategy,
             execution_mode: this.executionMode,
             description: this.description,
+            step_alias: this.stepAlias,
             icon: this.icon,
             position_x: this.position_x,
             position_y: this.position_y,
@@ -285,6 +289,7 @@ class VisualStep {
             onErrorStrategy: json.on_error_strategy,
             executionMode: json.execution_mode,
             description: json.description,
+            stepAlias: json.step_alias,
             icon: json.icon,
             position_x: json.position_x,
             position_y: json.position_y,
@@ -372,6 +377,7 @@ class VisualStep {
             onErrorStrategy: this.onErrorStrategy,
             executionMode: this.executionMode,
             description: this.description,
+            stepAlias: this.stepAlias,
             icon: this.icon
         });
     }

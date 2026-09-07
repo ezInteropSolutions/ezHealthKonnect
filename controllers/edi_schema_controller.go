@@ -62,13 +62,30 @@ type repeatSummary struct {
 	GroupFields []elementSummary  `json:"groupFields"`
 }
 
+// syntaxRuleSummary is one OOB (schema-defined) element-relational
+// constraint (edi.SyntaxRule) exposed for the edi.validate step's UI to
+// list and selectively disable. Positions are the raw, schema-native
+// position strings (e.g. "06") — carried through verbatim so a disable
+// request round-tripped from this same payload can be matched exactly
+// against edi.X12SegmentDef.SyntaxRules server-side (SyntaxRule has no
+// separate ID field; (segmentId, type, positions) IS its identity).
+// ElementKeys are the same positions resolved to human-readable element
+// keys, purely for display — mirrors the "never show raw numeric
+// positions in the UI" convention the custom-rule picker already follows.
+type syntaxRuleSummary struct {
+	Type        string   `json:"type"`
+	Positions   []string `json:"positions"`
+	ElementKeys []string `json:"elementKeys"`
+}
+
 type segmentSummary struct {
-	ID       string           `json:"id"`
-	Name     string           `json:"name,omitempty"`
-	Usage    string           `json:"usage,omitempty"`
-	MaxUse   string           `json:"maxUse,omitempty"`
-	Elements []elementSummary `json:"elements"`
-	Repeats  []repeatSummary  `json:"repeats,omitempty"`
+	ID          string              `json:"id"`
+	Name        string              `json:"name,omitempty"`
+	Usage       string              `json:"usage,omitempty"`
+	MaxUse      string              `json:"maxUse,omitempty"`
+	Elements    []elementSummary    `json:"elements"`
+	Repeats     []repeatSummary     `json:"repeats,omitempty"`
+	SyntaxRules []syntaxRuleSummary `json:"syntaxRules,omitempty"`
 }
 
 // GetSegments returns every segment in the shared library — name, own
@@ -115,10 +132,38 @@ func toSegmentSummary(seg *edi.X12SegmentDef) segmentSummary {
 			MaxGroups: r.MaxGroups, GroupFields: groupFields,
 		})
 	}
+	syntaxRules := make([]syntaxRuleSummary, 0, len(seg.SyntaxRules))
+	for _, r := range seg.SyntaxRules {
+		syntaxRules = append(syntaxRules, syntaxRuleSummary{
+			Type: r.Type, Positions: r.Positions,
+			ElementKeys: resolveElementKeys(seg, r.Positions),
+		})
+	}
+
 	return segmentSummary{
 		ID: seg.ID, Name: seg.Name, Usage: seg.Usage, MaxUse: seg.MaxUse,
-		Elements: elements, Repeats: repeats,
+		Elements: elements, Repeats: repeats, SyntaxRules: syntaxRules,
 	}
+}
+
+// resolveElementKeys maps a SyntaxRule's raw positions to their element
+// keys for display. A position with no matching element (shouldn't happen
+// for real schema data, but the same "degrade gracefully" convention as
+// the rest of this package) falls back to the raw position string rather
+// than dropping it, so the UI still shows something.
+func resolveElementKeys(seg *edi.X12SegmentDef, positions []string) []string {
+	keys := make([]string, 0, len(positions))
+	for _, pos := range positions {
+		key := pos
+		for _, el := range seg.Elements {
+			if el.Pos == pos {
+				key = el.Key
+				break
+			}
+		}
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func toElementSummary(el *edi.X12ElementDef) elementSummary {

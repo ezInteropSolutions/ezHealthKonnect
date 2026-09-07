@@ -208,6 +208,127 @@ func TestBuildFHIRBundle_RewritesReferencesToMatchingFullURL(t *testing.T) {
 	}
 }
 
+// ===============================================================
+// ARRAY-VALUED resourcePaths TESTS (EDI Phase 5)
+//
+// Added so a control.loop step's own aggregated array output (e.g. N
+// ExplanationOfBenefit resources, one per X12 835 claim) can be bundled
+// alongside single resources — a path resolving to []interface{} previously
+// meant every element was silently skipped with a warning ("not a FHIR
+// resource map"), so a Bundle could never actually be assembled from
+// loop-produced resources at all.
+// ===============================================================
+
+// TestBuildFHIRBundle_ArrayValuedResourcePath_SpreadsIntoMultipleEntries
+// verifies a single resourcePaths entry resolving to an array of resources
+// produces one bundle entry per array element, in order.
+func TestBuildFHIRBundle_ArrayValuedResourcePath_SpreadsIntoMultipleEntries(t *testing.T) {
+	config := map[string]interface{}{
+		"mode": "fhir_bundle",
+		"fhirBundle": map[string]interface{}{
+			"bundleType":    "collection",
+			"resourcePaths": []interface{}{"eobs"},
+		},
+	}
+	inputData := map[string]interface{}{
+		"eobs": []interface{}{
+			map[string]interface{}{"resourceType": "ExplanationOfBenefit", "id": "eob-1"},
+			map[string]interface{}{"resourceType": "ExplanationOfBenefit", "id": "eob-2"},
+			map[string]interface{}{"resourceType": "ExplanationOfBenefit", "id": "eob-3"},
+		},
+	}
+
+	output := runPayloadBuilder(t, config, inputData)
+	bundle := bundleFromOutput(t, output)
+
+	entries, ok := bundle["entry"].([]interface{})
+	if !ok || len(entries) != 3 {
+		t.Fatalf("expected 3 entries from the 3-element array, got %v", bundle["entry"])
+	}
+	for i, wantID := range []string{"eob-1", "eob-2", "eob-3"} {
+		resource := entries[i].(map[string]interface{})["resource"].(map[string]interface{})
+		if resource["id"] != wantID {
+			t.Errorf("entry[%d].resource.id = %v, want %q (array order preserved)", i, resource["id"], wantID)
+		}
+	}
+}
+
+// TestBuildFHIRBundle_ArrayValuedResourcePath_MixedWithSingleResourcePath is
+// the real Phase 5 shape: N looped ExplanationOfBenefit resources plus one
+// PaymentReconciliation, both in the same flat resources slice, with a
+// reference from the single resource into one of the array's own resources
+// resolving correctly — proving AssembleEntries needs no changes at all once
+// every resource lands in one flat slice (see fhir/r4/bundle_assembler.go's
+// own doc comment: it has no notion of which resourcePaths entry a resource
+// came from).
+func TestBuildFHIRBundle_ArrayValuedResourcePath_MixedWithSingleResourcePath(t *testing.T) {
+	config := map[string]interface{}{
+		"mode": "fhir_bundle",
+		"fhirBundle": map[string]interface{}{
+			"bundleType":    "collection",
+			"resourcePaths": []interface{}{"eobs", "paymentReconciliation"},
+		},
+	}
+	inputData := map[string]interface{}{
+		"eobs": []interface{}{
+			map[string]interface{}{"resourceType": "ExplanationOfBenefit", "id": "eob-1"},
+			map[string]interface{}{"resourceType": "ExplanationOfBenefit", "id": "eob-2"},
+		},
+		"paymentReconciliation": map[string]interface{}{
+			"resourceType": "PaymentReconciliation",
+			"id":           "pr-1",
+			"detail": []interface{}{
+				map[string]interface{}{"response": map[string]interface{}{"reference": "ExplanationOfBenefit/eob-1"}},
+			},
+		},
+	}
+
+	output := runPayloadBuilder(t, config, inputData)
+	bundle := bundleFromOutput(t, output)
+
+	entries, ok := bundle["entry"].([]interface{})
+	if !ok || len(entries) != 3 {
+		t.Fatalf("expected 3 entries (2 from the array path + 1 from the single path), got %v", bundle["entry"])
+	}
+
+	eob1FullURL, _ := entries[0].(map[string]interface{})["fullUrl"].(string)
+	pr := entries[2].(map[string]interface{})["resource"].(map[string]interface{})
+	detail := pr["detail"].([]interface{})[0].(map[string]interface{})
+	gotRef, _ := detail["response"].(map[string]interface{})["reference"].(string)
+
+	if gotRef != eob1FullURL {
+		t.Errorf("PaymentReconciliation.detail[0].response.reference = %q, want it rewritten to eob-1's fullUrl %q", gotRef, eob1FullURL)
+	}
+}
+
+// TestBuildFHIRBundle_ArrayValuedResourcePath_NonMapElementsAreSkipped
+// verifies a malformed element in the array (not a map, not a JSON-string
+// resource) is skipped rather than aborting the whole path's contribution.
+func TestBuildFHIRBundle_ArrayValuedResourcePath_NonMapElementsAreSkipped(t *testing.T) {
+	config := map[string]interface{}{
+		"mode": "fhir_bundle",
+		"fhirBundle": map[string]interface{}{
+			"bundleType":    "collection",
+			"resourcePaths": []interface{}{"eobs"},
+		},
+	}
+	inputData := map[string]interface{}{
+		"eobs": []interface{}{
+			map[string]interface{}{"resourceType": "ExplanationOfBenefit", "id": "eob-1"},
+			"not a resource",
+			42,
+		},
+	}
+
+	output := runPayloadBuilder(t, config, inputData)
+	bundle := bundleFromOutput(t, output)
+
+	entries, ok := bundle["entry"].([]interface{})
+	if !ok || len(entries) != 1 {
+		t.Fatalf("expected 1 entry (malformed elements skipped), got %v", bundle["entry"])
+	}
+}
+
 // TestBuildFHIRBundle_GeneratesNarrativeWhenAbsent verifies the narrative
 // auto-generation step (leveraging services/fhir_narrative, the same
 // generator services/cda_fhir already uses) actually runs for a supported

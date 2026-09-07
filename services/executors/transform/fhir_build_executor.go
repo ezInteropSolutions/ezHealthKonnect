@@ -46,24 +46,38 @@
 //	version         — "R4" (default)
 //	outputField     — dot-path to write the built resource (default: "fhirResource")
 //	fields          — []{targetPath, sourcePath, fallbackPaths?, valueMap?,
-//	                  literalValue?, transform?} — flat/nested, non-repeating
-//	                  element writes
-//	repeatingGroups — []{targetPath, rowsPath, fields: [...]} — one sub-object
-//	                  written per source row, for repeating elements
-//	                  (identifier[], name[], telecom[], ...)
+//	                  literalValue?, transform?, condition?} — flat/nested,
+//	                  non-repeating element writes
+//	repeatingGroups — []{targetPath, rowsPath, fields: [...], repeatingGroups?,
+//	                  condition?, groupCondition?} — one sub-object written
+//	                  per source row, for repeating elements (identifier[],
+//	                  name[], telecom[], ...)
 //
 // Assembling multiple resources into one Bundle needs no new code: add one
 // fhir.build step per resource type, then feed each step's outputField into
 // an existing services/executors/payload.PayloadBuilderExecutor "fhir_bundle"
 // mode step.
 //
-// Conditional field population also needs no new code/mechanism here:
-// applyFieldRow has no per-field predicate on purpose. Compute/branch the
-// value upstream instead, in a services/executors/control if_then_else or
-// switch_case step (its set_field/set_value action writes a plain message.*
-// value on the matched branch), then this step's field row reads it with an
-// ordinary sourcePath. This composes rather than duplicating branching logic
-// into a second, field-row-shaped conditional schema.
+// Conditional field/row population: fields and repeatingGroups both take an
+// optional condition (fhirFieldMappingRow.Condition / fhirRepeatingGroup.Condition)
+// evaluated via the shared services/executors.EvaluateCondition{Values}
+// engine — the same {field, operator, value|compareToField} shape and
+// mergeWithFallback(row, topLevel) convention hl7_build_executor.go's own
+// per-field/per-segment Condition already uses. A control.if_then_else/
+// switch_case step upstream still works for branching that applies before
+// this step runs at all, but it has no concept of "for each row this step is
+// about to loop over via repeatingGroups, conditionally include it" — that
+// loop only exists inside applyRepeatingGroup itself, so per-row filtering
+// has to live here too (e.g. skipping blank-padded EDI 835 CAS adjustment
+// trios while keeping populated ones in the same adjudication[] list — see
+// fhir_build_executor_test.go). repeatingGroups additionally takes
+// groupCondition, evaluated ONCE against the parent row/inputData before
+// rowsPath is even resolved (contrast with condition, evaluated once per
+// resolved row) — a fhirRepeatingGroup has no single/repeating cardinality
+// switch the way an hl7SegmentConfig does, so "should this whole list exist
+// at all" and "should this one row qualify" are two independent questions
+// needing two independent fields, not one field whose meaning depends on
+// context that doesn't exist here.
 package transform
 
 import (
@@ -115,6 +129,12 @@ type fhirFieldMappingRow struct {
 	// Transform is a cdafhir.DeclarativeTransformRegistry name; "" means the
 	// resolved value is written as-is (see this file's package doc comment).
 	Transform string `json:"transform,omitempty"`
+	// Condition, when set, gates whether this field is written at all —
+	// same {field, operator, value|compareToField} shape/evaluator
+	// hl7_build_executor.go's hl7FieldMappingRow.Condition already uses (see
+	// conditionMet below). A nil/empty condition always holds (today's
+	// existing behavior, unchanged).
+	Condition map[string]interface{} `json:"condition,omitempty"`
 }
 
 // fhirRepeatingGroup maps one repeating FHIR element (identifier[], name[],
@@ -123,10 +143,47 @@ type fhirFieldMappingRow struct {
 // row instead of two independently-indexed CollectAll passes that could drift
 // out of alignment (the same rationale declarative_schema.go's MappingRow.Fields
 // documents for its own CollectAll+Fields primitive).
+//
+// RepeatingGroups nests one repeating group inside another — e.g. building
+// item[].adjudication[] from each item row's own CAS-derived adjustment
+// rows. A nested group's RowsPath resolves relative to the CURRENT row (the
+// same row its own Fields are applied against), not the top-level input —
+// same relative-resolution convention edi_map_to_canonical_executor.go's own
+// nested "loops" config already established for a different step. When a
+// nested group's own TargetPath names a field the parent row's Fields (or an
+// earlier nested group) already populated as an array — e.g. two ordinary
+// indexed fields writing fixed adjudication[0]/adjudication[1] entries — the
+// nested group's own rows are appended after whatever's already there
+// (see applyRepeatingGroup) rather than overwriting it; this, combined with
+// field_utils.go's "[*]" wildcard-flatten path support (added alongside this
+// for EDI's CAS[*].adjustments shape), is what lets one declarative config
+// build a 2-level nested FHIR structure with no script.
 type fhirRepeatingGroup struct {
-	TargetPath string                `json:"targetPath"`
-	RowsPath   string                `json:"rowsPath"`
-	Fields     []fhirFieldMappingRow `json:"fields"`
+	TargetPath      string                `json:"targetPath"`
+	RowsPath        string                `json:"rowsPath"`
+	Fields          []fhirFieldMappingRow `json:"fields"`
+	RepeatingGroups []fhirRepeatingGroup  `json:"repeatingGroups,omitempty"`
+	// Condition, when set, is evaluated once per row RESOLVED from RowsPath
+	// (against that row, falling back to topLevel) — false skips only that
+	// one row, leaving other rows in the same list untouched. This is the
+	// "some rows in this array are real, others are padding" case (e.g. an
+	// EDI 835 CAS segment's unused adjustment-trio slots) that a
+	// pipeline-level control.if_then_else/switch_case step can't express,
+	// since those evaluate once against the whole message with no notion of
+	// "for each row this step is about to loop over."
+	Condition map[string]interface{} `json:"condition,omitempty"`
+	// GroupCondition, when set, is evaluated ONCE, against the PARENT
+	// row/inputData, BEFORE RowsPath is resolved at all — false means this
+	// group is never attempted: RowsPath is never resolved and TargetPath is
+	// never written (stays absent, not an empty array). This is the "should
+	// this whole list exist at all" case, a genuinely different question from
+	// Condition's "does this one resolved row qualify" — a
+	// fhirRepeatingGroup has no single/repeating cardinality switch the way
+	// hl7SegmentConfig does to give one field two meanings, and
+	// EvaluateCondition has no AND/OR to combine both questions into one
+	// check, so both fields are independently necessary (see
+	// fhir_build_executor_test.go's GroupConditionAndRowCondition_BothApplyTogether).
+	GroupCondition map[string]interface{} `json:"groupCondition,omitempty"`
 }
 
 type fhirBuildConfig struct {
@@ -185,10 +242,10 @@ func (e *FHIRBuildExecutor) Execute(
 	resource := map[string]interface{}{"resourceType": cfg.ResourceType}
 
 	for _, f := range cfg.Fields {
-		e.applyFieldRow(resource, inputData, f)
+		e.applyFieldRow(resource, inputData, inputData, f)
 	}
 	for _, rg := range cfg.RepeatingGroups {
-		e.applyRepeatingGroup(resource, inputData, rg)
+		e.applyRepeatingGroup(resource, inputData, inputData, rg)
 	}
 
 	durationMs := time.Since(start).Milliseconds()
@@ -216,25 +273,54 @@ func (e *FHIRBuildExecutor) Execute(
 }
 
 // applyRepeatingGroup builds one sub-object per row found at rg.RowsPath
-// (relative to inputData) and writes it at rg.TargetPath[idx] via
-// cdafhir.IndexedPath/SetFHIRPath.
-func (e *FHIRBuildExecutor) applyRepeatingGroup(resource map[string]interface{}, inputData map[string]interface{}, rg fhirRepeatingGroup) {
+// (relative to contextRow — inputData for a top-level group, or the current
+// row for a nested one) and writes each at target[rg.TargetPath][idx] via
+// cdafhir.IndexedPath/SetFHIRPath, continuing the index sequence from
+// whatever's already at that path (see startingIndex) rather than always
+// starting at 0 — see this struct's own doc comment for why. Any of rg's own
+// RepeatingGroups are then applied against each row's own subObj, relative to
+// that same row.
+func (e *FHIRBuildExecutor) applyRepeatingGroup(target map[string]interface{}, contextRow map[string]interface{}, topLevel map[string]interface{}, rg fhirRepeatingGroup) {
 	if rg.TargetPath == "" {
 		return
 	}
-	rows := resolveRows(inputData, rg.RowsPath)
-	idx := 0
+	if !e.conditionMet(rg.GroupCondition, contextRow, topLevel) {
+		return
+	}
+	rows := resolveRows(contextRow, rg.RowsPath)
+	idx := startingIndex(target, rg.TargetPath)
 	for _, row := range rows {
+		if !e.conditionMet(rg.Condition, row, topLevel) {
+			continue
+		}
 		subObj := map[string]interface{}{}
 		for _, f := range rg.Fields {
-			e.applyFieldRow(subObj, row, f)
+			e.applyFieldRow(subObj, row, topLevel, f)
+		}
+		for _, nested := range rg.RepeatingGroups {
+			e.applyRepeatingGroup(subObj, row, topLevel, nested)
 		}
 		if len(subObj) == 0 {
 			continue
 		}
-		cdafhir.SetFHIRPath(resource, cdafhir.IndexedPath(rg.TargetPath, idx), subObj)
+		cdafhir.SetFHIRPath(target, cdafhir.IndexedPath(rg.TargetPath, idx), subObj)
 		idx++
 	}
+}
+
+// startingIndex returns how many entries already sit at target[targetPath]
+// (0 if absent or not yet an array) — the index a repeatingGroup's own writes
+// should continue from, so a nested group appends after entries its parent
+// row's ordinary Fields (or an earlier nested group) already wrote at the
+// same TargetPath instead of clobbering them. targetPath is always a bare
+// field name here (every repeatingGroup TargetPath in this engine is, e.g.
+// "item", "identifier", "adjudication" — never a dotted/bracketed path), so a
+// direct map lookup is correct.
+func startingIndex(target map[string]interface{}, targetPath string) int {
+	if arr, ok := target[targetPath].([]interface{}); ok {
+		return len(arr)
+	}
+	return 0
 }
 
 // applyFieldRow resolves f's value against source (inputData for a top-level
@@ -246,8 +332,11 @@ func (e *FHIRBuildExecutor) applyRepeatingGroup(resource map[string]interface{},
 // value was found or the transform decided there is nothing to write (both
 // are normal, expected outcomes — not an error, per DeclarativeTransformFn's
 // own "return nil, nil for empty" convention).
-func (e *FHIRBuildExecutor) applyFieldRow(target map[string]interface{}, source map[string]interface{}, f fhirFieldMappingRow) {
+func (e *FHIRBuildExecutor) applyFieldRow(target map[string]interface{}, source map[string]interface{}, topLevel map[string]interface{}, f fhirFieldMappingRow) {
 	if f.TargetPath == "" {
+		return
+	}
+	if !e.conditionMet(f.Condition, source, topLevel) {
 		return
 	}
 
@@ -266,6 +355,51 @@ func (e *FHIRBuildExecutor) applyFieldRow(target map[string]interface{}, source 
 	}
 
 	cdafhir.SetFHIRPath(target, f.TargetPath, transformed)
+}
+
+// conditionMet reports whether condition holds against source (a
+// fhirRepeatingGroup row/field's own source, or contextRow for a
+// GroupCondition check), falling back to topLevel for anything condition's
+// field/compareToField doesn't find in source — mirrors
+// hl7_build_executor.go's own conditionMet/mergeWithFallback exactly (same
+// package `transform`, mergeWithFallback is reused directly, not
+// reimplemented), so a nested row's condition can check either its own
+// field or a genuinely top-level one without the config needing to know
+// which. A nil/empty condition always holds (no condition configured =
+// always build/populate, today's existing behavior unchanged).
+//
+// Deliberately resolves via executors.GetFieldValue, NOT
+// executors.EvaluateCondition's own GetNestedValue: GetFieldValue is the
+// same resolver this file already uses for SourcePath/FallbackPaths,
+// including predicate-bracket paths (e.g. "NM1[entityIdentifierCode=82]")
+// and native []map[string]interface{} slices (the shape EDI's parser
+// produces) — GetNestedValue supports neither, which would make a condition
+// on that same kind of path silently evaluate as "not met" even though the
+// identical path resolves fine for an ordinary field mapping. Evaluation
+// errors (e.g. a malformed regex) are logged and treated as not-met — a
+// broken condition should suppress the field/row, not crash the whole build.
+func (e *FHIRBuildExecutor) conditionMet(condition map[string]interface{}, source, topLevel map[string]interface{}) bool {
+	if len(condition) == 0 {
+		return true
+	}
+	merged := mergeWithFallback(source, topLevel)
+	field, _ := condition["field"].(string)
+	operator, _ := condition["operator"].(string)
+
+	fieldValue := executors.GetFieldValue(merged, field)
+	var compareValue interface{}
+	if compareToField, _ := condition["compareToField"].(string); compareToField != "" {
+		compareValue = executors.GetFieldValue(merged, compareToField)
+	} else {
+		compareValue = condition["value"]
+	}
+
+	met, err := executors.EvaluateConditionValues(operator, fieldValue, compareValue)
+	if err != nil {
+		log.Printf("  ⚠️  [fhir.build] condition evaluation failed, treating as not met: %v", err)
+		return false
+	}
+	return met
 }
 
 // resolveRawValue tries SourcePath, then each FallbackPaths candidate, then
@@ -311,10 +445,27 @@ func (e *FHIRBuildExecutor) Validate(step *models.TransformationStep) error {
 	return nil
 }
 
-// GetOutputVariables declares the built resource for the field picker.
+// GetOutputVariables declares the built resource for the field picker
+// (public/js/pipeline/utils/StepVariablesProvider.js -> FieldPathSearchComponent,
+// e.g. payload.builder's Resource Paths picker). Reads THIS step's own
+// configured outputField/resourceType rather than the "fhirResource"
+// default — a step whose author renamed outputField (e.g. the EDI 835
+// template's "message.paymentReconciliation") would otherwise have the
+// picker offer a path that doesn't actually exist in the pipeline data,
+// silently pointing users at the wrong field.
 func (e *FHIRBuildExecutor) GetOutputVariables(step *models.TransformationStep) []models.VariableDefinition {
+	outputField := "fhirResource"
+	resourceType := "FHIR"
+	if step != nil && step.Config != nil {
+		if v, ok := step.Config["outputField"].(string); ok && v != "" {
+			outputField = v
+		}
+		if v, ok := step.Config["resourceType"].(string); ok && v != "" {
+			resourceType = v
+		}
+	}
 	return []models.VariableDefinition{
-		{Name: "FHIR Resource", Path: "fhirResource", DataType: "object",
-			Description: "FHIR R4 resource built from configured field mappings", Category: "FHIR Transform"},
+		{Name: resourceType + " Resource", Path: outputField, DataType: "object",
+			Description: "FHIR R4 " + resourceType + " resource built from this step's configured field mappings", Category: "FHIR Transform"},
 	}
 }

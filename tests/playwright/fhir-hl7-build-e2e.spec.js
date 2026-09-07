@@ -456,7 +456,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
         await page.evaluate(() => window._fhirBuildBuilder.addField());
         await page.waitForTimeout(200);
         await page.locator('#fbbFieldsContainer .fbb-field-target').first().fill('status');
-        await page.evaluate(() => { window._fhirBuildBuilder.addField(); window._fhirBuildBuilder.removeField(-1, 1); });
+        await page.evaluate(() => { window._fhirBuildBuilder.addField(); window._fhirBuildBuilder.removeField('-1', 1); });
         await page.waitForTimeout(300);
 
         bannerText = await builder.innerText();
@@ -537,7 +537,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
 
         await page.evaluate(() => window._fhirBuildBuilder.addGroupField(0));
         await page.waitForTimeout(200);
-        await page.locator('.fbb-group-card[data-group-index="0"] .fbb-field-target').first().fill('language');
+        await page.locator('.fbb-group-card[data-group-path="0"] .fbb-field-target').first().fill('language');
         await page.evaluate(() => {
             window._fhirBuildBuilder.addGroupField(0);
             window._fhirBuildBuilder.removeField(0, 1);
@@ -550,6 +550,102 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
         expect(afterMapped.total).toBe(before.total + 1);
         expect(afterMapped.satisfied).toBe(before.satisfied + 1);
         expect(bannerText).not.toContain('communication.language');
+    });
+
+    test('FHB-E1-005c fhir.build nested repeatingGroups — add/configure/remove a nested group without disturbing its parent', async ({ page }) => {
+        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+
+        // EDI Phase 5's real shape: ExplanationOfBenefit.item[].adjudication[]
+        // — a group nested inside another group, addressed by a dot-joined
+        // path ("0" for the top-level group, "0.0" for its first nested
+        // child) rather than a flat integer, since a bare int can't express
+        // more than one level.
+        await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
+        await page.waitForLoadState('load');
+        await page.waitForFunction(() => window.pipelineBuilder && window.pipelineBuilder.pipeline != null, { timeout: 8000 });
+
+        await page.evaluate(() => {
+            window.pipelineBuilder?.addStep?.({ stepType: 'fhir.build', stepName: 'Build FHIR EOB Nested Groups', config: { resourceType: 'ExplanationOfBenefit' } });
+        });
+        await page.waitForTimeout(300);
+        await page.evaluate(() => {
+            const pb = window.pipelineBuilder;
+            const steps = pb?.getAllStepsFlat?.() || [];
+            const s = steps.find(st => st.stepName === 'Build FHIR EOB Nested Groups');
+            if (s && pb.propertiesPanel?.showStepProperties) pb.propertiesPanel.showStepProperties(s);
+        });
+        await page.waitForTimeout(1200);
+
+        const builder = page.locator('#fhirBuildBuilder');
+        await expect(builder).toBeVisible({ timeout: 3000 });
+
+        // Top-level group ("item").
+        await page.evaluate(() => window._fhirBuildBuilder.addRepeatingGroup(''));
+        await page.waitForTimeout(200);
+        await page.evaluate(() => window._fhirBuildBuilder.onGroupTargetChange('0', 'item'));
+        await page.waitForTimeout(200);
+
+        const topCard = page.locator('.fbb-group-card[data-group-path="0"]');
+        await expect(topCard).toBeVisible({ timeout: 2000 });
+
+        // Nested group ("adjudication") under the top-level one.
+        await page.evaluate(() => window._fhirBuildBuilder.addRepeatingGroup('0'));
+        await page.waitForTimeout(200);
+        await page.evaluate(() => window._fhirBuildBuilder.onGroupTargetChange('0.0', 'adjudication'));
+        await page.waitForTimeout(200);
+
+        const nestedCard = page.locator('.fbb-group-card[data-group-path="0.0"]');
+        await expect(nestedCard).toBeVisible({ timeout: 2000 });
+        // The nested card must render WITHIN the top-level card's own DOM
+        // subtree (that's what "nested" means in the UI), not as a sibling.
+        await expect(topCard.locator('.fbb-group-card[data-group-path="0.0"]')).toHaveCount(1);
+
+        // Set the nested group's own rowsPath (using the wildcard-flatten
+        // syntax field_utils.go now supports) and add one field to it.
+        await nestedCard.locator('.fbb-group-rowspath').first().fill('CAS[*].adjustments');
+        await page.evaluate(() => window._fhirBuildBuilder.addGroupField('0.0'));
+        await page.waitForTimeout(200);
+        await nestedCard.locator('.fbb-field-target').first().fill('amount.value');
+
+        // Also give the PARENT its own field, to prove the two levels'
+        // Fields tables don't cross-contaminate on sync (a real bug class
+        // this addressing scheme specifically has to avoid — a naive
+        // descendant-scoped query on the parent card would also pick up the
+        // nested card's own rows).
+        await page.evaluate(() => window._fhirBuildBuilder.addGroupField('0'));
+        await page.waitForTimeout(200);
+        await topCard.locator(':scope > #fbbGroupOwnFields-0 .fbb-field-target').first().fill('productOrService.coding[0].code');
+
+        const cfg = await page.evaluate(() => {
+            window._fhirBuildBuilder._syncDOMToConfig();
+            return window._fhirBuildBuilder._step.config.repeatingGroups;
+        });
+
+        expect(cfg).toHaveLength(1);
+        expect(cfg[0].targetPath).toBe('item');
+        expect(cfg[0].fields).toHaveLength(1);
+        expect(cfg[0].fields[0].targetPath).toBe('productOrService.coding[0].code');
+        expect(cfg[0].repeatingGroups).toHaveLength(1);
+        expect(cfg[0].repeatingGroups[0].targetPath).toBe('adjudication');
+        expect(cfg[0].repeatingGroups[0].rowsPath).toBe('CAS[*].adjustments');
+        expect(cfg[0].repeatingGroups[0].fields).toHaveLength(1);
+        expect(cfg[0].repeatingGroups[0].fields[0].targetPath).toBe('amount.value');
+
+        // Removing the nested group leaves the parent and its own field
+        // completely untouched.
+        await page.evaluate(() => window._fhirBuildBuilder.removeRepeatingGroup('0.0'));
+        await page.waitForTimeout(200);
+        await expect(page.locator('.fbb-group-card[data-group-path="0.0"]')).toHaveCount(0);
+        await expect(page.locator('.fbb-group-card[data-group-path="0"]')).toHaveCount(1);
+
+        const afterRemove = await page.evaluate(() => {
+            window._fhirBuildBuilder._syncDOMToConfig();
+            return window._fhirBuildBuilder._step.config.repeatingGroups;
+        });
+        expect(afterRemove).toHaveLength(1);
+        expect(afterRemove[0].targetPath).toBe('item');
+        expect(afterRemove[0].fields[0].targetPath).toBe('productOrService.coding[0].code');
+        expect(afterRemove[0].repeatingGroups || []).toHaveLength(0);
     });
 
     test('FHB-E1-006 fhir.build extension picker adds a field row with the correct predicate path and no transform', async ({ page }) => {
@@ -621,7 +717,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
         await page.waitForTimeout(200);
         await page.locator('#fbbFieldsContainer .fbb-field-target').first().fill('gender');
         await page.locator('#fbbFieldsContainer .fbb-field-literal').first().fill('XYZ');
-        await page.evaluate(() => { window._fhirBuildBuilder.addField(); window._fhirBuildBuilder.removeField(-1, 1); });
+        await page.evaluate(() => { window._fhirBuildBuilder.addField(); window._fhirBuildBuilder.removeField('-1', 1); });
         await page.waitForTimeout(300);
 
         await page.evaluate(() => window._fhirBuildBuilder.toggleValidatePanel());
@@ -1156,6 +1252,77 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
         expect(config.segments).toHaveLength(1); // parent untouched
         expect(config.segments[0].childSegments).toHaveLength(1); // one child removed
         expect(config.segments[0].childSegments[0].segment).toBe('OBX'); // the surviving one
+    });
+
+    // fhir.build's condition support mirrors hl7.build's own (FHB-E1-015/016
+    // above) but a repeatingGroup card carries TWO independent condition
+    // slots -- GroupCondition ("does this list exist at all") and Condition
+    // ("does this one resolved row qualify") -- which can be open and
+    // persisted at the same time, unlike a single hl7SegmentConfig.Condition.
+    // This proves the field-level editor, both group-card editors, and their
+    // independent persistence through _syncDOMToConfig all work end to end.
+    test('FHB-E1-019 fhir.build: field condition, group condition, and row condition all persist independently', async ({ page }) => {
+        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+
+        await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
+        await page.waitForLoadState('load');
+        await page.waitForFunction(() => window.pipelineBuilder && window.pipelineBuilder.pipeline != null, { timeout: 8000 });
+
+        await page.evaluate(() => {
+            window.pipelineBuilder?.addStep?.({
+                stepType: 'fhir.build', stepName: 'Build FHIR Condition Test',
+                config: {
+                    resourceType: 'ExplanationOfBenefit',
+                    fields: [{ targetPath: 'status', literalValue: 'active' }],
+                    repeatingGroups: [
+                        { targetPath: 'adjudication', rowsPath: 'trios', fields: [{ targetPath: 'amount.value', sourcePath: 'amount' }] },
+                    ],
+                },
+            });
+        });
+        await page.waitForTimeout(300);
+        await page.evaluate(() => {
+            const pb = window.pipelineBuilder;
+            const steps = pb?.getAllStepsFlat?.() || [];
+            const s = steps.find(st => st.stepName === 'Build FHIR Condition Test');
+            if (s && pb.propertiesPanel?.showStepProperties) pb.propertiesPanel.showStepProperties(s);
+        });
+        await page.waitForTimeout(1200);
+
+        // Field-level: toggle the ⚡ on the one top-level field row.
+        await page.locator('#fbbFieldsContainer button:has-text("⚡")').first().click();
+        const fieldEditor = page.locator('.fbb-field-condition-row .fbb-condition-editor');
+        await expect(fieldEditor).toBeVisible({ timeout: 2000 });
+        await fieldEditor.locator('.fbb-condition-field').fill('country');
+        await fieldEditor.locator('.fbb-condition-value').fill('US');
+
+        // Group-level (GroupCondition) — fill in before triggering any other
+        // action, since addCondition/removeCondition/toggle all call
+        // _syncDOMToConfig() first, which correctly discards a still-blank editor.
+        const groupCondEditor = page.locator('[id^="fbbGroupCond-"] .fbb-condition-editor');
+        await page.locator('button:has-text("+ Add condition (only build this list at all if")').first().click();
+        await expect(groupCondEditor).toBeVisible({ timeout: 2000 });
+        await expect(groupCondEditor).toContainText('ONLY BUILD THIS LIST AT ALL IF');
+        await groupCondEditor.locator('.fbb-condition-field').fill('isMultiClaim');
+        await groupCondEditor.locator('.fbb-condition-value').fill('true');
+
+        // Row-level (Condition) — the second _rerender() must not wipe the
+        // group condition just filled in above.
+        const rowCondEditor = page.locator('[id^="fbbGroupRowCond-"] .fbb-condition-editor');
+        await page.locator('button:has-text("+ Add row condition (skip a row if")').first().click();
+        await expect(rowCondEditor).toBeVisible({ timeout: 2000 });
+        await expect(rowCondEditor).toContainText('INCLUDE EACH ROW ONLY IF');
+        await expect(groupCondEditor, 'group condition editor must survive the row-condition rerender').toBeVisible();
+        await rowCondEditor.locator('.fbb-condition-field').fill('reasonCode');
+        await rowCondEditor.locator('.fbb-condition-operator').selectOption('not_equals');
+
+        const config = await page.evaluate(() => {
+            window._fhirBuildBuilder._syncDOMToConfig();
+            return window._fhirBuildBuilder._step.config;
+        });
+        expect(config.fields[0].condition).toEqual({ field: 'country', operator: 'equals', value: 'US' });
+        expect(config.repeatingGroups[0].groupCondition).toEqual({ field: 'isMultiClaim', operator: 'equals', value: 'true' });
+        expect(config.repeatingGroups[0].condition).toMatchObject({ field: 'reasonCode', operator: 'not_equals' });
     });
 
 });

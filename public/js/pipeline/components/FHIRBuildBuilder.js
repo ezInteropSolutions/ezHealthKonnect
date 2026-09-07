@@ -20,6 +20,26 @@
  *   destroy()            → void    tears down event listeners / AC refs
  */
 
+// Same 12 operators/labels as HL7BuildBuilder.js's own HL7_CONDITION_OPERATORS
+// — both evaluate through the same shared engine
+// (services/executors/condition.go's EvaluateConditionValues), so the choices
+// a user sees must read identically in both builders.
+const FHIR_CONDITION_OPERATORS = [
+    { value: 'equals', label: 'Equals' },
+    { value: 'not_equals', label: 'Not Equals' },
+    { value: 'contains', label: 'Contains' },
+    { value: 'starts_with', label: 'Starts With' },
+    { value: 'ends_with', label: 'Ends With' },
+    { value: 'greater_than', label: 'Greater Than' },
+    { value: 'greater_than_or_equal', label: 'Greater Than or Equal' },
+    { value: 'less_than', label: 'Less Than' },
+    { value: 'less_than_or_equal', label: 'Less Than or Equal' },
+    { value: 'exists', label: 'Exists' },
+    { value: 'not_exists', label: 'Does Not Exist' },
+    { value: 'regex_match', label: 'Matches Regex' },
+    { value: 'in_list', label: 'In List' },
+];
+
 class FHIRBuildBuilder {
     constructor(panel) {
         this._panel = panel;
@@ -30,6 +50,9 @@ class FHIRBuildBuilder {
         this._fieldCatalog = [];       // [{key, label, dataType, required}] for current resourceType+profile+version
         this._transformCatalog = {};   // name -> description
         this._fieldSearches = [];      // active FieldPathSearchComponent instances
+        // Keys of currently-expanded field-level condition editors: `${groupPathStr}|${fieldIndex}`
+        // (mirrors HL7BuildBuilder.js's own _conditionPanelOpen convention).
+        this._conditionPanelOpen = new Set();
         this._suggestPanelOpen = false;
         this._suggestSampleRowsText = '';
         this._suggestError = '';
@@ -167,7 +190,7 @@ class FHIRBuildBuilder {
                 <div id="fbbFieldsContainer">
                     ${cfg.fields.length === 0
                         ? `<div style="text-align:center;padding:1rem;color:#94a3b8;font-size:0.8rem;border:1px dashed #cbd5e1;border-radius:6px;">No fields mapped yet.</div>`
-                        : this._renderFieldsTable(cfg.fields, 'fbbFieldTargets', -1, this._validateIssueByRowKey)}
+                        : this._renderFieldsTable(cfg.fields, 'fbbFieldTargets', '-1', this._validateIssueByRowKey)}
                 </div>
             </div>
 
@@ -175,15 +198,15 @@ class FHIRBuildBuilder {
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
                     <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;margin:0;">Repeating Groups</label>
                     <button type="button" class="btn btn-sm btn-primary"
-                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addRepeatingGroup()">
+                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addRepeatingGroup('')">
                         <i class="fas fa-plus"></i> Add Group
                     </button>
                 </div>
-                <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">For repeating elements (<code>identifier[]</code>, <code>name[]</code>, <code>telecom[]</code>) — one sub-object is built per source row, so multiple fields from the same row stay aligned.</div>
+                <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">For repeating elements (<code>identifier[]</code>, <code>name[]</code>, <code>telecom[]</code>) — one sub-object is built per source row, so multiple fields from the same row stay aligned. A group can itself contain nested groups (e.g. <code>item[].adjudication[]</code>) — a nested group's Rows Path resolves relative to its own parent row, and its own rows are appended after any fields the parent row already wrote at the same Target Path (e.g. two fixed entries), never overwriting them.</div>
                 <div id="fbbGroupsContainer">
                     ${cfg.repeatingGroups.length === 0
                         ? `<div style="text-align:center;padding:1.2rem;color:#94a3b8;font-size:0.8rem;border:1px dashed #cbd5e1;border-radius:6px;">No repeating groups configured yet.</div>`
-                        : cfg.repeatingGroups.map((rg, i) => this._renderGroupCard(rg, i)).join('')}
+                        : cfg.repeatingGroups.map((rg, i) => this._renderGroupCard(rg, [i])).join('')}
                 </div>
             </div>
 
@@ -280,16 +303,25 @@ class FHIRBuildBuilder {
     }
 
     // ── Fields table (shared by top-level Fields and each group's Fields) ────
+    //
+    // groupIndex is always a STRING here: "-1" for the top-level Fields
+    // table, or a dot-joined path of indices (e.g. "0", "0.2") identifying
+    // which (possibly nested) repeatingGroup this table belongs to — see the
+    // path helpers below _renderGroupCard. A bare int can't safely round-trip
+    // through an inline onclick handler for a nested path like "0.2" (it
+    // would parse back as the NUMBER 0.2, not the two-level path), so the
+    // whole convention is string-based even for the top-level "-1" case.
 
     _renderFieldsTable(fields, datalistId, groupIndex, issuesByRowKey) {
         const esc = FHIRBuildBuilder._esc;
         const rowsHtml = fields.map((f, fi) => {
-            const rowKey = groupIndex === -1 ? `top:${fi}` : `group:${groupIndex}:${fi}`;
+            const rowKey = groupIndex === '-1' ? `top:${fi}` : `group:${groupIndex}:${fi}`;
             const issues = (issuesByRowKey || {})[rowKey];
             const hasError = issues && issues.some(i => i.severity === 'error');
             const badge = issues && issues.length
                 ? `<span title="${esc(issues.map(i => i.message).join('; '))}" style="color:${hasError ? '#dc2626' : '#d97706'};margin-left:4px;cursor:help;">${hasError ? '❌' : '⚠️'}</span>`
                 : '';
+            const condOpen = this._conditionPanelOpen.has(rowKey) || !!f.condition;
             return `
             <tr data-field-index="${fi}">
                 <td>
@@ -321,12 +353,21 @@ class FHIRBuildBuilder {
                         value="${esc(FHIRBuildBuilder._valueMapToText(f.valueMap))}" placeholder="A=active, R=resolved" autocomplete="off"
                         title="Comma-separated raw=value translations, passed into the Transform">
                 </td>
-                <td style="width:40px;text-align:center;">
+                <td style="width:70px;text-align:center;white-space:nowrap;">
+                    <button type="button" class="btn btn-sm ${f.condition ? 'btn-warning' : 'btn-outline-secondary'}"
+                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.toggleFieldConditionPanel('${esc(groupIndex)}', ${fi})"
+                        title="Populate only if a condition holds">⚡</button>
                     <button type="button" class="btn btn-sm btn-danger"
-                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.removeField(${groupIndex}, ${fi})"
+                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.removeField('${esc(groupIndex)}', ${fi})"
                         title="Remove field"><i class="fas fa-trash"></i></button>
                 </td>
-            </tr>`;
+            </tr>
+            ${condOpen ? `
+            <tr class="fbb-field-condition-row" data-field-index="${fi}">
+                <td colspan="7" style="padding-top:0;padding-bottom:0.4rem;">
+                    ${this._renderConditionEditor(f.condition, 'field', groupIndex, fi, 'INCLUDE THIS FIELD ONLY IF')}
+                </td>
+            </tr>` : ''}`;
         }).join('');
 
         return `
@@ -631,12 +672,24 @@ class FHIRBuildBuilder {
         (cfg.fields || []).forEach((f, fi) => {
             if (relates(f.targetPath)) keys.push('top:' + fi);
         });
-        (cfg.repeatingGroups || []).forEach((rg, gi) => {
-            (rg.fields || []).forEach((f, fi) => {
-                const full = rg.targetPath ? `${rg.targetPath}.${f.targetPath}` : f.targetPath;
-                if (relates(full)) keys.push(`group:${gi}:${fi}`);
+        // Recurse through nested repeatingGroups, accumulating both the
+        // dotted target-path prefix (for matching against the validator's
+        // own resolved path) and the dot-joined group path (for the rowKey,
+        // matching _renderFieldsTable's "group:<pathStr>:<fi>" convention).
+        const walk = (groups, pathPrefix, targetPrefix) => {
+            (groups || []).forEach((rg, gi) => {
+                const groupPathStr = pathPrefix ? `${pathPrefix}.${gi}` : `${gi}`;
+                const fullTargetPrefix = rg.targetPath
+                    ? (targetPrefix ? `${targetPrefix}.${rg.targetPath}` : rg.targetPath)
+                    : targetPrefix;
+                (rg.fields || []).forEach((f, fi) => {
+                    const full = fullTargetPrefix ? `${fullTargetPrefix}.${f.targetPath}` : f.targetPath;
+                    if (relates(full)) keys.push(`group:${groupPathStr}:${fi}`);
+                });
+                walk(rg.repeatingGroups, groupPathStr, fullTargetPrefix);
             });
-        });
+        };
+        walk(cfg.repeatingGroups, '', '');
         return keys;
     }
 
@@ -726,83 +779,275 @@ class FHIRBuildBuilder {
             });
     }
 
-    removeField(groupIndex, fieldIndex) {
+    removeField(groupPathStr, fieldIndex) {
         this._syncDOMToConfig();
         const cfg = this._step.config;
-        const target = groupIndex === -1 ? cfg.fields : (cfg.repeatingGroups[groupIndex] || {}).fields;
+        const target = groupPathStr === '-1' ? cfg.fields : (this._groupAtPath(FHIRBuildBuilder._parsePath(groupPathStr)) || {}).fields;
         if (!Array.isArray(target)) return;
         target.splice(fieldIndex, 1);
         this._rerender();
     }
 
-    // ── Repeating groups ──────────────────────────────────────────────────────
-
-    _renderGroupCard(rg, groupIndex) {
+    // ── Conditional field/row/group population ───────────────────────────────
+    // Renders one {field, operator, value} condition editor — shared markup
+    // for a field's own Condition (kind='field', gates whether just this one
+    // field is written), a repeating group's per-row Condition (kind='row',
+    // gates whether one RESOLVED row becomes an entry — some rows in the
+    // list are real, others are padding), and a repeating group's
+    // GroupCondition (kind='group', gates whether the list is built AT ALL,
+    // checked before rowsPath even resolves). Evaluated server-side by
+    // services/executors/transform/fhir_build_executor.go's own conditionMet
+    // — same {field, operator, value|compareToField} shape/evaluator
+    // HL7BuildBuilder.js's own condition editor already uses (mirrored here
+    // deliberately, down to the operator list, so the two builders read
+    // identically), against the current row with fallback to the top-level
+    // pipeline data. badgeText carries the kind-specific meaning (unlike
+    // HL7's single-condition-at-a-time cards, a FHIR group card can show its
+    // GroupCondition and Condition editors open at once, so the badge text
+    // itself — not just the button that opened it — has to say which
+    // question is being asked).
+    _renderConditionEditor(condition, kind, groupPathStr, fieldIndex, badgeText) {
         const esc = FHIRBuildBuilder._esc;
-        const datalistId = `fbbGroupTargets-${groupIndex}`;
-        const groupCatalog = this._catalogFor(rg.targetPath);
+        const cond = condition || {};
+        const operator = cond.operator || 'equals';
+        const needsValue = operator !== 'exists' && operator !== 'not_exists';
+        const isListOp = operator === 'in_list';
+        const valueText = isListOp
+            ? (Array.isArray(cond.value) ? cond.value.join(', ') : '')
+            : (cond.value !== undefined && cond.value !== null ? cond.value : '');
+        const fieldIndexAttr = fieldIndex === undefined || fieldIndex === null ? '' : ` data-field-index="${fieldIndex}"`;
+        const fieldIndexArg = fieldIndex === undefined || fieldIndex === null ? 'null' : fieldIndex;
 
         return `
-        <div class="fbb-group-card" data-group-index="${groupIndex}"
+        <div class="fbb-condition-editor" data-kind="${esc(kind)}" data-group-path="${esc(groupPathStr)}"${fieldIndexAttr}
+            style="display:flex;gap:0.3rem;align-items:center;flex-wrap:wrap;background:#fffbeb;border:1px dashed #f0c36d;border-radius:5px;padding:0.35rem 0.5rem;margin-bottom:0.4rem;">
+            <span style="font-size:0.66rem;color:#92400e;font-weight:600;white-space:nowrap;">${esc(badgeText)}</span>
+            <input type="text" class="form-control form-control-sm fbb-condition-field" style="flex:1 1 140px;font-family:monospace;font-size:0.75rem;"
+                value="${esc(cond.field)}" placeholder="field path (e.g. reasonCode)" autocomplete="off">
+            <select class="form-select form-select-sm fbb-condition-operator" style="flex:0 0 160px;font-size:0.75rem;"
+                onchange="window._fhirBuildBuilder && window._fhirBuildBuilder.onConditionOperatorChange('${esc(kind)}', '${esc(groupPathStr)}', ${fieldIndexArg}, this.value)">
+                ${FHIR_CONDITION_OPERATORS.map(op => `<option value="${op.value}" ${op.value === operator ? 'selected' : ''}>${op.label}</option>`).join('')}
+            </select>
+            ${needsValue ? `<input type="text" class="form-control form-control-sm fbb-condition-value" style="flex:1 1 120px;font-size:0.75rem;"
+                value="${esc(valueText)}" placeholder="${isListOp ? 'val1, val2' : 'value'}" autocomplete="off">` : ''}
+            <button type="button" class="btn btn-sm btn-outline-danger"
+                onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.removeCondition('${esc(kind)}', '${esc(groupPathStr)}', ${fieldIndexArg})"
+                title="Remove condition">×</button>
+        </div>`;
+    }
+
+    // _conditionTargetFor resolves the object a condition of this kind lives
+    // on: the field row itself for kind='field', or the repeatingGroup for
+    // kind='row'/'group' (row/group conditions only ever apply to a
+    // repeatingGroup — the top-level resource has no rowsPath/cardinality
+    // concept to gate).
+    _conditionTargetFor(kind, groupPathStr, fieldIndex) {
+        if (kind === 'field') {
+            const cfg = this._step.config;
+            const fields = groupPathStr === '-1' ? cfg.fields : (this._groupAtPath(FHIRBuildBuilder._parsePath(groupPathStr)) || {}).fields;
+            return Array.isArray(fields) ? fields[fieldIndex] : null;
+        }
+        return this._groupAtPath(FHIRBuildBuilder._parsePath(groupPathStr));
+    }
+
+    toggleFieldConditionPanel(groupPathStr, fieldIndex) {
+        this._syncDOMToConfig();
+        const key = `${groupPathStr}|${fieldIndex}`;
+        if (this._conditionPanelOpen.has(key)) {
+            this._conditionPanelOpen.delete(key);
+        } else {
+            this._conditionPanelOpen.add(key);
+            const f = this._conditionTargetFor('field', groupPathStr, fieldIndex);
+            if (f && !f.condition) f.condition = { field: '', operator: 'equals', value: '' };
+        }
+        this._rerender();
+    }
+
+    addCondition(kind, groupPathStr) {
+        this._syncDOMToConfig();
+        const rg = this._conditionTargetFor(kind, groupPathStr, null);
+        if (!rg) return;
+        const blank = { field: '', operator: 'equals', value: '' };
+        if (kind === 'group') rg.groupCondition = blank;
+        else if (kind === 'row') rg.condition = blank;
+        this._rerender();
+    }
+
+    removeCondition(kind, groupPathStr, fieldIndex) {
+        this._syncDOMToConfig();
+        const target = this._conditionTargetFor(kind, groupPathStr, fieldIndex);
+        if (!target) return;
+        if (kind === 'field') {
+            delete target.condition;
+            this._conditionPanelOpen.delete(`${groupPathStr}|${fieldIndex}`);
+        } else if (kind === 'group') {
+            delete target.groupCondition;
+        } else if (kind === 'row') {
+            delete target.condition;
+        }
+        this._rerender();
+    }
+
+    onConditionOperatorChange(kind, groupPathStr, fieldIndex, newOperator) {
+        this._syncDOMToConfig();
+        const target = this._conditionTargetFor(kind, groupPathStr, fieldIndex);
+        if (!target) return;
+        const cond = kind === 'group' ? target.groupCondition : target.condition;
+        if (cond) cond.operator = newOperator;
+        this._rerender();
+    }
+
+    // ── Repeating groups (recursively nestable) ──────────────────────────────
+    //
+    // A group is addressed by a PATH: an array of indices from the top-level
+    // cfg.repeatingGroups array down to the group itself — [0] is
+    // cfg.repeatingGroups[0], [0, 2] is that group's own
+    // repeatingGroups[2]. Encoded as a dot-joined string ("0", "0.2") in DOM
+    // attributes and onclick handlers (HTML attributes are strings; a bare
+    // int would round-trip a 2-level path like "0.2" back as the NUMBER 0.2,
+    // silently corrupting it), and parsed back via _parsePath. The empty
+    // string "" addresses the top-level cfg.repeatingGroups array itself
+    // (used as the "parent" when adding a new top-level group).
+
+    static _parsePath(pathStr) {
+        return (pathStr === '' || pathStr == null) ? [] : String(pathStr).split('.').map(Number);
+    }
+
+    // _groupsArrayFor(parentPath) returns the .repeatingGroups array a NEW
+    // sibling should be pushed into — the top-level cfg.repeatingGroups array
+    // when parentPath is empty, or that ancestor group's own (lazily
+    // initialised) nested array otherwise. Returns null if parentPath points
+    // at a group that no longer exists (stale path after a concurrent removal).
+    _groupsArrayFor(parentPath) {
+        let arr = this._step.config.repeatingGroups;
+        for (const idx of parentPath) {
+            const rg = arr && arr[idx];
+            if (!rg) return null;
+            if (!Array.isArray(rg.repeatingGroups)) rg.repeatingGroups = [];
+            arr = rg.repeatingGroups;
+        }
+        return arr;
+    }
+
+    // _groupAtPath(path) resolves the group AT path itself (path must be
+    // non-empty — there is no group object for the top-level array itself).
+    _groupAtPath(path) {
+        if (!path.length) return null;
+        const arr = this._groupsArrayFor(path.slice(0, -1));
+        return arr ? arr[path[path.length - 1]] : null;
+    }
+
+    // _accumulatedTargetPath builds the dotted prefix a nested group's own
+    // catalog/issue-matching should filter against — e.g. path [0,2] with
+    // cfg.repeatingGroups[0].targetPath="item" and its own
+    // repeatingGroups[2].targetPath="adjudication" -> "item.adjudication".
+    _accumulatedTargetPath(path) {
+        const parts = [];
+        let arr = this._step.config.repeatingGroups;
+        for (const idx of path) {
+            const rg = arr && arr[idx];
+            if (!rg) break;
+            if (rg.targetPath) parts.push(rg.targetPath);
+            arr = rg.repeatingGroups;
+        }
+        return parts.join('.');
+    }
+
+    _renderGroupCard(rg, path) {
+        const esc = FHIRBuildBuilder._esc;
+        const pathStr = path.join('.');
+        const datalistId = `fbbGroupTargets-${pathStr}`;
+        const ownFieldsId = `fbbGroupOwnFields-${pathStr}`;
+        const groupCatalog = this._catalogFor(this._accumulatedTargetPath(path));
+        const nested = Array.isArray(rg.repeatingGroups) ? rg.repeatingGroups : [];
+
+        return `
+        <div class="fbb-group-card" data-group-path="${esc(pathStr)}"
             style="border:1px solid #e2e8f0;border-radius:8px;padding:0.7rem 0.8rem;margin-bottom:0.8rem;background:#fafbfc;">
             <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.55rem;">
                 <input type="text" class="form-control form-control-sm fbb-group-target"
                     value="${esc(rg.targetPath)}" placeholder="e.g. identifier"
                     style="flex:0 0 220px;font-family:monospace;font-size:0.82rem;"
-                    onchange="window._fhirBuildBuilder && window._fhirBuildBuilder.onGroupTargetChange(${groupIndex}, this.value)">
-                <input type="text" class="form-control form-control-sm fbb-group-rowspath" data-search-kind="rowspath" data-group-index="${groupIndex}"
+                    onchange="window._fhirBuildBuilder && window._fhirBuildBuilder.onGroupTargetChange('${esc(pathStr)}', this.value)">
+                <input type="text" class="form-control form-control-sm fbb-group-rowspath" data-search-kind="rowspath" data-group-path="${esc(pathStr)}"
                     value="${esc(rg.rowsPath)}" placeholder="e.g. patientIdentifiers"
                     style="flex:1;font-family:monospace;font-size:0.8rem;">
                 <button type="button" class="btn btn-sm btn-outline-danger"
-                    onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.removeRepeatingGroup(${groupIndex})"
+                    onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.removeRepeatingGroup('${esc(pathStr)}')"
                     title="Remove group"><i class="fas fa-trash"></i></button>
             </div>
+            <div id="fbbGroupCond-${esc(pathStr)}" style="margin-bottom:0.4rem;">
+                ${rg.groupCondition
+                    ? this._renderConditionEditor(rg.groupCondition, 'group', pathStr, null, 'ONLY BUILD THIS LIST AT ALL IF')
+                    : `<button type="button" class="btn btn-sm btn-link" style="font-size:0.7rem;padding:0.1rem 0;"
+                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addCondition('group', '${esc(pathStr)}')">+ Add condition (only build this list at all if…)</button>`}
+            </div>
             <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">
-                Target Path: the repeating element on the resource (e.g. <code>identifier</code>).
-                Rows Path: pipeline field holding the array of source rows for this group.
+                Target Path: the repeating element on the resource, relative to this group's own parent (e.g. <code>identifier</code>, or <code>adjudication</code> inside an <code>item</code> group).
+                Rows Path: the array of source rows for this group, relative to its parent's own row (top-level: relative to the pipeline data). Supports a <code>[*]</code> segment to flatten a nested source array (e.g. <code>CAS[*].adjustments</code>).
             </div>
             <datalist id="${datalistId}">
                 ${groupCatalog.map(f => `<option value="${esc(f.key)}">${esc(f.label || f.key)}</option>`).join('')}
             </datalist>
-            ${(rg.fields || []).length === 0
-                ? `<div style="font-size:0.74rem;color:#94a3b8;margin-bottom:0.4rem;">No fields mapped yet.</div>`
-                : this._renderFieldsTableWithDatalist(rg.fields, datalistId, groupIndex, this._validateIssueByRowKey)}
+            <div id="fbbGroupRowCond-${esc(pathStr)}" style="margin-bottom:0.4rem;">
+                ${rg.condition
+                    ? this._renderConditionEditor(rg.condition, 'row', pathStr, null, 'INCLUDE EACH ROW ONLY IF')
+                    : `<button type="button" class="btn btn-sm btn-link" style="font-size:0.7rem;padding:0.1rem 0;"
+                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addCondition('row', '${esc(pathStr)}')">+ Add row condition (skip a row if…)</button>`}
+            </div>
+            <div id="${ownFieldsId}">
+                ${(rg.fields || []).length === 0
+                    ? `<div style="font-size:0.74rem;color:#94a3b8;margin-bottom:0.4rem;">No fields mapped yet.</div>`
+                    : this._renderFieldsTable(rg.fields, datalistId, pathStr, this._validateIssueByRowKey)}
+            </div>
             <button type="button" class="btn btn-sm btn-outline-primary"
-                onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addGroupField(${groupIndex})"
+                onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addGroupField('${esc(pathStr)}')"
                 style="font-size:0.72rem;padding:0.15rem 0.5rem;margin-top:0.4rem;">+ Add Field</button>
+
+            <div style="margin-top:0.7rem;padding:0.6rem 0 0 0.9rem;border-left:2px solid #e2e8f0;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;">
+                    <label style="font-size:0.7rem;font-weight:600;text-transform:uppercase;color:#94a3b8;margin:0;">Nested Groups</label>
+                    <button type="button" class="btn btn-sm btn-outline-primary"
+                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addRepeatingGroup('${esc(pathStr)}')"
+                        style="font-size:0.7rem;padding:0.1rem 0.45rem;">+ Add Nested Group</button>
+                </div>
+                <div id="fbbNestedGroups-${esc(pathStr)}">
+                    ${nested.length === 0
+                        ? `<div style="font-size:0.72rem;color:#cbd5e1;">None — this group's own rows are the entries built.</div>`
+                        : nested.map((child, ci) => this._renderGroupCard(child, [...path, ci])).join('')}
+                </div>
+            </div>
         </div>`;
     }
 
-    // _renderFieldsTable hardcodes the datalist id to the shared top-level one;
-    // group cards need their own scoped datalist id, so this thin wrapper lets
-    // both call sites share the same row-rendering logic without duplicating it.
-    _renderFieldsTableWithDatalist(fields, datalistId, groupIndex, issuesByRowKey) {
-        return this._renderFieldsTable(fields, datalistId, groupIndex, issuesByRowKey);
-    }
-
-    addRepeatingGroup() {
+    addRepeatingGroup(parentPathStr) {
         this._syncDOMToConfig();
-        this._step.config.repeatingGroups.push({ targetPath: '', rowsPath: '', fields: [] });
+        const arr = this._groupsArrayFor(FHIRBuildBuilder._parsePath(parentPathStr || ''));
+        if (!arr) return;
+        arr.push({ targetPath: '', rowsPath: '', fields: [] });
         this._rerender();
     }
 
-    removeRepeatingGroup(index) {
+    removeRepeatingGroup(pathStr) {
         this._syncDOMToConfig();
-        this._step.config.repeatingGroups.splice(index, 1);
+        const path = FHIRBuildBuilder._parsePath(pathStr);
+        const parentArr = this._groupsArrayFor(path.slice(0, -1));
+        if (!parentArr) return;
+        parentArr.splice(path[path.length - 1], 1);
         this._rerender();
     }
 
-    onGroupTargetChange(groupIndex, newTarget) {
+    onGroupTargetChange(pathStr, newTarget) {
         this._syncDOMToConfig();
-        const rg = this._step.config.repeatingGroups[groupIndex];
+        const rg = this._groupAtPath(FHIRBuildBuilder._parsePath(pathStr));
         if (!rg) return;
         rg.targetPath = newTarget.trim();
         this._rerender();
     }
 
-    addGroupField(groupIndex) {
+    addGroupField(pathStr) {
         this._syncDOMToConfig();
-        const rg = this._step.config.repeatingGroups[groupIndex];
+        const rg = this._groupAtPath(FHIRBuildBuilder._parsePath(pathStr));
         if (!rg) return;
         if (!Array.isArray(rg.fields)) rg.fields = [];
         rg.fields.push({ targetPath: '', sourcePath: '' });
@@ -856,21 +1101,50 @@ class FHIRBuildBuilder {
         const fieldsContainer = root.querySelector('#fbbFieldsContainer');
         if (fieldsContainer) this._syncFieldRows(fieldsContainer, cfg.fields);
 
+        // .fbb-group-card matches every card regardless of nesting depth —
+        // each carries its own resolvable data-group-path, so a flat query is
+        // sufficient (no need to walk the tree recursively). Each card's OWN
+        // target/rowsPath inputs are found correctly by a plain descendant
+        // query (they're placed before the nested-groups section in the
+        // markup, so querySelector's document-order match lands on the
+        // card's own input, not a nested child's) — but each card's OWN
+        // fields table is looked up by its unique per-path element id
+        // instead of a descendant query, since a plain
+        // card.querySelectorAll('tr[data-field-index]') would ALSO pick up
+        // rows belonging to nested child cards' own fields tables (they are
+        // DOM descendants of this card too), corrupting both this card's and
+        // the child's field arrays.
         root.querySelectorAll('.fbb-group-card').forEach(card => {
-            const gIdx = parseInt(card.dataset.groupIndex, 10);
-            const rg = cfg.repeatingGroups[gIdx];
+            const pathStr = card.dataset.groupPath || '';
+            const rg = this._groupAtPath(FHIRBuildBuilder._parsePath(pathStr));
             if (!rg) return;
             const targetEl = card.querySelector('.fbb-group-target');
             if (targetEl) rg.targetPath = targetEl.value.trim();
             const rowsPathEl = card.querySelector('.fbb-group-rowspath');
             if (rowsPathEl) rg.rowsPath = rowsPathEl.value.trim();
             if (!Array.isArray(rg.fields)) rg.fields = [];
-            this._syncFieldRows(card, rg.fields);
+            const ownFields = document.getElementById(`fbbGroupOwnFields-${pathStr}`);
+            if (ownFields) this._syncFieldRows(ownFields, rg.fields);
+
+            // Looked up by unique per-path id, NOT a card.querySelector
+            // descendant query -- a nested child group's own condition
+            // editors are also DOM descendants of this card, so a flat
+            // descendant query would read this card's condition from
+            // whichever editor happened to match first (parent's own, or a
+            // nested child's), corrupting one or the other. Same rationale
+            // ownFields above already follows for fields tables.
+            const groupCondEl = document.getElementById(`fbbGroupCond-${pathStr}`)?.querySelector('.fbb-condition-editor');
+            if (groupCondEl) this._syncOneCondition(groupCondEl, rg, 'groupCondition');
+            else delete rg.groupCondition;
+
+            const rowCondEl = document.getElementById(`fbbGroupRowCond-${pathStr}`)?.querySelector('.fbb-condition-editor');
+            if (rowCondEl) this._syncOneCondition(rowCondEl, rg, 'condition');
+            else delete rg.condition;
         });
     }
 
     _syncFieldRows(container, fields) {
-        container.querySelectorAll('tr[data-field-index]').forEach(row => {
+        container.querySelectorAll('tr[data-field-index]:not(.fbb-field-condition-row)').forEach(row => {
             const fIdx = parseInt(row.dataset.fieldIndex, 10);
             const f = fields[fIdx];
             if (!f) return;
@@ -884,7 +1158,32 @@ class FHIRBuildBuilder {
             f.transform = transformEl && transformEl.value ? transformEl.value : undefined;
             const valueMap = FHIRBuildBuilder._parseValueMapText(row.querySelector('.fbb-field-valuemap').value);
             f.valueMap = valueMap && Object.keys(valueMap).length > 0 ? valueMap : undefined;
+
+            const condRow = row.nextElementSibling;
+            const condEl = condRow && condRow.classList.contains('fbb-field-condition-row')
+                ? condRow.querySelector('.fbb-condition-editor') : null;
+            if (condEl) this._syncOneCondition(condEl, f, 'condition');
+            else delete f.condition;
         });
+    }
+
+    // _syncOneCondition reads one condition editor's 3 inline inputs back
+    // into target[conditionKey] — deleting the key entirely (not writing a
+    // blank {field:'',...}) when the field-path input is left empty, the
+    // same "empty condition means unconditional" convention
+    // HL7BuildBuilder.js's own _syncOneCondition uses.
+    _syncOneCondition(editor, target, conditionKey) {
+        const field = editor.querySelector('.fbb-condition-field').value.trim();
+        if (!field) { delete target[conditionKey]; return; }
+        const operator = editor.querySelector('.fbb-condition-operator').value;
+        const valueEl = editor.querySelector('.fbb-condition-value');
+        const condition = { field, operator };
+        if (valueEl) {
+            condition.value = operator === 'in_list'
+                ? valueEl.value.split(',').map(s => s.trim()).filter(Boolean)
+                : valueEl.value;
+        }
+        target[conditionKey] = condition;
     }
 
     _rerender() {

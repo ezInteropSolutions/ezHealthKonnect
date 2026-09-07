@@ -24,6 +24,17 @@ import (
 // Supported operators: equals, not_equals, contains, starts_with, ends_with,
 // greater_than, greater_than_or_equal, less_than, less_than_or_equal,
 // exists, not_exists, regex_match, in_list.
+//
+// This function's own field resolution (GetNestedValue) is deliberately left
+// untouched by fhir.build's need for a more capable resolver (predicate
+// brackets, native []map[string]interface{} handling — see
+// services/executors/field_utils.go's GetFieldValue) — IfThenElseExecutor has
+// a legacy-mode branch that depends on GetNestedValue's own data["message"]
+// auto-unwrap when evaluating against full outputData directly
+// (conditional_executor.go), and services/executors/control/ has no test
+// coverage to catch a regression there. See EvaluateConditionValues below,
+// which fhir.build calls directly after resolving fields itself via
+// GetFieldValue — same operator semantics, different, caller-chosen resolver.
 func EvaluateCondition(condition map[string]interface{}, data map[string]interface{}) (bool, error) {
 	field, _ := condition["field"].(string)
 	operator, _ := condition["operator"].(string)
@@ -37,6 +48,18 @@ func EvaluateCondition(condition map[string]interface{}, data map[string]interfa
 		compareValue = condition["value"]
 	}
 
+	return EvaluateConditionValues(operator, fieldValue, compareValue)
+}
+
+// EvaluateConditionValues applies operator to a pair of already-resolved
+// values — the field-resolution-agnostic half of EvaluateCondition, extracted
+// so a caller with its own field-resolution strategy (fhir.build's
+// conditionMet, services/executors/transform/fhir_build_executor.go) can
+// reuse the exact same operator semantics without inheriting
+// EvaluateCondition's own GetNestedValue resolution. EvaluateCondition itself
+// is unchanged externally by this extraction — it still resolves via
+// GetNestedValue, then delegates here.
+func EvaluateConditionValues(operator string, fieldValue, compareValue interface{}) (bool, error) {
 	switch operator {
 	case "equals":
 		return fmt.Sprintf("%v", fieldValue) == fmt.Sprintf("%v", compareValue), nil

@@ -347,7 +347,8 @@ exports.saveInterfaceAsTemplate = async (req, res) => {
                                            'parent_conditional_step_id', ts2.parent_conditional_step_id::text,
                                            'branch_type', ts2.branch_type,
                                            'case_value', ts2.case_value,
-                                           'step_alias', ts2.step_alias
+                                           'step_alias', ts2.step_alias,
+                                           'description', ts2.description
                                        )
                                    )
                                    FROM transformation_steps ts2

@@ -2582,14 +2582,20 @@ async function handleEditInterface(event) {
         interfaceData.dlq_config = dlqConfig;
     }
 
-    // Always collect CDA Coverage Audit config (not managed by config manager).
+    // Collect CDA Coverage Audit config (not managed by config manager) —
+    // only when the section is actually visible (populateEditForm in
+    // modal-components.js shows it solely for message_type === 'CCD'
+    // interfaces). A hidden, non-CCD interface's save leaves this field
+    // completely untouched rather than sending an explicit null for a
+    // setting that was never applicable to it in the first place.
     // "notify" is only included when at least one channel is checked — the
     // badge (always-on when enabled) doesn't need it, external notification
     // is opt-in on top. Sending an explicit `null` here (not omitting the
     // key) is what lets the backend tell "user unchecked this" apart from
     // "this editor doesn't know about the field" — see interfacesController.js.
+    const coverageSectionVisible = document.getElementById('editCdaCoverageAuditSection')?.style.display !== 'none';
     const coverageEnabledEl = document.getElementById('editCdaCoverageAuditEnabled');
-    if (coverageEnabledEl) {
+    if (coverageEnabledEl && coverageSectionVisible) {
         if (coverageEnabledEl.checked) {
             const coverageConfig = { enabled: true };
             // "entry" (the original, default granularity) is left as the

@@ -12,6 +12,14 @@
 // The real SFTP protocol (what this file now uses) is exactly what such
 // servers exist to serve.
 //
+// The actual SSH/SFTP mechanics (dial, auth, directory listing, download,
+// archive/delete, poll loop) live in sftp_poller.go, shared with
+// edi_x12_inbound.go — this connector's own fields still hold its own
+// config values directly (unchanged, so existing field-level tests keep
+// working); toSFTPPollerConfig() below is the one place they're assembled
+// into the shared config shape at the point pollSFTPOnce/testSFTPDirectory
+// actually need it.
+//
 // Configuration:
 //
 //	host              string   Remote hostname or IP
@@ -33,17 +41,13 @@ package connectors
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
-	"net"
 	"path"
-	"sort"
 	"strings"
 	"time"
 
 	"ezhealthkonnect/models"
 
-	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -153,7 +157,7 @@ func (c *SFTPInboundConnector) Initialize(config []byte) error {
 	c.readTimeout = time.Duration(readSec) * time.Second
 
 	// Build SSH auth
-	authMethods, err := c.buildSFTPInboundAuthMethods()
+	authMethods, err := buildSFTPAuthMethods(c.authType, c.password, c.keyContent)
 	if err != nil {
 		return NewConnectorError(c.GetMetadata().TypeName, "initialize", err, false)
 	}
@@ -193,24 +197,33 @@ func (c *SFTPInboundConnector) Validate() error {
 	return nil
 }
 
+// toSFTPPollerConfig assembles this connector's own fields into the shape
+// sftp_poller.go's shared functions take — the one seam between this
+// connector's own config surface and edi_x12_inbound.go's, which otherwise
+// differ in field names/defaults (remote_dir vs remote_path,
+// poll_interval_sec vs polling_interval_seconds).
+func (c *SFTPInboundConnector) toSFTPPollerConfig() sftpPollerConfig {
+	return sftpPollerConfig{
+		Host:            c.host,
+		Port:            c.port,
+		SSHConfig:       c.sshConfig,
+		RemoteDir:       c.remoteDir,
+		FilePattern:     c.filePattern,
+		MaxFilesPerRun:  c.maxFilesPerRun,
+		ConnectTimeout:  c.connectTimeout,
+		ReadTimeout:     c.readTimeout,
+		AfterProcessing: c.afterProcessing,
+		ArchiveDir:      c.archiveDir,
+		SourceType:      "sftp",
+		MessageType:     "",
+		LogPrefix:       "[sftp_inbound]",
+	}
+}
+
 // TestConnection verifies SFTP connectivity and that remote_dir is accessible.
 func (c *SFTPInboundConnector) TestConnection(ctx context.Context) error {
-	conn, err := c.dialSSHInbound(ctx)
-	if err != nil {
-		return NewConnectorError(c.GetMetadata().TypeName, "test_connection", err, true)
-	}
-	defer conn.Close()
-
-	sftpClient, err := sftp.NewClient(conn)
-	if err != nil {
-		return NewConnectorError(c.GetMetadata().TypeName, "test_connection",
-			fmt.Errorf("SFTP subsystem unavailable: %w", err), true)
-	}
-	defer sftpClient.Close()
-
-	if _, err := sftpClient.Stat(c.remoteDir); err != nil {
-		return NewConnectorError(c.GetMetadata().TypeName, "test_connection",
-			fmt.Errorf("remote_dir %q not accessible: %w", c.remoteDir, err), false)
+	if retryable, err := testSFTPDirectory(ctx, c.toSFTPPollerConfig()); err != nil {
+		return NewConnectorError(c.GetMetadata().TypeName, "test_connection", err, retryable)
 	}
 	return nil
 }
@@ -220,200 +233,14 @@ func (c *SFTPInboundConnector) Start(ctx context.Context, messageChan chan<- *mo
 	c.SetState(StateRunning)
 	log.Printf("[sftp_inbound] started polling %s:%s every %s", c.host, c.remoteDir, c.pollInterval)
 
-	go func() {
-		ticker := time.NewTicker(c.pollInterval)
-		defer ticker.Stop()
-
-		stopCh := c.GetStopChannel()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-stopCh:
-				return
-			case <-ticker.C:
-				if err := c.pollOnce(ctx, messageChan); err != nil {
-					log.Printf("[sftp_inbound] poll error: %v", err)
-					c.RecordError(err)
-				}
-			}
-		}
-	}()
+	runSFTPPollLoop(ctx, c.GetStopChannel(), c.pollInterval, "[sftp_inbound]",
+		func(ctx context.Context) error {
+			return pollSFTPOnce(ctx, c.toSFTPPollerConfig(), messageChan, c.IncrementMessagesReceived)
+		},
+		c.RecordError,
+	)
 
 	return nil
-}
-
-// --------------------------------------------------------------------------
-// Internal helpers
-// --------------------------------------------------------------------------
-
-// pollOnce connects, lists files via the real SFTP protocol, downloads and
-// processes each one.
-func (c *SFTPInboundConnector) pollOnce(ctx context.Context, messageChan chan<- *models.InboundMessage) error {
-	conn, err := c.dialSSHInbound(ctx)
-	if err != nil {
-		return fmt.Errorf("ssh dial: %w", err)
-	}
-	defer conn.Close()
-
-	sftpClient, err := sftp.NewClient(conn)
-	if err != nil {
-		return fmt.Errorf("open SFTP session: %w", err)
-	}
-	defer sftpClient.Close()
-
-	entries, err := sftpClient.ReadDir(c.remoteDir)
-	if err != nil {
-		return fmt.Errorf("list %s: %w", c.remoteDir, err)
-	}
-
-	var names []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		matched, _ := path.Match(c.filePattern, entry.Name())
-		if matched {
-			names = append(names, entry.Name())
-		}
-	}
-	if len(names) == 0 {
-		return nil
-	}
-	sort.Strings(names) // deterministic processing order
-	if len(names) > c.maxFilesPerRun {
-		names = names[:c.maxFilesPerRun]
-	}
-
-	log.Printf("[sftp_inbound] found %d file(s) to process", len(names))
-	c.IncrementMessagesReceived()
-
-	for _, name := range names {
-		filePath := path.Join(c.remoteDir, name)
-
-		content, err := sftpDownloadWithTimeout(sftpClient, filePath, c.readTimeout)
-		if err != nil {
-			log.Printf("[sftp_inbound] download error for %s: %v", filePath, err)
-			continue
-		}
-
-		msg := &models.InboundMessage{
-			MessageID:      generateSFTPMessageID(filePath),
-			Content:        content,
-			SourceType:     "sftp",
-			SourceEndpoint: fmt.Sprintf("%s:%d", c.host, c.port),
-			ReceivedAt:     time.Now(),
-			SourceMetadata: map[string]string{
-				"sftp_host":     c.host,
-				"sftp_path":     filePath,
-				"sftp_filename": name,
-			},
-		}
-
-		select {
-		case messageChan <- msg:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-
-		if err := c.postProcess(sftpClient, filePath, name); err != nil {
-			log.Printf("[sftp_inbound] post-process error for %s: %v", filePath, err)
-		}
-	}
-
-	return nil
-}
-
-// sftpDownloadWithTimeout reads a remote file's full content via the real
-// SFTP protocol, bounded by timeout (the blocking read runs in a goroutine so
-// a hung connection is reported as a timeout rather than blocking forever).
-func sftpDownloadWithTimeout(client *sftp.Client, remotePath string, timeout time.Duration) (string, error) {
-	type result struct {
-		content string
-		err     error
-	}
-	done := make(chan result, 1)
-	go func() {
-		f, err := client.Open(remotePath)
-		if err != nil {
-			done <- result{"", fmt.Errorf("open %s: %w", remotePath, err)}
-			return
-		}
-		defer f.Close()
-		b, err := io.ReadAll(f)
-		if err != nil {
-			done <- result{"", fmt.Errorf("read %s: %w", remotePath, err)}
-			return
-		}
-		done <- result{string(b), nil}
-	}()
-
-	select {
-	case r := <-done:
-		return r.content, r.err
-	case <-time.After(timeout):
-		return "", fmt.Errorf("download of %s timed out after %s", remotePath, timeout)
-	}
-}
-
-// postProcess moves or deletes the remote file after successful delivery,
-// via the real SFTP protocol (MkdirAll + PosixRename for archive, Remove for
-// delete — PosixRename rather than Rename so re-archiving a same-named file
-// on a retry doesn't hard-fail if the destination already exists).
-func (c *SFTPInboundConnector) postProcess(client *sftp.Client, filePath, filename string) error {
-	switch c.afterProcessing {
-	case "delete":
-		return client.Remove(filePath)
-	case "archive":
-		if err := client.MkdirAll(c.archiveDir); err != nil {
-			return fmt.Errorf("mkdir %s: %w", c.archiveDir, err)
-		}
-		destPath := path.Join(c.archiveDir, filename)
-		if err := client.PosixRename(filePath, destPath); err != nil {
-			return fmt.Errorf("move %s -> %s: %w", filePath, destPath, err)
-		}
-		return nil
-	default: // "none"
-		return nil
-	}
-}
-
-func (c *SFTPInboundConnector) dialSSHInbound(ctx context.Context) (*ssh.Client, error) {
-	addr := fmt.Sprintf("%s:%d", c.host, c.port)
-	d := &net.Dialer{Timeout: c.connectTimeout}
-	netConn, err := d.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("ssh tcp dial: %w", err)
-	}
-	sshConn, chans, reqs, err := ssh.NewClientConn(netConn, addr, c.sshConfig)
-	if err != nil {
-		_ = netConn.Close()
-		return nil, fmt.Errorf("ssh handshake: %w", err)
-	}
-	return ssh.NewClient(sshConn, chans, reqs), nil
-}
-
-func (c *SFTPInboundConnector) buildSFTPInboundAuthMethods() ([]ssh.AuthMethod, error) {
-	switch c.authType {
-	case "key":
-		if c.keyContent == "" {
-			return nil, fmt.Errorf("key_content is required when auth_type is 'key'")
-		}
-		signer, err := ssh.ParsePrivateKey([]byte(c.keyContent))
-		if err != nil {
-			return nil, fmt.Errorf("parse private key: %w", err)
-		}
-		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
-	default:
-		return []ssh.AuthMethod{ssh.Password(c.password)}, nil
-	}
-}
-
-// generateSFTPMessageID produces a reproducible message ID from the file path.
-func generateSFTPMessageID(filePath string) string {
-	ts := time.Now().UTC().Format("20060102150405")
-	base := path.Base(filePath)
-	return fmt.Sprintf("sftp_%s_%s", ts, base)
 }
 
 // filterNonEmpty filters empty/whitespace-only strings from a slice. No

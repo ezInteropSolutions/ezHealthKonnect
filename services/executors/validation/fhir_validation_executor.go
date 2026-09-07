@@ -347,9 +347,9 @@ func (fve *FHIRValidationExecutor) resolveSourceField(inputData map[string]inter
 		log.Printf("  ⚠️  [FHIR Validation] source_field '%s' resolved to nil — falling back to default search", sourceField)
 		return nil, false
 	}
-	data, ok := resolved.(map[string]interface{})
+	data, ok := asFHIRDataMap(resolved)
 	if !ok {
-		log.Printf("  ⚠️  [FHIR Validation] source_field '%s' resolved to %T, not an object — falling back to default search", sourceField, resolved)
+		log.Printf("  ⚠️  [FHIR Validation] source_field '%s' resolved to %T, not an object (or a JSON string of one) — falling back to default search", sourceField, resolved)
 		return nil, false
 	}
 	rt, _ := data["resourceType"].(string)
@@ -357,6 +357,29 @@ func (fve *FHIRValidationExecutor) resolveSourceField(inputData map[string]inter
 	log.Printf("  🔍 Found FHIR data via configured source_field '%s' (resourceType: %s, mode: %s)",
 		sourceField, rt, map[bool]string{true: "bundle", false: "resource"}[isBundle])
 	return data, isBundle
+}
+
+// asFHIRDataMap accepts either an already-decoded map[string]interface{} or
+// a JSON string of one, returning the map either way. Needed because
+// payload.builder's fhir_bundle mode outputs its assembled Bundle as an
+// already-marshaled JSON STRING (its "payload" field), not a map — there is
+// no separate map-shaped output anywhere in that executor — so a
+// source_field pointing at a payload.builder step's own output would
+// otherwise never resolve here, forcing a script step in between just to
+// json.Unmarshal it back (the exact bridge V212's PAS template needed
+// enrichment.script for). This mirrors payload_builder_executor.go's own
+// asFHIRResourceMap, applied on the READ side of the same shape mismatch.
+func asFHIRDataMap(v interface{}) (map[string]interface{}, bool) {
+	if m, ok := v.(map[string]interface{}); ok {
+		return m, true
+	}
+	if s, ok := v.(string); ok {
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(s), &m); err == nil {
+			return m, true
+		}
+	}
+	return nil, false
 }
 
 // findFHIRData — fixed-key fallback search, unchanged from v1

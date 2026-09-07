@@ -20,8 +20,15 @@
 // "parsedEDI".
 //
 // Config keys:
-//   sourceField — dot-path to the field holding raw EDI content (default: "raw")
-//   outputField — top-level key to write the validation Result under (default: "ediValidation")
+//   sourceField   — dot-path to the field holding raw EDI content (default: "raw")
+//   outputField   — top-level key to write the validation Result under (default: "ediValidation")
+//   disabledRules — []{segmentId, type, positions} — selectively suppresses specific OOB
+//                   (schema-defined) SyntaxRules for this step only. positions are the
+//                   raw, schema-native position strings GET /api/edi/schema/segments
+//                   already returns for each rule (edi.SyntaxRule has no separate ID
+//                   field, so (segmentId, type, positions) IS a rule's identity) — never
+//                   mutates the shared, cached spec, same isolation guarantee customRules
+//                   already provides.
 
 package transform
 
@@ -81,21 +88,54 @@ type ediCustomRule struct {
 	Positions []string `json:"positions"`
 }
 
-type ediValidateConfig struct {
-	SourceField string          `json:"sourceField"`
-	OutputField string          `json:"outputField"`
-	CustomRules []ediCustomRule `json:"customRules,omitempty"`
+// ediRuleRef identifies one OOB SyntaxRule to disable. Same
+// (segmentId, type, positions) identity GetSegments's own syntaxRules
+// summary returns — SyntaxRule has no separate ID field (edi/schema_types.go),
+// so this composite key IS the identity, and the UI round-trips positions
+// verbatim from that same API response rather than inventing its own IDs.
+type ediRuleRef struct {
+	SegmentID string   `json:"segmentId"`
+	Type      string   `json:"type"`
+	Positions []string `json:"positions"`
 }
 
-// specWithCustomRules returns a spec whose targeted segments' own
-// SyntaxRules are extended with the step's user-supplied customRules —
-// never mutating spec itself (the loader's cached, shared instance reused
-// across every Execute() call; mutating it would leak one pipeline's custom
-// rules into every other validation). Only segments actually targeted by a
-// rule get their own cloned *edi.X12SegmentDef (once per segment, even
-// across multiple rules targeting it); every other segment is the SAME
+type ediValidateConfig struct {
+	SourceField   string          `json:"sourceField"`
+	OutputField   string          `json:"outputField"`
+	CustomRules   []ediCustomRule `json:"customRules,omitempty"`
+	DisabledRules []ediRuleRef    `json:"disabledRules,omitempty"`
+}
+
+// positionsEqual compares two position sets for exact membership,
+// order-independent (a disable request round-trips the same array the
+// segments API returned, but comparing as a set rather than requiring
+// identical order is a cheap, harmless robustness margin).
+func positionsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	remaining := make(map[string]int, len(a))
+	for _, v := range a {
+		remaining[v]++
+	}
+	for _, v := range b {
+		remaining[v]--
+		if remaining[v] < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// specWithRuleOverrides returns a spec with disabledRules removed from and
+// customRules appended to their targeted segments' own SyntaxRules — never
+// mutating spec itself (the loader's cached, shared instance reused across
+// every Execute() call; mutating it would leak one pipeline's overrides
+// into every other validation). Only segments actually targeted by an
+// override get their own cloned *edi.X12SegmentDef (once per segment, even
+// across multiple overrides targeting it); every other segment is the SAME
 // shared pointer spec already has.
-func specWithCustomRules(spec *edi.X12SpecDef, rules []ediCustomRule) *edi.X12SpecDef {
+func specWithRuleOverrides(spec *edi.X12SpecDef, disabledRules []ediRuleRef, customRules []ediCustomRule) *edi.X12SpecDef {
 	cloned := &edi.X12SpecDef{
 		SpecVersion:     spec.SpecVersion,
 		Segments:        make(map[string]*edi.X12SegmentDef, len(spec.Segments)),
@@ -106,7 +146,42 @@ func specWithCustomRules(spec *edi.X12SpecDef, rules []ediCustomRule) *edi.X12Sp
 		cloned.Segments[id] = seg
 	}
 
-	for _, rule := range rules {
+	cloneOnce := func(segmentID string) *edi.X12SegmentDef {
+		original, ok := spec.Segments[segmentID]
+		if !ok {
+			return nil
+		}
+		if current := cloned.Segments[segmentID]; current != original {
+			return current // already cloned earlier in this same call
+		}
+		dup := *original
+		dup.SyntaxRules = append([]edi.SyntaxRule{}, original.SyntaxRules...)
+		cloned.Segments[segmentID] = &dup
+		return &dup
+	}
+
+	for _, ref := range disabledRules {
+		segCopy := cloneOnce(ref.SegmentID)
+		if segCopy == nil {
+			log.Printf("⚠️  [edi.validate] disabledRules references unknown segment %q — skipped", ref.SegmentID)
+			continue
+		}
+		filtered := segCopy.SyntaxRules[:0]
+		matched := false
+		for _, r := range segCopy.SyntaxRules {
+			if !matched && r.Type == ref.Type && positionsEqual(r.Positions, ref.Positions) {
+				matched = true
+				continue // drop it
+			}
+			filtered = append(filtered, r)
+		}
+		segCopy.SyntaxRules = filtered
+		if !matched {
+			log.Printf("⚠️  [edi.validate] disabledRules entry for segment %q type %q positions %v matched no OOB rule — skipped", ref.SegmentID, ref.Type, ref.Positions)
+		}
+	}
+
+	for _, rule := range customRules {
 		original, ok := spec.Segments[rule.SegmentID]
 		if !ok {
 			log.Printf("⚠️  [edi.validate] custom rule references unknown segment %q — skipped", rule.SegmentID)
@@ -118,13 +193,7 @@ func specWithCustomRules(spec *edi.X12SpecDef, rules []ediCustomRule) *edi.X12Sp
 			continue
 		}
 
-		segCopy := cloned.Segments[rule.SegmentID]
-		if segCopy == original { // not yet cloned this run
-			dup := *original
-			dup.SyntaxRules = append([]edi.SyntaxRule{}, original.SyntaxRules...)
-			segCopy = &dup
-			cloned.Segments[rule.SegmentID] = segCopy
-		}
+		segCopy := cloneOnce(rule.SegmentID)
 		segCopy.SyntaxRules = append(segCopy.SyntaxRules, edi.SyntaxRule{
 			Type: rule.Type, Positions: positions, Source: "custom",
 		})
@@ -214,14 +283,18 @@ func (e *EDIValidateExecutor) Execute(
 	}
 
 	spec := e.loader.Spec()
-	if len(cfg.CustomRules) > 0 {
+	if len(cfg.CustomRules) > 0 || len(cfg.DisabledRules) > 0 {
 		// Must merge BEFORE parsing, not after: edi.ParseTransactionSet only
 		// records a segment's raw values into ParseResult.SegmentInstances
 		// (checkSyntaxRules' own data source) when that segment's OWN spec
 		// entry already has at least one SyntaxRule — an optimization that
 		// would silently skip every custom rule on a segment with zero OOB
 		// rules (e.g. N3) if the merge happened after parsing instead.
-		spec = specWithCustomRules(spec, cfg.CustomRules)
+		// Disabling rules has no equivalent ordering requirement (a segment
+		// left with zero active rules simply stops needing to be recorded at
+		// all — correct either way), but both overrides share one spec clone
+		// per Execute() call regardless.
+		spec = specWithRuleOverrides(spec, cfg.DisabledRules, cfg.CustomRules)
 	}
 	parsed, err := edi.ParseTransactionSet(spec, rawEDI)
 	if err != nil {

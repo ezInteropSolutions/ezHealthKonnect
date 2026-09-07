@@ -184,22 +184,51 @@
                 },
                 {
                     typeName: 'sftp_inbound', displayName: 'SFTP File Reader', icon: '🔐', mode: 'pull',
-                    description: 'Polls a remote SFTP server directory for new files on a configurable schedule (cron). After downloading each file it can delete, move, or rename it on the server. Supports both password and SSH private key authentication.',
-                    notes: 'Requires a cron schedule on the interface. Set "After Processing" to delete or move to prevent reprocessing the same file.',
-                    required: ['host', 'port', 'username', 'remote_directory'],
+                    description: 'Polls a remote SFTP server directory for new files on a configurable interval. Uses the real SFTP protocol (not shell commands over SSH), so it works against properly locked-down SFTP-only servers. After downloading each file it can delete, archive, or leave it in place. Supports both password and SSH private key authentication.',
+                    notes: 'Set "After Processing" to delete or archive to prevent reprocessing the same file on the next poll.',
+                    required: ['host', 'username', 'remote_dir'],
                     keyFields: [
                         { name: 'host', type: 'string', required: true, default: '—', notes: 'SFTP server hostname or IP.' },
-                        { name: 'port', type: 'integer', required: true, default: '22', notes: 'Standard SSH/SFTP port.' },
+                        { name: 'port', type: 'integer', default: '22', notes: 'Standard SSH/SFTP port.' },
                         { name: 'username', type: 'string', required: true, default: '—', notes: 'SSH login username.' },
-                        { name: 'password', type: 'string (password)', default: '—', notes: 'SSH password. Leave blank if using private key.' },
-                        { name: 'private_key_path', type: 'string', default: '—', notes: 'Path to SSH private key file (alternative to password).' },
-                        { name: 'remote_directory', type: 'string', required: true, default: '—', notes: 'Remote path to poll for new files.' },
+                        { name: 'auth_type', type: 'enum', default: 'password', notes: 'password | key. Selecting "key" shows the Private Key field below instead of Password.' },
+                        { name: 'password', type: 'string (password)', default: '—', notes: 'SSH password. Only used when Auth Type = password.' },
+                        { name: 'key_content', type: 'string (password)', default: '—', notes: 'Full PEM private key text. Only used when Auth Type = key — paste it directly, or use the "Browse for key file…" button to read it from a local file.' },
+                        { name: 'remote_dir', type: 'string', required: true, default: '/inbox', notes: 'Remote path to poll for new files.' },
                         { name: 'file_pattern', type: 'string', default: '*.hl7', notes: 'Glob pattern to match files (e.g. *.hl7, ADT_*.txt).' },
-                        { name: 'after_processing', type: 'enum', default: 'move', notes: 'delete | move | rename | nothing.' },
-                        { name: 'archive_directory', type: 'string', default: '—', notes: 'Remote path to move processed files to.' },
-                        { name: 'max_files_per_poll', type: 'integer', default: '100', notes: 'Cap per cron run to avoid overload.' }
+                        { name: 'after_processing', type: 'enum', default: 'archive', notes: 'delete | archive | none.' },
+                        { name: 'archive_dir', type: 'string', default: '<remote_dir>/processed', notes: 'Remote path to move processed files to when After Processing = archive.' },
+                        { name: 'max_files_per_run', type: 'integer', default: '100', notes: 'Cap per poll cycle to avoid overload.' },
+                        { name: 'poll_interval_sec', type: 'integer', default: '30', notes: 'Seconds between poll cycles.' },
+                        { name: 'connect_timeout', type: 'integer', default: '10', notes: 'SSH connect timeout in seconds.' },
+                        { name: 'read_timeout', type: 'integer', default: '60', notes: 'Per-file download timeout in seconds.' }
                     ],
-                    example: { connectorType: 'sftp_inbound', config: { host: 'sftp.partner.org', port: 22, username: 'hl7feed', private_key_path: '/certs/sftp_key', remote_directory: '/outbound/hl7', file_pattern: '*.hl7', after_processing: 'move', archive_directory: '/processed/hl7', max_files_per_poll: 50 } }
+                    example: { connectorType: 'sftp_inbound', config: { host: 'sftp.partner.org', port: 22, username: 'hl7feed', auth_type: 'key', key_content: '-----BEGIN PRIVATE KEY-----...', remote_dir: '/outbound/hl7', file_pattern: '*.hl7', after_processing: 'archive', archive_dir: '/outbound/hl7/processed', max_files_per_run: 50 } }
+                },
+                {
+                    typeName: 'edi_x12_inbound', displayName: 'EDI X12 Inbound (835 Remittance)', icon: '💰', mode: 'pull',
+                    description: 'Polls a remote SFTP directory for X12 EDI files (phase 1 supports the 835 Health Care Claim Payment/Advice transaction set — remittance/payment data from a payer). A file may contain multiple ST...SE transaction sets; the engine splits them centrally after ingestion, so this connector does not need to. Downstream, use edi.parse → edi.validate to turn the raw X12 into structured JSON and check it against the X12 5010 standard.',
+                    notes: 'Transport is locked to SFTP in phase 1 — HTTP and AS2 are named future phases (the field stays selectable, and widens later, rather than being removed). Transaction Types is informational only today: 835 is the only transaction set implemented end-to-end, so no filtering actually happens yet.',
+                    required: ['transport', 'host', 'username'],
+                    keyFields: [
+                        { name: 'transport', type: 'enum', required: true, default: 'sftp', notes: 'Only "sftp" is implemented in phase 1 — any other value fails validation with a clear error rather than silently no-op\'ing.' },
+                        { name: 'host', type: 'string', required: true, default: '—', notes: 'SFTP server hostname or IP.' },
+                        { name: 'port', type: 'integer', default: '22', notes: 'Standard SSH/SFTP port.' },
+                        { name: 'username', type: 'string', required: true, default: '—', notes: 'SSH login username.' },
+                        { name: 'auth_type', type: 'enum', default: 'password', notes: 'password | key. Selecting "key" shows the Private Key field below instead of Password.' },
+                        { name: 'password', type: 'string (password)', default: '—', notes: 'SSH password. Only used when Auth Type = password.' },
+                        { name: 'key_content', type: 'string (password)', default: '—', notes: 'Full PEM private key text. Only used when Auth Type = key — paste it directly, or use the "Browse for key file…" button to read it from a local file.' },
+                        { name: 'remote_path', type: 'string', default: '/incoming', notes: 'Remote directory to poll for new 835 files.' },
+                        { name: 'file_pattern', type: 'string', default: '*.edi', notes: 'Glob pattern to match files.' },
+                        { name: 'transaction_types', type: 'array (checkbox list)', default: '["835"]', notes: 'Which X12 transaction sets to accept. Only 835 is selectable today — 837/270/271 are later phases.' },
+                        { name: 'after_processing', type: 'enum', default: 'archive', notes: 'archive | delete | none.' },
+                        { name: 'archive_dir', type: 'string', default: '<remote_path>/processed', notes: 'Remote path to move processed files to when After Processing = archive.' },
+                        { name: 'max_files_per_run', type: 'integer', default: '100', notes: 'Cap per poll cycle to avoid overload.' },
+                        { name: 'polling_interval_seconds', type: 'integer', default: '300', notes: 'Seconds between poll cycles.' },
+                        { name: 'connect_timeout', type: 'integer', default: '10', notes: 'SSH connect timeout in seconds.' },
+                        { name: 'read_timeout', type: 'integer', default: '60', notes: 'Per-file download timeout in seconds.' }
+                    ],
+                    example: { connectorType: 'edi_x12_inbound', config: { transport: 'sftp', host: 'payer-sftp.example.com', remote_path: '/incoming', file_pattern: '*.edi', polling_interval_seconds: 300, after_processing: 'archive', transaction_types: ['835'] } }
                 },
                 {
                     typeName: 'file_listener', displayName: 'File System Listener', icon: '📁', mode: 'pull',

@@ -453,7 +453,20 @@ func resolveFHIRFieldValue(data map[string]interface{}, path string) interface{}
 	return resolveJSONPathValue(fhirData, path)
 }
 
-// resolveJSONPathValue retrieves value using dot notation with array support
+// resolveJSONPathValue retrieves value using dot notation with array support.
+// The returned value is normalised via normaliseResolvedValue so a caller
+// asserting ".([]interface{})" (every existing caller does — GetFieldValue's
+// own consumers, resolveRows in map_to_canonical_executor.go shared by
+// fhir.build's own RowsPath resolution, ...) gets a consistent result
+// whether the path ended by walking INTO an array (already normalised by
+// asInterfaceSlice inside resolvePathParts) or landed EXACTLY ON a bare
+// array key with no further bracket to consume (e.g. "loops.2000[0].loops.
+// 2100" — the walk's last step is a plain map access, so nothing inside
+// resolvePathParts ever touched the value it returns). Without this, a path
+// ending exactly at a native []map[string]interface{} array (edi/loop_engine.go's
+// own shape) would return that concrete type unnormalised, silently breaking
+// every ".([]interface{})" caller — caught by EDI Phase 5's own real-sample
+// integration test.
 func resolveJSONPathValue(data map[string]interface{}, path string) interface{} {
 	if path == "" {
 		return nil
@@ -461,33 +474,102 @@ func resolveJSONPathValue(data map[string]interface{}, path string) interface{} 
 
 	// Try direct key first
 	if val, ok := data[path]; ok {
-		return val
+		return normaliseResolvedValue(val)
 	}
 
-	// Parse path with array indices support
 	parts := parseJSONPath(path)
-	var current interface{} = data
+	return normaliseResolvedValue(resolvePathParts(data, parts))
+}
 
-	for _, part := range parts {
-		if part.isArray {
-			// Array access
-			if arr, ok := current.([]interface{}); ok {
-				if part.index >= 0 && part.index < len(arr) {
-					current = arr[part.index]
-				} else {
-					return nil
-				}
-			} else {
+// normaliseResolvedValue converts a []map[string]interface{} result into
+// []interface{} (via asInterfaceSlice) so every caller of
+// resolveJSONPathValue/GetFieldValue sees one consistent array
+// representation regardless of the underlying native Go type. Any other
+// value (map, scalar, already []interface{}, nil) passes through unchanged.
+func normaliseResolvedValue(v interface{}) interface{} {
+	if _, isMapSlice := v.([]map[string]interface{}); !isMapSlice {
+		return v
+	}
+	arr, _ := asInterfaceSlice(v)
+	return arr
+}
+
+// resolvePathParts walks parts against root, handling map access, numeric
+// array indexing, "[field=value]" predicate selection, and "[*]" wildcard
+// flattening. Recursive (rather than the single flat loop this replaced)
+// because a wildcard has to resolve the REST of the path independently
+// within each array element before combining the results — every other part
+// kind still narrows "current" step by step exactly as before.
+func resolvePathParts(root interface{}, parts []pathPart) interface{} {
+	current := root
+
+	for i, part := range parts {
+		switch {
+		case part.isWildcard:
+			// Flatten: resolve the remaining path within EACH element of the
+			// current array, then concatenate every element's own result
+			// (itself an array, or a single value) into one flat slice. This
+			// is what turns e.g. X12's "CAS[*].adjustments" -- an array of CAS
+			// occurrences, each with its own adjustments[] sub-array -- into
+			// one flat row list a repeatingGroup's RowsPath can iterate,
+			// without a script or a second nesting level of repeatingGroups.
+			arr, ok := asInterfaceSlice(current)
+			if !ok {
 				return nil
 			}
-		} else {
-			// Map access
-			if currentMap, ok := current.(map[string]interface{}); ok {
-				current = currentMap[part.key]
-				if current == nil {
-					return nil
+			remaining := parts[i+1:]
+			var flattened []interface{}
+			for _, el := range arr {
+				sub := resolvePathParts(el, remaining)
+				if sub == nil {
+					continue
 				}
-			} else {
+				// sub is the recursive result for ONE array element, which can
+				// itself be []map[string]interface{} (e.g. one CAS occurrence's
+				// own "adjustments" — the same native, non-JSON-round-tripped
+				// shape asInterfaceSlice exists for above), not just
+				// []interface{} — reuse it here too, or a native map-slice
+				// result would be appended as ONE opaque element instead of
+				// being flattened into its own rows.
+				if subArr, ok := asInterfaceSlice(sub); ok {
+					flattened = append(flattened, subArr...)
+				} else {
+					flattened = append(flattened, sub)
+				}
+			}
+			return flattened
+
+		case part.isArray:
+			arr, ok := asInterfaceSlice(current)
+			if !ok {
+				return nil
+			}
+			if part.index < 0 || part.index >= len(arr) {
+				return nil
+			}
+			current = arr[part.index]
+
+		case part.isPredicate:
+			// First element whose predicateField stringifies to
+			// predicateValue. Not found, or current isn't an array, -> nil,
+			// same "absent, not an error" convention as every other miss here.
+			arr, ok := asInterfaceSlice(current)
+			if !ok {
+				return nil
+			}
+			match := findPredicateMatch(arr, part.predicateField, part.predicateValue)
+			if match == nil {
+				return nil
+			}
+			current = match
+
+		default:
+			currentMap, ok := current.(map[string]interface{})
+			if !ok {
+				return nil
+			}
+			current = currentMap[part.key]
+			if current == nil {
 				return nil
 			}
 		}
@@ -496,15 +578,69 @@ func resolveJSONPathValue(data map[string]interface{}, path string) interface{} 
 	return current
 }
 
+// asInterfaceSlice normalises current into a []interface{} view, accepting
+// both the shape a JSON round-trip produces ([]interface{}) and the shape
+// edi/loop_engine.go's own parser actually builds in-process
+// ([]map[string]interface{} — matchSegmentSequence's own out[segID] =
+// append(arr, instance) with arr []map[string]interface{}). Pipeline steps
+// pass data between each other as live Go values with NO JSON round-trip
+// (services/transformation_pipeline_service.go passes a shallow copy of the
+// same in-memory message map to each step's Execute call), so EDI-parsed
+// loop/repeat-group arrays reaching this resolver via a real pipeline run
+// are genuinely []map[string]interface{}, not []interface{} — a real bug
+// this file's numeric-index branch already had before predicate/wildcard
+// support was added, caught by EDI Phase 5's own real-sample integration
+// test rather than left latent.
+func asInterfaceSlice(v interface{}) ([]interface{}, bool) {
+	switch arr := v.(type) {
+	case []interface{}:
+		return arr, true
+	case []map[string]interface{}:
+		out := make([]interface{}, len(arr))
+		for i, m := range arr {
+			out[i] = m
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
 // pathPart represents a part of a JSON path
 type pathPart struct {
 	key     string
 	isArray bool
 	index   int
+
+	// isPredicate marks a "[field=value]" bracket (as opposed to a numeric
+	// "[N]" index) — added for EDI/FHIR-build declarative sourcePaths that
+	// need to pick one element out of an array by a field's value (e.g. an
+	// X12 NM1 segment occurrence by its own entityIdentifierCode) without a
+	// script or a repeating-group step. See resolveJSONPathValue's handling
+	// below for the match semantics.
+	isPredicate    bool
+	predicateField string
+	predicateValue string
+
+	// isWildcard marks a "[*]" bracket — flatten across every element of the
+	// current array, resolving the rest of the path within each (see
+	// resolvePathParts). Added for EDI Phase 5's declarative 835->FHIR
+	// mapping: X12 CAS occurrences each carry their own adjustments[]
+	// sub-array, and "CAS[*].adjustments" flattens that 2-level nesting into
+	// one row list a repeatingGroup's RowsPath can iterate directly, with no
+	// script and no second nesting level of repeatingGroups.
+	isWildcard bool
 }
 
 // parseJSONPath parses a JSON path into parts
 // Supports: "data.items[0].name" -> [{key:"data"}, {key:"items"}, {isArray:true, index:0}, {key:"name"}]
+// Also supports a "[field=value]" predicate bracket in place of a numeric
+// index: "data.items[status=active].name" -> selects the first element of
+// "items" whose "status" field equals "active"; and a "[*]" wildcard bracket:
+// "data.groups[*].members" -> flattens every group's own "members" array into
+// one combined array. A bracket that is none of numeric/predicate/wildcard is
+// dropped, same as before this addition (pre-existing behavior for a
+// malformed bracket).
 func parseJSONPath(path string) []pathPart {
 	var parts []pathPart
 	var current strings.Builder
@@ -522,15 +658,24 @@ func parseJSONPath(path string) []pathPart {
 				parts = append(parts, pathPart{key: current.String()})
 				current.Reset()
 			}
-			// Parse array index
+			// Parse bracket contents: a numeric index, a "*" wildcard, or a "field=value" predicate
 			i++
-			var indexStr strings.Builder
+			var bracketStr strings.Builder
 			for i < len(path) && path[i] != ']' {
-				indexStr.WriteByte(path[i])
+				bracketStr.WriteByte(path[i])
 				i++
 			}
-			if idx, err := strconv.Atoi(indexStr.String()); err == nil {
+			content := bracketStr.String()
+			if content == "*" {
+				parts = append(parts, pathPart{isWildcard: true})
+			} else if idx, err := strconv.Atoi(content); err == nil {
 				parts = append(parts, pathPart{isArray: true, index: idx})
+			} else if eq := strings.IndexByte(content, '='); eq > 0 {
+				parts = append(parts, pathPart{
+					isPredicate:    true,
+					predicateField: content[:eq],
+					predicateValue: content[eq+1:],
+				})
 			}
 		} else {
 			current.WriteByte(c)
@@ -542,6 +687,23 @@ func parseJSONPath(path string) []pathPart {
 	}
 
 	return parts
+}
+
+// findPredicateMatch returns the first element of arr that is a
+// map[string]interface{} whose field stringifies (via fmt.Sprintf("%v", ...),
+// so a JSON number like 82 still matches the string predicate "82") to value,
+// or nil if none match.
+func findPredicateMatch(arr []interface{}, field, value string) interface{} {
+	for _, el := range arr {
+		m, ok := el.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if fmt.Sprintf("%v", m[field]) == value {
+			return el
+		}
+	}
+	return nil
 }
 
 // ===============================================================

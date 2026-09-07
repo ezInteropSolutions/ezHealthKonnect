@@ -222,7 +222,9 @@ class EdiBuildStepBuilder {
 }
 
 // ── EdiValidateStepBuilder ───────────────────────────────────────────────────
-// Config: { sourceField, outputField, customRules: [{segmentId, type, positions:[key,...]}] }
+// Config: { sourceField, outputField,
+//           customRules: [{segmentId, type, positions:[key,...]}],
+//           disabledRules: [{segmentId, type, positions:[pos,...]}] }
 //
 // customRules reuses the SAME P/C/L/R/E SyntaxRule model edi/validator.go
 // already implements for the OOB spec rules (see edi/schema_types.go's
@@ -235,6 +237,36 @@ class EdiBuildStepBuilder {
 // which already have their own OOB rules and would need a repeat-index
 // picker this first pass doesn't build) — a named, deliberate limitation,
 // not an oversight.
+//
+// disabledRules selectively suppresses individual OOB (schema-defined)
+// SyntaxRules for THIS step only — the shared schema itself is never
+// edited. Unlike customRules, positions here are the RAW position strings
+// (e.g. "06") the segments catalog already returns per OOB rule, not
+// element keys — SyntaxRule has no separate ID field, so (segmentId, type,
+// positions) exactly as returned by GET /api/edi/schema/segments IS a
+// rule's identity, and round-tripping it verbatim avoids inventing a
+// second identifier scheme. The UI still displays the resolved element
+// keys (segment.syntaxRules[i].elementKeys), never raw positions, to the
+// user — only the config payload carries positions.
+
+// Order-independent set comparison, mirroring
+// edi_validate_executor.go's own positionsEqual exactly (a disable request
+// round-trips the same positions array the segments API returned, but
+// comparing as a set rather than requiring identical order is a cheap,
+// harmless robustness margin).
+function ediPositionsEqual(a, b) {
+    const aa = Array.isArray(a) ? a : [];
+    const bb = Array.isArray(b) ? b : [];
+    if (aa.length !== bb.length) return false;
+    const remaining = new Map();
+    aa.forEach(v => remaining.set(v, (remaining.get(v) || 0) + 1));
+    for (const v of bb) {
+        const count = remaining.get(v) || 0;
+        if (count === 0) return false;
+        remaining.set(v, count - 1);
+    }
+    return true;
+}
 
 const EDI_RULE_TYPES = [
     { value: 'P', label: 'Paired', description: 'If any selected field is present, all must be.' },
@@ -249,7 +281,7 @@ class EdiValidateStepBuilder {
         this._panel = panel;
         this._ac = new AbortController();
         this._step = null;
-        this._segmentsCatalog = null; // [{id, name, elements:[{pos,key,name,dataType}], repeats:[...]}]
+        this._segmentsCatalog = null; // [{id, name, elements:[{pos,key,name,dataType}], repeats:[...], syntaxRules:[{type,positions,elementKeys}]}]
 
         window._ediValidateBuilder = this;
     }
@@ -258,6 +290,7 @@ class EdiValidateStepBuilder {
         this._step = step;
         if (!step.config) step.config = {};
         if (!Array.isArray(step.config.customRules)) step.config.customRules = [];
+        if (!Array.isArray(step.config.disabledRules)) step.config.disabledRules = [];
 
         this._loadSegmentsCatalog();
 
@@ -311,6 +344,11 @@ class EdiValidateStepBuilder {
                     style="font-family:monospace;font-size:0.82rem;">
             </div>
             <div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;">
+                <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;margin-bottom:0.4rem;">OOB Validation Rules</div>
+                <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.5rem;">Every business-rule constraint built into the base X12 5010 standard for this transaction set. Uncheck any rule to suppress it for THIS step only — the shared schema is never changed, and errors (malformed field values) are unaffected either way.</div>
+                ${this._renderOOBRulesSection()}
+            </div>
+            <div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem;">
                     <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;">Custom Rules (Optional)</div>
                     <button type="button" class="btn btn-sm btn-outline-primary" style="font-size:0.75rem;"
@@ -321,6 +359,34 @@ class EdiValidateStepBuilder {
                 ${cfg.customRules.length === 0 ? '<div style="font-size:0.78rem;color:#94a3b8;">No custom rules added — only the base X12 5010 standard rules apply.</div>' : ''}
             </div>
         </div>`;
+    }
+
+    _renderOOBRulesSection() {
+        if (!this._segmentsCatalog) {
+            return '<div style="font-size:0.78rem;color:#94a3b8;">Loading OOB rules…</div>';
+        }
+        const segmentsWithRules = this._segmentsCatalog.filter(s => Array.isArray(s.syntaxRules) && s.syntaxRules.length > 0);
+        if (segmentsWithRules.length === 0) {
+            return '<div style="font-size:0.78rem;color:#94a3b8;">No OOB business-rule constraints in this schema.</div>';
+        }
+        const disabled = this._step.config.disabledRules || [];
+        return segmentsWithRules.map(seg => `
+            <div style="margin-bottom:0.7rem;">
+                <div style="font-size:0.78rem;font-weight:600;color:#334155;margin-bottom:0.25rem;"><code>${ediEsc(seg.id)}</code>${seg.name ? ' — ' + ediEsc(seg.name) : ''}</div>
+                ${seg.syntaxRules.map((r, i) => {
+                    const isDisabled = disabled.some(d => d.segmentId === seg.id && d.type === r.type && ediPositionsEqual(d.positions, r.positions));
+                    const typeInfo = EDI_RULE_TYPES.find(t => t.value === r.type) || {};
+                    const fieldsLabel = ediEsc((r.elementKeys && r.elementKeys.length ? r.elementKeys : r.positions || []).join(' + '));
+                    return `
+                    <label style="display:flex;align-items:flex-start;gap:0.4rem;font-size:0.78rem;padding:0.15rem 0 0.15rem 0.75rem;cursor:pointer;">
+                        <input type="checkbox" ${isDisabled ? '' : 'checked'} style="margin-top:0.2rem;"
+                            onchange="window._ediValidateBuilder && window._ediValidateBuilder.toggleOOBRule('${ediEsc(seg.id)}', ${i}, this.checked)">
+                        <span><strong>${ediEsc(typeInfo.label || r.type)}</strong> — ${fieldsLabel}<br>
+                            <span style="color:#94a3b8;">${ediEsc(typeInfo.description || '')}</span></span>
+                    </label>`;
+                }).join('')}
+            </div>
+        `).join('');
     }
 
     _renderRule(rule, index) {
@@ -369,6 +435,30 @@ class EdiValidateStepBuilder {
     }
 
     // ── interaction handlers (called from inline onclick/onchange) ──────────
+
+    // Toggles one OOB rule's enabled state. ruleIndex addresses
+    // segment.syntaxRules[ruleIndex] (looked up fresh from the cached
+    // catalog, not passed by value) rather than embedding the rule's own
+    // (type, positions) array inside an inline onchange attribute, which
+    // would need fragile HTML/JS double-escaping for an array value.
+    toggleOOBRule(segmentId, ruleIndex, checked) {
+        const seg = this._segmentByID(segmentId);
+        const rule = seg && seg.syntaxRules && seg.syntaxRules[ruleIndex];
+        if (!rule) return;
+
+        this._step.config.disabledRules = this._step.config.disabledRules || [];
+        const idx = this._step.config.disabledRules.findIndex(d =>
+            d.segmentId === segmentId && d.type === rule.type && ediPositionsEqual(d.positions, rule.positions));
+
+        if (checked) {
+            // Re-enabling: remove the suppression entry, if any.
+            if (idx !== -1) this._step.config.disabledRules.splice(idx, 1);
+        } else {
+            // Disabling: record it (avoid duplicate entries).
+            if (idx === -1) this._step.config.disabledRules.push({ segmentId, type: rule.type, positions: rule.positions.slice() });
+        }
+        // No full rerender needed -- same rationale as toggleRulePosition.
+    }
 
     addRule() {
         this._step.config.customRules.push({ segmentId: '', type: 'P', positions: [] });
@@ -422,9 +512,10 @@ class EdiValidateStepBuilder {
 
         if (sourceEl) step.config.sourceField = sourceEl.value.trim() || 'raw';
         if (outputEl) step.config.outputField = outputEl.value.trim() || 'ediValidation';
-        // customRules already lives in step.config, kept in sync by the
-        // interaction handlers above — nothing further to read from the DOM.
+        // customRules/disabledRules already live in step.config, kept in sync
+        // by the interaction handlers above — nothing further to read from the DOM.
         step.config.customRules = (step.config.customRules || []).filter(r => r.segmentId && r.positions && r.positions.length > 0);
+        step.config.disabledRules = step.config.disabledRules || [];
     }
 
     destroy() {

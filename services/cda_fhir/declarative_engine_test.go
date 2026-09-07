@@ -1180,6 +1180,35 @@ func TestDeclarativeTransformRegistry_StringDirect_ValueMap(t *testing.T) {
 	}
 }
 
+// TestDeclarativeTransformRegistry_X12DateToFHIRDate covers the EDI Phase 5
+// transform: X12's DT type (CCYYMMDD, no separators) reformatted into a FHIR
+// "date" (YYYY-MM-DD) — used for BPR16/DTM date fields in the
+// 835->ExplanationOfBenefit/PaymentReconciliation mapping.
+func TestDeclarativeTransformRegistry_X12DateToFHIRDate(t *testing.T) {
+	reg := cdafhir.NewDeclarativeTransformRegistry()
+	got, err := reg.Apply("x12_date_to_fhir_date", "20101231", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "2010-12-31" {
+		t.Errorf("got %v, want \"2010-12-31\"", got)
+	}
+}
+
+func TestDeclarativeTransformRegistry_X12DateToFHIRDate_MalformedInput_SkipsWrite(t *testing.T) {
+	reg := cdafhir.NewDeclarativeTransformRegistry()
+	cases := []interface{}{"", "2010123", "2010-12-31", "abcd1231", 20101231, nil}
+	for _, in := range cases {
+		got, err := reg.Apply("x12_date_to_fhir_date", in, nil)
+		if err != nil {
+			t.Fatalf("input %v: unexpected error: %v", in, err)
+		}
+		if got != nil {
+			t.Errorf("input %v: got %v, want nil (skip write, not a guessed value)", in, got)
+		}
+	}
+}
+
 func TestDeclarativeTransformRegistry_HasTransform(t *testing.T) {
 	reg := cdafhir.NewDeclarativeTransformRegistry()
 	if !reg.HasTransform("cda_code_to_codeable_concept") {

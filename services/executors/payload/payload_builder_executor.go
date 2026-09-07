@@ -389,7 +389,17 @@ func (e *PayloadBuilderExecutor) buildFHIRBundle(
 	// transaction and batch always need request blocks
 	includeRequest := bc.IncludeRequest || bundleType == "transaction" || bundleType == "batch"
 
-	// Resolve resources from pipeline paths
+	// Resolve resources from pipeline paths. A path may resolve to ONE
+	// resource (the original, still-common case) or to an ARRAY of resources
+	// — e.g. a control.loop step's own aggregated "child_steps.<name>.
+	// fhirResource" output, one entry per loop iteration (added for EDI Phase
+	// 5's per-claim ExplanationOfBenefit resources, but generic — any future
+	// multi-instance bundle need benefits the same way). Every resource from
+	// every path lands in one flat slice before AssembleEntries runs, so
+	// cross-references between an array-sourced resource and a single-sourced
+	// one (e.g. each EOB <-> the one PaymentReconciliation) resolve exactly
+	// like any other pair — AssembleEntries has no notion of which path a
+	// resource came from (see fhir/r4/bundle_assembler.go's own doc comment).
 	var resources []map[string]interface{}
 	for _, path := range bc.ResourcePaths {
 		raw := executors.GetFieldValue(inputData, path)
@@ -404,22 +414,24 @@ func (e *PayloadBuilderExecutor) buildFHIRBundle(
 			continue
 		}
 
-		resource, ok := raw.(map[string]interface{})
-		if !ok {
-			// If it's a JSON string, unmarshal it
-			if s, ok := raw.(string); ok {
-				var m map[string]interface{}
-				if err := json.Unmarshal([]byte(s), &m); err != nil {
-					log.Printf("  ⚠️  [PayloadBuilder/fhir_bundle] path %q is string but not valid JSON: %v", path, err)
-					continue
+		if arr, ok := raw.([]interface{}); ok {
+			before := len(resources)
+			for _, el := range arr {
+				if resource, ok := asFHIRResourceMap(el); ok {
+					resources = append(resources, resource)
+				} else {
+					log.Printf("  ⚠️  [PayloadBuilder/fhir_bundle] path %q: array element is not a FHIR resource map — skipping", path)
 				}
-				resource = m
-			} else {
-				log.Printf("  ⚠️  [PayloadBuilder/fhir_bundle] path %q is not a FHIR resource map — skipping", path)
-				continue
 			}
+			log.Printf("  ℹ️  [PayloadBuilder/fhir_bundle] path %q resolved to an array — added %d resource(s)", path, len(resources)-before)
+			continue
 		}
 
+		resource, ok := asFHIRResourceMap(raw)
+		if !ok {
+			log.Printf("  ⚠️  [PayloadBuilder/fhir_bundle] path %q is not a FHIR resource map — skipping", path)
+			continue
+		}
 		resources = append(resources, resource)
 	}
 
@@ -507,6 +519,26 @@ func (e *PayloadBuilderExecutor) buildFHIRBundle(
 
 	log.Printf("  📦 [PayloadBuilder/fhir_bundle] type=%s entries=%d id=%s", bundleType, len(entries), bundleID)
 	return string(body), "application/fhir+json", nil
+}
+
+// asFHIRResourceMap coerces raw (one resourcePaths value, or one element of
+// an array-valued one) into a FHIR resource map: passes a
+// map[string]interface{} through as-is, or unmarshals a JSON string into
+// one. Anything else (including a nil, or a nested array — arrays are not
+// flattened more than one level) fails, matching this function's single
+// caller's own pre-existing per-path fallback logic before the array-spread
+// support above was added.
+func asFHIRResourceMap(raw interface{}) (map[string]interface{}, bool) {
+	if resource, ok := raw.(map[string]interface{}); ok {
+		return resource, true
+	}
+	if s, ok := raw.(string); ok {
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(s), &m); err == nil {
+			return m, true
+		}
+	}
+	return nil, false
 }
 
 // buildBundleEntryRequest creates the entry.request block for transaction/batch Bundles.

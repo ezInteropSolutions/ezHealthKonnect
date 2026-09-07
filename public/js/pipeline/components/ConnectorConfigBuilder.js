@@ -1540,6 +1540,51 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             if (schema.minimum !== undefined) inputEl.min = schema.minimum;
             if (schema.maximum !== undefined) inputEl.max = schema.maximum;
             inputEl.placeholder = schema.default !== undefined ? `Default: ${schema.default}` : '';
+        } else if (schema.type === 'array' && Array.isArray(schema.items?.enum) && schema.items.enum.length > 0) {
+            // Fixed set of allowed values -- render as a checkbox list instead of
+            // free-text, backed by a hidden field carrying the same comma-joined
+            // value shape getConfig() already expects for fieldType 'array'.
+            const currentArr = Array.isArray(value)
+                ? value
+                : (typeof value === 'string' && value ? value.split(',').map(v => v.trim()).filter(Boolean) : []);
+
+            const checklistWrapper = this.createElement('div', { class: 'connector-config-array-checklist' });
+            const hiddenInput = document.createElement('input');
+            hiddenInput.type = 'hidden';
+            hiddenInput.className = 'connector-config-field';
+            hiddenInput.dataset.field = fieldName;
+            hiddenInput.dataset.fieldType = 'array';
+            hiddenInput.value = currentArr.join(', ');
+
+            const checkboxes = [];
+            schema.items.enum.forEach(optVal => {
+                const optId = `connector-field-${fieldName}-${optVal}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+                const optWrapper = this.createElement('div', { class: 'form-check' });
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'form-check-input';
+                cb.id = optId;
+                cb.checked = currentArr.includes(optVal);
+                checkboxes.push({ cb, optVal });
+
+                const cbLabel = document.createElement('label');
+                cbLabel.className = 'form-check-label';
+                cbLabel.htmlFor = optId;
+                cbLabel.textContent = optVal;
+
+                optWrapper.appendChild(cb);
+                optWrapper.appendChild(cbLabel);
+                checklistWrapper.appendChild(optWrapper);
+
+                cb.addEventListener('change', () => {
+                    hiddenInput.value = checkboxes.filter(c => c.cb.checked).map(c => c.optVal).join(', ');
+                    this.onChange();
+                });
+            });
+
+            formGroup.appendChild(checklistWrapper);
+            formGroup.appendChild(hiddenInput);
+            return formGroup;
         } else if (schema.type === 'array') {
             // Render as comma-separated text input
             inputEl = document.createElement('input');
@@ -1548,9 +1593,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             inputEl.dataset.field = fieldName;
             inputEl.dataset.fieldType = 'array';
             inputEl.value = Array.isArray(value) ? value.join(', ') : (value || '');
-            inputEl.placeholder = schema.items?.enum
-                ? `Options: ${schema.items.enum.join(', ')}`
-                : 'Comma-separated values';
+            inputEl.placeholder = 'Comma-separated values';
         } else {
             // Default: text input (or password for sensitive fields)
             inputEl = document.createElement('input');
@@ -1569,9 +1612,98 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             formGroup.appendChild(inputEl);
             inputEl.addEventListener('input', () => this.onChange());
             inputEl.addEventListener('change', () => this.onChange());
+
+            // Private-key fields: add a "Browse..." button that reads a local
+            // file's text content into this field via FileReader -- the browser
+            // has no access to a server-side path, and the Go connectors only
+            // ever consume key_content as pasted PEM text (see sftp_outbound.go's
+            // own doc comment: "reading a key from the local filesystem was
+            // never implemented -- only key_content works"), so a real path
+            // reference isn't something either side of this UI can act on.
+            if (fieldName === 'key_content') {
+                formGroup.appendChild(this._buildKeyFileBrowseControl(inputEl));
+            }
         }
 
         return formGroup;
+    }
+
+    /**
+     * Builds a "Browse..." button + hidden file input that reads a locally
+     * selected private-key file's text content into targetInput via
+     * FileReader.readAsText -- same browse-to-textfield pattern already used
+     * for CDA/HL7 file uploads elsewhere in this app (see hl7Service.js's
+     * readFileContent). The file itself is never uploaded; only its text
+     * content is copied into the existing key_content field.
+     */
+    _buildKeyFileBrowseControl(targetInput) {
+        const wrapper = this.createElement('div', { class: 'connector-config-key-browse', style: 'margin-top:0.35rem;' });
+
+        const browseBtn = document.createElement('button');
+        browseBtn.type = 'button';
+        browseBtn.className = 'btn btn-sm btn-outline-secondary';
+        browseBtn.innerHTML = '<i class="fas fa-folder-open"></i> Browse for key file…';
+
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.pem,.key,.ppk,.txt';
+        fileInput.style.display = 'none';
+
+        browseBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files && fileInput.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                targetInput.value = e.target.result;
+                targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+            };
+            reader.onerror = () => console.error('[ConnectorConfigBuilder] Failed to read private key file');
+            reader.readAsText(file);
+        });
+
+        const hint = document.createElement('small');
+        hint.className = 'form-text text-muted';
+        hint.style.display = 'block';
+        hint.textContent = 'Reads the file in your browser and pastes its contents here — the file itself is never uploaded, only the PEM text.';
+
+        wrapper.appendChild(browseBtn);
+        wrapper.appendChild(fileInput);
+        wrapper.appendChild(hint);
+        return wrapper;
+    }
+
+    /**
+     * Shows/hides `password` vs `key_content`/`key_file` fields based on the
+     * schema's own `auth_type` field, whenever that field's enum includes
+     * "key" -- generic across any connector using this convention, not tied
+     * to a specific type_name.
+     */
+    setupPasswordKeyAuthVisibility(container) {
+        const properties = this.configSchema?.properties;
+        const authTypeSchema = properties?.auth_type;
+        if (!authTypeSchema || !Array.isArray(authTypeSchema.enum) || !authTypeSchema.enum.includes('key')) return;
+
+        const authTypeField = container.querySelector('.connector-config-field[data-field="auth_type"]');
+        if (!authTypeField) return;
+
+        const passwordFieldName = properties.password ? 'password' : null;
+        const secretFieldNames = ['key_content', 'key_file'].filter(name => properties[name]);
+
+        const setVisible = (fieldName, visible) => {
+            const input = container.querySelector(`.connector-config-field[data-field="${fieldName}"]`);
+            const group = input?.closest('.form-group');
+            if (group) group.style.display = visible ? '' : 'none';
+        };
+
+        const applyVisibility = (authType) => {
+            if (passwordFieldName) setVisible(passwordFieldName, authType !== 'key');
+            secretFieldNames.forEach(name => setVisible(name, authType === 'key'));
+        };
+
+        applyVisibility(authTypeField.value || authTypeSchema.default || 'password');
+        authTypeField.addEventListener('change', () => applyVisibility(authTypeField.value));
     }
 
     addEmbeddedBuilders(container, existingConfig = {}) {
@@ -1603,6 +1735,15 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 authTypeField.addEventListener('change', () => applyAuthVisibility(authTypeField.value));
             }
         }
+
+        // Generic password/key auth toggle -- driven by the schema, not the
+        // connector type name, so it applies uniformly to every current and
+        // future connector using this same auth_type convention (today:
+        // sftp_inbound, sftp_outbound, edi_x12_inbound, edi_x12_outbound).
+        // oracle_inbound/outbound also have an auth_type field but its enum is
+        // ["password","windows"] -- no "key" value -- so the includes('key')
+        // check below correctly leaves that pair untouched.
+        this.setupPasswordKeyAuthVisibility(container);
 
         // FHIR connectors: fully handled by _renderFHIRConnectorUI (via renderDynamicConfig)
         const isFHIR = typeName.includes('fhir');

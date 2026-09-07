@@ -205,37 +205,75 @@ type walker struct {
 	segmentInstances []SegmentInstance
 }
 
-// matchSegmentSequence walks segmentIDs in schema order against tokens
-// starting at *pos, consuming each ID's segment (once, or — when the shared
-// segment definition's MaxUse is ">1" — repeatedly, greedily) whenever the
-// current token matches. A situational segment that never matches is simply
-// absent from out; a required segment that never matches is an error.
+// matchSegmentSequence treats segmentIDs as the SET of segments expected at
+// this one level (a transaction set's header/trailer, or one loop's own
+// segment list) and greedily consumes tokens from *pos for as long as the
+// current token's ID is a member of that set — WITHOUT requiring segmentIDs'
+// own list order to match the data's actual order among themselves.
+//
+// This matters because two mutually-independent OPTIONAL segments at the
+// same level have no real ordering constraint in X12 itself, and real
+// trading partners disagree on which one they emit first — e.g. an 835
+// header's REF (receiver ID) and DTM (production date): one real, unedited
+// 005010X221A1 sample from eMedNY emits REF before DTM, another real,
+// unedited sample from a dental payer emits DTM before REF. A strict
+// single-pass walk over segmentIDs in schema-declared order (the previous
+// implementation) would find DTM where it expected REF, give up on REF
+// forever, and leave the real REF token stranded — which then poisons every
+// later structural boundary the walker checks against it, surfacing as
+// completely unrelated failures like "required segment SE not found at
+// position N". Consuming this level's own segment IDs as an unordered set —
+// still stopping the instant a token isn't a member of the set at all, which
+// is what correctly ends this level and hands off to whatever structurally
+// follows (a loop trigger, a trailer, or a genuinely unrelated segment) —
+// fixes this for every transaction set and every loop's own segment list in
+// one place, matching this engine's own "flexible, not rigid" design intent
+// (see edi/validator's syntax-rule severity split for the same principle
+// applied to element-relational constraints instead of segment order).
 func (w *walker) matchSegmentSequence(pos *int, segmentIDs []string, out map[string]interface{}, parentPath []pathStep) error {
-	for _, segID := range segmentIDs {
-		segDef, ok := w.spec.Segments[segID]
+	idSet := make(map[string]bool, len(segmentIDs))
+	for _, id := range segmentIDs {
+		idSet[id] = true
+	}
+	matchedOnce := make(map[string]bool, len(segmentIDs))
+
+	for *pos < len(w.tokens) {
+		id := w.tokens[*pos].ID
+		if !idSet[id] {
+			break // not part of this level — reached a loop trigger, the trailer, or an unrelated segment
+		}
+		segDef, ok := w.spec.Segments[id]
 		if !ok {
-			return fmt.Errorf("segment %q not found in shared library", segID)
+			return fmt.Errorf("segment %q not found in shared library", id)
+		}
+		if matchedOnce[id] && !segDef.RepeatsMultiple() {
+			// A second, non-contiguous occurrence of a non-repeating ID
+			// structurally belongs to whatever comes next (a later loop
+			// instance sharing the same segment type, or non-conformant
+			// data) — not to this level a second time. Same exit as an
+			// unrelated segment, not an error.
+			break
 		}
 
-		matchedOnce := false
-		for *pos < len(w.tokens) && w.tokens[*pos].ID == segID {
-			index := 0
-			if segDef.RepeatsMultiple() {
-				index = countExisting(out[segID]) + 1
-			}
-			instance := w.parseSegmentInstance(w.tokens[*pos], segDef, append(parentPath, pathStep{Name: segID, Index: index}))
-			*pos++
-			matchedOnce = true
-
-			if segDef.RepeatsMultiple() {
-				arr, _ := out[segID].([]map[string]interface{})
-				out[segID] = append(arr, instance)
-			} else {
-				out[segID] = instance
-				break
-			}
+		index := 0
+		if segDef.RepeatsMultiple() {
+			index = countExisting(out[id]) + 1
 		}
-		if !matchedOnce && segDef.IsRequired() {
+		instance := w.parseSegmentInstance(w.tokens[*pos], segDef, append(parentPath, pathStep{Name: id, Index: index}))
+		*pos++
+		matchedOnce[id] = true
+
+		if segDef.RepeatsMultiple() {
+			arr, _ := out[id].([]map[string]interface{})
+			out[id] = append(arr, instance)
+		} else {
+			out[id] = instance
+		}
+	}
+
+	for _, segID := range segmentIDs {
+		segDef := w.spec.Segments[segID]
+		if segDef != nil && segDef.IsRequired() && !matchedOnce[segID] {
 			return fmt.Errorf("required segment %q not found at position %d", segID, *pos)
 		}
 	}
