@@ -53,11 +53,21 @@ func NewIfThenElseResolver() *IfThenElseResolver {
 }
 
 func (r *IfThenElseResolver) GetStepType() string {
-	return "pre.logic"
+	return "if_then_else"
 }
 
+// CanHandle matches "if_then_else" — the real, current canonical step type
+// (services/executors/control/conditional_executor.go's own
+// NewBaseExecutor("if_then_else", ...) call, and what every saved if_then_else
+// step's step_type column actually holds) — plus the pre-rename "pre.logic"/
+// "pre.logic.ifthenelse" names for any step that predates the rename, mirroring
+// services/executor_registry.go's own alias philosophy. Before this fix, this
+// resolver only recognized the legacy names, so GetStepsToSkip's own
+// GetResolver(step.StepType) lookup silently found no match for any real
+// if_then_else step and returned nothing — the auto-skip mechanism was
+// unreachable for real data regardless of which engine called it.
 func (r *IfThenElseResolver) CanHandle(stepType string) bool {
-	return stepType == "pre.logic" || stepType == "pre.logic.ifthenelse"
+	return stepType == "if_then_else" || stepType == "pre.logic" || stepType == "pre.logic.ifthenelse"
 }
 
 func (r *IfThenElseResolver) GetStepsToSkip(
@@ -109,11 +119,16 @@ func NewSwitchCaseResolver() *SwitchCaseResolver {
 }
 
 func (r *SwitchCaseResolver) GetStepType() string {
-	return "pre.logic.switch"
+	return "switch_case"
 }
 
+// CanHandle matches "switch_case" — the real, current canonical step type
+// (NewBaseExecutor("switch_case", ...)'s own name, and what every saved
+// switch_case step's step_type column actually holds) — plus the pre-rename
+// "pre.logic.switch"/"pre.logic.switchcase" names, same rationale as
+// IfThenElseResolver.CanHandle's own doc comment above.
 func (r *SwitchCaseResolver) CanHandle(stepType string) bool {
-	return stepType == "pre.logic.switch" || stepType == "pre.logic.switchcase"
+	return stepType == "switch_case" || stepType == "pre.logic.switch" || stepType == "pre.logic.switchcase"
 }
 
 func (r *SwitchCaseResolver) GetStepsToSkip(

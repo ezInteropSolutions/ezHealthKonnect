@@ -377,11 +377,6 @@ func (e *FieldValidationExecutor) formatFieldValidationErrors(errors []models.Fi
 	return strings.Join(messages, "; ")
 }
 
-// GetStepType returns the step type identifier
-func (e *FieldValidationExecutor) GetStepType() string {
-	return "pre.validation"
-}
-
 // publishValidationFeedback publishes validation results to the ProcessingEngine
 func (e *FieldValidationExecutor) publishValidationFeedback(
 	ctx context.Context,

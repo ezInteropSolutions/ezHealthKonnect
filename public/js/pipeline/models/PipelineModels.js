@@ -262,10 +262,17 @@ class VisualStep {
             icon: this.icon,
             position_x: this.position_x,
             position_y: this.position_y,
-            // WORKAROUND: Don't send parent_conditional_step_id to avoid FK constraint issues
-            // The backend topological sort should handle this, but there's a Docker volume issue
-            // Branch membership can be determined from connections graph during execution
-            parent_conditional_step_id: null,
+            // controllers/pipelineController.js's savePipeline() already topologically sorts
+            // steps by parent_conditional_step_id (topologicalSortSteps, wired in since before
+            // this workaround was written) specifically so parents insert before children — the
+            // FK-ordering problem this used to null out for is already solved there. Sending it
+            // also matters for a path that never even touches the DB: PipelineAPIService's
+            // testPipeline() sends this same toJSON() as the live "pipeline" object, which
+            // controllers/transformation_test_controller.go's convertFrontendPipeline reads
+            // directly (no INSERT at all) — branch auto-skip (services/branch_resolver.go's
+            // GetStepsToSkip, keyed on this field) needs it to find a conditional step's own
+            // children when a real user clicks "Test Pipeline".
+            parent_conditional_step_id: this.parentConditionalStepId,
             branch_type: this.branchType,
             case_value: this.caseValue,
             parent_step_id: this.parentStepId,

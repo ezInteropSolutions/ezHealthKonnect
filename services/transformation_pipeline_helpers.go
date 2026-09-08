@@ -658,6 +658,27 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 				delete(routingDirective, "skipSteps")
 			}
 
+			// OOP-BASED BRANCH RESOLUTION (mirrors executePipeline's own identical
+			// block in transformation_pipeline_service.go): if_then_else/switch_case
+			// already publish _routing.branchTaken/_routing.caseMatched, and every
+			// child step created under a branch in the pipeline builder UI already
+			// carries ParentConditionalStepID + BranchType/CaseValue (persisted for
+			// visual layout — see models.TransformationStep) — BranchResolver reads
+			// exactly that pairing to compute the OTHER branch's own steps
+			// automatically. This was the missing half of exclusive branching in
+			// THIS engine (the one Test Pipeline, Re-run, and real production
+			// ingestion all actually use): explicit skipSteps above requires the
+			// pipeline author to hand-list them; this makes it automatic for any
+			// step tagged as belonging to a branch, with zero config.
+			stepsToAutoSkip := tps.branchResolver.GetStepsToSkip(&step, routingDirective, pipeline.Steps)
+			for _, stepID := range stepsToAutoSkip {
+				skipStepIDs[stepID] = true
+				logger.Debug("marking step to skip (auto branch resolution)",
+					"interface_id", pipeline.InterfaceID,
+					"correlation_id", result.CorrelationID,
+					"step_id", stepID)
+			}
+
 			if nextStepId, ok := routingDirective["nextStep"].(string); ok {
 				// Find step by ID
 				nextIndex := tps.findStepIndexById(pipeline.Steps, nextStepId)

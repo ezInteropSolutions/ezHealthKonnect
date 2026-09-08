@@ -52,6 +52,28 @@ class ApiHelper {
         return this._json(res, 'getInterface');
     }
 
+    // ── Pipelines ───────────────────────────────────────────────────────────────
+    // savePipeline expects steps wrapped as execution_groups (one flat group is enough
+    // for a simple sequential pipeline) — a bare top-level "steps" array is silently ignored.
+    async savePipeline({ interfaceId, messageType, steps, connections = [] }) {
+        const res = await this.request.post(`${this.base}/api/pipelines`, {
+            data: {
+                interface_id: interfaceId,
+                message_type: messageType,
+                execution_groups: [{ steps }],
+                connections,
+            },
+        });
+        const body = await this._json(res, 'savePipeline');
+        if (!body.success) throw new Error(`savePipeline: ${body.error}`);
+        return body;
+    }
+
+    async testPipeline(payload) {
+        const res = await this.request.post(`${this.base}/api/fhir/pipeline/test`, { data: payload });
+        return res.json();
+    }
+
     async deactivateInterface(id) {
         // wizard route deactivates via Go engine (releases the port listener)
         const res = await this.request.post(

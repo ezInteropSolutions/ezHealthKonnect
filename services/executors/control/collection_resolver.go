@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"strings"
+
+	"ezhealthkonnect/services/executors"
 )
 
 // ===============================================================
@@ -117,7 +119,7 @@ func (r *NestedLoopResolver) Resolve(data map[string]interface{}, path string) [
 	}
 
 	// Navigate the sub-path within the parent item
-	result := navigatePath(parentItem, strings.Split(itemPath, "."))
+	result := navigateJSONPath(parentItem, itemPath)
 	return convertToSlice(result)
 }
 
@@ -433,7 +435,7 @@ func (r *FHIRCollectionResolver) resolveResourceField(msg map[string]interface{}
 	}
 
 	// Navigate to the field
-	result := navigatePath(resource, strings.Split(fieldPath, "."))
+	result := navigateJSONPath(resource, fieldPath)
 	return convertToSlice(result)
 }
 
@@ -453,16 +455,15 @@ func (r *JSONCollectionResolver) CanResolve(data map[string]interface{}, path st
 
 func (r *JSONCollectionResolver) Resolve(data map[string]interface{}, path string) []interface{} {
 	// Try the path from the data root
-	parts := strings.Split(path, ".")
-	result := navigatePath(data, parts)
-	if slice := convertToSlice(result); slice != nil {
+	if slice := convertToSlice(navigateJSONPath(data, path)); slice != nil {
 		return slice
 	}
 
-	// Try under "message" key
+	// Try under "message" key (lets a config path be written relative to the
+	// message envelope, e.g. "parsedEDI.loops.2000" instead of
+	// "message.parsedEDI.loops.2000")
 	if msg := getMessageMap(data); msg != nil {
-		result := navigatePath(msg, parts)
-		if slice := convertToSlice(result); slice != nil {
+		if slice := convertToSlice(navigateJSONPath(msg, path)); slice != nil {
 			return slice
 		}
 	}
@@ -502,6 +503,22 @@ func getMessageMap(data map[string]interface{}) map[string]interface{} {
 		return msg
 	}
 	return nil
+}
+
+// navigateJSONPath resolves a raw, possibly-bracketed path (e.g.
+// "loops.2000[0].loops.2100", the shape every EDI-parsed nested loop uses)
+// against data. Delegates to the parent package's GetFieldValue — the same
+// modern, predicate/wildcard/numeric-index-aware resolver fhir.build/
+// hl7.build/payload.builder already rely on — rather than navigatePath
+// below, whose plain strings.Split(path, ".") walk treats "2000[0]" as one
+// literal (nonexistent) map key and silently resolves to nil. Every
+// call site here that walks a raw path string a config author actually
+// typed (a loop's own "collection", a nested-loop item sub-path, a FHIR
+// resource field path) needs this; navigatePath itself stays as-is for the
+// two call sites below that only ever walk a fixed, hardcoded, bracket-free
+// key sequence.
+func navigateJSONPath(data map[string]interface{}, path string) interface{} {
+	return executors.GetFieldValue(data, path)
 }
 
 // navigatePath traverses nested maps using path parts

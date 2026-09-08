@@ -67,10 +67,11 @@ function Wait-ForDocker {
     Write-Host "    Waiting for Docker daemon" -NoNewline
     $deadline = (Get-Date).AddSeconds(180)
     $ready = $false
+    $LASTEXITCODE = -1
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 5
         Write-Host "." -NoNewline
-        & { $ErrorActionPreference = "SilentlyContinue"; docker info 2>&1 | Out-Null }
+        docker info 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
             $ready = $true
             break

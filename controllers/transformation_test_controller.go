@@ -553,6 +553,31 @@ func (c *TransformationTestController) convertFrontendPipeline(pipelineData map[
 			step.TimeoutMs = 30000 // Default 30s timeout
 		}
 
+		// Branch membership — needed for BranchResolver's auto-skip (services/branch_resolver.go)
+		// to find a conditional step's own children. PipelineModels.js's toJSON() (used by the
+		// real "Test Pipeline" button — see PipelineAPIService.js's testPipeline(), which always
+		// sends the live frontend pipeline object, not just a pipeline_id) sends these camelCase;
+		// a saved-and-reloaded pipeline (models/PipelineModels.js's fromJSON) would carry them as
+		// snake_case if ever round-tripped through here too, hence checking both like every other
+		// field above. Before this fix, every step converted through this path had these three as
+		// nil regardless of what the frontend actually sent, silently defeating auto-skip for the
+		// one code path a real user's "Test Pipeline" click always takes.
+		if pid, ok := stepMap["parentConditionalStepId"].(string); ok && pid != "" {
+			step.ParentConditionalStepID = &pid
+		} else if pid, ok := stepMap["parent_conditional_step_id"].(string); ok && pid != "" {
+			step.ParentConditionalStepID = &pid
+		}
+		if bt, ok := stepMap["branchType"].(string); ok && bt != "" {
+			step.BranchType = &bt
+		} else if bt, ok := stepMap["branch_type"].(string); ok && bt != "" {
+			step.BranchType = &bt
+		}
+		if cv, ok := stepMap["caseValue"].(string); ok && cv != "" {
+			step.CaseValue = &cv
+		} else if cv, ok := stepMap["case_value"].(string); ok && cv != "" {
+			step.CaseValue = &cv
+		}
+
 		// Debug logging to understand what's being processed
 		log.Printf("   🔍 Processing step: id=%v, stepName=%v, stepType=%v",
 			step.ID, step.StepName, step.StepType)
