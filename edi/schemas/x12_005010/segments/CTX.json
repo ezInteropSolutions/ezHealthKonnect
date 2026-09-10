@@ -1,0 +1,36 @@
+{
+  "id": "CTX",
+  "name": "Context",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "contextIdentification",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "contextName", "dataType": "AN" },
+          { "pos": "2", "key": "contextReference", "dataType": "AN" }
+        ]
+      }
+    },
+    { "pos": "02", "key": "segmentIdCode", "dataType": "AN" },
+    { "pos": "03", "key": "segmentPosition", "dataType": "N0" },
+    { "pos": "04", "key": "loopIdentifierCode", "dataType": "AN" },
+    {
+      "pos": "05",
+      "key": "positionInSegment",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "elementPosition", "dataType": "N0" },
+          { "pos": "2", "key": "componentPosition", "dataType": "N0" },
+          { "pos": "3", "key": "repeatingElementPosition", "dataType": "N0" }
+        ]
+      }
+    },
+    { "pos": "06", "key": "dataElementReferenceNumber", "dataType": "N0" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 999.5010X231.A1.xml. IMPORTANT: this IG map declares CTX at THREE distinct positions — 2100's 'Segment Context' (max_use 9), 2100's own second, separate 'Business Unit Identifier' occurrence (max_use 1), and 2110's 'Element Context' (max_use 10) — each with different PER-ELEMENT usage/situational constraints (e.g. CTX02/03/04/06 are required in the first and third but explicitly Not-Used in the second, which instead requires CTX01-02). This schema's shared-segment-library architecture has one CTX definition for every position that references it (edi/loop_engine.go resolves segments purely by ID, with no per-loop-position variant mechanism) — so this file is the PERMISSIVE UNION of all 3 real variants: every element genuinely used (R or S) in at least one of the 3 is kept as situational, and CTX06-02 (the one sub-position marked Not-Used in literally all 3 variants) is the only position dropped entirely, matching CLP.json's own established 'omit N positions entirely' precedent. Position-specific tightening (e.g. rejecting a stray CTX01-02 value on a 'Segment Context' occurrence) is out of scope, consistent with this project's own 'flexible, not rigid' validator design (see edi/validator's SyntaxRule doc comment) — genuinely malformed VALUES still fail Validate, only this cross-position ambiguity is left permissive. maxUse is set to '>1' since a single 2100 loop instance can carry both the up-to-9-repeat 'Segment Context' variant AND the single 'Business Unit Identifier' occurrence back to back — this engine's own MaxUse is a binary '1'/'>1' flag with no numeric ceiling modeled anywhere else in the schema either."
+  ]
+}

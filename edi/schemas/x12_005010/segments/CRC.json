@@ -1,0 +1,18 @@
+{
+  "id": "CRC",
+  "name": "Conditions Indicator",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    { "pos": "01", "key": "codeCategory", "dataType": "ID" },
+    { "pos": "02", "key": "certificationConditionIndicator", "dataType": "ID" },
+    { "pos": "03", "key": "conditionCode1", "dataType": "ID" },
+    { "pos": "04", "key": "conditionCode2", "dataType": "ID" },
+    { "pos": "05", "key": "conditionCode3", "dataType": "ID" },
+    { "pos": "06", "key": "conditionCode4", "dataType": "ID" },
+    { "pos": "07", "key": "conditionCode5", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2, reused across 4 distinct 'roles' in this IG (Ambulance Certification, Patient Condition Information: Vision, Homebound Indicator, EPSDT Referral) purely via CRC01's own qualifier value. CRC04-07 (independent condition-code positions, same 'not a repeat group' reasoning as 999's own IK5/AK9 — see segments/IK5.json) are usage=N in some roles but genuinely used (S) in others (e.g. Ambulance Certification uses up to 5 condition codes) — kept as the permissive union across all 4 roles, matching CTX.json's own established precedent."
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "CN1",
+  "name": "Contract Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "contractTypeCode", "dataType": "ID" },
+    { "pos": "02", "key": "contractAmount", "dataType": "R" },
+    { "pos": "03", "key": "contractPercentage", "dataType": "R" },
+    { "pos": "04", "key": "contractCode", "dataType": "AN" },
+    { "pos": "05", "key": "termsDiscountPercentage", "dataType": "R" },
+    { "pos": "06", "key": "contractVersionIdentifier", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2, all 6 positions kept, none dropped."
+  ]
+}

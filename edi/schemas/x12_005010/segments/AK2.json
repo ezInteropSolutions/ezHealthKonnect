@@ -1,0 +1,14 @@
+{
+  "id": "AK2",
+  "name": "Transaction Set Response Header",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "transactionSetIdentifierCode", "dataType": "ID" },
+    { "pos": "02", "key": "transactionSetControlNumber", "dataType": "AN" },
+    { "pos": "03", "key": "implementationConventionReference", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 999.5010X231.A1.xml. AK201/AK202/AK203 echo the ORIGINAL transaction set's own ST01/ST02/ST03 being acknowledged — data element numbers 143/329/1705 match this project's own shared ST.json exactly (transactionSetIdentifierCode ID, transactionSetControlNumber AN, implementationConventionReference AN), confirming AK2 is structurally an echo of ST, not a new shape."
+  ]
+}

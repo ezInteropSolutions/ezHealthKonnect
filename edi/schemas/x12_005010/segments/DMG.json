@@ -1,0 +1,14 @@
+{
+  "id": "DMG",
+  "name": "Demographic Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "dateTimePeriodFormatQualifier", "dataType": "ID" },
+    { "pos": "02", "key": "birthDate", "dataType": "DT" },
+    { "pos": "03", "key": "genderCode", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (Subscriber/Patient Demographic Information). DMG04 (Marital Status Code), DMG05 (composite C056 Race or Ethnicity), DMG06-11 (Citizenship Status, Country Code, Basis of Verification, Quantity, Code List Qualifier, Industry Code) are usage=N at every real occurrence — dropped."
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "CTP",
+  "name": "Drug Quantity",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "04", "key": "nationalDrugUnitCount", "dataType": "R" },
+    {
+      "pos": "05",
+      "key": "unitOfMeasure",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "qualifier", "dataType": "ID" }
+        ]
+      }
+    }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (loop 2410, Drug Identification). CTP01-03 (Class of Trade Code, Price Identifier Code, Unit Price) and CTP05's own composite sub02-15 plus CTP06-11 are all usage=N at the real occurrence — this IG's own Drug Quantity collapses to just the unit count + its measurement-unit qualifier."
+  ]
+}

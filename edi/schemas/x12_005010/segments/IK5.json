@@ -1,0 +1,17 @@
+{
+  "id": "IK5",
+  "name": "Transaction Set Response Trailer",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "transactionSetAcknowledgmentCode", "dataType": "ID" },
+    { "pos": "02", "key": "syntaxErrorCode1", "dataType": "ID" },
+    { "pos": "03", "key": "syntaxErrorCode2", "dataType": "ID" },
+    { "pos": "04", "key": "syntaxErrorCode3", "dataType": "ID" },
+    { "pos": "05", "key": "syntaxErrorCode4", "dataType": "ID" },
+    { "pos": "06", "key": "syntaxErrorCode5", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 999.5010X231.A1.xml. IK502-IK506 are five INDEPENDENT scalar positions all using the same data element (618, Implementation Transaction Set Syntax Error Code) — not a repeating GROUP (X12RepeatDef), since each position stands alone rather than being one of several fields within a repeated group of DIFFERENT field types (contrast CAS's reason/amount/quantity trio, which genuinely is a repeating group). Modeled as 5 plain elements, matching this engine's existing distinction between a repeat group and repeated same-type positions."
+  ]
+}

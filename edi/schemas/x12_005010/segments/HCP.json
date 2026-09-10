@@ -1,0 +1,25 @@
+{
+  "id": "HCP",
+  "name": "Claim Pricing/Repricing Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "pricingMethodology", "dataType": "ID" },
+    { "pos": "02", "key": "repricedAllowedAmount", "dataType": "R" },
+    { "pos": "03", "key": "repricedSavingAmount", "dataType": "R" },
+    { "pos": "04", "key": "repricingOrganizationIdentifier", "dataType": "AN" },
+    { "pos": "05", "key": "repricingPerDiemOrFlatRateAmount", "dataType": "R" },
+    { "pos": "06", "key": "repricedApprovedAmbulatoryPatientGroupCode", "dataType": "AN" },
+    { "pos": "07", "key": "repricedApprovedAmbulatoryPatientGroupAmount", "dataType": "R" },
+    { "pos": "09", "key": "productOrServiceIdQualifier", "dataType": "ID" },
+    { "pos": "10", "key": "repricedApprovedCode", "dataType": "AN" },
+    { "pos": "11", "key": "unitOfMeasurementCode", "dataType": "ID" },
+    { "pos": "12", "key": "repricedApprovedServiceUnitCount", "dataType": "R" },
+    { "pos": "13", "key": "rejectReasonCode", "dataType": "ID" },
+    { "pos": "14", "key": "policyComplianceCode", "dataType": "ID" },
+    { "pos": "15", "key": "exceptionCode", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (Claim/Line Pricing-Repricing Information). Only HCP08 (Product/Service ID) is usage=N at every real occurrence — dropped; every other position kept."
+  ]
+}

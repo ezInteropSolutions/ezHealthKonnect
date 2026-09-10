@@ -1,0 +1,20 @@
+{
+  "id": "AK9",
+  "name": "Functional Group Response Trailer",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "functionalGroupAcknowledgeCode", "dataType": "ID" },
+    { "pos": "02", "key": "numberOfTransactionSetsIncluded", "dataType": "N0" },
+    { "pos": "03", "key": "numberOfReceivedTransactionSets", "dataType": "N0" },
+    { "pos": "04", "key": "numberOfAcceptedTransactionSets", "dataType": "N0" },
+    { "pos": "05", "key": "syntaxErrorCode1", "dataType": "ID" },
+    { "pos": "06", "key": "syntaxErrorCode2", "dataType": "ID" },
+    { "pos": "07", "key": "syntaxErrorCode3", "dataType": "ID" },
+    { "pos": "08", "key": "syntaxErrorCode4", "dataType": "ID" },
+    { "pos": "09", "key": "syntaxErrorCode5", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 999.5010X231.A1.xml. AK901 ('A'/'E'/'M'/'P'/'R'/'W'/'X') is the transaction-set-level rollup for the whole functional group this 999 acknowledges — edi.generate_999's own AK9 computation (see CLAUDE.md's EDI Phase 2 999 auto-fire design) derives this from whether any ERROR-severity edi/validator.Issue exists, matching the two-severity model already established. AK905-909 are five independent scalar positions (data element 716), same 'not a repeat group' reasoning as IK5.json's own note."
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "FRM",
+  "name": "Supporting Documentation",
+  "usage": "required",
+  "maxUse": "99",
+  "elements": [
+    { "pos": "01", "key": "questionNumberOrLetter", "dataType": "AN" },
+    { "pos": "02", "key": "questionResponseYesNo", "dataType": "ID" },
+    { "pos": "03", "key": "questionResponseText", "dataType": "AN" },
+    { "pos": "04", "key": "questionResponseDate", "dataType": "DT" },
+    { "pos": "05", "key": "questionResponsePercent", "dataType": "R" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (loop 2440, Form Identification Code's own answers). All 5 positions kept — FRM02-05 are 4 differently-typed 'Question Response' slots (Y/N, free text, date, percentage) that are mutually situational per the real question being answered, not a repeat group of the same shape."
+  ]
+}

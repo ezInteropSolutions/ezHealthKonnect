@@ -1,0 +1,171 @@
+{
+  "id": "2300",
+  "name": "Claim Information",
+  "repeat": "100",
+  "segmentIds": ["CLM", "DTP", "PWK", "CN1", "AMT", "REF", "K3", "NTE", "CR1", "CR2", "CRC", "HI", "HCP"],
+  "loops": [
+    {
+      "id": "2310A",
+      "name": "Referring Provider Name",
+      "repeat": "2",
+      "segmentIds": ["NM1", "REF"]
+    },
+    {
+      "id": "2310B",
+      "name": "Rendering Provider Name",
+      "repeat": "1",
+      "segmentIds": ["NM1", "PRV", "REF"]
+    },
+    {
+      "id": "2310C",
+      "name": "Service Facility Location Name",
+      "repeat": "1",
+      "segmentIds": ["NM1", "N3", "N4", "REF", "PER"]
+    },
+    {
+      "id": "2310D",
+      "name": "Supervising Provider Name",
+      "repeat": "1",
+      "segmentIds": ["NM1", "REF"]
+    },
+    {
+      "id": "2310E",
+      "name": "Ambulance Pick-up Location",
+      "repeat": "1",
+      "segmentIds": ["NM1", "N3", "N4"]
+    },
+    {
+      "id": "2310F",
+      "name": "Ambulance Drop-off Location",
+      "repeat": "1",
+      "segmentIds": ["NM1", "N3", "N4"]
+    },
+    {
+      "id": "2320",
+      "name": "Other Subscriber Information",
+      "repeat": "10",
+      "segmentIds": ["SBR", "CAS", "AMT", "OI", "MOA"],
+      "loops": [
+        {
+          "id": "2330A",
+          "name": "Other Subscriber Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4", "REF"]
+        },
+        {
+          "id": "2330B",
+          "name": "Other Payer Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4", "DTP", "REF"]
+        },
+        {
+          "id": "2330C",
+          "name": "Other Payer Referring Provider",
+          "repeat": "2",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2330D",
+          "name": "Other Payer Rendering Provider",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2330E",
+          "name": "Other Payer Service Facility Location",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2330F",
+          "name": "Other Payer Supervising Provider",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2330G",
+          "name": "Other Payer Billing Provider",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        }
+      ]
+    },
+    {
+      "id": "2400",
+      "name": "Service Line Number",
+      "repeat": "50",
+      "segmentIds": ["LX", "SV1", "SV5", "PWK", "CR1", "CR3", "CRC", "DTP", "QTY", "MEA", "CN1", "REF", "AMT", "K3", "NTE", "PS1", "HCP"],
+      "loops": [
+        {
+          "id": "2410",
+          "name": "Drug Identification",
+          "repeat": "1",
+          "segmentIds": ["LIN", "CTP", "REF"]
+        },
+        {
+          "id": "2420A",
+          "name": "Rendering Provider Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "PRV", "REF"]
+        },
+        {
+          "id": "2420B",
+          "name": "Purchased Service Provider Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2420C",
+          "name": "Service Facility Location Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4", "REF"]
+        },
+        {
+          "id": "2420D",
+          "name": "Supervising Provider Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2420E",
+          "name": "Ordering Provider Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4", "REF", "PER"]
+        },
+        {
+          "id": "2420F",
+          "name": "Referring Provider Name",
+          "repeat": "2",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2420G",
+          "name": "Ambulance Pick-up Location",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4"]
+        },
+        {
+          "id": "2420H",
+          "name": "Ambulance Drop-off Location",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4"]
+        },
+        {
+          "id": "2430",
+          "name": "Line Adjudication Information",
+          "repeat": "15",
+          "segmentIds": ["SVD", "CAS", "DTP", "AMT"]
+        },
+        {
+          "id": "2440",
+          "name": "Form Identification Code",
+          "repeat": ">1",
+          "segmentIds": ["LQ", "FRM"]
+        }
+      ]
+    }
+  ],
+  "_sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — the ENTIRE 2300 subtree (2310A-F, 2320->2330A-G, 2400->2410/2420A-H/2430/2440) appears in TWO tree positions within 837P: under 2000B (subscriber is the patient) and under 2000C (a dependent is the patient) — confirmed via line-count comparison of both real occurrences (~11,371 vs ~11,379 lines, same shape, not two different structures that happen to share a loop ID). Authored ONCE here per the Phase 2 loopRef mechanism (edi/schema_disk_types... see edi/schema_loader.go's resolveLoopRefs) and referenced from both 837P.json's and 837I.json's own 2000B/2000C positions via {\"loopRef\": \"2300-claim\"} — see CLAUDE.md's EDI Phase 2 section for the full design rationale."
+  ]
+}

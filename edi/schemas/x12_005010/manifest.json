@@ -3,8 +3,21 @@
   "transactionSets": {
     "835": {
       "file": "835.json",
-      "functionalIdentifierCode": "HP",
       "name": "Health Care Claim Payment/Advice"
+    },
+    "999": {
+      "file": "999.json",
+      "name": "Implementation Acknowledgment"
+    },
+    "837:005010X222A1": {
+      "file": "837P.json",
+      "friendlyId": "837P",
+      "name": "Health Care Claim: Professional"
+    },
+    "837:005010X223A2": {
+      "file": "837I.json",
+      "friendlyId": "837I",
+      "name": "Health Care Claim: Institutional"
     }
   }
 }

@@ -1,0 +1,91 @@
+{
+  "transactionSetId": "837I",
+  "stTransactionSetId": "837",
+  "functionalIdentifierCode": "HC",
+  "versionReleaseIndustryCode": "005010X223A2",
+  "version": "005010X223A2",
+  "headerSegmentIds": ["ST", "BHT"],
+  "loops": [
+    {
+      "id": "1000A",
+      "name": "Submitter Name",
+      "repeat": "1",
+      "segmentIds": ["NM1", "PER"]
+    },
+    {
+      "id": "1000B",
+      "name": "Receiver Name",
+      "repeat": "1",
+      "segmentIds": ["NM1"]
+    },
+    {
+      "id": "2000A",
+      "name": "Billing Provider Hierarchical Level",
+      "repeat": ">1",
+      "segmentIds": ["HL", "PRV", "CUR"],
+      "loops": [
+        {
+          "id": "2010AA",
+          "name": "Billing Provider Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4", "REF", "PER"]
+        },
+        {
+          "id": "2010AB",
+          "name": "Pay-to Address Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4"]
+        },
+        {
+          "id": "2010AC",
+          "name": "Pay-To Plan Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4", "REF"]
+        },
+        {
+          "id": "2000B",
+          "name": "Subscriber Hierarchical Level",
+          "repeat": ">1",
+          "segmentIds": ["HL", "SBR"],
+          "loops": [
+            {
+              "id": "2010BA",
+              "name": "Subscriber Name",
+              "repeat": "1",
+              "segmentIds": ["NM1", "N3", "N4", "DMG", "REF"]
+            },
+            {
+              "id": "2010BB",
+              "name": "Payer Name",
+              "repeat": "1",
+              "segmentIds": ["NM1", "N3", "N4", "REF"]
+            },
+            { "loopRef": "2300-claim-institutional" },
+            {
+              "id": "2000C",
+              "name": "Patient Hierarchical Level",
+              "repeat": ">1",
+              "segmentIds": ["HL", "PAT"],
+              "loops": [
+                {
+                  "id": "2010CA",
+                  "name": "Patient Name",
+                  "repeat": "1",
+                  "segmentIds": ["NM1", "N3", "N4", "DMG", "REF"]
+                },
+                { "loopRef": "2300-claim-institutional" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trailerSegmentIds": ["SE"],
+  "_sourceRefs": [
+    "PyX12 (azoner/pyx12) 837Q3.I.5010.X223.A1.xml — downloaded and read directly, structural skeleton extracted via the same Python XML-parser script used for 837P, cross-checked line-by-line against the raw XML. Structurally mirrors 837P's own header/loops/trailer flattening (HEADER/DETAIL/FOOTER wrapper artifacts collapsed away the same way) with 2 real, confirmed differences from 837P: 2000B carries no PAT segment here (institutional puts patient info only at 2000C, never duplicated at the subscriber level), and 2010BA/2010CA carry no PER segment (837P's subscriber/patient name loops do).",
+    "2000B/2000C's own {loopRef: '2300-claim-institutional'} entries mirror 837P's own Fix 3 mechanism exactly, referencing loops/2300-claim-institutional.json — see that file's own _sourceRefs for why it's a genuinely different shared shape, not a duplicate of 837P's own 2300-claim.json.",
+    "GS08/versionReleaseIndustryCode is '005010X223A2' (not X223A1) — confirmed directly from this map's own GS08 valid_codes list, the real, current institutional companion-guide version; 837P uses X222A1 (no A2 revision exists for professional).",
+    "TA1 deliberately NOT modeled, same reasoning as every other transaction set in this schema."
+  ]
+}

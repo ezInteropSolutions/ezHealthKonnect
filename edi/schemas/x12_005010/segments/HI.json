@@ -1,0 +1,38 @@
+{
+  "id": "HI",
+  "name": "Health Care Information Codes",
+  "usage": "situational",
+  "maxUse": "1",
+  "repeats": [
+    {
+      "key": "codes",
+      "startPos": 1,
+      "groupSize": 1,
+      "maxGroups": 12,
+      "groupFields": [
+        {
+          "pos": "1",
+          "key": "code",
+          "composite": {
+            "subElements": [
+              { "pos": "1", "key": "qualifier", "dataType": "ID" },
+              { "pos": "2", "key": "code", "dataType": "AN" },
+              { "pos": "3", "key": "dateTimePeriodFormatQualifier", "dataType": "ID" },
+              { "pos": "4", "key": "dateTimePeriod", "dataType": "AN" },
+              { "pos": "5", "key": "amount", "dataType": "R" },
+              { "pos": "6", "key": "_reserved6", "dataType": "AN" },
+              { "pos": "7", "key": "_reserved7", "dataType": "AN" },
+              { "pos": "8", "key": "_reserved8", "dataType": "AN" },
+              { "pos": "9", "key": "presentOnAdmissionIndicator", "dataType": "ID" }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml (837P) — new segment for Phase 2 (Health Care Diagnosis Code / Anesthesia Related Procedure / Condition Information — one shared HI segment, distinguished purely by each repetition's own qualifier code, e.g. 'ABK' principal diagnosis vs 'ABF' other diagnosis). HI01-HI12 are 12 REPEATS of the exact same composite C022 shape (confirmed structurally identical position-by-position across all 12) — modeled via X12RepeatDef (startPos=1, groupSize=1) rather than 12 hand-written composite elements, the same 'a repeat group's own field can itself be composite' mechanism already proven by PLB's adjustment-identifier field (see edi/loop_engine.go's parseRepeatGroup, edi/builder/segment_writer.go's writeSegmentInstance) — this is the anti-hardcoding-preferred shape per CLAUDE.md's own 'one hand-written function/field per instance' warning. Under 837P, C022 sub-elements 3-9 are usage=N at every real position — originally modeled with only qualifier+code kept.",
+    "PHASE 2 EXTENSION for 837Q3.I.5010.X223.A1.xml (837I): institutional's own HI usage (Occurrence Code/Span dates, Value Code amounts, Present on Admission indicator for diagnosis codes) genuinely populates sub03 (Date Time Period Format Qualifier), sub04 (Date Time Period), sub05 (Monetary Amount), and sub09 (Present on Admission Indicator) — unlike 837P, which never uses them. Added additively; 837P's own HI usage (which never populates these) is unaffected. Subs 6-8 (Quantity, Version Identifier, Industry Code) remain usage=N in BOTH IGs.",
+    "COMPOSITE ALIGNMENT GOTCHA (see CLM.json's own note for the full mechanism explanation): subs 6/7/8 sit BETWEEN kept subs 5 and 9, and a composite's SubElements align by array index, not by Pos — so they could not simply be omitted despite being usage=N in every real occurrence; kept as reserved, never-populated placeholders (_reserved6/7/8) purely to preserve index alignment for sub09."
+  ]
+}

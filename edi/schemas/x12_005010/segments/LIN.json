@@ -1,0 +1,13 @@
+{
+  "id": "LIN",
+  "name": "Drug Identification",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "02", "key": "productOrServiceIdQualifier", "dataType": "ID" },
+    { "pos": "03", "key": "nationalDrugCode", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (loop 2410, Drug Identification). LIN01 (Assigned Identification) and the ENTIRE repeating LIN04-31 block (14 more qualifier/code pairs, structurally identical to LIN02/03) are usage=N at the real occurrence — this IG's own Drug Identification carries exactly one NDC code via LIN02/03, nothing else. LIN04-31's own repeat-GROUP shape (were it ever needed) is the same mechanism HI.json's own 12x repeat already proves; not built here since nothing in this IG populates it."
+  ]
+}

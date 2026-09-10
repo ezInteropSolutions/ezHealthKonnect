@@ -121,8 +121,18 @@ type X12LoopDef struct {
 	ID         string        `json:"id"`             // e.g. "2100" — the addressing key
 	Name       string        `json:"name,omitempty"` // display only
 	Repeat     string        `json:"repeat,omitempty"` // "1" | ">1" | "1..999" — cardinality + validator input
-	SegmentIDs []string      `json:"segmentIds,omitempty"` // ordered segment ID references into the shared library, strict order
+	SegmentIDs []string      `json:"segmentIds,omitempty"` // ordered segment ID references into the shared library, strict order — matched BEFORE Loops
 	Loops      []*X12LoopDef `json:"loops,omitempty"`      // nested child loops (2100 -> 2110)
+
+	// TrailerSegmentIDs are this loop's OWN segments that come AFTER its
+	// nested Loops close — the loop-level counterpart to
+	// X12TransactionSetDef's own Header/Trailer split, one level down. Most
+	// loops don't need this (a loop's own segments all precede its
+	// children — 835 never needed it), but some genuinely do: 999's own
+	// 2000 loop is AK2, then a repeating 2100 child loop, THEN IK5 — a
+	// segment that structurally closes the loop out, not one that opens it.
+	// Empty for the overwhelming majority of loops.
+	TrailerSegmentIDs []string `json:"trailerSegmentIds,omitempty"`
 }
 
 // RepeatsMultiple reports whether this loop may occur more than once at its
@@ -135,12 +145,41 @@ func (l *X12LoopDef) RepeatsMultiple() bool {
 // and trailer segments, all referencing the shared segment library by ID.
 // This is the ONLY place one transaction set (835) differs from another
 // (837): everything it references is shared.
+//
+// TransactionSetID is the schema's own registry key — for a transaction set
+// with only one real-world variant (835, 999) this equals the raw X12 ST01
+// value; for one with multiple variants sharing the same ST01 (837P/837I are
+// both literally "837") it's the human-legible disambiguated form ("837P"),
+// and STTransactionSetID carries the real ST01 value to write/expect on the
+// wire. FunctionalIdentifierCode (GS01) and VersionReleaseIndustryCode
+// (GS08) are the other two envelope-level values that vary by transaction
+// set, previously hardcoded as 835-only fixedValues on the shared
+// envelope.json/segments/ST.json — see EffectiveST01's own doc comment for
+// why ST01 alone needed a second field where GS01/GS08 didn't.
 type X12TransactionSetDef struct {
-	TransactionSetID  string        `json:"transactionSetId"` // e.g. "835"
-	Version            string        `json:"version,omitempty"` // e.g. "005010X221A1" — documentation/validation only
-	HeaderSegmentIDs   []string      `json:"headerSegmentIds,omitempty"`  // ST, BPR, TRN, REF, DTM — references into the shared library
-	Loops              []*X12LoopDef `json:"loops,omitempty"`             // top-level loops: 1000A, 1000B, 2000, ...
-	TrailerSegmentIDs  []string      `json:"trailerSegmentIds,omitempty"` // PLB, SE
+	TransactionSetID           string        `json:"transactionSetId"`             // e.g. "835", or "837P" for a disambiguated variant
+	STTransactionSetID         string        `json:"stTransactionSetId,omitempty"` // the raw ST01 value, e.g. "837" — only set when it differs from TransactionSetID
+	FunctionalIdentifierCode   string        `json:"functionalIdentifierCode,omitempty"`   // GS01, e.g. "HP" (835), "HC" (837), "FA" (999)
+	VersionReleaseIndustryCode string        `json:"versionReleaseIndustryCode,omitempty"` // GS08, e.g. "005010X221A1"
+	Version                    string        `json:"version,omitempty"`           // e.g. "005010X221A1" — documentation only, distinct from GS08 above
+	HeaderSegmentIDs           []string      `json:"headerSegmentIds,omitempty"`  // ST, BPR, TRN, REF, DTM — references into the shared library
+	Loops                      []*X12LoopDef `json:"loops,omitempty"`             // top-level loops: 1000A, 1000B, 2000, ...
+	TrailerSegmentIDs          []string      `json:"trailerSegmentIds,omitempty"` // PLB, SE
+}
+
+// EffectiveST01 returns the raw value to write/expect in ST01 on the wire —
+// STTransactionSetID when the schema set one (a disambiguated variant like
+// 837P/837I, whose own TransactionSetID is more specific than the real X12
+// value), otherwise TransactionSetID itself (835, 999 — single-variant sets
+// where the registry key already IS the real ST01 value).
+func (t *X12TransactionSetDef) EffectiveST01() string {
+	if t == nil {
+		return ""
+	}
+	if t.STTransactionSetID != "" {
+		return t.STTransactionSetID
+	}
+	return t.TransactionSetID
 }
 
 // X12EnvelopeDef is the ISA/GS/GE/IEA shape, orthogonal to the transaction-set

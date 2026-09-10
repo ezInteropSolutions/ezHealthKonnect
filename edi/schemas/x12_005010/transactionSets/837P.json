@@ -1,0 +1,91 @@
+{
+  "transactionSetId": "837P",
+  "stTransactionSetId": "837",
+  "functionalIdentifierCode": "HC",
+  "versionReleaseIndustryCode": "005010X222A1",
+  "version": "005010X222A1",
+  "headerSegmentIds": ["ST", "BHT"],
+  "loops": [
+    {
+      "id": "1000A",
+      "name": "Submitter Name",
+      "repeat": "1",
+      "segmentIds": ["NM1", "PER"]
+    },
+    {
+      "id": "1000B",
+      "name": "Receiver Name",
+      "repeat": "1",
+      "segmentIds": ["NM1"]
+    },
+    {
+      "id": "2000A",
+      "name": "Billing Provider Hierarchical Level",
+      "repeat": ">1",
+      "segmentIds": ["HL", "PRV", "CUR"],
+      "loops": [
+        {
+          "id": "2010AA",
+          "name": "Billing Provider Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4", "REF", "PER"]
+        },
+        {
+          "id": "2010AB",
+          "name": "Pay-to Address Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4"]
+        },
+        {
+          "id": "2010AC",
+          "name": "Pay-To Plan Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4", "REF"]
+        },
+        {
+          "id": "2000B",
+          "name": "Subscriber Hierarchical Level",
+          "repeat": ">1",
+          "segmentIds": ["HL", "SBR", "PAT"],
+          "loops": [
+            {
+              "id": "2010BA",
+              "name": "Subscriber Name",
+              "repeat": "1",
+              "segmentIds": ["NM1", "N3", "N4", "DMG", "REF", "PER"]
+            },
+            {
+              "id": "2010BB",
+              "name": "Payer Name",
+              "repeat": "1",
+              "segmentIds": ["NM1", "N3", "N4", "REF"]
+            },
+            { "loopRef": "2300-claim" },
+            {
+              "id": "2000C",
+              "name": "Patient Hierarchical Level",
+              "repeat": ">1",
+              "segmentIds": ["HL", "PAT"],
+              "loops": [
+                {
+                  "id": "2010CA",
+                  "name": "Patient Name",
+                  "repeat": "1",
+                  "segmentIds": ["NM1", "N3", "N4", "DMG", "REF", "PER"]
+                },
+                { "loopRef": "2300-claim" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trailerSegmentIds": ["SE"],
+  "_sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — downloaded and read directly, structural skeleton extracted via a Python XML-parser script (not AI-summarized) to avoid the hallucination risk a prior round hit on a large fetched file, cross-checked line-by-line against the raw XML for every loop/segment. HEADER/DETAIL/FOOTER (PyX12's own Table 1/2/3 wrapper artifacts, not real X12 loops) are flattened away exactly as 835's own header/loops/trailer split already established: BHT (from HEADER) folds into headerSegmentIds alongside ST; 1000A/1000B (from HEADER) and 2000A (from DETAIL) become top-level Loops siblings; FOOTER is empty (usage=N) for 837P, nothing to model.",
+    "2000B/2000C's own {loopRef: '2300-claim'} entries are the Fix 3 shared-loop-template mechanism (edi/schema_loader.go's resolveLoopRefs) — see loops/2300-claim.json's own _sourceRefs for the full duplication-avoidance rationale.",
+    "TA1 deliberately NOT modeled, same reasoning as 835/999's own precedent (receiver-side interchange acknowledgment, not part of this transaction set's own ST...SE payload).",
+    "stTransactionSetId is '837': 837P and 837I are NOT distinguishable by ST01 alone (both are literally the string '837') — GS08 (versionReleaseIndustryCode, REQUIRED in every real GS segment, unlike ST03 which many trading partners leave blank) is the real disambiguator. See CLAUDE.md's EDI Phase 2 section and edi/loop_engine.go's own composite-lookup comment."
+  ]
+}

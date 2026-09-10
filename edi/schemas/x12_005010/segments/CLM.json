@@ -1,0 +1,45 @@
+{
+  "id": "CLM",
+  "name": "Claim Information",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "patientControlNumber", "dataType": "AN" },
+    { "pos": "02", "key": "totalClaimChargeAmount", "dataType": "R" },
+    {
+      "pos": "05",
+      "key": "healthCareServiceLocation",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "placeOfServiceCode", "dataType": "ID" },
+          { "pos": "2", "key": "facilityCodeQualifier", "dataType": "ID" },
+          { "pos": "3", "key": "claimFrequencyCode", "dataType": "ID" }
+        ]
+      }
+    },
+    { "pos": "06", "key": "providerSignatureIndicator", "dataType": "ID" },
+    { "pos": "07", "key": "assignmentOrPlanParticipationCode", "dataType": "ID" },
+    { "pos": "08", "key": "benefitsAssignmentCertificationIndicator", "dataType": "ID" },
+    { "pos": "09", "key": "releaseOfInformationCode", "dataType": "ID" },
+    { "pos": "10", "key": "patientSignatureSourceCode", "dataType": "ID" },
+    {
+      "pos": "11",
+      "key": "relatedCauses",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "relatedCausesCode1", "dataType": "ID" },
+          { "pos": "2", "key": "relatedCausesCode2", "dataType": "ID" },
+          { "pos": "3", "key": "_reserved3", "dataType": "ID" },
+          { "pos": "4", "key": "autoAccidentStateCode", "dataType": "ID" },
+          { "pos": "5", "key": "countryCode", "dataType": "ID" }
+        ]
+      }
+    },
+    { "pos": "12", "key": "specialProgramIndicator", "dataType": "ID" },
+    { "pos": "20", "key": "delayReasonCode", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (loop 2300, the claim header itself). CLM03/04 (Claim Filing Indicator Code, Non-Institutional Claim Type Code) and CLM13-19 (7 further Yes/No/Level-of-Service/Provider-Agreement/Claim-Status/Claim-Submission-Reason positions) are usage=N at the real occurrence — dropped (safe: they're plain top-level Elements, which align by their own numeric Pos, not array index — see edi/builder/segment_writer.go's writeSegmentInstance). Both composites (C023 Health Care Service Location, C024 Related Causes) reuse the same sub-element-naming discipline SV1's own composites already establish.",
+    "IMPORTANT COMPOSITE GOTCHA (found and fixed during Phase 2): unlike a segment's own top-level Elements, a composite's SubElements align by ARRAY INDEX, not by their own Pos string (edi/builder/segment_writer.go's writeComposite does `parts[i]` where i is the Go slice index; edi/loop_engine.go's parseComposite mirrors this on read) — Pos is purely informational for a composite sub-element. C024 sub03 ('Related Causes Code', a third qualifier slot) is usage=N at the real occurrence, but since subs 4 (Auto Accident State Code) and 5 (Country Code) ARE used and come AFTER it, sub03 could NOT simply be omitted the way a top-level dropped position can — doing so would have silently shifted sub04/05's real wire values one position left/right on every build/parse. Kept as a reserved, never-populated placeholder (_reserved3) purely to preserve index alignment. Dropping only TRAILING sub-positions (as every other composite in this schema does) remains safe."
+  ]
+}

@@ -1,5 +1,7 @@
 {
   "transactionSetId": "835",
+  "functionalIdentifierCode": "HP",
+  "versionReleaseIndustryCode": "005010X221A1",
   "version": "005010X221A1",
   "_sourceRefs": [
     "Stedi X12 EDI 835 transaction set reference — stedi.com/edi/hipaa/transaction-set/835-W1 (loop hierarchy, cardinalities, and which segments belong to which loop) — LOOP STRUCTURE independently confirmed correct against PyX12 below, byte-for-byte, on every loop and segment presence.",

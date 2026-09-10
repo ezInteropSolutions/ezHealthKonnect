@@ -1,0 +1,15 @@
+{
+  "id": "IK3",
+  "name": "Error Identification",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "segmentIdCode", "dataType": "AN" },
+    { "pos": "02", "key": "segmentPosition", "dataType": "N0" },
+    { "pos": "03", "key": "loopIdentifierCode", "dataType": "AN" },
+    { "pos": "04", "key": "segmentSyntaxErrorCode", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 999.5010X231.A1.xml. IK302 (Segment Position in Transaction Set) is a 1-based count of segments from ST — modeled N0 (whole number), matching this schema's own convention for other position-count elements (CTX03/CTX05-01, etc.). IK304's valid_codes (1-8, I4, I6-I9) are the standard X12 Segment Syntax Error Code table — not modeled inline since this schema's own established convention (see CLP.json/CAS.json) never populates enumerated valid-code lists, only dataType/length."
+  ]
+}

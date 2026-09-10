@@ -1,0 +1,14 @@
+{
+  "id": "PRV",
+  "name": "Provider Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "providerCode", "dataType": "ID" },
+    { "pos": "02", "key": "referenceIdentificationQualifier", "dataType": "ID" },
+    { "pos": "03", "key": "providerTaxonomyCode", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (Billing Provider Specialty Information / Rendering Provider Specialty Information). PRV04 (State/Province Code), PRV05 (composite C035 Provider Specialty Information), PRV06 (Provider Organization Code) are usage=N at every real occurrence — dropped per this schema's established convention."
+  ]
+}

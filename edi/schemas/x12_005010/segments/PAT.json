@@ -1,0 +1,16 @@
+{
+  "id": "PAT",
+  "name": "Patient Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "05", "key": "dateTimePeriodFormatQualifier", "dataType": "ID" },
+    { "pos": "06", "key": "patientDeathDate", "dataType": "DT" },
+    { "pos": "07", "key": "unitOfMeasurementCode", "dataType": "ID" },
+    { "pos": "08", "key": "patientWeight", "dataType": "R" },
+    { "pos": "09", "key": "pregnancyIndicator", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (loops 2000B/2000C). PAT01-04 (Individual Relationship Code, Patient Location Code, Employment Status Code, Student Status Code) are usage=N at every real occurrence in this IG — this IG carries the patient/subscriber relationship on SBR02 instead, not PAT01. Dropped per this schema's established convention; positions 05-09 kept, none dropped."
+  ]
+}

@@ -38,10 +38,11 @@ type EDIField struct {
 	Key        string // the element's raw position ("02") — Path's own trailing component; the addressing
 	                   // convention is deliberately position-based, not canonical-key-based (unlike the
 	                   // nested ParsedJSON tree, which DOES use canonical Keys where the schema defines them)
-	DataType   string
-	FixedValue string // set when the schema declares this element as a business-fixed constant, e.g. ST01 == "835"
-	MinLength  int
-	MaxLength  int
+	DataType       string
+	FixedValue     string // set when the schema declares this element as a business-fixed constant, e.g. ST01 == "835"
+	MinLength      int
+	MaxLength      int
+	SegmentPosition int // this field's own segment occurrence's 1-based position in the transaction set — same value, same counter as SegmentInstance.Position, stamped per-field so a caller (edi.generate_999's own IK3 generation) never has to re-parse Path to correlate a field-level error back to its segment occurrence
 }
 
 // ParseResult is the structured output of one transaction-set parse.
@@ -63,8 +64,17 @@ type ParseResult struct {
 // purely so the validator can check a segment's own SyntaxRules (which
 // relate element positions within ONE occurrence) without re-walking the
 // nested ParsedJSON tree itself.
+//
+// Position is this occurrence's 1-based ordinal among EVERY segment matched
+// from ST through SE inclusive — the real X12 "Segment Position in
+// Transaction Set" a 999's own IK3 (Error Identification) segment reports.
+// Every segment occurrence gets one (not just ones with SyntaxRules — a
+// broader use than checkSyntaxRules alone needed, but a free byproduct of
+// the same walk, and the only piece IK3 generation needs that the flat,
+// loop-qualified EDIField.Path can't already answer on its own).
 type SegmentInstance struct {
 	SegmentID string
+	Position  int
 	RawByPos  map[string]string
 }
 
@@ -86,6 +96,7 @@ func ParseTransactionSet(spec *X12SpecDef, content string) (*ParseResult, error)
 	}
 
 	interchange := map[string]interface{}{}
+	gs08 := ""
 	stIndex := -1
 	for i, t := range tokens {
 		switch t.ID {
@@ -102,6 +113,9 @@ func ParseTransactionSet(spec *X12SpecDef, content string) (*ParseResult, error)
 			interchange["usageIndicator"] = strings.TrimRight(elementAt(t, 15), " ")
 		case "GS":
 			interchange["gsControlNumber"] = elementAt(t, 6)
+			interchange["functionalIdentifierCode"] = elementAt(t, 1)
+			interchange["versionReleaseIndustryCode"] = elementAt(t, 8)
+			gs08 = elementAt(t, 8)
 		case "ST":
 			stIndex = i
 		}
@@ -116,9 +130,22 @@ func ParseTransactionSet(spec *X12SpecDef, content string) (*ParseResult, error)
 	txSetID := elementAt(tokens[stIndex], 1)
 	interchange["stControlNumber"] = elementAt(tokens[stIndex], 2)
 
-	txSet, ok := spec.TransactionSets[txSetID]
+	// Multi-variant transaction sets (837P/837I both literally ST01=="837")
+	// are disambiguated by GS08 — try the composite key first, then fall
+	// back to the bare ST01 key, which covers every single-variant set (835,
+	// 999) unchanged. See CLAUDE.md's EDI Phase 2 section for why GS08 (not
+	// ST03) is the real disambiguator: it's REQUIRED in every GS segment,
+	// unlike ST03, which many real trading partners leave blank.
+	var txSet *X12TransactionSetDef
+	var ok bool
+	if gs08 != "" {
+		txSet, ok = spec.TransactionSets[txSetID+":"+gs08]
+	}
 	if !ok {
-		return nil, fmt.Errorf("edi: unknown transaction set %q", txSetID)
+		txSet, ok = spec.TransactionSets[txSetID]
+	}
+	if !ok {
+		return nil, fmt.Errorf("edi: unknown transaction set %q (GS08 %q)", txSetID, gs08)
 	}
 
 	seIndex := -1
@@ -152,7 +179,11 @@ func ParseTransactionSet(spec *X12SpecDef, content string) (*ParseResult, error)
 	}
 
 	return &ParseResult{
-		TransactionSet:   txSetID,
+		// txSet.TransactionSetID (not the raw txSetID/ST01 local var) — for a
+		// disambiguated multi-variant set this is the human-legible resolved
+		// id ("837P"), never the ambiguous bare "837" both variants share.
+		// See X12TransactionSetDef's own doc comment.
+		TransactionSet:   txSet.TransactionSetID,
 		EnvelopePresent:  envelopePresent,
 		Interchange:      interchange,
 		Header:           header,
@@ -184,13 +215,14 @@ type pathStep struct {
 }
 
 type pendingField struct {
-	Steps      []pathStep
-	Value      string
-	Key        string
-	DataType   string
-	FixedValue string
-	MinLength  int
-	MaxLength  int
+	Steps           []pathStep
+	Value           string
+	Key             string
+	DataType        string
+	FixedValue      string
+	MinLength       int
+	MaxLength       int
+	SegmentPosition int
 }
 
 // walker carries the token stream and accumulates flat fields as it walks;
@@ -203,6 +235,7 @@ type walker struct {
 	delimiters       Delimiters
 	pending          []pendingField
 	segmentInstances []SegmentInstance
+	segmentPosition  int // running 1-based count of every segment matched from ST — see SegmentInstance.Position's own doc comment
 }
 
 // matchSegmentSequence treats segmentIDs as the SET of segments expected at
@@ -293,6 +326,7 @@ func countExisting(v interface{}) int {
 // records the same data as pending flat fields, then applies the segment's
 // own intra-segment X12RepeatDef groups (e.g. CAS) on top.
 func (w *walker) parseSegmentInstance(t segmentToken, segDef *X12SegmentDef, path []pathStep) map[string]interface{} {
+	w.segmentPosition++
 	out := map[string]interface{}{}
 	consumedPositions := map[int]bool{}
 	rawByPos := map[string]string{}
@@ -326,13 +360,14 @@ func (w *walker) parseSegmentInstance(t segmentToken, segDef *X12SegmentDef, pat
 				// path already ends in this segment's own step — matchSegmentSequence
 				// appends it before calling parseSegmentInstance — so it's cloned
 				// as-is here, not appended to again.
-				Steps:      append([]pathStep{}, path...),
-				Value:      raw,
-				Key:        el.Pos,
-				DataType:   string(el.DataType),
-				FixedValue: el.FixedValue,
-				MinLength:  el.MinLength,
-				MaxLength:  el.MaxLength,
+				Steps:           append([]pathStep{}, path...),
+				Value:           raw,
+				Key:             el.Pos,
+				DataType:        string(el.DataType),
+				FixedValue:      el.FixedValue,
+				MinLength:       el.MinLength,
+				MaxLength:       el.MaxLength,
+				SegmentPosition: w.segmentPosition,
 			})
 		}
 	}
@@ -344,9 +379,12 @@ func (w *walker) parseSegmentInstance(t segmentToken, segDef *X12SegmentDef, pat
 		}
 	}
 
-	if len(segDef.SyntaxRules) > 0 {
-		w.segmentInstances = append(w.segmentInstances, SegmentInstance{SegmentID: segDef.ID, RawByPos: rawByPos})
-	}
+	// Always recorded now (not gated on the segment having SyntaxRules) —
+	// checkSyntaxRules' own inner loop over segDef.SyntaxRules is a no-op for
+	// a segment with none, so this is a free, harmless superset for that
+	// caller, and the only source of Position data edi.generate_999's own
+	// IK3 (Error Identification) generation needs.
+	w.segmentInstances = append(w.segmentInstances, SegmentInstance{SegmentID: segDef.ID, Position: w.segmentPosition, RawByPos: rawByPos})
 
 	return out
 }
@@ -505,6 +543,11 @@ func (w *walker) matchLoopInstance(pos *int, loop *X12LoopDef, path []pathStep) 
 			instance["loops"] = childLoops
 		}
 	}
+	if len(loop.TrailerSegmentIDs) > 0 {
+		if err := w.matchSegmentSequence(pos, loop.TrailerSegmentIDs, instance, path); err != nil {
+			return nil, err
+		}
+	}
 	return instance, nil
 }
 
@@ -561,6 +604,7 @@ func (w *walker) renderFields() map[string]*EDIField {
 		out[path] = &EDIField{
 			Path: path, Value: p.Value, Key: p.Key, DataType: p.DataType,
 			FixedValue: p.FixedValue, MinLength: p.MinLength, MaxLength: p.MaxLength,
+			SegmentPosition: p.SegmentPosition,
 		}
 	}
 	return out

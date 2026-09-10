@@ -1,0 +1,14 @@
+{
+  "id": "AK1",
+  "name": "Functional Group Response Header",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "functionalIdentifierCode", "dataType": "ID" },
+    { "pos": "02", "key": "groupControlNumber", "dataType": "N0" },
+    { "pos": "03", "key": "versionReleaseIndustryCode", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 999.5010X231.A1.xml — downloaded and read directly (not AI-summarized), same discipline as 835's own segment files. AK101/AK102/AK103 echo the ORIGINAL functional group's own GS01/GS06/GS08 being acknowledged — data element numbers 479/28/480 match envelope.json's own GS01 (functionalIdentifierCode)/GS06 (gsControlNumber, N0)/GS08 (versionReleaseIndustryCode, AN) exactly, confirming the dataType choices here."
+  ]
+}

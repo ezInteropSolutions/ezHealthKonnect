@@ -252,6 +252,17 @@ func (w *buildWalker) writeLoopInstance(loop *edi.X12LoopDef, data map[string]in
 			segs = append(segs, childSegs...)
 		}
 	}
+	if len(loop.TrailerSegmentIDs) > 0 {
+		// Same source map as SegmentIDs above (not childData) — a loop's own
+		// trailer segments are keyed by segment ID at the SAME level as its
+		// own leading segments, just written after Loops. See
+		// X12LoopDef.TrailerSegmentIDs' own doc comment.
+		trailerSegs, err := w.writeSegmentSequence(loop.TrailerSegmentIDs, data)
+		if err != nil {
+			return nil, err
+		}
+		segs = append(segs, trailerSegs...)
+	}
 	return segs, nil
 }
 

@@ -75,8 +75,55 @@ func Validate(spec *edi.X12SpecDef, result *edi.ParseResult) *Result {
 		}
 	}
 
+	// checkEnvelopeIdentity's issues are always error-severity by
+	// construction (see its own doc comment) — unlike checkSyntaxRules'
+	// (always warning), so unlike that append below, this one must also
+	// flip Valid.
+	if envelopeIssues := checkEnvelopeIdentity(spec, result); len(envelopeIssues) > 0 {
+		r.Valid = false
+		r.Issues = append(r.Issues, envelopeIssues...)
+	}
+
 	r.Issues = append(r.Issues, checkSyntaxRules(spec, result)...)
 	return r
+}
+
+// checkEnvelopeIdentity re-checks GS01 (functionalIdentifierCode) and GS08
+// (versionReleaseIndustryCode) against the transaction set ParseTransactionSet
+// actually resolved — the read-direction counterpart to Fix 1's move of
+// these two values off the shared envelope.json's own (now-removed)
+// fixedValues and onto X12TransactionSetDef. ST01 needs no equivalent check
+// here: it's the very value the parse-time lookup was keyed on, so by
+// construction a successfully-parsed result's ST01 already matches its
+// resolved transaction set (see edi/loop_engine.go's composite lookup) —
+// checking it again here would be dead code. GS01 is never part of that
+// lookup key at all (only ST01+GS08 are), and GS08 itself is unchecked when
+// a single-variant set falls back to its bare ST01 key (835, 999) — so both
+// checks catch real, otherwise-invisible mismatches, ERROR severity per this
+// file's own two-severity model (a wrong envelope identity is malformed
+// data, not a relational nuance).
+func checkEnvelopeIdentity(spec *edi.X12SpecDef, result *edi.ParseResult) []Issue {
+	txSet, ok := spec.TransactionSets[result.TransactionSet]
+	if !ok {
+		return nil
+	}
+
+	var issues []Issue
+	if got, _ := result.Interchange["functionalIdentifierCode"].(string); got != "" && txSet.FunctionalIdentifierCode != "" && got != txSet.FunctionalIdentifierCode {
+		issues = append(issues, Issue{
+			Severity: "error",
+			Path:     "GS.01",
+			Message:  fmt.Sprintf("expected functional identifier code %q for transaction set %q, got %q", txSet.FunctionalIdentifierCode, result.TransactionSet, got),
+		})
+	}
+	if got, _ := result.Interchange["versionReleaseIndustryCode"].(string); got != "" && txSet.VersionReleaseIndustryCode != "" && got != txSet.VersionReleaseIndustryCode {
+		issues = append(issues, Issue{
+			Severity: "error",
+			Path:     "GS.08",
+			Message:  fmt.Sprintf("expected version/release/industry code %q for transaction set %q, got %q", txSet.VersionReleaseIndustryCode, result.TransactionSet, got),
+		})
+	}
+	return issues
 }
 
 // checkSyntaxRules walks every recorded edi.SegmentInstance and checks it

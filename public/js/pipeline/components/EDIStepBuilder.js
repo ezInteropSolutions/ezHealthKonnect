@@ -1,5 +1,6 @@
 /**
- * EDIStepBuilder — step config builders for EDI X12 pipeline steps (835 phase 1).
+ * EDIStepBuilder — step config builders for EDI X12 pipeline steps
+ * (835 phase 1; 837P/837I/999 added Phase 2).
  *
  * Registers four step types with StepBuilderRegistry:
  *   - edi.parse             Parse raw X12 EDI content to ParsedJSON
@@ -41,9 +42,15 @@ function ediTransformOptionsHTML(selected) {
     ).join('');
 }
 
-// Only "835" is implemented end-to-end in phase 1 (edi_build_executor.go's
-// own default is likewise hardcoded "835") — extend this list when 837 lands.
-const EDI_TRANSACTION_SETS = ['835'];
+// 835 (Health Care Claim Payment/Advice), 837P (Professional), 837I
+// (Institutional), and 999 (Implementation Acknowledgment) are all
+// implemented end-to-end — edi.build/edi.map_to_canonical resolve any of
+// these via edi/schema_loader.go's dual friendly-id registration (see
+// CLAUDE.md's EDI Phase 2 section). "835" stays each step's own default
+// (edi_build_executor.go, edi_map_to_canonical_executor.go) for backward
+// compatibility with existing pipelines, not because the others are
+// second-class.
+const EDI_TRANSACTION_SETS = ['835', '837P', '837I', '999'];
 
 function ediTransactionSetOptionsHTML(selected) {
     return EDI_TRANSACTION_SETS.map(ts =>
@@ -95,7 +102,7 @@ class EdiParseStepBuilder {
                 <select id="ediParseTransactionSet" class="form-select form-select-sm">
                     ${ediTransactionSetOptionsHTML(cfg.transactionSet)}
                 </select>
-                <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Only 835 (Health Care Claim Payment/Advice) is supported in phase 1.</div>
+                <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Informational only — edi.parse auto-detects the real transaction set from the message's own ST01/GS08, it doesn't read this value.</div>
             </div>
         </div>`;
     }
@@ -543,7 +550,7 @@ class EdiMapToCanonicalStepBuilder {
         this._ac = new AbortController();
         this._step = null;
         this._segmentsCatalog = null; // [{id, name, elements:[...]}]
-        this._loopsCatalog = null;    // [{id, name, repeat, segmentIds, loops:[...]}] — the 835 loop tree
+        this._loopsCatalog = null;    // [{id, name, repeat, segmentIds, loops:[...]}] — the CURRENTLY configured transaction set's own loop tree (see _loadLoopsCatalog)
 
         window._ediMapBuilder = this;
     }
@@ -555,6 +562,8 @@ class EdiMapToCanonicalStepBuilder {
         if (!cfg.outputField) cfg.outputField = 'canonicalEDI';
         if (!Array.isArray(cfg.header)) cfg.header = [];
         if (!Array.isArray(cfg.loops)) cfg.loops = [];
+
+        if (!cfg.transactionSet) cfg.transactionSet = '835';
 
         this._loadSegmentsCatalog();
         this._loadLoopsCatalog();
@@ -574,9 +583,14 @@ class EdiMapToCanonicalStepBuilder {
             .catch(() => {});
     }
 
+    // Fetches the loop tree for the CURRENTLY configured transaction set —
+    // not hardcoded to 835. onTransactionSetChange resets _loopsCatalog to
+    // null before calling this again, so switching the picker re-fetches the
+    // right tree instead of silently keeping the previous transaction set's.
     _loadLoopsCatalog() {
         if (this._loopsCatalog) return;
-        fetch('/api/edi/schema/transaction-sets/835/loops', { signal: this._ac.signal })
+        const txSet = ediEsc(this._step.config.transactionSet || '835');
+        fetch(`/api/edi/schema/transaction-sets/${txSet}/loops`, { signal: this._ac.signal })
             .then(r => r.ok ? r.json() : null)
             .then(data => {
                 if (!data || !data.loops) return;
@@ -584,6 +598,18 @@ class EdiMapToCanonicalStepBuilder {
                 this._rerender();
             })
             .catch(() => {});
+    }
+
+    // Switching transaction sets invalidates the loop catalog (a different
+    // transaction set has a completely different loop tree) AND every
+    // previously-configured loop mapping, which addresses the OLD tree's own
+    // loop IDs and would silently reference nonexistent loops otherwise.
+    onTransactionSetChange(value) {
+        this._step.config.transactionSet = value || '835';
+        this._step.config.loops = [];
+        this._loopsCatalog = null;
+        this._loadLoopsCatalog();
+        this._rerender();
     }
 
     _segmentByID(id) {
@@ -642,14 +668,22 @@ class EdiMapToCanonicalStepBuilder {
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Map to Canonical step.</strong> No-code field mapping from any source shape
                 (CSV, DB rows, generic JSON) into the canonical interchange/header/loops/trailer JSON
-                <code>edi.build</code> consumes — the on-ramp for building an 835 from data that never
-                went through <code>edi.parse</code>.
+                <code>edi.build</code> consumes — the on-ramp for building an EDI document from data
+                that never went through <code>edi.parse</code>.
             </div>
             <div class="config-group" style="margin-bottom:1.1rem;">
                 <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Output Field</label>
                 <input id="ediMapOutputField" type="text" class="form-control form-control-sm"
                     value="${ediEsc(cfg.outputField)}" placeholder="canonicalEDI"
                     style="font-family:monospace;font-size:0.82rem;">
+            </div>
+            <div class="config-group" style="margin-bottom:1.1rem;">
+                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Transaction Set</label>
+                <select class="form-select form-select-sm"
+                    onchange="window._ediMapBuilder && window._ediMapBuilder.onTransactionSetChange(this.value)">
+                    ${ediTransactionSetOptionsHTML(cfg.transactionSet)}
+                </select>
+                <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Which transaction set's loop tree the Loops section below reflects. Switching this clears any loop mappings configured below — they addressed the previous tree's own loop IDs.</div>
             </div>
             ${this._renderHeaderSection()}
             ${this._renderLoopsSection()}
@@ -851,6 +885,11 @@ class EdiMapToCanonicalStepBuilder {
 
         const outputEl = form.querySelector('#ediMapOutputField');
         if (outputEl) step.config.outputField = outputEl.value.trim() || 'canonicalEDI';
+
+        // transactionSet is already kept in sync on step.config by
+        // onTransactionSetChange (it must reset _loopsCatalog/loops
+        // immediately, not wait for a later collectConfig call) — nothing
+        // further to read from the DOM for it here.
 
         // header/loops already live in step.config, kept in sync by the
         // interaction handlers above. Header rows missing both a source and

@@ -1,0 +1,39 @@
+{
+  "transactionSetId": "999",
+  "functionalIdentifierCode": "FA",
+  "versionReleaseIndustryCode": "005010X231A1",
+  "version": "005010X231A1",
+  "_sourceRefs": [
+    "PyX12 (azoner/pyx12) 999.5010X231.A1.xml — downloaded and read directly in full (1283 lines, small enough for a complete direct read, avoiding the AI-summarization risk the 835 work hit on a larger file), the same IG-specific ground-truth class already proven for 835.",
+    "Loop structure confirmed: HEADER (a PyX12 wrapper, not a real X12 loop — same category as ISA_LOOP/GS_LOOP/ST_LOOP, per this project's own established convention) contains AK1, then a repeating 2000 loop (AK2 + a repeating 2100 loop [IK3, two distinct CTX occurrences — see segments/CTX.json's own note — plus a repeating 2110 loop (IK4 + CTX)] + a trailing IK5), then AK9. DETAIL and FOOTER (Table 2/3) are both usage=N (Not Used) for this transaction set per the map itself — 999 is genuinely a Table-1-only document, nothing to model there.",
+    "TA1 (Interchange Acknowledgement) deliberately NOT modeled, same reasoning as 835's own precedent: it's a receiver-side response to the ORIGINAL interchange envelope, not part of a 999's own ST...SE payload this engine builds/parses.",
+    "A real structural finding this file's own authoring surfaced: IK5 sits AFTER its parent loop's nested 2100 loop closes, not before it like every segment in 835's own loop tree — required adding X12LoopDef.TrailerSegmentIDs (edi/schema_types.go), the loop-level counterpart to X12TransactionSetDef's existing Header/Trailer split, since the engine previously only supported a loop's own segments preceding its children. See CLAUDE.md's EDI Phase 2 section."
+  ],
+  "headerSegmentIds": ["ST", "AK1"],
+  "loops": [
+    {
+      "id": "2000",
+      "name": "Transaction Set Response Header",
+      "repeat": ">1",
+      "segmentIds": ["AK2"],
+      "loops": [
+        {
+          "id": "2100",
+          "name": "AK2/IK3 Error Identification",
+          "repeat": ">1",
+          "segmentIds": ["IK3", "CTX"],
+          "loops": [
+            {
+              "id": "2110",
+              "name": "AK2/IK3/IK4 Implementation Data Element Note",
+              "repeat": ">1",
+              "segmentIds": ["IK4", "CTX"]
+            }
+          ]
+        }
+      ],
+      "trailerSegmentIds": ["IK5"]
+    }
+  ],
+  "trailerSegmentIds": ["AK9", "SE"]
+}

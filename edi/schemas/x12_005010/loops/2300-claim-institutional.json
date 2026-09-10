@@ -1,0 +1,153 @@
+{
+  "id": "2300",
+  "name": "Claim Information",
+  "repeat": "100",
+  "segmentIds": ["CLM", "DTP", "CL1", "PWK", "CN1", "AMT", "REF", "K3", "NTE", "CRC", "HI", "HCP"],
+  "loops": [
+    {
+      "id": "2310A",
+      "name": "Attending Provider Name",
+      "repeat": "1",
+      "segmentIds": ["NM1", "PRV", "REF"]
+    },
+    {
+      "id": "2310B",
+      "name": "Operating Physician Name",
+      "repeat": "1",
+      "segmentIds": ["NM1", "REF"]
+    },
+    {
+      "id": "2310C",
+      "name": "Other Operating Physician Name",
+      "repeat": "1",
+      "segmentIds": ["NM1", "REF"]
+    },
+    {
+      "id": "2310D",
+      "name": "Rendering Provider Name",
+      "repeat": "1",
+      "segmentIds": ["NM1", "REF"]
+    },
+    {
+      "id": "2310E",
+      "name": "Service Facility Location Name",
+      "repeat": "1",
+      "segmentIds": ["NM1", "N3", "N4", "REF"]
+    },
+    {
+      "id": "2310F",
+      "name": "Referring Provider Name",
+      "repeat": "1",
+      "segmentIds": ["NM1", "REF"]
+    },
+    {
+      "id": "2320",
+      "name": "Other Subscriber Information",
+      "repeat": "10",
+      "segmentIds": ["SBR", "CAS", "AMT", "OI", "MIA", "MOA"],
+      "loops": [
+        {
+          "id": "2330A",
+          "name": "Other Subscriber Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4", "REF"]
+        },
+        {
+          "id": "2330B",
+          "name": "Other Payer Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "N3", "N4", "DTP", "REF"]
+        },
+        {
+          "id": "2330C",
+          "name": "Other Payer Attending Provider",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2330D",
+          "name": "Other Payer Operating Physician",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2330E",
+          "name": "Other Payer Other Operating Physician",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2330F",
+          "name": "Other Payer Service Facility Location",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2330G",
+          "name": "Other Payer Rendering Provider Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2330H",
+          "name": "Other Payer Referring Provider",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2330I",
+          "name": "Other Payer Billing Provider",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        }
+      ]
+    },
+    {
+      "id": "2400",
+      "name": "Service Line Number",
+      "repeat": "999",
+      "segmentIds": ["LX", "SV2", "PWK", "DTP", "REF", "AMT", "NTE", "HCP"],
+      "loops": [
+        {
+          "id": "2410",
+          "name": "Drug Identification",
+          "repeat": "1",
+          "segmentIds": ["LIN", "CTP", "REF"]
+        },
+        {
+          "id": "2420A",
+          "name": "Operating Physician Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2420B",
+          "name": "Other Operating Physician Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2420C",
+          "name": "Rendering Provider Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2420D",
+          "name": "Referring Provider Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "REF"]
+        },
+        {
+          "id": "2430",
+          "name": "Line Adjudication Information",
+          "repeat": "15",
+          "segmentIds": ["SVD", "CAS", "DTP", "AMT"]
+        }
+      ]
+    }
+  ],
+  "_sourceRefs": [
+    "PyX12 (azoner/pyx12) 837Q3.I.5010.X223.A1.xml — the institutional counterpart to loops/2300-claim.json (837P's own shared claim subtree). Genuinely different shape, not a copy: CL1 (Institutional Claim Code) replaces nothing (no professional equivalent), SV2 replaces SV1/SV5, no SV1/SV5/CR1/CR2/CR3/QTY/MEA/PS1/2440 (ambulance/spinal/DME/form-identification are professional-only concepts), 2320 gains BOTH MIA and MOA (institutional has separate inpatient/outpatient adjudication segments) and 9 Other-Payer sub-loops (2330A-I, not 837P's 7 A-G) — institutional distinguishes 'Operating Physician' from 'Other Operating Physician' as separate provider roles the professional IG doesn't have. Referenced from 837I's own 2000B/2000C positions via the SAME loopRef mechanism as 837P's 2300-claim.json — see that file's own _sourceRefs for the full duplication-avoidance rationale, and CLAUDE.md's EDI Phase 2 section."
+  ]
+}

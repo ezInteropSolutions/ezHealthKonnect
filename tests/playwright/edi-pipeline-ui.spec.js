@@ -9,6 +9,8 @@
 // tree, both fed by GET /api/edi/schema/segments and
 // GET /api/edi/schema/transaction-sets/835/loops.
 const { test, expect } = require('@playwright/test');
+const fs = require('fs');
+const path = require('path');
 
 test('EDI pipeline builder UI renders all 4 step types correctly', async ({ page }) => {
     const consoleErrors = [];
@@ -261,12 +263,20 @@ test('edi_x12_inbound connector config: transaction_types checkbox, auth_type vi
     // any other array field) -- wait on the visible checklist wrapper instead.
     await page.waitForSelector('.connector-config-array-checklist', { timeout: 5000 });
 
-    // 1. transaction_types is a checkbox list with exactly one option ("835"),
-    // pre-checked from the seeded config, backed by a hidden field carrying
-    // the same comma-joined value getConfig() already expects.
+    // 1. transaction_types is a checkbox list with 4 options (835/837P/837I/999,
+    // V235's own enum expansion once 837/999 became real schema-backed
+    // transaction sets — was 1 option pre-Phase-2), "835" pre-checked from
+    // the seeded config, backed by a hidden field carrying the same
+    // comma-joined value getConfig() already expects.
     const transactionCheckboxes = page.locator('.connector-config-array-checklist input[type="checkbox"]');
-    await expect(transactionCheckboxes, 'transaction_types should render exactly one checkbox (only 835 is selectable today)').toHaveCount(1);
-    await expect(transactionCheckboxes.first()).toBeChecked();
+    await expect(transactionCheckboxes, 'transaction_types should render 4 checkboxes (835/837P/837I/999)').toHaveCount(4);
+    // The checkbox itself carries no value attribute (ConnectorConfigBuilder.js
+    // never sets cb.value — it browser-defaults to "on") — the real option
+    // text lives on the associated <label for="...">, matched by id.
+    const checkedValues = await transactionCheckboxes.evaluateAll(
+        boxes => boxes.filter(b => b.checked).map(b => document.querySelector(`label[for="${b.id}"]`)?.textContent.trim())
+    );
+    expect(checkedValues, 'only 835 should be pre-checked from the seeded config').toEqual(['835']);
     await expect(page.locator('.connector-config-field[data-field="transaction_types"]')).toHaveValue('835');
 
     // 2. auth_type=password (the seeded default): password field visible, key_content hidden.
@@ -402,6 +412,220 @@ test('payload.builder Resource Paths has a working field picker sourced from the
 
     await suggestion.click();
     await expect(rpInput, 'clicking the suggestion should fill in the correct path').toHaveValue('message.paymentReconciliation');
+
+    expect(consoleErrors, `expected no console errors, got: ${consoleErrors.join('; ')}`).toHaveLength(0);
+});
+
+// EDI Phase 2 (837P/837I/999): EDI_TRANSACTION_SETS grew from ['835'] to
+// ['835','837P','837I','999'] (edi.parse/edi.build's own picker), and
+// edi.map_to_canonical gained a Transaction Set picker it previously had
+// none of at all — it used to always fetch 835's own loop tree regardless of
+// step config. Proves both: the dropdown now offers all 4, and switching it
+// on edi.map_to_canonical actually re-fetches and re-renders a DIFFERENT
+// transaction set's own loop tree (not just that the picker exists).
+test('EDI Phase 2: transaction set picker offers 837P/837I/999, and edi.map_to_canonical re-fetches the loop tree on change', async ({ page }) => {
+    const consoleErrors = [];
+    page.on('console', msg => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+    });
+    page.on('pageerror', err => consoleErrors.push('pageerror: ' + err.message));
+
+    await page.goto('/pipeline-builder.html');
+    await page.waitForSelector('#all-steps-list .step-card', { timeout: 15000 });
+
+    // 1. edi.build's own Transaction Set dropdown lists all 4 real options.
+    await page.evaluate(() => {
+        const step = new VisualStep({ stepName: 'Test edi.build txSets', stepType: 'edi.build', config: {} });
+        window.pipelineBuilder.addStep(step);
+        window.pipelineBuilder.propertiesPanel.showStepProperties(step, false);
+    });
+    await page.waitForSelector('#stepPropertiesModal', { state: 'visible', timeout: 5000 });
+    const buildOptions = await page.locator('#ediBuildTransactionSet option').allTextContents();
+    expect(buildOptions, 'edi.build Transaction Set dropdown should list all 4 real transaction sets').toEqual(['835', '837P', '837I', '999']);
+    await expect(page.locator('#ediBuildTransactionSet')).toHaveValue('835');
+    await page.locator('#stepPropertiesModal .modal-close').first().click();
+    await page.waitForSelector('#stepPropertiesModal', { state: 'hidden', timeout: 5000 }).catch(() => {});
+
+    // 2. edi.map_to_canonical: picker exists (it had none before Phase 2),
+    // defaults to 835, and its own loop tree starts as 835's (2100/2110).
+    await page.evaluate(() => {
+        const step = new VisualStep({ stepName: 'Test map txSet switch', stepType: 'edi.map_to_canonical', config: {} });
+        window._testMapStep = step;
+        window.pipelineBuilder.addStep(step);
+        window.pipelineBuilder.propertiesPanel.showStepProperties(step, false);
+    });
+    await page.waitForSelector('#stepPropertiesModal', { state: 'visible', timeout: 5000 });
+    await page.waitForFunction(
+        () => (document.getElementById('formTabContent')?.innerText || '').includes('2110'),
+        { timeout: 5000 }
+    );
+    const mapTxSetSelect = page.locator('#ediMapToCanonicalBuilder select').first();
+    await expect(mapTxSetSelect, 'edi.map_to_canonical should now have its own Transaction Set picker').toBeVisible();
+    const mapOptions = await mapTxSetSelect.locator('option').allTextContents();
+    expect(mapOptions, 'edi.map_to_canonical Transaction Set dropdown should list all 4 real transaction sets').toEqual(['835', '837P', '837I', '999']);
+    await expect(mapTxSetSelect).toHaveValue('835');
+    let panelText = await page.locator('#formTabContent').innerText();
+    expect(panelText, 'default (835) loop tree should show 2100/2110').toContain('2110');
+    expect(panelText, 'default (835) loop tree should NOT show 837-only loops').not.toContain('2010AA');
+
+    // 3. Switching to 837P re-fetches and re-renders a STRUCTURALLY DIFFERENT
+    // loop tree (2010AA/2000A/2000B — none of which exist in 835's own tree)
+    // — the real proof this isn't just a cosmetic dropdown that never
+    // actually changes what the Loops section below it shows.
+    await mapTxSetSelect.selectOption('837P');
+    await page.waitForFunction(
+        () => (document.getElementById('formTabContent')?.innerText || '').includes('2010AA'),
+        { timeout: 5000 }
+    );
+    panelText = await page.locator('#formTabContent').innerText();
+    for (const loopId of ['1000A', '1000B', '2000A', '2010AA', '2000B']) {
+        expect(panelText, `837P loop tree should show loop ${loopId} after switching`).toContain(loopId);
+    }
+    expect(panelText, '837P loop tree should no longer show the stale 835 loop tree markers').not.toContain('2110');
+
+    // 4. The config itself was actually updated (not just the DOM), and
+    // switching cleared any prior loop mappings (they addressed 835's own
+    // loop IDs, which don't all exist in 837P's tree).
+    const mapConfig = await page.evaluate(() => window._testMapStep.config);
+    expect(mapConfig.transactionSet, 'step.config.transactionSet should reflect the switch').toBe('837P');
+    expect(mapConfig.loops, 'switching transaction sets should clear prior loop mappings').toEqual([]);
+
+    expect(consoleErrors, `expected no console errors, got: ${consoleErrors.join('; ')}`).toHaveLength(0);
+});
+
+// V236's own OOB template (database/migrations/V236__EDI_837_OOB_Pipeline_Template.sql),
+// driven through the REAL "Use Template" UI flow — same discipline as the
+// 835-to-FHIR template's own test above, since API-level verification alone
+// can't prove the 4 saved steps render on the real canvas with the right
+// config. THEN, on that same real (interfaceId/messageType-backed) pipeline,
+// adds edi.generate_999 as a 5th step and runs it through the REAL "Test
+// Pipeline" button against a real, unedited 835 sample — proving the whole
+// chain: /api/pipelines/test requires a genuine interface_id/message_type
+// (an ad-hoc, never-saved pipeline gets rejected with "Could not determine
+// interface_id and message_type from request" — confirmed by hitting this
+// directly during investigation), which only a template-created (or
+// otherwise persisted) interface provides. edi.generate_999 doesn't care
+// which transaction set it's acknowledging (see its own doc comment) — reusing
+// the same real 835 sample the Go-level executor tests use is deliberate,
+// not a stand-in for a missing 837 sample.
+test('EDI X12 837 Inbound template: Use Template renders 4 steps with correct config, then edi.generate_999 produces a real 999 via Test Pipeline', async ({ page }) => {
+    const consoleErrors = [];
+    page.on('console', msg => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+    });
+    page.on('pageerror', err => consoleErrors.push('pageerror: ' + err.message));
+
+    await page.goto('/dashboard.html');
+    await page.click('a[href="#templates"]');
+    await page.waitForSelector('.tg-card', { timeout: 15000 });
+
+    const card = page.locator('.tg-card', { hasText: 'EDI X12 837 Inbound' });
+    await expect(card, 'Templates gallery should list the EDI X12 837 Inbound template').toBeVisible({ timeout: 5000 });
+    await card.locator('.tg-use-btn').click();
+
+    await page.waitForSelector('#tgConfigureModal', { state: 'visible', timeout: 5000 });
+    await page.fill('#tcf_name', `PW EDI-837 Test ${Date.now()}`);
+    await page.click('#tcf_submit');
+
+    await page.waitForURL(/pipeline-builder\.html\?interfaceId=/, { timeout: 15000 });
+    await page.waitForLoadState('load');
+    await page.waitForFunction(() => window.pipelineBuilder && window.pipelineBuilder.pipeline != null, { timeout: 8000 });
+
+    const stepCount = await page.evaluate(() => window.pipelineBuilder.getAllStepsFlat().length);
+    expect(stepCount, 'template should have saved all 4 steps').toBe(4);
+
+    await page.waitForSelector('.flowchart-step-node', { timeout: 8000 });
+    const nodeCount = await page.locator('.flowchart-step-node').count();
+    expect(nodeCount, 'all 4 steps should render as canvas nodes').toBe(4);
+
+    const closeStepModal = async () => {
+        const closeBtn = page.locator('#stepPropertiesModal .modal-close');
+        if (await closeBtn.count() > 0) await closeBtn.first().click();
+        await page.waitForSelector('#stepPropertiesModal', { state: 'hidden', timeout: 5000 }).catch(() => {});
+    };
+
+    const stepChecks = [
+        {
+            name: 'Parse 837 -> JSON',
+            assert: async () => {
+                await expect(page.locator('#ediParseSourceField')).toHaveValue('raw');
+                await expect(page.locator('#ediParseTransactionSet')).toHaveValue('837P');
+            },
+        },
+        {
+            name: 'Validate Against X12 5010',
+            assert: async () => {
+                await expect(page.locator('#ediValidateSourceField')).toHaveValue('raw');
+            },
+        },
+    ];
+    for (const { name, assert } of stepChecks) {
+        const node = page.locator('.flowchart-step-node', { hasText: name });
+        await expect(node, `canvas should have a step node for "${name}"`).toBeVisible({ timeout: 5000 });
+        await node.click();
+        await page.waitForSelector('#stepPropertiesModal', { state: 'visible', timeout: 5000 });
+        await assert();
+        await closeStepModal();
+    }
+    // The 2 connector steps reuse the existing, already-covered connector
+    // config UI — just confirm each opens cleanly.
+    for (const name of ['Receive 837 File (SFTP)', 'Store Parsed Result']) {
+        const node = page.locator('.flowchart-step-node', { hasText: name });
+        await expect(node, `canvas should have a step node for "${name}"`).toBeVisible({ timeout: 5000 });
+        await node.click();
+        await page.waitForSelector('#stepPropertiesModal', { state: 'visible', timeout: 5000 });
+        await closeStepModal();
+    }
+
+    // Now add edi.generate_999 as a 5th step on this real, persisted-interface
+    // pipeline (per TransformationTestController.TestPipeline's own resolution
+    // order, this reads interfaceId/messageType from window.pipelineBuilder.pipeline
+    // itself — Test Pipeline explicitly supports testing unsaved in-progress
+    // changes, so this step need not be saved first).
+    await page.evaluate(() => {
+        const step = new VisualStep({ stepName: 'Generate999', stepType: 'edi.generate_999', config: { sourceField: 'raw', outputField: 'generated999' } });
+        window.pipelineBuilder.addStep(step);
+    });
+
+    const sample = fs.readFileSync(path.join(__dirname, '..', '..', 'edi', 'testdata', 'real_samples', 'blue_cross_nc_sample.txt'), 'utf8');
+    await page.evaluate(() => window.pipelineBuilder.openTestModal());
+    await page.waitForSelector('#testModal.active', { timeout: 5000 });
+    await page.selectOption('#testMessageFormat', 'edi');
+    await page.fill('#testMessageInput', sample);
+    await page.click('#runTestBtn');
+
+    await page.waitForFunction(
+        () => {
+            const el = document.getElementById('testResultsContent');
+            return el && el.innerText.trim().length > 0 && !el.innerText.includes('Running test');
+        },
+        { timeout: 20000 }
+    );
+
+    const testOutput = await page.evaluate(() => window.pipelineLastTestOutput);
+    expect(testOutput?.success, `Test Pipeline run should succeed, got: ${JSON.stringify(testOutput)}`).toBe(true);
+
+    const genStep = testOutput.steps?.generate999;
+    expect(genStep, 'generate999 step should have its own entry in the test results').toBeTruthy();
+    expect(genStep.step_metadata?.success, 'edi.generate_999 step itself should succeed').toBe(true);
+    expect(genStep.step_metadata?.ackCode, 'a clean real 835 sample should produce an Accepted 999').toBe('A');
+
+    const built999 = genStep.step_output?.generated999;
+    expect(built999, 'edi.generate_999 should produce real built 999 text').toBeTruthy();
+    expect(built999).toContain('ST*999*');
+    // AK1 echoes 835's own known FunctionalIdentifierCode/VersionReleaseIndustryCode
+    // (this sample has no real envelope — envelopePresent:false — so this also
+    // proves the txSet-level fallback fix for envelope-less messages fires
+    // correctly through the real system, not just in the Go unit test).
+    expect(built999).toContain('AK1*HP*');
+    expect(built999).toContain('AK2*835*1234');
+    expect(built999).toContain('IK5*A');
+    expect(built999).toContain('AK9*A*1*1*1');
+    // The real PER paired-rule SyntaxRule warning this exact sample carries
+    // (see edi_validate_executor_test.go's own TestEDIValidateExecutor_SyntaxRuleViolation_IsWarningNeverBlocking)
+    // must still surface as an IK3 entry — proving warnings are reported, not
+    // silently dropped, even though they never affect AK9/IK5's Accepted code.
+    expect(built999).toContain('IK3*PER*');
 
     expect(consoleErrors, `expected no console errors, got: ${consoleErrors.join('; ')}`).toHaveLength(0);
 });

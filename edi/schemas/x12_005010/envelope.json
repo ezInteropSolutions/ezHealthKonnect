@@ -3,6 +3,7 @@
     "Stedi X12 EDI segment reference — stedi.com/edi/x12/segment/ISA (fixed field widths confirmed independently against processing/batch_splitter.go's own detectEDISegmentTerminator, which relies on the same 106-char ISA length)",
     "Stedi X12 EDI segment reference — stedi.com/edi/x12/segment/GS"
   ],
+  "_note": "GS01 (functionalIdentifierCode) and GS08 (versionReleaseIndustryCode) deliberately carry NO fixedValue here — this file is shared across every transaction set (835/837/999/...), and each one's own expected GS01/GS08 differs (835=HP/005010X221A1, 837=HC/005010X222A1 or X223A2, 999=FA/005010X231A1). Those per-transaction-set values live on X12TransactionSetDef itself (schema_types.go) and are read directly by edi/validator and edi/builder — see CLAUDE.md's EDI Phase 2 section for the full rationale.",
   "isa": [
     { "pos": "01", "key": "authInfoQualifier", "dataType": "ID", "fixedValue": "00", "maxLength": 2 },
     { "pos": "02", "key": "authInfo", "dataType": "AN", "maxLength": 10 },
@@ -22,14 +23,14 @@
     { "pos": "16", "key": "componentSeparator", "dataType": "AN", "fixedValue": ":", "maxLength": 1 }
   ],
   "gs": [
-    { "pos": "01", "key": "functionalIdentifierCode", "dataType": "ID", "fixedValue": "HP" },
+    { "pos": "01", "key": "functionalIdentifierCode", "dataType": "ID" },
     { "pos": "02", "key": "gsSenderCode", "dataType": "AN" },
     { "pos": "03", "key": "gsReceiverCode", "dataType": "AN" },
     { "pos": "04", "key": "date", "dataType": "DT" },
     { "pos": "05", "key": "time", "dataType": "TM" },
     { "pos": "06", "key": "gsControlNumber", "dataType": "N0" },
     { "pos": "07", "key": "responsibleAgencyCode", "dataType": "ID", "fixedValue": "X" },
-    { "pos": "08", "key": "versionReleaseIndustryCode", "dataType": "AN", "fixedValue": "005010X221A1" }
+    { "pos": "08", "key": "versionReleaseIndustryCode", "dataType": "AN" }
   ],
   "ge": [
     { "pos": "01", "key": "count", "dataType": "N0" },

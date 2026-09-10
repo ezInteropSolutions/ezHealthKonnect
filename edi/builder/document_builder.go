@@ -57,11 +57,13 @@ func BuildDocument(spec *edi.X12SpecDef, input BuildInput) (string, error) {
 	stControl := stringOr(input.Interchange, "stControlNumber", generateControlNumber(4))
 
 	interchangeValues := cloneWithDefaults(input.Interchange, map[string]string{
-		"isaControlNumber": isaControl,
-		"gsControlNumber":  gsControl,
-		"date":             stringOr(input.Interchange, "date", time.Now().UTC().Format("060102")),
-		"time":             stringOr(input.Interchange, "time", time.Now().UTC().Format("1504")),
-		"usageIndicator":   stringOr(input.Interchange, "usageIndicator", "P"),
+		"isaControlNumber":           isaControl,
+		"gsControlNumber":            gsControl,
+		"date":                       stringOr(input.Interchange, "date", time.Now().UTC().Format("060102")),
+		"time":                       stringOr(input.Interchange, "time", time.Now().UTC().Format("1504")),
+		"usageIndicator":             stringOr(input.Interchange, "usageIndicator", "P"),
+		"functionalIdentifierCode":   txSet.FunctionalIdentifierCode,   // GS01 — no longer a shared envelope.json fixedValue, see X12TransactionSetDef
+		"versionReleaseIndustryCode": txSet.VersionReleaseIndustryCode, // GS08
 	})
 
 	isaSeg := w.writeEnvelopeSegment("ISA", spec.Envelope.ISA, interchangeValues)
@@ -74,7 +76,11 @@ func BuildDocument(spec *edi.X12SpecDef, input BuildInput) (string, error) {
 	// parse to round-trip from).
 	header := cloneMap(input.Header)
 	if _, hasST := header["ST"]; !hasST {
-		header["ST"] = map[string]interface{}{"_default_01": input.TransactionSet, "_default_02": stControl}
+		// txSet.EffectiveST01() (not input.TransactionSet) — for a
+		// disambiguated multi-variant set input.TransactionSet is the
+		// human-legible schema id ("837P"), never the literal wire value
+		// ST01 must carry ("837").
+		header["ST"] = map[string]interface{}{"_default_01": txSet.EffectiveST01(), "_default_02": stControl}
 	}
 
 	body, err := w.writeSegmentSequence(txSet.HeaderSegmentIDs, header)

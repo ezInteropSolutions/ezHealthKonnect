@@ -1,0 +1,18 @@
+{
+  "id": "CR1",
+  "name": "Ambulance Transport Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "patientWeightUnitCode", "dataType": "ID" },
+    { "pos": "02", "key": "patientWeight", "dataType": "R" },
+    { "pos": "04", "key": "ambulanceTransportReasonCode", "dataType": "ID" },
+    { "pos": "05", "key": "transportDistanceUnitCode", "dataType": "ID" },
+    { "pos": "06", "key": "transportDistance", "dataType": "R" },
+    { "pos": "09", "key": "roundTripPurposeDescription", "dataType": "AN" },
+    { "pos": "10", "key": "stretcherPurposeDescription", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2. CR1 reuses data element 355 (Unit or Basis for Measurement Code) TWICE at different positions (01: patient weight's own unit, valid_codes LB; 05: transport distance's own unit, valid_codes DH) — kept as two independently-named fields since they're genuinely different business values, not the same field repeated. CR103 (Ambulance Transport Code), CR107/08 (both Address Information) are usage=N at the real occurrence — dropped."
+  ]
+}

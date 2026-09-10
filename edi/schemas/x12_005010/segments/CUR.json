@@ -4,10 +4,11 @@
   "usage": "situational",
   "maxUse": "1",
   "elements": [
-    { "pos": "01", "key": "entityIdentifierCode", "dataType": "ID", "fixedValue": "PR" },
+    { "pos": "01", "key": "entityIdentifierCode", "dataType": "ID" },
     { "pos": "02", "key": "currencyCode", "dataType": "ID" }
   ],
   "sourceRefs": [
-    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment. Every position from CUR03 onward (Exchange Rate, the second Entity/Currency pair, and all 5 repeating date/time-qualifier trios from CUR07-21) is marked usage=\"N\" (Not Used) by this Implementation Guide — this segment collapses to just 2 usable elements. Supersedes an earlier version of this file that modeled a full 21-element segment with a 5-trio repeat group, built from Stedi's generic (X12 Release 8010) page before the version-mismatch issue was caught; the repeat-group MECHANISM itself remains a validated, reusable capability (see CAS/PLB), it simply isn't needed here."
+    "PyX12 (azoner/pyx12) 835.5010.X221.A1.xml — the authoritative source for this segment. Every position from CUR03 onward (Exchange Rate, the second Entity/Currency pair, and all 5 repeating date/time-qualifier trios from CUR07-21) is marked usage=\"N\" (Not Used) by this Implementation Guide — this segment collapses to just 2 usable elements. Supersedes an earlier version of this file that modeled a full 21-element segment with a 5-trio repeat group, built from Stedi's generic (X12 Release 8010) page before the version-mismatch issue was caught; the repeat-group MECHANISM itself remains a validated, reusable capability (see CAS/PLB), it simply isn't needed here.",
+    "PHASE 2 FIX: CUR01's fixedValue was originally hardcoded to \"PR\" (Payer) — correct for 835's own CUR occurrence (Assignment of Benefits Indicator context) but WRONG for 837P/837I's own CUR occurrence (loop 2000A, Billing Provider level), which needs \"85\" (Billing Provider) per PyX12's 837.5010.X222.A1.xml. Same class of bug as envelope.json/ST.json's own GS01/ST01 fixedValues Fix 1 addressed — a 'shared' segment file secretly baking in a transaction-set-specific business constant. Removed; CUR01 is now a plain, unconstrained ID field like every other shared segment's qualifier positions."
   ]
 }

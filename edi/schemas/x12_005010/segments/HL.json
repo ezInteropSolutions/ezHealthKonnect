@@ -1,0 +1,15 @@
+{
+  "id": "HL",
+  "name": "Hierarchical Level",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "hierarchicalIdNumber", "dataType": "AN" },
+    { "pos": "02", "key": "hierarchicalParentIdNumber", "dataType": "AN" },
+    { "pos": "03", "key": "hierarchicalLevelCode", "dataType": "ID" },
+    { "pos": "04", "key": "hierarchicalChildCode", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2. HL02 (Hierarchical Parent ID Number) is usage=N at 2000A (Billing Provider — top of the HL hierarchy, no parent) but usage=R at 2000B/2000C (which DO have a parent) — kept as situational (the permissive union, matching this schema's established cross-position convention, e.g. segments/CTX.json's own multi-variant note) rather than dropped, since it's genuinely required in 2 of the 3 real positions. Both AN per the base X12 standard's own DE628/734 declarations (sequential identifiers, not used arithmetically)."
+  ]
+}

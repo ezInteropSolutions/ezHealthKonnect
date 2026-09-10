@@ -1,0 +1,25 @@
+{
+  "id": "IK4",
+  "name": "Implementation Data Element Note",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "positionInSegment",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "elementPosition", "dataType": "N0" },
+          { "pos": "2", "key": "componentPosition", "dataType": "N0" },
+          { "pos": "3", "key": "repeatingElementPosition", "dataType": "N0" }
+        ]
+      }
+    },
+    { "pos": "02", "key": "dataElementReferenceNumber", "dataType": "N0" },
+    { "pos": "03", "key": "implementationDataElementSyntaxErrorCode", "dataType": "ID" },
+    { "pos": "04", "key": "copyOfBadDataElement", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 999.5010X231.A1.xml. IK401 is composite C030 (Position in Segment) — the same composite CTX05 reuses at a different segment; both are modeled independently here per this schema's own 'shared segment library, not shared composite library' convention (composites are always inlined within their own segment file, matching SVC.json's own precedent of re-declaring the same C003 shape twice rather than factoring out a shared composite type). IK403's valid_codes (1-13, I6, I9-I13) are the standard Implementation Data Element Syntax Error Code table — not modeled inline, see IK3.json's own note on this schema's enumerated-code convention."
+  ]
+}

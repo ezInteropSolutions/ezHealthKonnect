@@ -1,0 +1,46 @@
+{
+  "id": "SV1",
+  "name": "Professional Service",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "procedureCode",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "qualifier", "dataType": "ID" },
+          { "pos": "2", "key": "code", "dataType": "AN" },
+          { "pos": "3", "key": "modifier1", "dataType": "AN" },
+          { "pos": "4", "key": "modifier2", "dataType": "AN" },
+          { "pos": "5", "key": "modifier3", "dataType": "AN" },
+          { "pos": "6", "key": "modifier4", "dataType": "AN" },
+          { "pos": "7", "key": "description", "dataType": "AN" }
+        ]
+      }
+    },
+    { "pos": "02", "key": "lineItemChargeAmount", "dataType": "R" },
+    { "pos": "03", "key": "unitOfMeasurementCode", "dataType": "ID" },
+    { "pos": "04", "key": "serviceUnitCount", "dataType": "R" },
+    { "pos": "05", "key": "placeOfServiceCode", "dataType": "ID" },
+    {
+      "pos": "07",
+      "key": "diagnosisCodePointer",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "pointer1", "dataType": "N0" },
+          { "pos": "2", "key": "pointer2", "dataType": "N0" },
+          { "pos": "3", "key": "pointer3", "dataType": "N0" },
+          { "pos": "4", "key": "pointer4", "dataType": "N0" }
+        ]
+      }
+    },
+    { "pos": "09", "key": "emergencyIndicator", "dataType": "ID" },
+    { "pos": "11", "key": "epsdtIndicator", "dataType": "ID" },
+    { "pos": "12", "key": "familyPlanningIndicator", "dataType": "ID" },
+    { "pos": "15", "key": "coPayStatusCode", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (loop 2400, the service line's own procedure/charge). SV101 sub08 (Product/Service ID) is N — dropped, 7 subs kept. SV106,08,10,13,14,16-21 are usage=N at the real occurrence — dropped. Diagnosis Code Pointer (C004) sub-elements modeled N0 (integer index into the claim's own HI diagnosis list, e.g. '1','2') rather than AN, since they're genuinely used as numeric pointers, not free text — consistent with LX's own precedent for a similar index/sequence field."
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "SBR",
+  "name": "Subscriber Information",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "payerResponsibilitySequenceNumberCode", "dataType": "ID" },
+    { "pos": "02", "key": "individualRelationshipCode", "dataType": "ID" },
+    { "pos": "03", "key": "insuredGroupOrPolicyNumber", "dataType": "AN" },
+    { "pos": "04", "key": "insuredGroupName", "dataType": "AN" },
+    { "pos": "05", "key": "insuranceTypeCode", "dataType": "ID" },
+    { "pos": "09", "key": "claimFilingIndicatorCode", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (Subscriber Information / Other Subscriber Information, loops 2000B and 2320). SBR06 (Coordination of Benefits Code), SBR07/08 (both Yes/No Condition or Response Code / Employment Status Code) are usage=N at every real occurrence — dropped."
+  ]
+}
