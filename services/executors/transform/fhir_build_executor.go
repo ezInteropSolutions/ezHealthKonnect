@@ -52,11 +52,21 @@
 //	                  condition?, groupCondition?} — one sub-object written
 //	                  per source row, for repeating elements (identifier[],
 //	                  name[], telecom[], ...)
+//	rowsPath        — optional; when set, builds ONE resource PER ROW found at
+//	                  this path (relative to inputData) instead of one
+//	                  resource from inputData directly — outputField then
+//	                  receives an ARRAY. fields/repeatingGroups resolve
+//	                  relative to each row, same convention repeatingGroups'
+//	                  own Fields already use. See fhirBuildConfig.RowsPath's
+//	                  own doc comment for why this exists (N independent
+//	                  resources of one type from one array, with no
+//	                  control.loop wrapper step needed).
 //
 // Assembling multiple resources into one Bundle needs no new code: add one
 // fhir.build step per resource type, then feed each step's outputField into
 // an existing services/executors/payload.PayloadBuilderExecutor "fhir_bundle"
-// mode step.
+// mode step — resourcePaths accepts both a single-resource path and an
+// array-valued one (e.g. this rowsPath mode's own output) in the same list.
 //
 // Conditional field/row population: fields and repeatingGroups both take an
 // optional condition (fhirFieldMappingRow.Condition / fhirRepeatingGroup.Condition)
@@ -187,10 +197,32 @@ type fhirRepeatingGroup struct {
 }
 
 type fhirBuildConfig struct {
-	ResourceType    string                `json:"resourceType"`
-	Profile         string                `json:"profile"`
-	Version         string                `json:"version"`
-	OutputField     string                `json:"outputField"`
+	ResourceType string `json:"resourceType"`
+	Profile      string `json:"profile"`
+	Version      string `json:"version"`
+	OutputField  string `json:"outputField"`
+	// RowsPath, when set, switches this step from building ONE resource out of
+	// inputData to building ONE resource PER ROW found at this path (relative
+	// to inputData) — outputField then receives an ARRAY of resources instead
+	// of a single object. Fields/RepeatingGroups resolve relative to each row
+	// (inputData stays reachable as the fallback "topLevel" — same
+	// row-with-topLevel-fallback convention fhirRepeatingGroup.Fields already
+	// uses, see applyFieldRow's own doc comment), so a config written for the
+	// single-resource case can be reused unchanged just by adding RowsPath.
+	//
+	// Exists specifically so a step chain that needs N independent resources
+	// of the SAME type from an array (e.g. one Patient/Coverage/Claim per
+	// claim in a multi-claim EDI 837 file) never needs a control.loop wrapper
+	// step — control.loop's own childStepIds config can only hold real
+	// DB-assigned step IDs, which don't exist yet when an OOB interface
+	// template is authored (see database/migrations/V231's own documented
+	// finding: "no template JSON can pre-declare that link"), making
+	// control.loop fundamentally unusable inside a template migration. This
+	// keeps the "N resources from one array" case fully declarative and
+	// template-safe. payload.builder's fhir_bundle mode already accepts an
+	// array-valued resourcePaths entry (see its own doc comment), so the
+	// array this produces plugs in directly, same as any other array source.
+	RowsPath        string                `json:"rowsPath,omitempty"`
 	Fields          []fhirFieldMappingRow `json:"fields,omitempty"`
 	RepeatingGroups []fhirRepeatingGroup  `json:"repeatingGroups,omitempty"`
 }
@@ -239,21 +271,52 @@ func (e *FHIRBuildExecutor) Execute(
 		return nil, fmt.Errorf("fhir.build: unknown resourceType/profile/version %q/%q/%q", cfg.ResourceType, cfg.Profile, cfg.Version)
 	}
 
-	resource := map[string]interface{}{"resourceType": cfg.ResourceType}
+	durationMs := time.Since(start).Milliseconds()
+	outputData := make(map[string]interface{}, len(inputData)+1)
+	for k, v := range inputData {
+		outputData[k] = v
+	}
 
+	if cfg.RowsPath != "" {
+		rows := resolveRows(inputData, cfg.RowsPath)
+		resources := make([]map[string]interface{}, 0, len(rows))
+		for _, row := range rows {
+			resource := map[string]interface{}{"resourceType": cfg.ResourceType}
+			for _, f := range cfg.Fields {
+				e.applyFieldRow(resource, row, inputData, f)
+			}
+			for _, rg := range cfg.RepeatingGroups {
+				e.applyRepeatingGroup(resource, row, inputData, rg)
+			}
+			resources = append(resources, resource)
+		}
+		durationMs = time.Since(start).Milliseconds()
+		executors.UpdateFieldValue(outputData, cfg.OutputField, resources)
+
+		log.Printf("  ✅ [fhir.build] Built %d %s resource(s) from rowsPath %q (%d field(s), %d repeating group(s)) in %dms",
+			len(resources), cfg.ResourceType, cfg.RowsPath, len(cfg.Fields), len(cfg.RepeatingGroups), durationMs)
+
+		e.SetStepOutputWithDetails(outputData,
+			map[string]interface{}{"fhirResource": resources},
+			map[string]interface{}{
+				"duration_ms":    durationMs,
+				"success":        true,
+				"resourceType":   cfg.ResourceType,
+				"resourceCount":  len(resources),
+				"transformation": "fhir_build",
+			},
+		)
+		return outputData, nil
+	}
+
+	resource := map[string]interface{}{"resourceType": cfg.ResourceType}
 	for _, f := range cfg.Fields {
 		e.applyFieldRow(resource, inputData, inputData, f)
 	}
 	for _, rg := range cfg.RepeatingGroups {
 		e.applyRepeatingGroup(resource, inputData, inputData, rg)
 	}
-
-	durationMs := time.Since(start).Milliseconds()
-
-	outputData := make(map[string]interface{}, len(inputData)+1)
-	for k, v := range inputData {
-		outputData[k] = v
-	}
+	durationMs = time.Since(start).Milliseconds()
 	executors.UpdateFieldValue(outputData, cfg.OutputField, resource)
 
 	log.Printf("  ✅ [fhir.build] Built %s resource (%d field(s), %d repeating group(s)) in %dms",

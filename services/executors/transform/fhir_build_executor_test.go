@@ -7,6 +7,7 @@ import (
 
 	"ezhealthkonnect/fhir/r4"
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/executors"
 )
 
 // testFHIRSchemaDir mirrors fhir/r4/r4_test.go's testSchemaDir, adjusted for
@@ -1137,5 +1138,206 @@ func TestFHIRBuild_Condition_PredicateBracketSourcePath_ResolvesConsistentlyWith
 	display := resource["provider"].(map[string]interface{})["display"]
 	if display != "Smith Clinic" {
 		t.Errorf("provider.display = %v, want Smith Clinic (condition's predicate-bracket path must resolve the same as the ordinary sourcePath does)", display)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// rowsPath: one resource PER ROW, replacing a control.loop wrapper for the
+// "N independent resources of the same type from one array" case (added for
+// EDI 837's multi-claim mapping — a template can't pre-wire a control.loop's
+// childStepIds, since those must be real DB-assigned step IDs that don't
+// exist yet at template-authoring time; see fhirBuildConfig.RowsPath's own
+// doc comment).
+// ─────────────────────────────────────────────────────────────────────────
+
+// fhirResourceArrayFrom resolves field as a dot-path (via executors.GetFieldValue,
+// the same resolver UpdateFieldValue's own reads go through elsewhere in this
+// codebase) rather than a flat map key — outputField values used with
+// rowsPath are realistically nested (e.g. "message.fhirPatients"), matching
+// this executor's own established "message.*" output convention (see
+// database/migrations/V231's "message.paymentReconciliation"). GetFieldValue's
+// nested-path walk re-wraps a genuine []map[string]interface{} as
+// []interface{} of map[string]interface{} elements — accepts both shapes,
+// same "toInterfaceSlice" dual-shape convention edi/builder/segment_writer.go
+// already establishes for this exact class of ambiguity.
+func fhirResourceArrayFrom(t *testing.T, output map[string]interface{}, field string) []map[string]interface{} {
+	t.Helper()
+	raw := executors.GetFieldValue(output, field)
+	switch v := raw.(type) {
+	case []map[string]interface{}:
+		return v
+	case []interface{}:
+		out := make([]map[string]interface{}, 0, len(v))
+		for _, el := range v {
+			m, ok := el.(map[string]interface{})
+			if !ok {
+				t.Fatalf("field %q: array element is not a map[string]interface{}, got %T", field, el)
+			}
+			out = append(out, m)
+		}
+		return out
+	default:
+		t.Fatalf("expected field %q to resolve to an array, got %T", field, raw)
+		return nil
+	}
+}
+
+// TestFHIRBuild_RowsPath_BuildsOneResourcePerRow proves 3 rows produce a
+// 3-element array, each resource built independently from its own row, with
+// sourcePath resolving relative to the row (same convention repeatingGroups'
+// own Fields already use) rather than requiring an "item." prefix.
+func TestFHIRBuild_RowsPath_BuildsOneResourcePerRow(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "Patient",
+		"outputField":  "message.fhirPatients",
+		"rowsPath":     "_claim_contexts",
+		"fields": []interface{}{
+			map[string]interface{}{"targetPath": "id", "sourcePath": "patientInfo.memberId"},
+			map[string]interface{}{"targetPath": "name[0].family", "sourcePath": "patientInfo.lastName"},
+		},
+	}
+	inputData := map[string]interface{}{
+		"_claim_contexts": []interface{}{
+			map[string]interface{}{"patientInfo": map[string]interface{}{"memberId": "SUB123", "lastName": "Smith"}},
+			map[string]interface{}{"patientInfo": map[string]interface{}{"memberId": "SUB123", "lastName": "Smith"}},
+			map[string]interface{}{"patientInfo": map[string]interface{}{"memberId": "DEP456", "lastName": "Smith Jr"}},
+		},
+	}
+
+	output := runFHIRBuild(t, config, inputData)
+	resources := fhirResourceArrayFrom(t, output, "message.fhirPatients")
+	if len(resources) != 3 {
+		t.Fatalf("expected 3 resources, got %d", len(resources))
+	}
+	if resources[0]["id"] != "SUB123" || resources[2]["id"] != "DEP456" {
+		t.Errorf("unexpected ids: %v, %v", resources[0]["id"], resources[2]["id"])
+	}
+	name := resources[2]["name"].([]interface{})[0].(map[string]interface{})
+	if name["family"] != "Smith Jr" {
+		t.Errorf("resources[2].name[0].family = %v, want 'Smith Jr'", name["family"])
+	}
+
+	details, _ := output["_executionDetails"].(map[string]interface{})
+	if count, _ := details["resourceCount"].(int); count != 3 {
+		t.Errorf("_executionDetails.resourceCount = %v, want 3", details["resourceCount"])
+	}
+}
+
+// TestFHIRBuild_RowsPath_FieldSourcePathIsRowScopedOnly proves a plain Fields
+// sourcePath under rowsPath resolves ONLY against the row, with no automatic
+// topLevel fallback — resolveRawValue's own contract (unchanged by rowsPath;
+// it always resolves purely against whatever "source" it's handed, row or
+// inputData), same as repeatingGroups' own Fields have always worked. A field
+// absent from the row is silently skipped (not an error), matching this
+// executor's established "absent data is not an error" convention.
+func TestFHIRBuild_RowsPath_FieldSourcePathIsRowScopedOnly(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "Organization",
+		"outputField":  "message.fhirOrgs",
+		"rowsPath":     "_rows",
+		"fields": []interface{}{
+			map[string]interface{}{"targetPath": "id", "sourcePath": "rowId"},
+			map[string]interface{}{"targetPath": "name", "sourcePath": "_billing_provider.name"},
+		},
+	}
+	inputData := map[string]interface{}{
+		"_billing_provider": map[string]interface{}{"name": "ACME CLINIC"},
+		"_rows": []interface{}{
+			map[string]interface{}{"rowId": "row-1"},
+			map[string]interface{}{"rowId": "row-2", "_billing_provider": map[string]interface{}{"name": "ROW-OWN CLINIC"}},
+		},
+	}
+
+	output := runFHIRBuild(t, config, inputData)
+	resources := fhirResourceArrayFrom(t, output, "message.fhirOrgs")
+	if len(resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(resources))
+	}
+	if _, present := resources[0]["name"]; present {
+		t.Errorf("resources[0].name = %v, want absent — sourcePath must not silently reach into topLevel inputData", resources[0]["name"])
+	}
+	if resources[1]["name"] != "ROW-OWN CLINIC" {
+		t.Errorf("resources[1].name = %v, want ROW-OWN CLINIC (the row's own field, proving resolution is row-scoped)", resources[1]["name"])
+	}
+}
+
+// TestFHIRBuild_RowsPath_ConditionFallsBackToTopLevel proves a Fields
+// Condition under rowsPath still merges topLevel via mergeWithFallback, the
+// same contract TestFHIRBuild_FieldCondition_RowFallsBackToTopLevel already
+// proves for repeatingGroups — now proven for the rowsPath code path too,
+// since conditionMet is called with topLevel=inputData there as well.
+func TestFHIRBuild_RowsPath_ConditionFallsBackToTopLevel(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "Claim",
+		"outputField":  "message.fhirClaims",
+		"rowsPath":     "_claim_contexts",
+		"fields": []interface{}{
+			map[string]interface{}{"targetPath": "id", "sourcePath": "claimId"},
+			map[string]interface{}{
+				"targetPath": "use",
+				"literalValue": "claim",
+				"condition":  map[string]interface{}{"field": "_file_mode", "operator": "equals", "value": "submission"},
+			},
+		},
+	}
+	inputData := map[string]interface{}{
+		"_file_mode": "submission",
+		"_claim_contexts": []interface{}{
+			map[string]interface{}{"claimId": "CLM-1"},
+			map[string]interface{}{"claimId": "CLM-2"},
+		},
+	}
+
+	output := runFHIRBuild(t, config, inputData)
+	resources := fhirResourceArrayFrom(t, output, "message.fhirClaims")
+	if len(resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(resources))
+	}
+	for i, r := range resources {
+		if r["use"] != "claim" {
+			t.Errorf("resources[%d].use = %v, want 'claim' (condition must fall back to topLevel _file_mode, absent from every row)", i, r["use"])
+		}
+	}
+}
+
+// TestFHIRBuild_RowsPath_EmptyOrMissing_ProducesEmptyArrayNotError proves an
+// absent/empty rowsPath degrades to a zero-length array (a no-op, matching
+// this executor's established "absent data is not an error" convention —
+// see Validate's own doc comment) rather than panicking or erroring.
+func TestFHIRBuild_RowsPath_EmptyOrMissing_ProducesEmptyArrayNotError(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "Claim",
+		"outputField":  "message.fhirClaims",
+		"rowsPath":     "_claim_contexts",
+		"fields": []interface{}{
+			map[string]interface{}{"targetPath": "id", "sourcePath": "id"},
+		},
+	}
+	output := runFHIRBuild(t, config, map[string]interface{}{})
+	resources := fhirResourceArrayFrom(t, output, "message.fhirClaims")
+	if len(resources) != 0 {
+		t.Errorf("expected 0 resources for missing rowsPath, got %d", len(resources))
+	}
+}
+
+// TestFHIRBuild_NoRowsPath_UnchangedSingleResourceBehavior is a regression
+// guard: omitting rowsPath must still produce today's single-object output
+// exactly as before this field was added.
+func TestFHIRBuild_NoRowsPath_UnchangedSingleResourceBehavior(t *testing.T) {
+	initFHIRRegistry(t)
+	config := map[string]interface{}{
+		"resourceType": "Patient",
+		"fields": []interface{}{
+			map[string]interface{}{"targetPath": "id", "sourcePath": "memberId"},
+		},
+	}
+	output := runFHIRBuild(t, config, map[string]interface{}{"memberId": "MEM-1"})
+	resource := fhirResourceFrom(t, output, "fhirResource")
+	if resource["id"] != "MEM-1" {
+		t.Errorf("id = %v, want MEM-1", resource["id"])
 	}
 }
