@@ -442,9 +442,11 @@ func TestRealSchema_837P_BuildAndRoundTrip_LoopRefResolvesIndependently(t *testi
 				"providerSignatureIndicator": "Y", "assignmentOrPlanParticipationCode": "A",
 				"benefitsAssignmentCertificationIndicator": "Y", "releaseOfInformationCode": "Y",
 			},
-			"HI": map[string]interface{}{
-				"codes": []interface{}{
-					map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "R51"}},
+			"HI": []interface{}{
+				map[string]interface{}{
+					"codes": []interface{}{
+						map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "R51"}},
+					},
 				},
 			},
 			"loops": map[string]interface{}{
@@ -577,7 +579,15 @@ func TestRealSchema_837P_BuildAndRoundTrip_LoopRefResolvesIndependently(t *testi
 
 	// Both claims' own HI (12x repeat-group, see segments/HI.json) and 2400
 	// service-line data must also have round-tripped correctly, independently.
-	subHI := subscriberClaims[0]["HI"].(map[string]interface{})["codes"].([]map[string]interface{})
+	// HI is itself maxUse ">1" (a claim can carry several HI occurrences, one
+	// per qualifier-group — see segments/HI.json's own maxUse-correction
+	// note), so the segment itself is an array; this fixture only supplies
+	// one occurrence.
+	subHIInstances := subscriberClaims[0]["HI"].([]map[string]interface{})
+	if len(subHIInstances) != 1 {
+		t.Fatalf("expected 1 HI occurrence, got %d", len(subHIInstances))
+	}
+	subHI := subHIInstances[0]["codes"].([]map[string]interface{})
 	if len(subHI) != 1 || subHI[0]["code"].(map[string]interface{})["code"] != "R51" {
 		t.Errorf("subscriber claim HI codes = %#v", subHI)
 	}
@@ -657,9 +667,11 @@ func TestRealSchema_837I_BuildAndRoundTrip_DistinctFrom837P(t *testing.T) {
 											"CL1": map[string]interface{}{
 												"admissionTypeCode": "1", "admissionSourceCode": "1", "patientStatusCode": "01",
 											},
-											"HI": map[string]interface{}{
-												"codes": []interface{}{
-													map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "I219"}},
+											"HI": []interface{}{
+												map[string]interface{}{
+													"codes": []interface{}{
+														map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "I219"}},
+													},
 												},
 											},
 											"loops": map[string]interface{}{

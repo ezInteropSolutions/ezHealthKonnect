@@ -13,9 +13,10 @@
 //     has no professional equivalent -> Claim.supportingInfo[].
 //   - HI is SHARED for diagnosis AND procedure codes on 837I (unlike 837P,
 //     where HI only ever carries diagnoses) — distinguished purely by each
-//     repetition's own qualifier (ABK/ABF/ABJ = diagnosis, BBR/BR =
-//     procedure) -> Claim.diagnosis[] and Claim.procedure[] respectively.
-//     HI's own Present-on-Admission indicator (sub09) rides on diagnosis
+//     repetition's own qualifier (BK/ABK/BF/ABF/BJ/ABJ/BN/ABN/PR/APR =
+//     diagnosis [ICD-9/ICD-10 pairs], BR/BBR/BQ/BBQ = procedure) ->
+//     Claim.diagnosis[] and Claim.procedure[] respectively. HI's own
+//     Present-on-Admission indicator (sub09) rides on diagnosis
 //     repetitions -> Claim.diagnosis[].onAdmission.
 //   - Care team roles differ: 2310A=Attending, 2310B=Operating Physician,
 //     2310D=Rendering, 2310F=Referring (837P's 2310A/2310B are Referring/
@@ -82,11 +83,21 @@ func edi837IFixtureLoops() map[string]interface{} {
 											"healthCareServiceLocation": map[string]interface{}{"placeOfServiceCode": "21", "facilityCodeQualifier": "B", "claimFrequencyCode": "1"},
 										},
 										"CL1": map[string]interface{}{"admissionTypeCode": "3", "admissionSourceCode": "1", "patientStatusCode": "01"},
-										"HI": map[string]interface{}{
-											"codes": []interface{}{
-												map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "I21.4"}},
-												map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABF", "code": "I10", "presentOnAdmissionIndicator": "Y"}},
-												map[string]interface{}{"code": map[string]interface{}{"qualifier": "BBR", "code": "0270"}},
+										// 2 separate HI occurrences (diagnosis codes, then the procedure code) --
+										// the real-world shape HI.json's own maxUse=">1" correction models;
+										// proves allHICodes' own cross-instance flattening, not just a
+										// single-instance array wrapper.
+										"HI": []interface{}{
+											map[string]interface{}{
+												"codes": []interface{}{
+													map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "I21.4"}},
+													map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABF", "code": "I10", "presentOnAdmissionIndicator": "Y"}},
+												},
+											},
+											map[string]interface{}{
+												"codes": []interface{}{
+													map[string]interface{}{"code": map[string]interface{}{"qualifier": "BBR", "code": "0270"}},
+												},
 											},
 										},
 										"loops": map[string]interface{}{
@@ -162,9 +173,11 @@ func edi837IFixtureLoops() map[string]interface{} {
 														"healthCareServiceLocation": map[string]interface{}{"placeOfServiceCode": "22", "facilityCodeQualifier": "B", "claimFrequencyCode": "1"},
 													},
 													"CL1": map[string]interface{}{"admissionTypeCode": "9", "admissionSourceCode": "9", "patientStatusCode": "01"},
-													"HI": map[string]interface{}{
-														"codes": []interface{}{
-															map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "S52.501A"}},
+													"HI": []interface{}{
+														map[string]interface{}{
+															"codes": []interface{}{
+																map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "S52.501A"}},
+															},
 														},
 													},
 													"loops": map[string]interface{}{
@@ -240,21 +253,44 @@ var billingProvider = {
 };
 
 // HI is SHARED for diagnosis and procedure codes on 837I, distinguished
-// purely by each repetition's own qualifier -- ABK/ABF/ABJ = diagnosis,
-// BBR/BR = procedure. Value/occurrence/condition codes (BE/BH/BG) are not
-// modeled in this pass (named simplification, matching 835's own "core
-// fields, not exhaustive" precedent).
-function extractDiagnoses(hi) {
-  var codes = (hi && hi.codes) || [];
+// purely by each repetition's own qualifier. Diagnosis qualifiers come in
+// ICD-9/ICD-10 pairs (BK/ABK = principal, BF/ABF = other, BJ/ABJ =
+// admitting, BN/ABN = external cause of injury, PR/APR = patient's reason
+// for visit) -- an X12.org real-world sample (the "Jones Hospital" 005010X223
+// example, ICD-9-CM era) caught a real gap here: an earlier version of
+// extractDiagnoses only matched the "AB"-prefixed ICD-10 forms, silently
+// dropping every ICD-9 diagnosis (BK/BF/etc). Procedure qualifiers are
+// BR/BBR (principal) and BQ/BBQ (other). Value/occurrence/condition codes
+// (BE/BH/BG) and DRG (DR) are not modeled in this pass (named
+// simplification, matching 835's own "core fields, not exhaustive"
+// precedent) -- excluded automatically since they're not in either
+// whitelist below.
+var DIAGNOSIS_HI_QUALIFIERS = ["BK", "ABK", "BF", "ABF", "BJ", "ABJ", "BN", "ABN", "PR", "APR"];
+var PROCEDURE_HI_QUALIFIERS = ["BR", "BBR", "BQ", "BBQ"];
+// HI is maxUse ">1" -- a claim can carry SEVERAL separate HI segment
+// occurrences at the same 2300 level (one per qualifier-group; see
+// edi/schemas/x12_005010/segments/HI.json's own maxUse-correction note for
+// why, found via testing against real, unedited samples), each with its own
+// up-to-12-entry codes[] repeat group. Flatten every occurrence's codes[]
+// into one combined list before filtering by qualifier.
+function allHICodes(hiList) {
+  var instances = arr(hiList);
   var out = [];
-  var seq = 0;
+  for (var i = 0; i < instances.length; i++) {
+    var codes = (instances[i] && instances[i].codes) || [];
+    for (var j = 0; j < codes.length; j++) out.push(codes[j]);
+  }
+  return out;
+}
+
+function extractDiagnoses(codes) {
+  var out = [];
   for (var i = 0; i < codes.length; i++) {
     var c = (codes[i] && codes[i].code) || {};
     if (!c.code) continue;
     var q = c.qualifier || "";
-    if (q.indexOf("AB") !== 0) continue;
-    seq++;
-    var entry = { code: c.code, sequence: seq };
+    if (DIAGNOSIS_HI_QUALIFIERS.indexOf(q) === -1) continue;
+    var entry = { code: c.code, sequence: out.length + 1 };
     // Omit the key entirely (not an empty string) when absent -- an empty
     // onAdmission.coding[0].code sourcePath still resolves as "not empty
     // data" for a LITERAL system field with no sourcePath of its own, so the
@@ -266,17 +302,14 @@ function extractDiagnoses(hi) {
   return out;
 }
 
-function extractProcedures(hi) {
-  var codes = (hi && hi.codes) || [];
+function extractProcedures(codes) {
   var out = [];
-  var seq = 0;
   for (var i = 0; i < codes.length; i++) {
     var c = (codes[i] && codes[i].code) || {};
     if (!c.code) continue;
     var q = c.qualifier || "";
-    if (q !== "BBR" && q !== "BR") continue;
-    seq++;
-    out.push({ code: c.code, sequence: seq });
+    if (PROCEDURE_HI_QUALIFIERS.indexOf(q) === -1) continue;
+    out.push({ code: c.code, sequence: out.length + 1 });
   }
   return out;
 }
@@ -300,21 +333,61 @@ function extractServiceLines(claimLoops) {
     var sv2 = line.SV2 || {};
     var proc = sv2.procedureCode || {};
     var dtpList = arr(line.DTP);
-    var servicedDate = "";
-    for (var d = 0; d < dtpList.length; d++) {
-      if (dtpList[d].dateTimeQualifier === "472") { servicedDate = dtpList[d].datePeriod; break; }
-    }
-    out.push({
+    var svc = resolveServicedDate(dtpList);
+    var entry = {
       sequence: parseInt(lx.assignedNumber || String(i + 1), 10),
       revenueCode: sv2.serviceLineRevenueCode || "",
-      procedureCode: proc.code || "",
-      procedureSystem: (proc.qualifier === "HC") ? "http://www.ama-assn.org/go/cpt" : "",
       quantity: sv2.serviceUnitCount ? Number(sv2.serviceUnitCount) : 1,
       net: sv2.lineItemChargeAmount ? Number(sv2.lineItemChargeAmount) : 0,
-      servicedDate: servicedDate
-    });
+      servicedDate: svc.servicedDate,
+      servicedStart: svc.servicedStart,
+      servicedEnd: svc.servicedEnd
+    };
+    // Claim.item.productOrService is ALWAYS anchored on the revenue code
+    // (Claim config's own productOrService.coding[0], built directly off
+    // revenueCode) -- the one identifier EVERY real institutional line
+    // carries, and the field an official X12.org example (005010X223A2
+    // Example 1a) shows populated on every line even when a procedure code
+    // is ALSO present. SV202 (procedure code) is genuinely OPTIONAL on real
+    // institutional claims -- present on many ancillary/outpatient lines
+    // (often required under CMS OPPS rules for specific revenue codes),
+    // absent on others (room & board, some inpatient DRG-based lines; a
+    // real, unedited sample checked this round had NO procedure code on any
+    // of its 9 lines). When present, it's added as a SECOND coding in the
+    // SAME productOrService CodeableConcept (Claim config's own
+    // productOrService.coding[1]) -- never a replacement for the revenue-
+    // code coding. Keys omitted entirely (not set to "") when absent,
+    // matching the same "a condition checking a field 'exists' must see a
+    // truly missing key, not an empty string" convention onAdmission
+    // already established.
+    if (proc.code) {
+      entry.procedureCode = proc.code;
+      entry.procedureSystem = (proc.qualifier === "HC") ? "http://www.ama-assn.org/go/cpt" : "";
+    }
+    out.push(entry);
   }
   return out;
+}
+
+// DTP02 (Date/Time Period Format Qualifier) "D8" is a single CCYYMMDD date;
+// "RD8" is a CCYYMMDD-CCYYMMDD range. Claim.item.serviced[x] is a choice type
+// (servicedDate | servicedPeriod) -- only one of the two shapes below is ever
+// populated per DTP*472 occurrence, matching that choice. Found only by
+// testing against a real, unedited 837 sample (databricks-industry-
+// solutions/x12-edi-parser's own CC_837P_EDI.txt/CC_837I_EDI.txt test
+// fixtures) carrying genuine RD8 ranges -- the synthetic Go-test fixture
+// only ever used D8 dates, so this gap was invisible there.
+function resolveServicedDate(dtpList) {
+  for (var d = 0; d < dtpList.length; d++) {
+    if (dtpList[d].dateTimeQualifier !== "472") continue;
+    var period = dtpList[d].datePeriod || "";
+    if (dtpList[d].dateTimePeriodFormatQualifier === "RD8" && period.indexOf("-") !== -1) {
+      var parts = period.split("-");
+      return { servicedDate: "", servicedStart: parts[0] || "", servicedEnd: parts[1] || "" };
+    }
+    return { servicedDate: period, servicedStart: "", servicedEnd: "" };
+  }
+  return { servicedDate: "", servicedStart: "", servicedEnd: "" };
 }
 
 // Institutional care-team roles are genuinely different assignments from
@@ -339,26 +412,47 @@ function extractCareTeam(claimLoops) {
   return team;
 }
 
+// Claim.facility (base FHIR, 0..1 Reference) -- 2310E Service Facility
+// Location on 837I (a genuinely different loop position from 837P's own
+// 2310C, since institutional's role numbering differs -- see this file's own
+// header comment). Same logical (identifier-only) reference pattern as
+// careTeam[].provider; not a care-team member. See
+// edi_837p_fhir_builder_test.go's own extractFacility for the full rationale
+// (found via X12.org's official COB example on the professional side).
+function extractFacility(claimLoops) {
+  var loop = (claimLoops || {})["2310E"];
+  if (!loop) return {};
+  var nm1 = first(loop.NM1);
+  if (!nm1.identificationCode) return {};
+  return { facilityNpi: nm1.identificationCode, facilityName: nm1.nameLastOrOrganizationName || "" };
+}
+
 var nowISO = new Date().toISOString();
 
 function buildClaimContext(patientInfo, subscriberInfo, payerInfo, claimLoop) {
   var clm = claimLoop.CLM || {};
   var svcLoc = clm.healthCareServiceLocation || {};
+  var facility = extractFacility(claimLoop.loops);
+  var claim = {
+    patientControlNumber: clm.patientControlNumber || "",
+    totalChargeAmount: clm.totalClaimChargeAmount ? Number(clm.totalClaimChargeAmount) : 0,
+    placeOfServiceCode: svcLoc.placeOfServiceCode || "",
+    createdAt: nowISO,
+    diagnosisList: extractDiagnoses(allHICodes(claimLoop.HI)),
+    procedureList: extractProcedures(allHICodes(claimLoop.HI)),
+    institutionalInfo: extractInstitutionalInfo(claimLoop.CL1),
+    serviceLines: extractServiceLines(claimLoop.loops),
+    careTeam: extractCareTeam(claimLoop.loops)
+  };
+  if (facility.facilityNpi) {
+    claim.facilityNpi = facility.facilityNpi;
+    claim.facilityName = facility.facilityName;
+  }
   return {
     patientInfo: patientInfo,
     subscriberInfo: subscriberInfo,
     payerInfo: payerInfo,
-    claim: {
-      patientControlNumber: clm.patientControlNumber || "",
-      totalChargeAmount: clm.totalClaimChargeAmount ? Number(clm.totalClaimChargeAmount) : 0,
-      placeOfServiceCode: svcLoc.placeOfServiceCode || "",
-      createdAt: nowISO,
-      diagnosisList: extractDiagnoses(claimLoop.HI),
-      procedureList: extractProcedures(claimLoop.HI),
-      institutionalInfo: extractInstitutionalInfo(claimLoop.CL1),
-      serviceLines: extractServiceLines(claimLoop.loops),
-      careTeam: extractCareTeam(claimLoop.loops)
-    }
+    claim: claim
   };
 }
 
@@ -401,7 +495,11 @@ for (var s = 0; s < subscriberLevels.length; s++) {
       var depLoops = depLevel.loops || {};
       var depNM1 = first((depLoops["2010CA"] || {}).NM1);
       var depDMG = (depLoops["2010CA"] || {}).DMG || {};
-      var patientInfo = personFromNM1AndDMG(depNM1, depDMG, sbr.individualRelationshipCode);
+      var depPAT = depLevel.PAT || {};
+      // See edi_837p_fhir_builder_test.go's own dependent-relationship comment
+      // -- same real-world PAT01-vs-SBR02 correction applies here (the 2000C
+      // loop and PAT segment are identical shape across 837P/837I).
+      var patientInfo = personFromNM1AndDMG(depNM1, depDMG, depPAT.individualRelationshipCode || sbr.individualRelationshipCode);
       if (!patientInfo.memberId) patientInfo.memberId = subscriberInfo.memberId + "-DEP" + (d + 1);
 
       var depClaims = arr(depLoops["2300"]);
@@ -465,6 +563,14 @@ func claim837IBuildConfig() map[string]interface{} {
 			map[string]interface{}{"targetPath": "provider.reference", "literalValue": "Organization/organization-billing"},
 			map[string]interface{}{"targetPath": "insurer.identifier.system", "literalValue": "http://ezhealthkonnect.local/x12-payer-id"},
 			map[string]interface{}{"targetPath": "insurer.identifier.value", "sourcePath": "payerInfo.payerId"},
+			// Claim.facility -- see edi_837p_fhir_builder_test.go's own note; here
+			// sourced from 2310E (institutional's own Service Facility Location
+			// position, distinct from 837P's 2310C).
+			map[string]interface{}{
+				"targetPath": "facility.identifier.system", "literalValue": "http://hl7.org/fhir/sid/us-npi",
+				"condition": map[string]interface{}{"field": "claim.facilityNpi", "operator": "exists"},
+			},
+			map[string]interface{}{"targetPath": "facility.identifier.value", "sourcePath": "claim.facilityNpi"},
 			map[string]interface{}{"targetPath": "total.value", "sourcePath": "claim.totalChargeAmount"},
 			map[string]interface{}{"targetPath": "total.currency", "literalValue": "USD"},
 			map[string]interface{}{"targetPath": "insurance[0].sequence", "literalValue": "1"},
@@ -511,12 +617,23 @@ func claim837IBuildConfig() map[string]interface{} {
 					map[string]interface{}{"targetPath": "sequence", "sourcePath": "sequence"},
 					map[string]interface{}{"targetPath": "revenue.coding[0].system", "literalValue": "https://codesystem.x12.org/005010/234"},
 					map[string]interface{}{"targetPath": "revenue.coding[0].code", "sourcePath": "revenueCode"},
-					map[string]interface{}{"targetPath": "productOrService.coding[0].system", "sourcePath": "procedureSystem"},
-					map[string]interface{}{"targetPath": "productOrService.coding[0].code", "sourcePath": "procedureCode"},
+					// productOrService is ALWAYS anchored on the revenue code (coding[0])
+					// -- the one identifier every real institutional line carries -- with
+					// the HCPCS/CPT code (when SV202 is actually present) added as a
+					// SECOND coding (coding[1]), never as a replacement. Both coding[1]
+					// fields use sourcePath (not literalValue), so they naturally resolve
+					// to nothing and get skipped when procedureCode/procedureSystem are
+					// absent from the row -- no explicit condition needed.
+					map[string]interface{}{"targetPath": "productOrService.coding[0].system", "literalValue": "https://codesystem.x12.org/005010/234"},
+					map[string]interface{}{"targetPath": "productOrService.coding[0].code", "sourcePath": "revenueCode"},
+					map[string]interface{}{"targetPath": "productOrService.coding[1].system", "sourcePath": "procedureSystem"},
+					map[string]interface{}{"targetPath": "productOrService.coding[1].code", "sourcePath": "procedureCode"},
 					map[string]interface{}{"targetPath": "quantity.value", "sourcePath": "quantity"},
 					map[string]interface{}{"targetPath": "net.value", "sourcePath": "net"},
 					map[string]interface{}{"targetPath": "net.currency", "literalValue": "USD"},
-					map[string]interface{}{"targetPath": "servicedDate", "sourcePath": "servicedDate"},
+					map[string]interface{}{"targetPath": "servicedDate", "sourcePath": "servicedDate", "transform": "x12_date_to_fhir_date"},
+					map[string]interface{}{"targetPath": "servicedPeriod.start", "sourcePath": "servicedStart", "transform": "x12_date_to_fhir_date"},
+					map[string]interface{}{"targetPath": "servicedPeriod.end", "sourcePath": "servicedEnd", "transform": "x12_date_to_fhir_date"},
 				},
 			},
 			map[string]interface{}{

@@ -164,7 +164,7 @@ func ParseTransactionSet(spec *X12SpecDef, content string) (*ParseResult, error)
 	pos := 0
 
 	header := map[string]interface{}{}
-	if err := w.matchSegmentSequence(&pos, txSet.HeaderSegmentIDs, header, nil); err != nil {
+	if err := w.matchSegmentSequence(&pos, txSet.HeaderSegmentIDs, header, nil, ""); err != nil {
 		return nil, fmt.Errorf("edi: header: %w", err)
 	}
 
@@ -174,7 +174,7 @@ func ParseTransactionSet(spec *X12SpecDef, content string) (*ParseResult, error)
 	}
 
 	trailer := map[string]interface{}{}
-	if err := w.matchSegmentSequence(&pos, txSet.TrailerSegmentIDs, trailer, nil); err != nil {
+	if err := w.matchSegmentSequence(&pos, txSet.TrailerSegmentIDs, trailer, nil, ""); err != nil {
 		return nil, fmt.Errorf("edi: trailer: %w", err)
 	}
 
@@ -263,7 +263,32 @@ type walker struct {
 // one place, matching this engine's own "flexible, not rigid" design intent
 // (see edi/validator's syntax-rule severity split for the same principle
 // applied to element-relational constraints instead of segment order).
-func (w *walker) matchSegmentSequence(pos *int, segmentIDs []string, out map[string]interface{}, parentPath []pathStep) error {
+//
+// triggerID, when non-empty, is the LOOP TRIGGER for the loop this call is
+// consuming segments for (matchLoopInstance passes loopTrigger(loop); the
+// transaction-set header/trailer and a loop's own TrailerSegmentIDs pass "",
+// since neither is itself a loop's own trigger). A loop's own trigger
+// segment must NEVER be treated as repeating WITHIN one loop instance,
+// REGARDLESS of that segment's own global MaxUse — X12 loop instances are
+// delimited BY their own trigger reappearing (matchLoops' own job to
+// recognize, via its own countLoopInstances bookkeeping), so a second sighting
+// here means either this SAME loop's own next instance has begun (if it
+// repeats) or a SIBLING loop sharing the same trigger has begun (if it
+// doesn't) — never a second occurrence to fold into this instance's own data.
+//
+// Found via real-sample testing (September 2026): NM1 is globally
+// maxUse=">1" (legitimately repeats in some contexts, e.g. loop 2330C's own
+// 2 occurrences) but is ALSO the trigger for many adjacent loops (e.g. 1000A
+// Submitter immediately followed by 1000B Receiver, or 2010BA Subscriber
+// immediately followed by 2010BB Payer) — without this guard,
+// matchSegmentSequence greedily folded the SIBLING loop's own NM1 (and, when
+// the current loop's own segmentIds happened to also list N3/N4, the
+// sibling's own address segments too — a hard "required segment SE not
+// found" failure) into the CURRENT loop's own instance, silently losing or
+// corrupting the sibling loop's data on every real 837P/837I file (1000A/
+// 1000B are present in EVERY such file). 835 is unaffected (N1, its own
+// envelope loops' trigger, is maxUse="1").
+func (w *walker) matchSegmentSequence(pos *int, segmentIDs []string, out map[string]interface{}, parentPath []pathStep, triggerID string) error {
 	idSet := make(map[string]bool, len(segmentIDs))
 	for _, id := range segmentIDs {
 		idSet[id] = true
@@ -279,7 +304,8 @@ func (w *walker) matchSegmentSequence(pos *int, segmentIDs []string, out map[str
 		if !ok {
 			return fmt.Errorf("segment %q not found in shared library", id)
 		}
-		if matchedOnce[id] && !segDef.RepeatsMultiple() {
+		repeats := segDef.RepeatsMultiple() && id != triggerID
+		if matchedOnce[id] && !repeats {
 			// A second, non-contiguous occurrence of a non-repeating ID
 			// structurally belongs to whatever comes next (a later loop
 			// instance sharing the same segment type, or non-conformant
@@ -289,14 +315,14 @@ func (w *walker) matchSegmentSequence(pos *int, segmentIDs []string, out map[str
 		}
 
 		index := 0
-		if segDef.RepeatsMultiple() {
+		if repeats {
 			index = countExisting(out[id]) + 1
 		}
 		instance := w.parseSegmentInstance(w.tokens[*pos], segDef, append(parentPath, pathStep{Name: id, Index: index}))
 		*pos++
 		matchedOnce[id] = true
 
-		if segDef.RepeatsMultiple() {
+		if repeats {
 			arr, _ := out[id].([]map[string]interface{})
 			out[id] = append(arr, instance)
 		} else {
@@ -471,52 +497,135 @@ func loopTrigger(loop *X12LoopDef) string {
 	return ""
 }
 
-// matchLoops repeatedly scans loops (in schema order) for one whose trigger
-// matches the current token, processes exactly one instance of the winning
-// loop, then restarts the scan from the top of loops — giving schema order
-// priority among siblings and letting any of them repeat any number of
-// times, in any interleaving the data actually presents. Stops when a full
-// pass finds no match.
+// matchLoops repeatedly scans loops for one whose trigger matches the
+// current token, processes exactly one instance of the winning loop, then
+// restarts the scan from the top of loops — letting any of them repeat any
+// number of times, in any interleaving the data actually presents. Stops
+// when a full pass finds no match.
+//
+// Two passes, per token, in this priority order:
+//  1. DISCRIMINATED candidates (TriggerDiscriminator set) — schema order
+//     among themselves, but a candidate only wins if the token's own
+//     element (resolved by the discriminator's ElementKey) equals the
+//     discriminator's own Value. This is the ONLY way to tell apart sibling
+//     loops sharing one trigger segment (e.g. 837's provider-role loops,
+//     all triggered by a bare NM1) — see X12LoopTriggerDiscriminator's own
+//     doc comment for why this exists and when it was added.
+//  2. UNDISCRIMINATED candidates (the pre-existing, still-default behavior)
+//     — plain schema order, first not-yet-consumed match wins, giving
+//     schema-declaration-order priority among siblings that share a
+//     trigger with no way (or no configured way) to disambiguate further.
+//     This is unchanged from before X12LoopTriggerDiscriminator existed —
+//     loops with no discriminator behave EXACTLY as they always have.
+//
+// Running discriminated candidates first (not interleaved with
+// undiscriminated ones in raw schema order) means a discriminated loop
+// always gets first refusal on its own known value, regardless of where it
+// sits in the list relative to undiscriminated siblings — an undiscriminated
+// sibling is a pure catch-all for "whatever no discriminated candidate
+// claimed," never a competitor for a value a discriminated candidate
+// actually recognizes.
 func (w *walker) matchLoops(pos *int, loops []*X12LoopDef, parentPath []pathStep) (map[string]interface{}, error) {
 	out := map[string]interface{}{}
 	for {
-		matched := false
-		for _, loop := range loops {
-			if *pos >= len(w.tokens) {
-				break
-			}
-			if w.tokens[*pos].ID != loopTrigger(loop) {
-				continue
-			}
-			if !loop.RepeatsMultiple() {
-				if _, already := out[loop.ID]; already {
-					continue
-				}
-			}
-
-			index := 0
-			if loop.RepeatsMultiple() {
-				index = countLoopInstances(out[loop.ID]) + 1
-			}
-			instance, err := w.matchLoopInstance(pos, loop, append(parentPath, pathStep{Name: loop.ID, Index: index}))
-			if err != nil {
-				return nil, err
-			}
-
-			if loop.RepeatsMultiple() {
-				arr, _ := out[loop.ID].([]map[string]interface{})
-				out[loop.ID] = append(arr, instance)
-			} else {
-				out[loop.ID] = instance
-			}
-			matched = true
+		if *pos >= len(w.tokens) {
 			break
 		}
-		if !matched {
+		loop := w.selectLoopCandidate(*pos, loops, out)
+		if loop == nil {
 			break
+		}
+
+		index := 0
+		if loop.RepeatsMultiple() {
+			index = countLoopInstances(out[loop.ID]) + 1
+		}
+		instance, err := w.matchLoopInstance(pos, loop, append(parentPath, pathStep{Name: loop.ID, Index: index}))
+		if err != nil {
+			return nil, err
+		}
+
+		if loop.RepeatsMultiple() {
+			arr, _ := out[loop.ID].([]map[string]interface{})
+			out[loop.ID] = append(arr, instance)
+		} else {
+			out[loop.ID] = instance
 		}
 	}
 	return out, nil
+}
+
+// selectLoopCandidate implements matchLoops' own two-pass priority (see that
+// function's doc comment): discriminated candidates checked first (schema
+// order among themselves, value-gated), then undiscriminated candidates
+// (schema order, first not-yet-consumed match). Returns nil when nothing at
+// tokenPos matches any candidate.
+func (w *walker) selectLoopCandidate(tokenPos int, loops []*X12LoopDef, out map[string]interface{}) *X12LoopDef {
+	tokenID := w.tokens[tokenPos].ID
+
+	tryCandidate := func(loop *X12LoopDef) bool {
+		if loopTrigger(loop) != tokenID {
+			return false
+		}
+		if !loop.RepeatsMultiple() {
+			if _, already := out[loop.ID]; already {
+				return false
+			}
+		}
+		return true
+	}
+
+	for _, loop := range loops {
+		if loop.TriggerDiscriminator == nil {
+			continue
+		}
+		if !tryCandidate(loop) {
+			continue
+		}
+		if !w.discriminatorMatches(w.tokens[tokenPos], loopTrigger(loop), loop.TriggerDiscriminator) {
+			continue
+		}
+		return loop
+	}
+
+	for _, loop := range loops {
+		if loop.TriggerDiscriminator != nil {
+			continue // already tried above
+		}
+		if !tryCandidate(loop) {
+			continue
+		}
+		return loop
+	}
+
+	return nil
+}
+
+// discriminatorMatches resolves triggerSegID's own element named by d's
+// ElementKey (via the shared segment library's own Elements — never a raw
+// numeric position, so this stays correct if a segment's own element
+// ordering is ever revised) against t's actual raw value at that position,
+// and reports whether it equals d.Value. An unresolvable element key or
+// missing segment definition is treated as a non-match (never a panic or a
+// silent wildcard-accept) — a misconfigured discriminator should make its
+// own loop simply never match, surfacing as an obviously-absent loop in
+// testing, not corrupt unrelated data.
+func (w *walker) discriminatorMatches(t segmentToken, triggerSegID string, d *X12LoopTriggerDiscriminator) bool {
+	segDef, ok := w.spec.Segments[triggerSegID]
+	if !ok {
+		return false
+	}
+	for _, el := range segDef.Elements {
+		key := el.Key
+		if key == "" {
+			key = el.Pos
+		}
+		if key != d.ElementKey {
+			continue
+		}
+		return elementAt(t, atoiSafe(el.Pos)) == d.Value
+	}
+	return false
 }
 
 func countLoopInstances(v interface{}) int {
@@ -531,7 +640,7 @@ func countLoopInstances(v interface{}) int {
 // its own child loops.
 func (w *walker) matchLoopInstance(pos *int, loop *X12LoopDef, path []pathStep) (map[string]interface{}, error) {
 	instance := map[string]interface{}{}
-	if err := w.matchSegmentSequence(pos, loop.SegmentIDs, instance, path); err != nil {
+	if err := w.matchSegmentSequence(pos, loop.SegmentIDs, instance, path, loopTrigger(loop)); err != nil {
 		return nil, err
 	}
 	if len(loop.Loops) > 0 {
@@ -544,7 +653,7 @@ func (w *walker) matchLoopInstance(pos *int, loop *X12LoopDef, path []pathStep) 
 		}
 	}
 	if len(loop.TrailerSegmentIDs) > 0 {
-		if err := w.matchSegmentSequence(pos, loop.TrailerSegmentIDs, instance, path); err != nil {
+		if err := w.matchSegmentSequence(pos, loop.TrailerSegmentIDs, instance, path, ""); err != nil {
 			return nil, err
 		}
 	}

@@ -8,13 +8,15 @@
       "id": "2310A",
       "name": "Attending Provider Name",
       "repeat": "1",
-      "segmentIds": ["NM1", "PRV", "REF"]
+      "segmentIds": ["NM1", "PRV", "REF"],
+      "triggerDiscriminator": { "elementKey": "entityIdentifierCode", "value": "71" }
     },
     {
       "id": "2310B",
       "name": "Operating Physician Name",
       "repeat": "1",
-      "segmentIds": ["NM1", "REF"]
+      "segmentIds": ["NM1", "REF"],
+      "triggerDiscriminator": { "elementKey": "entityIdentifierCode", "value": "72" }
     },
     {
       "id": "2310C",
@@ -26,19 +28,22 @@
       "id": "2310D",
       "name": "Rendering Provider Name",
       "repeat": "1",
-      "segmentIds": ["NM1", "REF"]
+      "segmentIds": ["NM1", "REF"],
+      "triggerDiscriminator": { "elementKey": "entityIdentifierCode", "value": "82" }
     },
     {
       "id": "2310E",
       "name": "Service Facility Location Name",
       "repeat": "1",
-      "segmentIds": ["NM1", "N3", "N4", "REF"]
+      "segmentIds": ["NM1", "N3", "N4", "REF"],
+      "triggerDiscriminator": { "elementKey": "entityIdentifierCode", "value": "77" }
     },
     {
       "id": "2310F",
       "name": "Referring Provider Name",
       "repeat": "1",
-      "segmentIds": ["NM1", "REF"]
+      "segmentIds": ["NM1", "REF"],
+      "triggerDiscriminator": { "elementKey": "entityIdentifierCode", "value": "DN" }
     },
     {
       "id": "2320",
@@ -148,6 +153,7 @@
     }
   ],
   "_sourceRefs": [
-    "PyX12 (azoner/pyx12) 837Q3.I.5010.X223.A1.xml — the institutional counterpart to loops/2300-claim.json (837P's own shared claim subtree). Genuinely different shape, not a copy: CL1 (Institutional Claim Code) replaces nothing (no professional equivalent), SV2 replaces SV1/SV5, no SV1/SV5/CR1/CR2/CR3/QTY/MEA/PS1/2440 (ambulance/spinal/DME/form-identification are professional-only concepts), 2320 gains BOTH MIA and MOA (institutional has separate inpatient/outpatient adjudication segments) and 9 Other-Payer sub-loops (2330A-I, not 837P's 7 A-G) — institutional distinguishes 'Operating Physician' from 'Other Operating Physician' as separate provider roles the professional IG doesn't have. Referenced from 837I's own 2000B/2000C positions via the SAME loopRef mechanism as 837P's 2300-claim.json — see that file's own _sourceRefs for the full duplication-avoidance rationale, and CLAUDE.md's EDI Phase 2 section."
+    "PyX12 (azoner/pyx12) 837Q3.I.5010.X223.A1.xml — the institutional counterpart to loops/2300-claim.json (837P's own shared claim subtree). Genuinely different shape, not a copy: CL1 (Institutional Claim Code) replaces nothing (no professional equivalent), SV2 replaces SV1/SV5, no SV1/SV5/CR1/CR2/CR3/QTY/MEA/PS1/2440 (ambulance/spinal/DME/form-identification are professional-only concepts), 2320 gains BOTH MIA and MOA (institutional has separate inpatient/outpatient adjudication segments) and 9 Other-Payer sub-loops (2330A-I, not 837P's 7 A-G) — institutional distinguishes 'Operating Physician' from 'Other Operating Physician' as separate provider roles the professional IG doesn't have. Referenced from 837I's own 2000B/2000C positions via the SAME loopRef mechanism as 837P's 2300-claim.json — see that file's own _sourceRefs for the full duplication-avoidance rationale, and CLAUDE.md's EDI Phase 2 section.",
+    "TRIGGER DISCRIMINATORS added (September 2026, found via real-sample 837-to-FHIR-mapping testing — see 2300-claim.json's own note for the general mechanism and rationale): 71=Attending Physician, 72=Operating Physician, 82=Rendering Provider (same code as professional's own Rendering role), 77=Service Facility Location (CONFIRMED directly against a real, unedited sample — databricks-industry-solutions/x12-edi-parser's own CC_837I_EDI.txt used NM1*77 for exactly this role), DN=Referring Provider (same code as professional's own Referring role). 2310C (Other Operating Physician Name) is DELIBERATELY left without a discriminator — its own real NM1-01 code value could not be confirmed with the same confidence from available sources — and acts as the sibling group's own catch-all instead (matchLoops' own two-pass algorithm: undiscriminated candidates only get tried after every discriminated sibling has already declined a given token, so 2310C still correctly catches genuine Other-Operating-Physician data without needing its own exact code, at the cost of also catching anything else structurally unrecognized at this position — a named, deliberate trade-off, not an oversight)."
   ]
 }

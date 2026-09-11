@@ -68,10 +68,12 @@ func edi837PFixtureLoops() map[string]interface{} {
 											"patientControlNumber": "CLM-SUB-001", "totalClaimChargeAmount": "350.00",
 											"healthCareServiceLocation": map[string]interface{}{"placeOfServiceCode": "11", "facilityCodeQualifier": "B", "claimFrequencyCode": "1"},
 										},
-										"HI": map[string]interface{}{
-											"codes": []interface{}{
-												map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "Z00.00"}},
-												map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABF", "code": "J06.9"}},
+										"HI": []interface{}{
+											map[string]interface{}{
+												"codes": []interface{}{
+													map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "Z00.00"}},
+													map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABF", "code": "J06.9"}},
+												},
 											},
 										},
 										"loops": map[string]interface{}{
@@ -141,9 +143,11 @@ func edi837PFixtureLoops() map[string]interface{} {
 														"patientControlNumber": "CLM-DEP-001", "totalClaimChargeAmount": "95.00",
 														"healthCareServiceLocation": map[string]interface{}{"placeOfServiceCode": "11", "facilityCodeQualifier": "B", "claimFrequencyCode": "1"},
 													},
-													"HI": map[string]interface{}{
-														"codes": []interface{}{
-															map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "J06.9"}},
+													"HI": []interface{}{
+														map[string]interface{}{
+															"codes": []interface{}{
+																map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "J06.9"}},
+															},
 														},
 													},
 													"loops": map[string]interface{}{
@@ -226,13 +230,28 @@ var billingProvider = {
   name: billingNM1.nameLastOrOrganizationName || ""
 };
 
-function extractDiagnoses(hi) {
-  var codes = (hi && hi.codes) || [];
+// HI is maxUse ">1" -- a claim can carry SEVERAL separate HI segment
+// occurrences at the same 2300 level (one per qualifier-group; see
+// edi/schemas/x12_005010/segments/HI.json's own maxUse-correction note for
+// why, found via testing against real, unedited samples), each with its own
+// up-to-12-entry codes[] repeat group. Flatten every occurrence's codes[]
+// into one combined list before filtering by qualifier.
+function allHICodes(hiList) {
+  var instances = arr(hiList);
+  var out = [];
+  for (var i = 0; i < instances.length; i++) {
+    var codes = (instances[i] && instances[i].codes) || [];
+    for (var j = 0; j < codes.length; j++) out.push(codes[j]);
+  }
+  return out;
+}
+
+function extractDiagnoses(codes) {
   var out = [];
   for (var i = 0; i < codes.length; i++) {
     var c = (codes[i] && codes[i].code) || {};
     if (!c.code) continue;
-    out.push({ code: c.code, sequence: i + 1 });
+    out.push({ code: c.code, sequence: out.length + 1 });
   }
   return out;
 }
@@ -255,40 +274,83 @@ function extractServiceLines(claimLoops) {
     var sv1 = line.SV1 || {};
     var proc = sv1.procedureCode || {};
     var dtpList = arr(line.DTP);
-    var servicedDate = "";
-    for (var d = 0; d < dtpList.length; d++) {
-      if (dtpList[d].dateTimeQualifier === "472") { servicedDate = dtpList[d].datePeriod; break; }
-    }
+    var svc = resolveServicedDate(dtpList);
     out.push({
       sequence: parseInt(lx.assignedNumber || String(i + 1), 10),
       procedureCode: proc.code || "",
       procedureSystem: (proc.qualifier === "HC") ? "http://www.ama-assn.org/go/cpt" : "",
       quantity: sv1.serviceUnitCount ? Number(sv1.serviceUnitCount) : 1,
       net: sv1.lineItemChargeAmount ? Number(sv1.lineItemChargeAmount) : 0,
-      servicedDate: servicedDate,
+      servicedDate: svc.servicedDate,
+      servicedStart: svc.servicedStart,
+      servicedEnd: svc.servicedEnd,
       diagnosisPointers: diagnosisPointers(sv1)
     });
   }
   return out;
 }
 
+// DTP02 (Date/Time Period Format Qualifier) "D8" is a single CCYYMMDD date;
+// "RD8" is a CCYYMMDD-CCYYMMDD range. Claim.item.serviced[x] is a choice type
+// (servicedDate | servicedPeriod) -- only one of the two shapes below is ever
+// populated per DTP*472 occurrence, matching that choice. Found only by
+// testing against a real, unedited 837 sample (databricks-industry-
+// solutions/x12-edi-parser's own CC_837P_EDI.txt/CC_837I_EDI.txt test
+// fixtures) carrying genuine RD8 ranges -- the synthetic Go-test fixture
+// only ever used D8 dates, so this gap was invisible there.
+function resolveServicedDate(dtpList) {
+  for (var d = 0; d < dtpList.length; d++) {
+    if (dtpList[d].dateTimeQualifier !== "472") continue;
+    var period = dtpList[d].datePeriod || "";
+    if (dtpList[d].dateTimePeriodFormatQualifier === "RD8" && period.indexOf("-") !== -1) {
+      var parts = period.split("-");
+      return { servicedDate: "", servicedStart: parts[0] || "", servicedEnd: parts[1] || "" };
+    }
+    return { servicedDate: period, servicedStart: "", servicedEnd: "" };
+  }
+  return { servicedDate: "", servicedStart: "", servicedEnd: "" };
+}
+
+// Covers every 2310A-F role that is genuinely a CARE TEAM MEMBER (a person or
+// organization providing care) -- 2310A Referring (DN), 2310B Rendering
+// (82), 2310D Supervising (DQ). 2310C Service Facility Location (77) is a
+// PLACE, not a care team member -- mapped separately to Claim.facility (see
+// extractFacility below), matching the base FHIR R4 Claim resource's own
+// dedicated 0..1 Reference field for exactly this concept. 2310E/2310F
+// Ambulance Pick-up/Drop-off Location (PW/45) are also genuinely locations
+// (addresses, not provider entities) with no equivalent base-Claim field --
+// a named, deliberate gap, not modeled in this pass. Found via X12.org's own
+// official COB example (Example 3a), whose 2310C carried a real NPI that a
+// prior version of this function silently dropped entirely.
 function extractCareTeam(claimLoops) {
   var team = [];
-  var renderingLoop = (claimLoops || {})["2310B"];
-  if (renderingLoop) {
-    var nm1 = first(renderingLoop.NM1);
-    if (nm1.identificationCode) {
-      team.push({ npi: nm1.identificationCode, role: "rendering", sequence: team.length + 1 });
-    }
-  }
-  var referringList = arr((claimLoops || {})["2310A"]);
-  for (var i = 0; i < referringList.length; i++) {
-    var rnm1 = first(referringList[i].NM1);
-    if (rnm1.identificationCode) {
-      team.push({ npi: rnm1.identificationCode, role: "referring", sequence: team.length + 1 });
+  var roleLoops = [
+    { key: "2310A", role: "referring" },
+    { key: "2310B", role: "rendering" },
+    { key: "2310D", role: "supervising" }
+  ];
+  for (var r = 0; r < roleLoops.length; r++) {
+    var list = arr((claimLoops || {})[roleLoops[r].key]);
+    for (var i = 0; i < list.length; i++) {
+      var nm1 = first(list[i].NM1);
+      if (nm1.identificationCode) {
+        team.push({ npi: nm1.identificationCode, role: roleLoops[r].role, sequence: team.length + 1 });
+      }
     }
   }
   return team;
+}
+
+// Claim.facility (base FHIR R4, 0..1 Reference) -- "Facility where the
+// services were provided." A logical (identifier-only) reference, same
+// pattern as careTeam[].provider -- no separate Location resource is built,
+// same rationale as the careTeam design note above.
+function extractFacility(claimLoops) {
+  var loop = (claimLoops || {})["2310C"];
+  if (!loop) return {};
+  var nm1 = first(loop.NM1);
+  if (!nm1.identificationCode) return {};
+  return { facilityNpi: nm1.identificationCode, facilityName: nm1.nameLastOrOrganizationName || "" };
 }
 
 // Claim.created is required by the base FHIR R4 Claim resource but has no
@@ -301,19 +363,25 @@ var nowISO = new Date().toISOString();
 function buildClaimContext(patientInfo, subscriberInfo, payerInfo, claimLoop) {
   var clm = claimLoop.CLM || {};
   var svcLoc = clm.healthCareServiceLocation || {};
+  var facility = extractFacility(claimLoop.loops);
+  var claim = {
+    patientControlNumber: clm.patientControlNumber || "",
+    totalChargeAmount: clm.totalClaimChargeAmount ? Number(clm.totalClaimChargeAmount) : 0,
+    placeOfServiceCode: svcLoc.placeOfServiceCode || "",
+    createdAt: nowISO,
+    diagnosisList: extractDiagnoses(allHICodes(claimLoop.HI)),
+    serviceLines: extractServiceLines(claimLoop.loops),
+    careTeam: extractCareTeam(claimLoop.loops)
+  };
+  if (facility.facilityNpi) {
+    claim.facilityNpi = facility.facilityNpi;
+    claim.facilityName = facility.facilityName;
+  }
   return {
     patientInfo: patientInfo,
     subscriberInfo: subscriberInfo,
     payerInfo: payerInfo,
-    claim: {
-      patientControlNumber: clm.patientControlNumber || "",
-      totalChargeAmount: clm.totalClaimChargeAmount ? Number(clm.totalClaimChargeAmount) : 0,
-      placeOfServiceCode: svcLoc.placeOfServiceCode || "",
-      createdAt: nowISO,
-      diagnosisList: extractDiagnoses(claimLoop.HI),
-      serviceLines: extractServiceLines(claimLoop.loops),
-      careTeam: extractCareTeam(claimLoop.loops)
-    }
+    claim: claim
   };
 }
 
@@ -356,7 +424,15 @@ for (var s = 0; s < subscriberLevels.length; s++) {
       var depLoops = depLevel.loops || {};
       var depNM1 = first((depLoops["2010CA"] || {}).NM1);
       var depDMG = (depLoops["2010CA"] || {}).DMG || {};
-      var patientInfo = personFromNM1AndDMG(depNM1, depDMG, sbr.individualRelationshipCode);
+      var depPAT = depLevel.PAT || {};
+      // Real, spec-compliant 837 data carries the dependent's own relationship
+      // code on PAT01 (2000C) -- confirmed against X12.org's own official
+      // "Ben Kildare Service" 837P example, which leaves the subscriber's own
+      // SBR02 (2000B) BLANK whenever a 2000C dependent loop exists and puts
+      // the real value on PAT01 instead (HL*2...SBR*P**2222-SJ*******CI [SBR02
+      // blank] -> HL*3...PAT*19 [child]). Prefer PAT01; fall back to SBR02 for
+      // trading partners that populate it there instead (flexible, not rigid).
+      var patientInfo = personFromNM1AndDMG(depNM1, depDMG, depPAT.individualRelationshipCode || sbr.individualRelationshipCode);
       if (!patientInfo.memberId) patientInfo.memberId = subscriberInfo.memberId + "-DEP" + (d + 1);
 
       var depClaims = arr(depLoops["2300"]);
@@ -467,6 +543,16 @@ func claim837PBuildConfig() map[string]interface{} {
 			map[string]interface{}{"targetPath": "provider.reference", "literalValue": "Organization/organization-billing"},
 			map[string]interface{}{"targetPath": "insurer.identifier.system", "literalValue": "http://ezhealthkonnect.local/x12-payer-id"},
 			map[string]interface{}{"targetPath": "insurer.identifier.value", "sourcePath": "payerInfo.payerId"},
+			// Claim.facility (base FHIR, 0..1) -- 2310C Service Facility Location, a
+			// logical (identifier-only) reference, same pattern as careTeam[].provider
+			// below. Only written when the claim actually carries one (most
+			// professional claims served at the billing provider's own address
+			// don't populate 2310C at all) -- found via X12.org's own COB example.
+			map[string]interface{}{
+				"targetPath": "facility.identifier.system", "literalValue": "http://hl7.org/fhir/sid/us-npi",
+				"condition": map[string]interface{}{"field": "claim.facilityNpi", "operator": "exists"},
+			},
+			map[string]interface{}{"targetPath": "facility.identifier.value", "sourcePath": "claim.facilityNpi"},
 			map[string]interface{}{"targetPath": "total.value", "sourcePath": "claim.totalChargeAmount"},
 			map[string]interface{}{"targetPath": "total.currency", "literalValue": "USD"},
 			map[string]interface{}{"targetPath": "insurance[0].sequence", "literalValue": "1"},
@@ -493,7 +579,9 @@ func claim837PBuildConfig() map[string]interface{} {
 					map[string]interface{}{"targetPath": "quantity.value", "sourcePath": "quantity"},
 					map[string]interface{}{"targetPath": "net.value", "sourcePath": "net"},
 					map[string]interface{}{"targetPath": "net.currency", "literalValue": "USD"},
-					map[string]interface{}{"targetPath": "servicedDate", "sourcePath": "servicedDate"},
+					map[string]interface{}{"targetPath": "servicedDate", "sourcePath": "servicedDate", "transform": "x12_date_to_fhir_date"},
+					map[string]interface{}{"targetPath": "servicedPeriod.start", "sourcePath": "servicedStart", "transform": "x12_date_to_fhir_date"},
+					map[string]interface{}{"targetPath": "servicedPeriod.end", "sourcePath": "servicedEnd", "transform": "x12_date_to_fhir_date"},
 				},
 			},
 			map[string]interface{}{

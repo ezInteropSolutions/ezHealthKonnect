@@ -133,6 +133,37 @@ type X12LoopDef struct {
 	// segment that structurally closes the loop out, not one that opens it.
 	// Empty for the overwhelming majority of loops.
 	TrailerSegmentIDs []string `json:"trailerSegmentIds,omitempty"`
+
+	// TriggerDiscriminator disambiguates SIBLING loops that share the exact
+	// same trigger segment ID — e.g. 837's own provider-role loops (2310A-F:
+	// Referring/Rendering/Service Facility/Supervising/Ambulance Pick-up/
+	// Drop-off for professional; Attending/Operating/Other Operating/
+	// Rendering/Service Facility/Referring for institutional) are ALL
+	// triggered by a bare "NM1", distinguished in real data only by NM1-01's
+	// own value (Entity Identifier Code). Without this, matchLoops' own
+	// schema-declaration-order matching (loop_engine.go's own doc comment)
+	// silently mis-assigns a token to whichever earlier-declared, not-yet-
+	// consumed sibling comes first — correct ONLY when every present sibling
+	// happens to appear in the data in the exact order the schema declares
+	// them, which real 837 files routinely violate (a claim might have an
+	// Attending provider and a Service Facility but no Operating/Rendering
+	// physician in between). Nil for the overwhelming majority of loops —
+	// this was explicitly anticipated and deferred in loop_engine.go's own
+	// original doc comment ("if a future transaction set ever needs one...
+	// add an explicit element-value discriminator then, not now") until a
+	// real transaction set (837, via real-sample testing) actually needed
+	// it. See matchLoops' own doc comment for the two-pass matching
+	// algorithm this enables.
+	TriggerDiscriminator *X12LoopTriggerDiscriminator `json:"triggerDiscriminator,omitempty"`
+}
+
+// X12LoopTriggerDiscriminator names one element (by its own canonical Key,
+// resolved against the trigger segment's own X12SegmentDef.Elements at match
+// time — never a raw numeric position) and the value it must equal for this
+// loop to claim a given trigger-segment occurrence.
+type X12LoopTriggerDiscriminator struct {
+	ElementKey string `json:"elementKey"`
+	Value      string `json:"value"`
 }
 
 // RepeatsMultiple reports whether this loop may occur more than once at its

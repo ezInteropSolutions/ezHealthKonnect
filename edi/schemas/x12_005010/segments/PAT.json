@@ -4,6 +4,7 @@
   "usage": "situational",
   "maxUse": "1",
   "elements": [
+    { "pos": "01", "key": "individualRelationshipCode", "dataType": "ID" },
     { "pos": "05", "key": "dateTimePeriodFormatQualifier", "dataType": "ID" },
     { "pos": "06", "key": "patientDeathDate", "dataType": "DT" },
     { "pos": "07", "key": "unitOfMeasurementCode", "dataType": "ID" },
@@ -11,6 +12,7 @@
     { "pos": "09", "key": "pregnancyIndicator", "dataType": "ID" }
   ],
   "sourceRefs": [
-    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (loops 2000B/2000C). PAT01-04 (Individual Relationship Code, Patient Location Code, Employment Status Code, Student Status Code) are usage=N at every real occurrence in this IG — this IG carries the patient/subscriber relationship on SBR02 instead, not PAT01. Dropped per this schema's established convention; positions 05-09 kept, none dropped."
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (loops 2000B/2000C). PAT01-04 (Individual Relationship Code, Patient Location Code, Employment Status Code, Student Status Code) were originally modeled as usage=N at every real occurrence in this IG, on the assumption this IG carries the patient/subscriber relationship on SBR02 instead of PAT01.",
+    "CORRECTION (found via testing against X12.org's own official 'Ben Kildare Service' 837P example, September 2026): that assumption was wrong. Real, spec-compliant 837 data leaves 2000B's own SBR02 BLANK whenever a 2000C (dependent) loop exists for that subscriber, and carries the real Individual Relationship Code on PAT01 in 2000C instead -- confirmed directly in the Ben Kildare example (HL*2*1*22*1 -> SBR*P**2222-SJ*******CI [SBR02 blank] -> HL*3*2*23*0 -> PAT*19 [child]). PAT01 re-added (dropped positions 02-04 -- Patient Location/Employment Status/Student Status Code -- remain genuinely unused in every real sample seen so far, kept dropped)."
   ]
 }
