@@ -1,0 +1,15 @@
+{
+  "id": "AAA",
+  "name": "Request Validation",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    { "pos": "01", "key": "yesNoConditionResponseCode", "dataType": "ID" },
+    { "pos": "02", "key": "agencyQualifierCode", "dataType": "ID" },
+    { "pos": "03", "key": "rejectReasonCode", "dataType": "ID" },
+    { "pos": "04", "key": "followUpActionCode", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/AAA) — X12 005010 AAA segment element reference. Modeled maxUse='>1': the HIPAA-specific 271 (005010X279A1) guide (stedi.com/edi/edi/hipaa/transaction-set/271-B1) explicitly places AAA up to 9 times at multiple levels (2000A, 2100A, 2100B, 2100C, 2100D, 2110C, 2110D) — a real rejection can carry more than one reason at once. AAA01='N' + AAA03 (Reject Reason Code) is how a 271 signals a request-validation failure (e.g. subscriber not found, invalid/missing name) — a structural fact this engine maps through, never decides."
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "HSD",
+  "name": "Health Care Services Delivery",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    { "pos": "01", "key": "quantityQualifier", "dataType": "ID" },
+    { "pos": "02", "key": "quantity", "dataType": "R" },
+    { "pos": "03", "key": "unitOrBasisForMeasurementCode", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/HSD) — X12 005010 HSD segment element reference. New for Phase 3 (271), used at 2110C/2110D (up to 9 occurrences) to describe benefit limitation quantities (e.g. visits remaining, days remaining). HSD04-08 (sample selection modulus, time period qualifier/number of periods, delivery pattern codes) deliberately not modeled — core quantity/unit fields only, matching this project's own 'core fields, not exhaustive' precedent."
+  ]
+}

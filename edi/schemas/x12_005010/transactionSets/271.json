@@ -1,0 +1,123 @@
+{
+  "transactionSetId": "271",
+  "functionalIdentifierCode": "HB",
+  "versionReleaseIndustryCode": "005010X279A1",
+  "version": "005010X279A1",
+  "_sourceRefs": [
+    "Stedi (stedi.com/edi/edi/hipaa/transaction-set/271-B1) — the HIPAA-specific (005010X279A1) 271 Eligibility, Coverage or Benefit Information (response) transaction set, EDI X12 Phase 3. Same sourcing discipline as 270.json (see its own _sourceRefs) — PyX12 has no 5010/X279 map for this transaction set, sourced from Stedi's own HIPAA-specific guide page instead.",
+    "AAA (Request Validation) is the real X12 mechanism a 271 uses to signal a rejection (e.g. subscriber not found) — placed at 2000A, 2100A, 2100B, 2100C, 2100D, 2110C, 2110D per the guide's own explicit table. This engine maps AAA through structurally like any other segment; it never decides WHEN to emit one — that determination belongs to whatever real eligibility system produced the data this transaction set is built from.",
+    "FunctionalIdentifierCode 'HB' (Health Care Eligibility Benefit Response) — not yet cross-checked against a live real-world sample; same open confirmation item as 270.json's own GS01/GS08 note.",
+    "Named, deliberate simplifications (same as 270.json, plus 271-specific ones): MPI omitted from 2100A-D. TRN (2000C/2000D) reuses the shared, unchanged TRN.json (maxUse stays '1') — same named simplification as 270.json. 2115C/2115D (III, Benefit Additional Information) IS modeled — a normal nested repeating loop, no wrapping complexity.",
+    "2120C/2120D (Benefit Related Entity Name) — a later polish pass closed this gap once the engine gained a genuine LS/LE-bracket mechanism (X12LoopDef.Wrapper; edi/loop_engine.go's matchWrappedLoop, edi/builder/segment_writer.go's writeWrappedLoop). Confirmed directly against Stedi's 271-B1 page: contains NM1/N3/N4/PER/PRV (N3/N4/PER/PRV all optional), repeats up to 23, and the LS...LE bracket wraps 2120 ALONE (sibling to, not including, 2115C/2115D) — placed as the last child of 2110C/2110D, after 2115C/2115D, matching the page's own ordering."
+  ],
+  "headerSegmentIds": ["ST", "BHT"],
+  "loops": [
+    {
+      "id": "2000A",
+      "name": "Information Source Level",
+      "repeat": ">1",
+      "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "20" },
+      "segmentIds": ["HL", "AAA"],
+      "loops": [
+        {
+          "id": "2100A",
+          "name": "Information Source Name",
+          "repeat": "1",
+          "segmentIds": ["NM1", "PER", "AAA"]
+        },
+        {
+          "id": "2000B",
+          "name": "Information Receiver Level",
+          "repeat": ">1",
+          "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "21" },
+          "segmentIds": ["HL"],
+          "loops": [
+            {
+              "id": "2100B",
+              "name": "Information Receiver Name",
+              "repeat": "1",
+              "segmentIds": ["NM1", "REF", "N3", "N4", "AAA", "PRV"]
+            },
+            {
+              "id": "2000C",
+              "name": "Subscriber Level",
+              "repeat": ">1",
+              "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "22" },
+              "segmentIds": ["HL", "TRN"],
+              "loops": [
+                {
+                  "id": "2100C",
+                  "name": "Subscriber Name",
+                  "repeat": "1",
+                  "segmentIds": ["NM1", "REF", "N3", "N4", "AAA", "PRV", "DMG", "INS", "HI", "DTP"],
+                  "loops": [
+                    {
+                      "id": "2110C",
+                      "name": "Subscriber Eligibility or Benefit Information",
+                      "repeat": ">1",
+                      "segmentIds": ["EB", "HSD", "REF", "DTP", "AAA", "MSG"],
+                      "loops": [
+                        {
+                          "id": "2115C",
+                          "name": "Subscriber Benefit Additional Information",
+                          "repeat": "10",
+                          "segmentIds": ["III"]
+                        },
+                        {
+                          "id": "2120C",
+                          "name": "Subscriber Benefit Related Entity Name",
+                          "repeat": "23",
+                          "segmentIds": ["NM1", "N3", "N4", "PER", "PRV"],
+                          "wrapper": { "start": "LS", "end": "LE" }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "2000D",
+                  "name": "Dependent Level",
+                  "repeat": ">1",
+                  "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "23" },
+                  "segmentIds": ["HL", "TRN"],
+                  "loops": [
+                    {
+                      "id": "2100D",
+                      "name": "Dependent Name",
+                      "repeat": "1",
+                      "segmentIds": ["NM1", "REF", "N3", "N4", "AAA", "PRV", "DMG", "INS", "HI", "DTP"],
+                      "loops": [
+                        {
+                          "id": "2110D",
+                          "name": "Dependent Eligibility or Benefit Information",
+                          "repeat": ">1",
+                          "segmentIds": ["EB", "HSD", "REF", "DTP", "AAA", "MSG"],
+                          "loops": [
+                            {
+                              "id": "2115D",
+                              "name": "Dependent Benefit Additional Information",
+                              "repeat": "10",
+                              "segmentIds": ["III"]
+                            },
+                            {
+                              "id": "2120D",
+                              "name": "Dependent Benefit Related Entity Name",
+                              "repeat": "23",
+                              "segmentIds": ["NM1", "N3", "N4", "PER", "PRV"],
+                              "wrapper": { "start": "LS", "end": "LE" }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trailerSegmentIds": ["SE"]
+}

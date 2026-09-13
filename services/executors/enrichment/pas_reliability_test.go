@@ -30,7 +30,7 @@ import (
 // payload.builder assemble -> stamp profile, config loaded directly from
 // database/migrations/V212__PAS_Template_Rebuild_On_FHIR_Builder.sql via
 // runPASZone2 in pas_integration_test.go) and returns the flat pipeline data
-// with steps.stamp_bundle_profile.step_output.pas_bundle populated — the
+// with steps.stamp_bundle_profile.step_output.fhirBundle populated — the
 // same addressing scheme downstream steps use in production (confirmed by
 // tracing executors.GetNestedValue's generic dot-path traversal, which walks
 // the original un-wrapped data for multi-part paths regardless of whether
@@ -60,7 +60,7 @@ func TestPASReliability_ValidatePASBundle_FindsBundleAndValidates(t *testing.T) 
 		Config: map[string]interface{}{
 			"profile":             "davinci-pas",
 			"validation_level":    "strict",
-			"source_field":        "steps.stamp_bundle_profile.step_output.pas_bundle",
+			"source_field":        "steps.stamp_bundle_profile.step_output.fhirBundle",
 			"fail_on_error":       false,
 			"required_resources":  []interface{}{"Claim", "Patient", "Coverage"},
 		},

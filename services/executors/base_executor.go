@@ -262,8 +262,10 @@ func GetNestedValue(data map[string]interface{}, path string) interface{} {
 	// CRITICAL: If data is wrapped in "message" key (from TransformationPipelineService),
 	// unwrap it first to access the actual message data
 	actualData := data
+	unwrapped := false
 	if messageData, ok := data["message"].(map[string]interface{}); ok {
 		actualData = messageData
+		unwrapped = true
 	}
 
 	// Try direct key first (for simple paths)
@@ -292,8 +294,40 @@ func GetNestedValue(data map[string]interface{}, path string) interface{} {
 	// Parse path with dot notation and array indices
 	// Example: "enhancedSegments.PID.fields[4].subfields[1].value"
 	// Special handling: Don't split on dots inside brackets
-	current := interface{}(data)
+	//
+	// Try the RAW (un-unwrapped) data first -- this is the pre-existing,
+	// long-established behavior every current caller depends on, including
+	// paths like "steps.<alias>.step_output.<field>" (a cross-step
+	// reference, always relative to the TOP-LEVEL data regardless of
+	// whether that data also happens to carry a sibling "message" key --
+	// unwrapping to "message" first would walk the WRONG subtree for these,
+	// which a real browser Test Pipeline run against fhir_validation's own
+	// "source_field" resolution caught directly: an earlier version of this
+	// fix unconditionally preferred actualData and broke that exact case).
+	// Only if that walk finds nothing AND a real "message" wrapper exists
+	// (actualData is a different map from data) do we retry against
+	// actualData -- additive, fixes multi-segment dotted paths like
+	// "body.patientFirstName" that only exist inside the unwrapped message
+	// (found via a real browser Test Pipeline run against the Da Vinci PAS
+	// template, 2026-09) without changing behavior for any path that
+	// already resolved correctly against the raw data.
 	parts := splitPathRespectingBrackets(path)
+	if result := walkDottedPath(data, parts); result != nil {
+		return result
+	}
+	if unwrapped {
+		return walkDottedPath(actualData, parts)
+	}
+	return nil
+}
+
+// walkDottedPath navigates root via parts (as produced by
+// splitPathRespectingBrackets), supporting both plain key segments and
+// bracket notation ("fields[4]"/"fields[PID.3]" -- numeric index or map
+// key). Returns nil on any missing key, type mismatch, or out-of-bounds
+// index.
+func walkDottedPath(root map[string]interface{}, parts []string) interface{} {
+	current := interface{}(root)
 
 	for _, part := range parts {
 		// Check if part has bracket notation like "fields[4]" or "fields[PID.3]"

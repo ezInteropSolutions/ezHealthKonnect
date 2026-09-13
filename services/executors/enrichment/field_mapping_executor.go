@@ -74,24 +74,69 @@ func (e *FieldMappingExecutor) Execute(
 			continue
 		}
 
-		// Apply transformations using shared utility (OOP - DRY principle)
-		transformedValue := fmt.Sprintf("%v", executors.ApplyTransformations(sourceValue, mapping.Transforms))
+		// Apply transformations using shared utility (OOP - DRY principle).
+		// ApplyTransformations passes non-string values through unchanged
+		// when mapping.Transforms is empty (the common case for an RHS that
+		// resolves to a real array/object, e.g. a JSON body's own array
+		// field) -- only actually stringifies when a string transform
+		// (trim/upper/regex/etc, which are meaningless on a whole
+		// array/object) is genuinely configured.
+		transformedValue := executors.ApplyTransformations(sourceValue, mapping.Transforms)
 
-		// Try to parse as JSON if it looks like JSON
+		// Only strings go through the legacy "does this look like a JSON
+		// string" rescue path. A value that already resolved to a real
+		// array/object/number/bool is used as-is -- a real bug found via a
+		// real browser Test Pipeline run against the Da Vinci PAS template
+		// (2026-09): this block used to unconditionally
+		// fmt.Sprintf("%v", ...) every value BEFORE this check, which
+		// mangled a real []interface{} (e.g. diagnosisCodes) into Go's
+		// default slice-stringification ("[Z00.00 J06.9]") -- neither valid
+		// JSON (so the "rescue" json.Unmarshal below always failed) nor the
+		// original structured value, permanently losing every element past
+		// the first. Fixed at the source: resolveSourceValue no longer
+		// eagerly stringifies non-string values either (see below).
 		var finalValue interface{} = transformedValue
-		if e.isJSONString(transformedValue) {
-			log.Printf("   🔍 [JSON Detection] Value looks like JSON: %s", transformedValue)
-			var jsonValue interface{}
-			if err := json.Unmarshal([]byte(transformedValue), &jsonValue); err == nil {
-				finalValue = jsonValue
-				log.Printf("   📦 Parsed JSON object for %s", mapping.LHS)
-			} else {
-				log.Printf("   ⚠️  Failed to parse JSON for %s: %v", mapping.LHS, err)
+		if strValue, isString := transformedValue.(string); isString {
+			if e.isJSONString(strValue) {
+				log.Printf("   🔍 [JSON Detection] Value looks like JSON: %s", strValue)
+				var jsonValue interface{}
+				if err := json.Unmarshal([]byte(strValue), &jsonValue); err == nil {
+					finalValue = jsonValue
+					log.Printf("   📦 Parsed JSON object for %s", mapping.LHS)
+				} else {
+					log.Printf("   ⚠️  Failed to parse JSON for %s: %v", mapping.LHS, err)
+				}
 			}
 		}
 
-		// Store result
-		mappedFields[mapping.LHS] = finalValue
+		// Store result. LHS is a genuine DOTTED PATH, not a flat literal key --
+		// GetOutputVariables's own doc comment already documents the intended
+		// downstream consumption as `getNestedValue(input, "<basePath>.<LHS>")`
+		// (a real nested traversal), and every real consumer in this codebase
+		// (fhir.build sourcePath, enrichment.script's own dot-notation object
+		// access) resolves dotted paths by walking nested maps, never by
+		// looking up one flat key containing literal dots. A flat
+		// `mappedFields[mapping.LHS] = finalValue` assignment silently broke
+		// every multi-segment LHS two ways: (1) no downstream consumer could
+		// ever address it correctly in the first place, and (2) once passed
+		// through models.OutputNormalizer.NormalizeStepOutput (which treats
+		// "." as a special character to STRIP, not a path separator to
+		// preserve), a camelCase multi-segment key like
+		// "_pas_envelope.patient.firstName" was silently mangled into
+		// something like "_pas_envelopepatientfirst_name" -- unrecoverable.
+		// SetNestedValue walks/creates real nested maps instead, so both
+		// problems are fixed together; single-segment LHS values (this
+		// executor's other real callers, e.g. V68's own "sending_app"/
+		// "patient_id" field_mapping steps) are unaffected -- a 1-segment
+		// path degrades to the exact same flat assignment as before. Found
+		// via a real browser Test Pipeline run against the Da Vinci PAS
+		// template (2026-09), which showed every built FHIR resource missing
+		// all of its real patient/provider/claim data -- the existing
+		// pas_integration_test.go suite never caught this because it
+		// deliberately bypasses this executor for its own "Zone 1" step,
+		// hand-injecting an already-correct _pas_envelope shape instead of
+		// calling FieldMappingExecutor for real.
+		executors.SetNestedValue(mappedFields, mapping.LHS, finalValue)
 		log.Printf("   ✅ %s = %v", mapping.LHS, finalValue)
 	}
 
@@ -120,8 +165,17 @@ func (e *FieldMappingExecutor) Execute(
 	return inputData, nil
 }
 
-// resolveSourceValue resolves the source value from RHS
-func (e *FieldMappingExecutor) resolveSourceValue(rhs string, inputData map[string]interface{}) (string, error) {
+// resolveSourceValue resolves the source value from RHS. Returns the
+// resolved value's REAL type (string, []interface{}, map[string]interface{},
+// float64, bool, ...) rather than eagerly stringifying -- a real array/object
+// field (e.g. a JSON body's own "diagnosisCodes" array) must survive this
+// resolution intact so Execute()'s own ApplyTransformations/JSON-rescue logic
+// can pass it through unchanged instead of mangling it into Go's default
+// %v slice/map formatting (see Execute()'s own comment for the real bug this
+// fixed). Callers that only ever produced scalars (system variables, HL7
+// field/subfield values) are unaffected -- those return a Go string either
+// way, now just without the redundant fmt.Sprintf wrapping.
+func (e *FieldMappingExecutor) resolveSourceValue(rhs string, inputData map[string]interface{}) (interface{}, error) {
 	// Handle system variables
 	if strings.HasPrefix(rhs, "${") && strings.HasSuffix(rhs, "}") {
 		varName := strings.TrimSuffix(strings.TrimPrefix(rhs, "${"), "}")
@@ -132,7 +186,7 @@ func (e *FieldMappingExecutor) resolveSourceValue(rhs string, inputData map[stri
 	if strings.HasPrefix(rhs, "[\"") && strings.Contains(rhs, "\"].") {
 		value := executors.GetNestedValue(inputData, rhs)
 		if value != nil {
-			return fmt.Sprintf("%v", value), nil
+			return value, nil
 		}
 		return "", nil
 	}
@@ -145,7 +199,7 @@ func (e *FieldMappingExecutor) resolveSourceValue(rhs string, inputData map[stri
 		if item, hasLoopItem := inputData["item"]; hasLoopItem {
 			value := resolveFieldFromLoopItem(item, rhs)
 			if value != nil {
-				return fmt.Sprintf("%v", value), nil
+				return value, nil
 			}
 			// Fall through to resolve from the full message
 		}
@@ -153,7 +207,7 @@ func (e *FieldMappingExecutor) resolveSourceValue(rhs string, inputData map[stri
 		// Fallback: resolve from the full message
 		value := executors.GetNestedValue(inputData, rhs)
 		if value != nil {
-			return fmt.Sprintf("%v", value), nil
+			return value, nil
 		}
 		return "", nil
 	}
@@ -162,7 +216,7 @@ func (e *FieldMappingExecutor) resolveSourceValue(rhs string, inputData map[stri
 	if strings.Contains(rhs, ".") {
 		value := executors.GetNestedValue(inputData, rhs)
 		if value != nil {
-			return fmt.Sprintf("%v", value), nil
+			return value, nil
 		}
 	}
 

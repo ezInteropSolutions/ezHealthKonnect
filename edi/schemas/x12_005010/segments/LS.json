@@ -1,0 +1,12 @@
+{
+  "id": "LS",
+  "name": "Loop Header",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "loopIdentifierCode", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "X12's own generic Loop Header segment (DE447 Loop Identifier Code), reused unchanged across every X12 transaction set that needs an explicit bracket around a whole repeating loop set rather than per-instance leading/trailing segments — new segment for EDI X12 Phase 3, first used by 271's own loop 2120 (see edi/schema_types.go's X12LoopDef.Wrapper doc comment for why 2120 needs this instead of the ordinary SegmentIDs/TrailerSegmentIDs mechanisms). LS01 always echoes the wrapped loop's own numeric ID (e.g. '2120') and is fully derivable at both parse and build time — edi/loop_engine.go's matchWrappedLoop and edi/builder/segment_writer.go's writeWrappedLoop both handle LS/LE directly (matching on segment ID, synthesizing LS01/LE01 on build) rather than routing through this file's own Elements list, so this definition exists for shared-library completeness/introspection (e.g. the /api/edi/schema/segments catalog) rather than being read by the engine itself."
+  ]
+}

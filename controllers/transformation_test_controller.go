@@ -1005,6 +1005,10 @@ var buildStepContentFields = map[string]buildStepContentField{
 	"hl7.build":  {field: "hl7_message", isObject: false, contentType: "x-application/hl7-v2+er7"},
 	"cda.build":  {field: "cda_xml", isObject: false, contentType: "application/xml"},
 	"fhir.build": {field: "fhir_resource", isObject: true, contentType: "application/fhir+json"},
+	// edi.build's own default outputField is "ediX12" (edi_build_executor.go),
+	// which NormalizeStepOutput's camelCase->snake_case conversion turns into
+	// "edi_x12" by the time this map is consulted.
+	"edi.build": {field: "edi_x12", isObject: false, contentType: "application/edi-x12"},
 }
 
 // extractBuildStepPayloadEntry is extractOutboundPayloadEntry's counterpart

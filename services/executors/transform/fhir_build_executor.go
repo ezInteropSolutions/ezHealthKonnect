@@ -60,7 +60,12 @@
 //	                  own Fields already use. See fhirBuildConfig.RowsPath's
 //	                  own doc comment for why this exists (N independent
 //	                  resources of one type from one array, with no
-//	                  control.loop wrapper step needed).
+//	                  control.loop wrapper step needed). Every row (whether
+//	                  from this top-level rowsPath or a repeatingGroup's own)
+//	                  also carries a synthetic "_rowIndex" field (its 1-based
+//	                  position) — reference it via an ordinary sourcePath
+//	                  (e.g. for FHIR's required item[].sequence) — see
+//	                  withRowIndex's own doc comment.
 //
 // Assembling multiple resources into one Bundle needs no new code: add one
 // fhir.build step per resource type, then feed each step's outputField into
@@ -95,6 +100,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"ezhealthkonnect/fhir/r4"
@@ -280,13 +286,14 @@ func (e *FHIRBuildExecutor) Execute(
 	if cfg.RowsPath != "" {
 		rows := resolveRows(inputData, cfg.RowsPath)
 		resources := make([]map[string]interface{}, 0, len(rows))
-		for _, row := range rows {
+		for i, row := range rows {
+			indexedRow := withRowIndex(row, i+1)
 			resource := map[string]interface{}{"resourceType": cfg.ResourceType}
 			for _, f := range cfg.Fields {
-				e.applyFieldRow(resource, row, inputData, f)
+				e.applyFieldRow(resource, indexedRow, inputData, f)
 			}
 			for _, rg := range cfg.RepeatingGroups {
-				e.applyRepeatingGroup(resource, row, inputData, rg)
+				e.applyRepeatingGroup(resource, indexedRow, inputData, rg)
 			}
 			resources = append(resources, resource)
 		}
@@ -352,16 +359,17 @@ func (e *FHIRBuildExecutor) applyRepeatingGroup(target map[string]interface{}, c
 	}
 	rows := resolveRows(contextRow, rg.RowsPath)
 	idx := startingIndex(target, rg.TargetPath)
-	for _, row := range rows {
-		if !e.conditionMet(rg.Condition, row, topLevel) {
+	for i, row := range rows {
+		indexedRow := withRowIndex(row, i+1)
+		if !e.conditionMet(rg.Condition, indexedRow, topLevel) {
 			continue
 		}
 		subObj := map[string]interface{}{}
 		for _, f := range rg.Fields {
-			e.applyFieldRow(subObj, row, topLevel, f)
+			e.applyFieldRow(subObj, indexedRow, topLevel, f)
 		}
 		for _, nested := range rg.RepeatingGroups {
-			e.applyRepeatingGroup(subObj, row, topLevel, nested)
+			e.applyRepeatingGroup(subObj, indexedRow, topLevel, nested)
 		}
 		if len(subObj) == 0 {
 			continue
@@ -369,6 +377,27 @@ func (e *FHIRBuildExecutor) applyRepeatingGroup(target map[string]interface{}, c
 		cdafhir.SetFHIRPath(target, cdafhir.IndexedPath(rg.TargetPath, idx), subObj)
 		idx++
 	}
+}
+
+// withRowIndex returns a shallow copy of row with "_rowIndex" set to
+// oneBasedIndex (a string, since every other resolved field value in this
+// engine flows through as a string until a "transform" converts it — see
+// resolveRawValue's own callers, e.g. cda_decimal_string_to_number). Exists
+// so a field mapping can reference a row's own 1-based position within
+// whatever rowsPath produced it (e.g. FHIR's required Claim/EOB
+// item[].sequence) via an ordinary sourcePath — "_rowIndex" — rather than
+// needing a new field-resolution code path: resolveRawValue already finds
+// it via the standard executors.GetFieldValue lookup on a flat key. A
+// shallow copy avoids mutating the row slice resolveRows returned, which
+// may be shared/reused (e.g. a nested repeatingGroup re-resolving against
+// the same parent row for a sibling group).
+func withRowIndex(row map[string]interface{}, oneBasedIndex int) map[string]interface{} {
+	out := make(map[string]interface{}, len(row)+1)
+	for k, v := range row {
+		out[k] = v
+	}
+	out["_rowIndex"] = strconv.Itoa(oneBasedIndex)
+	return out
 }
 
 // startingIndex returns how many entries already sit at target[targetPath]

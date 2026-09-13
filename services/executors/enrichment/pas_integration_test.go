@@ -140,7 +140,17 @@ func runPASZone2(t *testing.T, data map[string]interface{}) map[string]interface
 	for k, v := range result {
 		data[k] = v
 	}
-	injectStepOutput(data, "derive_pas_fields", deriveOut)
+	// Real fhir.build configs (V212) address this step's output via
+	// "steps.derive_pas_computed_fields.step_output._pas_derived.*" -- the
+	// NORMALIZED STEP NAME ("Derive PAS Computed Fields"), not the
+	// step_alias ("derive_pas_fields") used above only to look up the
+	// config itself. Injecting under the alias here silently broke every
+	// field this step derives (priority, gender, quantity, dates, claim_id,
+	// etc.) for any assertion strict enough to notice -- caught by
+	// TestPASIntegration_UrgentRequest_StatPriority after V212's own
+	// addressing was corrected to match the real engine (see field_mapping
+	// fix), while this test helper's injection key was not updated to match.
+	injectStepOutput(data, "derive_pas_computed_fields", deriveOut)
 	if derived, ok := deriveOut["_pas_derived"]; ok {
 		data["_pas_derived"] = derived
 	}
@@ -334,7 +344,7 @@ func runPASPipeline(t *testing.T, inbound map[string]interface{}, payerServer *h
 				"Content-Type": "application/fhir+json",
 				"Accept":       "application/fhir+json",
 			},
-			"bodyRef":   "steps.stamp_bundle_profile.step_output.pas_bundle",
+			"bodyRef":   "steps.stamp_bundle_profile.step_output.fhirBundle",
 			"timeoutMs": 10000,
 		},
 	}
@@ -558,7 +568,7 @@ func TestPASIntegration_PayerServerError(t *testing.T) {
 		Config: map[string]interface{}{
 			"method":   "POST",
 			"endpoint": payer.URL + "/fhir/R4/$submit",
-			"bodyRef":  "steps.stamp_bundle_profile.step_output.pas_bundle",
+			"bodyRef":  "steps.stamp_bundle_profile.step_output.fhirBundle",
 		},
 	}
 	_, err := apiExec.Execute(ctx, apiStep, data)

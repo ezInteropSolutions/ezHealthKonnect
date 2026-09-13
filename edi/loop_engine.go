@@ -484,7 +484,10 @@ func (w *walker) parseRepeatGroup(t segmentToken, group *X12RepeatDef, consumedP
 
 // loopTrigger returns the segment ID that starts loop — its own first
 // SegmentIDs entry, or (for a loop with none of its own, composed purely of
-// child loops) the first child loop's own trigger, recursively.
+// child loops) the first child loop's own trigger, recursively. This is
+// loop's REAL content trigger regardless of Wrapper — matchLoopInstance and
+// matchWrappedLoop both need the actual first-content-segment ID, never the
+// Wrapper's own Start marker, to correctly parse one instance's own segments.
 func loopTrigger(loop *X12LoopDef) string {
 	if len(loop.SegmentIDs) > 0 {
 		return loop.SegmentIDs[0]
@@ -495,6 +498,22 @@ func loopTrigger(loop *X12LoopDef) string {
 		}
 	}
 	return ""
+}
+
+// loopMatchTrigger returns the segment ID that signals loop's PRESENCE at a
+// given position in the token stream — for a Wrapper loop, that's the
+// Wrapper's own Start segment (e.g. "LS"), never the loop's real content
+// trigger, since the real trigger segment (e.g. NM1) is shared with sibling
+// loops at the same nesting level and can't itself distinguish "a wrapped
+// 2120 set is starting here" from an ordinary unwrapped loop. For every
+// other loop this is identical to loopTrigger. Used only by
+// selectLoopCandidate — matchLoopInstance/matchWrappedLoop's own inner
+// per-instance matching always uses loopTrigger directly.
+func loopMatchTrigger(loop *X12LoopDef) string {
+	if loop.Wrapper != nil {
+		return loop.Wrapper.Start
+	}
+	return loopTrigger(loop)
 }
 
 // matchLoops repeatedly scans loops for one whose trigger matches the
@@ -536,6 +555,24 @@ func (w *walker) matchLoops(pos *int, loops []*X12LoopDef, parentPath []pathStep
 			break
 		}
 
+		if loop.Wrapper != nil {
+			instances, err := w.matchWrappedLoop(pos, loop, parentPath)
+			if err != nil {
+				return nil, err
+			}
+			// Only recorded when non-empty — a present-but-empty LS...LE
+			// bracket (a legitimate zero-instance occurrence) stays
+			// consistent with every other repeating loop's own "zero
+			// matches means the key is simply never set" convention,
+			// rather than introducing a distinct "key present, value nil"
+			// state nothing else in this engine produces.
+			if len(instances) > 0 {
+				arr, _ := out[loop.ID].([]map[string]interface{})
+				out[loop.ID] = append(arr, instances...)
+			}
+			continue
+		}
+
 		index := 0
 		if loop.RepeatsMultiple() {
 			index = countLoopInstances(out[loop.ID]) + 1
@@ -564,7 +601,7 @@ func (w *walker) selectLoopCandidate(tokenPos int, loops []*X12LoopDef, out map[
 	tokenID := w.tokens[tokenPos].ID
 
 	tryCandidate := func(loop *X12LoopDef) bool {
-		if loopTrigger(loop) != tokenID {
+		if loopMatchTrigger(loop) != tokenID {
 			return false
 		}
 		if !loop.RepeatsMultiple() {
@@ -582,7 +619,7 @@ func (w *walker) selectLoopCandidate(tokenPos int, loops []*X12LoopDef, out map[
 		if !tryCandidate(loop) {
 			continue
 		}
-		if !w.discriminatorMatches(w.tokens[tokenPos], loopTrigger(loop), loop.TriggerDiscriminator) {
+		if !w.discriminatorMatches(w.tokens[tokenPos], loopMatchTrigger(loop), loop.TriggerDiscriminator) {
 			continue
 		}
 		return loop
@@ -658,6 +695,47 @@ func (w *walker) matchLoopInstance(pos *int, loop *X12LoopDef, path []pathStep) 
 		}
 	}
 	return instance, nil
+}
+
+// matchWrappedLoop parses the FULL bracketed instance set of a Wrapper loop
+// in one call: the single Start segment (e.g. "LS"), then zero or more
+// instances of loop's own real content — each matched exactly like
+// matchLoopInstance would, keyed by loop's own actual content trigger, never
+// the Wrapper's Start marker — then the single required End segment (e.g.
+// "LE"). See X12LoopDef.Wrapper's own doc comment for why this bracket
+// shape exists (271's loop 2120) and X12LoopWrapperDef for the two IDs.
+//
+// The Start/End segments themselves are consumed (so the token stream
+// advances past them) but their own content is never parsed or retained —
+// they are pure structural bracket markers (LS01/LE01 just echo loop's own
+// numeric ID, fully derivable from the fact that we're inside loop.ID
+// already), not data this engine's callers have any use for — the exact
+// mirror of edi/builder/segment_writer.go's writeWrappedLoop, which
+// synthesizes that same identical value on write rather than sourcing it
+// from caller-supplied data. Returns the parsed instances for the CALLER
+// (matchLoops) to append to loop.ID's own slot — unlike a normal loop, the
+// bracket itself is not "one instance," so it gets no pathStep index of its
+// own; each inner instance still gets its own 1-based index exactly as an
+// unwrapped repeating loop would.
+func (w *walker) matchWrappedLoop(pos *int, loop *X12LoopDef, parentPath []pathStep) ([]map[string]interface{}, error) {
+	*pos++ // consume the Start segment (e.g. LS)
+
+	innerTrigger := loopTrigger(loop)
+	var instances []map[string]interface{}
+	for *pos < len(w.tokens) && w.tokens[*pos].ID == innerTrigger {
+		instance, err := w.matchLoopInstance(pos, loop, append(parentPath, pathStep{Name: loop.ID, Index: len(instances) + 1}))
+		if err != nil {
+			return nil, err
+		}
+		instances = append(instances, instance)
+	}
+
+	if *pos >= len(w.tokens) || w.tokens[*pos].ID != loop.Wrapper.End {
+		return nil, fmt.Errorf("required wrapper end segment %q (loop %q) not found after %d instance(s)", loop.Wrapper.End, loop.ID, len(instances))
+	}
+	*pos++ // consume the End segment (e.g. LE)
+
+	return instances, nil
 }
 
 // stepKey returns the identity key for step i within steps, scoped to the

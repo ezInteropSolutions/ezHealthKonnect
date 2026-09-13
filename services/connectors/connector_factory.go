@@ -195,6 +195,12 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	f.RegisterInbound("edi_x12_inbound", NewEDIX12InboundConnector)
 	f.RegisterOutbound("edi_x12_outbound", NewEDIX12OutboundConnector)
 
+	// AS2 transport (Phase 4) — signed+encrypted HTTP with synchronous MDN,
+	// a separate connector type from edi_x12_* (SFTP-only) — see as2_inbound.go's
+	// own header comment for why.
+	f.RegisterInbound("as2_inbound", NewAS2InboundConnector)
+	f.RegisterOutbound("as2_outbound", NewAS2OutboundConnector)
+
 	// Direct Messaging (DirectTrust SMTP+SMIME)
 	f.RegisterInbound("direct_messaging_inbound", NewDirectMessagingInboundConnector)
 	f.RegisterOutbound("direct_messaging_outbound", NewDirectMessagingOutboundConnector)

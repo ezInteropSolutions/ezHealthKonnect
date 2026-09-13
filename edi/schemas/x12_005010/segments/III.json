@@ -1,0 +1,15 @@
+{
+  "id": "III",
+  "name": "Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "codeListQualifierCode", "dataType": "ID" },
+    { "pos": "02", "key": "industryCode", "dataType": "AN" },
+    { "pos": "03", "key": "codeCategory", "dataType": "ID" },
+    { "pos": "04", "key": "freeFormMessageText", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/III) — X12 005010 III segment element reference. New for Phase 3: on 270 it's the sole segment inside loop 2110C/2110D (Subscriber/Dependent Eligibility Additional Information); on 271 it's the sole segment inside loop 2115C/2115D (repeat 10), nested one level deeper under 2110C/2110D's own EB. Modeled maxUse='1' — one III per its owning loop instance, the loop itself carries the repetition (same convention as EQ/EB). III05 (Quantity) and III06 (Composite Unit of Measure) deliberately not modeled — core fields only (code qualifier/industry code/category/free text), matching this project's own 'core fields, not exhaustive' precedent."
+  ]
+}

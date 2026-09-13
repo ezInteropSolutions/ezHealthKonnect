@@ -122,7 +122,15 @@ test('EDI pipeline builder UI renders all 4 step types correctly', async ({ page
 // verification can't prove: that the 7 saved steps render on the real
 // canvas and each one's own config panel opens with the template's real
 // saved values, with no console errors.
-test('EDI 835 to FHIR template renders all 7 steps on canvas with correct config after Use Template', async ({ page }) => {
+// Updated for V247 (EDI X12 835 -> FHIR Mapping, per-claim ExplanationOfBenefit,
+// see CLAUDE.md's own "EDI X12 835 -> FHIR Mapping" section): the template grew
+// from 7 to 9 steps (a new "Derive 835 Claim Context" enrichment.script step and
+// a new "Build ExplanationOfBenefit" fhir.build step were inserted between
+// "Validate Against X12 5010" and "Build PaymentReconciliation"), and the
+// Assemble step's own first resourcePaths entry changed from
+// "message.paymentReconciliation" to "message.explanationOfBenefits" (V247's
+// own resourcePaths order: EOB array first, then the single PaymentReconciliation).
+test('EDI 835 to FHIR template renders all 9 steps on canvas with correct config after Use Template', async ({ page }) => {
     const consoleErrors = [];
     page.on('console', msg => {
         if (msg.type() === 'error') consoleErrors.push(msg.text());
@@ -150,11 +158,11 @@ test('EDI 835 to FHIR template renders all 7 steps on canvas with correct config
     await page.waitForFunction(() => window.pipelineBuilder && window.pipelineBuilder.pipeline != null, { timeout: 8000 });
 
     const stepCount = await page.evaluate(() => window.pipelineBuilder.getAllStepsFlat().length);
-    expect(stepCount, 'template should have saved all 7 steps').toBe(7);
+    expect(stepCount, 'template should have saved all 9 steps').toBe(9);
 
     await page.waitForSelector('.flowchart-step-node', { timeout: 8000 });
     const nodeCount = await page.locator('.flowchart-step-node').count();
-    expect(nodeCount, 'all 7 steps should render as canvas nodes').toBe(7);
+    expect(nodeCount, 'all 9 steps should render as canvas nodes').toBe(9);
 
     // Click each canvas node in turn (the real interaction — a single click
     // both selects the step and opens its properties panel, per
@@ -175,6 +183,20 @@ test('EDI 835 to FHIR template renders all 7 steps on canvas with correct config
             },
         },
         {
+            name: 'Derive 835 Claim Context',
+            assert: async () => {
+                await expect(page.locator('#scriptCodeEditor')).toBeVisible();
+                const scriptValue = await page.locator('#scriptCodeEditor').inputValue();
+                expect(scriptValue, 'the derive script should contain the real, template-saved logic').toContain('claim_rows');
+            },
+        },
+        {
+            name: 'Build ExplanationOfBenefit',
+            assert: async () => {
+                await expect(page.locator('#fbbResourceType')).toHaveValue('ExplanationOfBenefit');
+            },
+        },
+        {
             name: 'Build PaymentReconciliation',
             assert: async () => {
                 await expect(page.locator('#fbbResourceType')).toHaveValue('PaymentReconciliation');
@@ -184,7 +206,7 @@ test('EDI 835 to FHIR template renders all 7 steps on canvas with correct config
             name: 'Assemble 835 FHIR Bundle',
             assert: async () => {
                 await expect(page.locator('#pb-tab-fhir_bundle')).toBeVisible();
-                await expect(page.locator('#pb-resource-paths-list .pb-rp-input').first()).toHaveValue('message.paymentReconciliation');
+                await expect(page.locator('#pb-resource-paths-list .pb-rp-input').first()).toHaveValue('message.explanationOfBenefits');
             },
         },
         {
@@ -263,13 +285,14 @@ test('edi_x12_inbound connector config: transaction_types checkbox, auth_type vi
     // any other array field) -- wait on the visible checklist wrapper instead.
     await page.waitForSelector('.connector-config-array-checklist', { timeout: 5000 });
 
-    // 1. transaction_types is a checkbox list with 4 options (835/837P/837I/999,
+    // 1. transaction_types is a checkbox list with 6 options (835/837P/837I/999/270/271,
     // V235's own enum expansion once 837/999 became real schema-backed
-    // transaction sets — was 1 option pre-Phase-2), "835" pre-checked from
-    // the seeded config, backed by a hidden field carrying the same
-    // comma-joined value getConfig() already expects.
+    // transaction sets, V241's own further expansion for 270/271 Phase 3 —
+    // was 1 option pre-Phase-2), "835" pre-checked from the seeded config,
+    // backed by a hidden field carrying the same comma-joined value
+    // getConfig() already expects.
     const transactionCheckboxes = page.locator('.connector-config-array-checklist input[type="checkbox"]');
-    await expect(transactionCheckboxes, 'transaction_types should render 4 checkboxes (835/837P/837I/999)').toHaveCount(4);
+    await expect(transactionCheckboxes, 'transaction_types should render 6 checkboxes (835/837P/837I/999/270/271)').toHaveCount(6);
     // The checkbox itself carries no value attribute (ConnectorConfigBuilder.js
     // never sets cb.value — it browser-defaults to "on") — the real option
     // text lives on the associated <label for="...">, matched by id.
@@ -401,7 +424,13 @@ test('payload.builder Resource Paths has a working field picker sourced from the
     await page.locator('.flowchart-step-node', { hasText: 'Assemble 835 FHIR Bundle' }).click();
     await page.waitForSelector('#stepPropertiesModal', { state: 'visible', timeout: 5000 });
 
-    const rpInput = page.locator('.pb-rp-input').first();
+    // V247 (see CLAUDE.md's own "EDI X12 835 -> FHIR Mapping" section) added a
+    // 2nd fhir.build step ("Build ExplanationOfBenefit", sequence 100) before
+    // "Build PaymentReconciliation" (sequence 110) -- resourcePaths now has 2
+    // real entries, so this test targets the 2nd input row (PaymentReconciliation's
+    // own path) to keep proving the exact same "real prior step, not a
+    // hardcoded default" mechanism this test was written for.
+    const rpInput = page.locator('.pb-rp-input').nth(1);
     await rpInput.click();
     const dropdown = page.locator('.field-path-search-dropdown:visible');
     await expect(dropdown, 'clicking Resource Paths should open a picker dropdown').toBeVisible({ timeout: 5000 });
@@ -441,7 +470,7 @@ test('EDI Phase 2: transaction set picker offers 837P/837I/999, and edi.map_to_c
     });
     await page.waitForSelector('#stepPropertiesModal', { state: 'visible', timeout: 5000 });
     const buildOptions = await page.locator('#ediBuildTransactionSet option').allTextContents();
-    expect(buildOptions, 'edi.build Transaction Set dropdown should list all 4 real transaction sets').toEqual(['835', '837P', '837I', '999']);
+    expect(buildOptions, 'edi.build Transaction Set dropdown should list all 6 real transaction sets').toEqual(['835', '837P', '837I', '999', '270', '271']);
     await expect(page.locator('#ediBuildTransactionSet')).toHaveValue('835');
     await page.locator('#stepPropertiesModal .modal-close').first().click();
     await page.waitForSelector('#stepPropertiesModal', { state: 'hidden', timeout: 5000 }).catch(() => {});
@@ -462,7 +491,7 @@ test('EDI Phase 2: transaction set picker offers 837P/837I/999, and edi.map_to_c
     const mapTxSetSelect = page.locator('#ediMapToCanonicalBuilder select').first();
     await expect(mapTxSetSelect, 'edi.map_to_canonical should now have its own Transaction Set picker').toBeVisible();
     const mapOptions = await mapTxSetSelect.locator('option').allTextContents();
-    expect(mapOptions, 'edi.map_to_canonical Transaction Set dropdown should list all 4 real transaction sets').toEqual(['835', '837P', '837I', '999']);
+    expect(mapOptions, 'edi.map_to_canonical Transaction Set dropdown should list all 6 real transaction sets').toEqual(['835', '837P', '837I', '999', '270', '271']);
     await expect(mapTxSetSelect).toHaveValue('835');
     let panelText = await page.locator('#formTabContent').innerText();
     expect(panelText, 'default (835) loop tree should show 2100/2110').toContain('2110');

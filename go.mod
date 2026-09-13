@@ -13,6 +13,7 @@ require (
 	github.com/beevik/etree v1.4.1
 	github.com/databricks/databricks-sql-go v1.5.2
 	github.com/dop251/goja v0.0.0-20250630131328-58d95d85e994
+	github.com/emersion/go-imap v1.2.1
 	github.com/extrame/xls v0.0.1
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.10.1
@@ -30,6 +31,7 @@ require (
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/redis/go-redis/v9 v9.21.0
 	github.com/sijms/go-ora/v2 v2.8.22
+	github.com/smallstep/pkcs7 v0.2.3
 	github.com/snowflakedb/gosnowflake/v2 v2.1.0
 	github.com/stretchr/testify v1.11.1
 	github.com/wk8/go-ordered-map/v2 v2.1.8
@@ -87,6 +89,7 @@ require (
 	github.com/eapache/go-resiliency v1.7.0 // indirect
 	github.com/eapache/go-xerial-snappy v0.0.0-20230731223053-c322873962e3 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
+	github.com/emersion/go-sasl v0.0.0-20200509203442-7bfe0ed36a21 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/extrame/ole2 v0.0.0-20160812065207-d69429661ad7 // indirect
 	github.com/fatih/color v1.16.0 // indirect

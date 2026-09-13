@@ -752,6 +752,14 @@ func main() {
 			// per authenticated user (falls back to per-IP for unauthenticated callers).
 			fhirGroup.POST("/cda/parse", rateLimitMiddleware(100, 20, rateLimitByUserOrIP), transformTestCtrl.ParseCDA) // CDA document parse + section summary (wizard preview)
 
+			// Synchronous 270/271 eligibility check — calls ExecutePipeline
+			// directly from the HTTP handler and returns the real result in
+			// the same response, unlike every other (async) inbound path.
+			syncEligibilityPipelineSvc := services.NewTransformationPipelineService(db, credStore)
+			syncEligibilityCtrl := controllers.NewSyncEligibilityController(syncEligibilityPipelineSvc)
+			eligibilityGroup := api.Group("/eligibility")
+			syncEligibilityCtrl.RegisterRoutes(eligibilityGroup)
+
 			// FHIR Narrative Generator
 			// Accepts a FHIR resource as JSON body and returns XHTML narrative.
 			// If resource.text.div is already populated it is echoed back unchanged.

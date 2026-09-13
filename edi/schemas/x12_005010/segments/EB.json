@@ -1,0 +1,39 @@
+{
+  "id": "EB",
+  "name": "Eligibility or Benefit Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "eligibilityBenefitInformationCode", "dataType": "ID" },
+    { "pos": "02", "key": "coverageLevelCode", "dataType": "ID" },
+    { "pos": "03", "key": "serviceTypeCode", "dataType": "ID" },
+    { "pos": "04", "key": "insuranceTypeCode", "dataType": "ID" },
+    { "pos": "05", "key": "planCoverageDescription", "dataType": "AN" },
+    { "pos": "06", "key": "timePeriodQualifier", "dataType": "ID" },
+    { "pos": "07", "key": "monetaryAmount", "dataType": "R" },
+    { "pos": "08", "key": "percentageAsDecimal", "dataType": "R" },
+    { "pos": "09", "key": "quantityQualifier", "dataType": "ID" },
+    { "pos": "10", "key": "quantity", "dataType": "R" },
+    { "pos": "11", "key": "yesNoConditionResponseCode1", "dataType": "ID" },
+    { "pos": "12", "key": "yesNoConditionResponseCode2", "dataType": "ID" },
+    {
+      "pos": "13",
+      "key": "medicalProcedureIdentifier",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "productServiceIDQualifier", "dataType": "ID" },
+          { "pos": "2", "key": "productServiceID", "dataType": "AN" },
+          { "pos": "3", "key": "procedureModifier1", "dataType": "AN" },
+          { "pos": "4", "key": "procedureModifier2", "dataType": "AN" },
+          { "pos": "5", "key": "procedureModifier3", "dataType": "AN" },
+          { "pos": "6", "key": "procedureModifier4", "dataType": "AN" },
+          { "pos": "7", "key": "description", "dataType": "AN" },
+          { "pos": "8", "key": "productServiceID2", "dataType": "AN" }
+        ]
+      }
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/EB) — X12 005010 EB segment element reference, cross-checked against the HIPAA-specific 271 (005010X279A1) transaction-set guide (stedi.com/edi/edi/hipaa/transaction-set/271-B1). One EB per 2110C/2110D loop instance (loop repeats >1 — same 'repetition lives at the loop level' modeling as EQ.json). EB01 is the real eligibility/benefit answer code (e.g. '1'=Active Coverage, '6'=Inactive, 'A'=Co-Payment, 'B'=Co-Insurance, 'C'=Deductible — carries the actual determination made by whatever real system produced this 271; this engine only structurally maps it, never invents it). EB09/EB10 are a paired quantity qualifier+value (P0910 constraint: both present or neither)."
+  ]
+}

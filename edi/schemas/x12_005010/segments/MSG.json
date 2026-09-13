@@ -1,0 +1,12 @@
+{
+  "id": "MSG",
+  "name": "Message Text",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    { "pos": "01", "key": "freeFormMessageText", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/MSG) — X12 005010 MSG segment element reference. New for Phase 3 (271), used at 2110C/2110D (up to 10 occurrences per the HIPAA-specific 271-B1 guide) to carry free-form benefit explanation text. MSG02 (Printer Carriage Control Code) and MSG03 (advance-line count) deliberately not modeled — they control print formatting, meaningless to a digital pipeline."
+  ]
+}

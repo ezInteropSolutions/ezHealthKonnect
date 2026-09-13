@@ -1,0 +1,42 @@
+{
+  "id": "EQ",
+  "name": "Eligibility or Benefit Inquiry",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "serviceTypeCode", "dataType": "ID" },
+    {
+      "pos": "02",
+      "key": "medicalProcedureIdentifier",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "productServiceIDQualifier", "dataType": "ID" },
+          { "pos": "2", "key": "productServiceID", "dataType": "AN" },
+          { "pos": "3", "key": "procedureModifier1", "dataType": "AN" },
+          { "pos": "4", "key": "procedureModifier2", "dataType": "AN" },
+          { "pos": "5", "key": "procedureModifier3", "dataType": "AN" },
+          { "pos": "6", "key": "procedureModifier4", "dataType": "AN" },
+          { "pos": "7", "key": "description", "dataType": "AN" },
+          { "pos": "8", "key": "productServiceID2", "dataType": "AN" }
+        ]
+      }
+    },
+    { "pos": "03", "key": "coverageLevelCode", "dataType": "ID" },
+    { "pos": "04", "key": "insuranceTypeCode", "dataType": "ID" },
+    {
+      "pos": "05",
+      "key": "diagnosisCodePointer",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "pointer1", "dataType": "N0" },
+          { "pos": "2", "key": "pointer2", "dataType": "N0" },
+          { "pos": "3", "key": "pointer3", "dataType": "N0" },
+          { "pos": "4", "key": "pointer4", "dataType": "N0" }
+        ]
+      }
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/EQ) — X12 005010 EQ segment element reference, cross-checked against the HIPAA-specific 270 (005010X279A1) transaction-set guide (stedi.com/edi/edi/hipaa/transaction-set/270-B1), which places one EQ per 2110C/2110D loop instance (loop itself repeats up to 99 times — modeled maxUse='1' here, not '>1': the repetition lives at the LOOP level, matching how CLM/HL are single-occurrence-per-loop-instance segments, not at the segment level like DTP/REF/NM1 which can genuinely repeat multiple times WITHIN one loop instance). EQ02/EQ05 share the exact same C003/C004 composite shapes EB13/EQ05 (this segment) and EB's own C003 use — new for Phase 3, first transaction sets (270/271) needing this segment."
+  ]
+}

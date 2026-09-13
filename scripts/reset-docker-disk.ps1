@@ -36,7 +36,7 @@ $ErrorActionPreference = "Stop"
 
 $ComposeDir = "c:\Projects\ezHealthKonnect"
 $VhdxPath   = "$env:LOCALAPPDATA\Docker\wsl\disk\docker_data.vhdx"
-$DockerExe  = "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe"
+$DockerExe  = "$env:LOCALAPPDATA\Programs\DockerDesktop\Docker Desktop.exe"
 $Timestamp  = Get-Date -Format "yyyyMMdd_HHmm"
 
 # ---------------------------------------------------------------------------

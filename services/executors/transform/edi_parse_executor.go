@@ -135,12 +135,22 @@ func (e *EDIParseExecutor) Execute(
 		outputData[k] = v
 	}
 
+	// stepOutputVars mirrors outputData's own field placement so the
+	// steps.{alias}.step_output snapshot (used by the Test Pipeline UI and by
+	// any later step's sourcePath referencing this step's output) always
+	// carries the parsed result under the SAME key the real, forwarded
+	// pipeline data uses -- previously this hardcoded "parsedEDI" regardless
+	// of cfg.OutputField, so a custom outputField silently only reached
+	// later steps via inputData, never via steps.{alias}.step_output.
+	stepOutputVars := map[string]interface{}{"fieldCount": len(result.EnhancedFields)}
 	if cfg.OutputField == "__root__" {
 		for k, v := range result.ParsedJSON {
 			outputData[k] = v
+			stepOutputVars[k] = v
 		}
 	} else {
 		outputData[cfg.OutputField] = result.ParsedJSON
+		stepOutputVars[cfg.OutputField] = result.ParsedJSON
 	}
 
 	if _, ok := outputData["_format"]; !ok {
@@ -148,10 +158,7 @@ func (e *EDIParseExecutor) Execute(
 	}
 
 	e.SetStepOutputWithDetails(outputData,
-		map[string]interface{}{
-			"parsedEDI":  result.ParsedJSON,
-			"fieldCount": len(result.EnhancedFields),
-		},
+		stepOutputVars,
 		map[string]interface{}{
 			"duration_ms": durationMs,
 			"success":     true,

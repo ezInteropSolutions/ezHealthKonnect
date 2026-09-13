@@ -515,38 +515,7 @@ func NewFHIRR4OutboundConnector() OutboundConnector {
 // implementations — see services/connectors/edi_x12_inbound.go and
 // edi_x12_outbound.go. Removed from this stub file 2026-09-01.
 
-// NewDirectMessagingInboundConnector creates a DirectTrust SMTP+SMIME inbound connector (stub)
-func NewDirectMessagingInboundConnector() InboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "direct_messaging_inbound",
-		DisplayName:        "Direct Messaging Inbound",
-		Version:            "0.9.0",
-		Category:           "inbound",
-		Mode:               "pull",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_cron":  true,
-			"supports_smime": true,
-			"supports_cda":   true,
-		},
-	}
-	return NewBaseInboundConnector(metadata)
-}
-
-// NewDirectMessagingOutboundConnector creates a DirectTrust SMTP+SMIME outbound connector (stub)
-func NewDirectMessagingOutboundConnector() OutboundConnector {
-	metadata := ConnectorMetadata{
-		TypeName:           "direct_messaging_outbound",
-		DisplayName:        "Direct Messaging Outbound",
-		Version:            "0.9.0",
-		Category:           "outbound",
-		Mode:               "push",
-		ImplementationLang: "go",
-		Capabilities: map[string]bool{
-			"supports_batch": false,
-			"supports_smime": true,
-			"supports_cda":   true,
-		},
-	}
-	return NewBaseOutboundConnector(metadata, false)
-}
+// NewDirectMessagingInboundConnector / NewDirectMessagingOutboundConnector
+// are now real implementations — see services/connectors/
+// direct_messaging_inbound.go and direct_messaging_outbound.go. Removed from
+// this stub file 2026-09-13.

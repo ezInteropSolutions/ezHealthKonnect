@@ -45,36 +45,61 @@ func initFHIRRegistrySvc(t *testing.T) {
 // Fixtures
 // ─────────────────────────────────────────────────────────────────────────────
 
+// pasFHIRBuilderInput mirrors the REAL shape a fixed FieldMappingExecutor
+// (see field_mapping_executor.go's own SetNestedValue fix) actually produces
+// once its output is captured into a later step's "steps.map_to_pas_envelope.step_output"
+// snapshot and passed through models.OutputNormalizer.NormalizeStepOutput --
+// which snake_cases every camelCase key it finds (firstName -> first_name,
+// memberId -> member_id, etc; single-word keys like npi/dob/gender/urgency
+// are already snake_case and pass through unchanged). Previously this
+// fixture hand-built a flat, ALREADY-camelCase, ALREADY-top-level
+// "_pas_envelope" map directly -- convenient for the test, but it meant the
+// test could never have caught the real bug (LHS-as-literal-key
+// field_mapping output, unreachable except via steps.<alias>.step_output,
+// and mangled by normalization once there) found via a real browser Test
+// Pipeline run against the actual Da Vinci PAS template (2026-09). Provider
+// uses separate first_name/last_name fields (NOT a single combined "name"),
+// matching the REAL, currently-deployed shape: V91's original mapping
+// config collected one combined "_pas_envelope.provider.name" field, but
+// V212's own migration SQL (see its own header comment and its jsonb_set
+// patch to the "pas_envelope" step) already REPLACES that with two separate
+// "_pas_envelope.provider.firstName"/"lastName" mappings, mirroring how
+// patient.firstName/.lastName already work -- confirmed by reading V212's
+// full patch, not assumed from V91 alone.
 func pasFHIRBuilderInput() map[string]interface{} {
 	return map[string]interface{}{
-		"_pas_envelope": map[string]interface{}{
-			"patient": map[string]interface{}{
-				"firstName": "Jane",
-				"lastName":  "Smith",
-				"dob":       "1975-03-22",
-				"gender":    "female",
-				"memberId":  "MEM-00123",
-			},
-			"coverage": map[string]interface{}{
-				"payerId":     "1234567890",
-				"planId":      "GOLD-PPO",
-				"groupNumber": "GRP-999",
-			},
-			"provider": map[string]interface{}{
-				"npi":              "9876543210",
-				"firstName":        "Alice",
-				"lastName":         "Johnson",
-				"facilityNpi":      "1111111111",
-				"organizationName": "",
-				"phone":            "",
-			},
-			"request": map[string]interface{}{
-				"serviceCode":       "99213",
-				"diagnosisCodes":    []interface{}{"Z00.00", "J06.9"},
-				"urgency":           "routine",
-				"serviceStartDate":  "2026-05-01",
-				"serviceEndDate":    "2026-05-01",
-				"quantity":          "1",
+		"steps": map[string]interface{}{
+			"map_to_pas_envelope": map[string]interface{}{
+				"step_output": map[string]interface{}{
+					"_pas_envelope": map[string]interface{}{
+						"patient": map[string]interface{}{
+							"first_name": "Jane",
+							"last_name":  "Smith",
+							"dob":        "1975-03-22",
+							"gender":     "female",
+							"member_id":  "MEM-00123",
+						},
+						"coverage": map[string]interface{}{
+							"payer_id":     "1234567890",
+							"plan_id":      "GOLD-PPO",
+							"group_number": "GRP-999",
+						},
+						"provider": map[string]interface{}{
+							"npi":          "9876543210",
+							"first_name":   "Alice",
+							"last_name":    "Johnson",
+							"facility_npi": "1111111111",
+						},
+						"request": map[string]interface{}{
+							"service_code":       "99213",
+							"diagnosis_codes":    []interface{}{"Z00.00", "J06.9"},
+							"urgency":            "routine",
+							"service_start_date": "2026-05-01",
+							"service_end_date":   "2026-05-01",
+							"quantity":           "1",
+						},
+					},
+				},
 			},
 		},
 	}
@@ -83,10 +108,26 @@ func pasFHIRBuilderInput() map[string]interface{} {
 const derivePASFieldsScript = `
 // -- Derive PAS Computed Fields --
 // Pure data derivation only -- no FHIR resource shape or profile knowledge.
-var env = input._pas_envelope || {};
+//
+// Zone 1 (field_mapping/pas_envelope_mapping, step_alias "pas_envelope",
+// step_name "Map to PAS Envelope") writes its own output ONLY into
+// inputData["_stepOutput"] (BaseExecutor.SetStepOutputWithDetails) --
+// executeStepWithContext extracts that into this step's own "input.steps.<X>.step_output"
+// snapshot and DELETES "_stepOutput" from what actually reaches a later
+// step, so it is NEVER reachable at input._pas_envelope directly (the
+// pre-fix assumption this script made). The snapshot key "<X>" is the
+// NORMALIZED STEP NAME ("Map to PAS Envelope" -> "map_to_pas_envelope"),
+// NOT the step_alias ("pas_envelope") -- those two happen to be the same
+// string for this template's own Zone 2 steps (a naming convention, not a
+// guarantee) but genuinely differ for Zone 1, so this is not interchangeable
+// with the alias. Bare input._pas_envelope is kept as a fallback purely for
+// any Go-level test harness that constructs data flat, without the real
+// "steps" wrapper.
+var env = (input.steps && input.steps.map_to_pas_envelope && input.steps.map_to_pas_envelope.step_output && input.steps.map_to_pas_envelope.step_output._pas_envelope) || input._pas_envelope || {};
 var pat = env.patient || {};
 var cov = env.coverage || {};
 var req = env.request || {};
+var prov = env.provider || {};
 
 var gender = (pat.gender || "unknown").toLowerCase();
 if (gender !== "male" && gender !== "female" && gender !== "other" && gender !== "unknown") {
@@ -95,62 +136,93 @@ if (gender !== "male" && gender !== "female" && gender !== "other" && gender !==
 
 var priority = (req.urgency === "urgent") ? "stat" : "normal";
 
-var diagCodes = req.diagnosisCodes || [];
+var diagCodes = req.diagnosis_codes || [];
 if (typeof diagCodes === "string") {
   try { diagCodes = JSON.parse(diagCodes); } catch (e) { diagCodes = [diagCodes]; }
 }
 var diagnosisCodes = diagCodes.map(function(code) { return { code: String(code) }; });
 
 var today = new Date().toISOString().substring(0, 10);
-var serviceStartDate = req.serviceStartDate || today;
-var serviceEndDate = req.serviceEndDate || serviceStartDate;
+var serviceStartDate = req.service_start_date || today;
+var serviceEndDate = req.service_end_date || serviceStartDate;
 
 var quantity = req.quantity ? Number(req.quantity) : 1;
 
 var coverageClasses = [];
-if (cov.planId) {
-  coverageClasses.push({ type: "plan", value: cov.planId, name: "Health Plan" });
+if (cov.plan_id) {
+  coverageClasses.push({ type: "plan", value: cov.plan_id, name: "Health Plan" });
 }
-if (cov.groupNumber) {
-  coverageClasses.push({ type: "group", value: cov.groupNumber, name: "" });
+if (cov.group_number) {
+  coverageClasses.push({ type: "group", value: cov.group_number, name: "" });
 }
 
 var ts = new Date().toISOString();
 var claimId = "claim-" + Date.now();
 var bundleId = "pas-bundle-" + Date.now();
 
-// Full name fallback for Organization.name when no explicit org name is
-// mapped -- preserves the original script's "fall back to provider's name"
-// tier now that firstName/lastName are captured separately at Zone 1.
-var prov = env.provider || {};
-var providerFullName = ((prov.firstName || "") + " " + (prov.lastName || "")).trim();
+// Full name fallback for Organization.name when no explicit organization
+// name is mapped (V91/V212's own guided config has no "organizationName"
+// mapping at all) -- provider.firstName/lastName are separate, real fields
+// (see pasFHIRBuilderInput's own doc comment for why), combined here the
+// same way the pre-existing script always did.
+var providerFullName = ((prov.first_name || "") + " " + (prov.last_name || "")).trim();
 
 return ({
   _pas_derived: {
     gender: gender,
     priority: priority,
-    diagnosisCodes: diagnosisCodes,
-    serviceStartDate: serviceStartDate,
-    serviceEndDate: serviceEndDate,
+    diagnosis_codes: diagnosisCodes,
+    service_start_date: serviceStartDate,
+    service_end_date: serviceEndDate,
     quantity: quantity,
-    coverageClasses: coverageClasses,
-    claimId: claimId,
-    bundleId: bundleId,
-    createdAt: ts,
-    providerFullName: providerFullName
+    coverage_classes: coverageClasses,
+    claim_id: claimId,
+    bundle_id: bundleId,
+    created_at: ts,
+    provider_full_name: providerFullName
   }
 });
 `
 
+// Returns the bundle under the key "fhirBundle", NOT "pas_bundle" -- a real
+// bug found via a real browser Test Pipeline run against the Da Vinci PAS
+// template (2026-09): models.OutputNormalizer.NormalizeStepOutput recursively
+// snake_cases EVERY key in a step's returned object except a small, explicit
+// preserve-list ("result", "fhirBundle", "fhirResource"/"fhir_resource") --
+// any OTHER key name, including the original "pas_bundle", has its ENTIRE
+// nested content mangled (resourceType -> resource_type,
+// diagnosisCodeableConcept -> diagnosis_codeable_concept, etc.), silently
+// corrupting the real FHIR Bundle this step produces. "fhirBundle" is the
+// established, already-documented convention for exactly this situation (a
+// step returning a real FHIR resource tree whose internal field names must
+// stay camelCase) -- reusing it here is the correct fix, not a new special
+// case. This Go-level test bypasses NormalizeStepOutput entirely (see
+// stepOutput()/svcInjectStepOutput() below), so it could never have caught
+// this on its own; only a real end-to-end run through the actual pipeline
+// engine (which DOES normalize) surfaced it.
 const stampBundleProfileScript = `
 var bundle = JSON.parse(input.steps.assemble_pas_bundle.step_output.payload);
 bundle.meta = { profile: ["http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-pas-request-bundle"] };
-return ({ pas_bundle: bundle });
+return ({ fhirBundle: bundle });
 `
 
 // ─────────────────────────────────────────────────────────────────────────────
-// fhir.build configs -- these are transcribed verbatim into V212's SQL
+// fhir.build configs -- these are transcribed verbatim into V212's SQL.
+//
+// Every sourcePath/rowsPath/fallbackPaths reference below is prefixed with
+// "steps.<normalized-step-name>.step_output." -- a bare "_pas_envelope.*"/
+// "_pas_derived.*" (what this file used before) resolves to nothing against
+// the real pipeline engine, for the same reason documented on
+// derivePASFieldsScript's own "var env = ..." line: a prior enrichment.script
+// or field_mapping step's own returned/mapped fields are NEVER merged onto
+// plain inputData, only captured into that one step's own
+// "steps.<X>.step_output" snapshot. Field segments below are snake_case,
+// matching what models.OutputNormalizer.NormalizeStepOutput actually
+// produces for every camelCase key inside that snapshot.
 // ─────────────────────────────────────────────────────────────────────────────
+
+const pasEnvelopeStepPath = "steps.map_to_pas_envelope.step_output._pas_envelope."
+const pasDerivedStepPath = "steps.derive_pas_computed_fields.step_output._pas_derived."
 
 func patientBuildConfig() map[string]interface{} {
 	return map[string]interface{}{
@@ -159,18 +231,18 @@ func patientBuildConfig() map[string]interface{} {
 		"version":      "R4",
 		"outputField":  "message.fhirPatient",
 		"fields": []interface{}{
-			map[string]interface{}{"targetPath": "id", "sourcePath": "_pas_envelope.patient.memberId"},
+			map[string]interface{}{"targetPath": "id", "sourcePath": pasEnvelopeStepPath + "patient.member_id"},
 			map[string]interface{}{"targetPath": "meta.profile[0]", "literalValue": "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-subscriber"},
 			map[string]interface{}{"targetPath": "identifier[0].type.coding[0].system", "literalValue": "http://terminology.hl7.org/CodeSystem/v2-0203"},
 			map[string]interface{}{"targetPath": "identifier[0].type.coding[0].code", "literalValue": "MB"},
 			map[string]interface{}{"targetPath": "identifier[0].type.coding[0].display", "literalValue": "Member Number"},
 			map[string]interface{}{"targetPath": "identifier[0].system", "literalValue": "urn:oid:2.16.840.1.113883.4.6"},
-			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": "_pas_envelope.patient.memberId"},
+			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": pasEnvelopeStepPath + "patient.member_id"},
 			map[string]interface{}{"targetPath": "name[0].use", "literalValue": "official"},
-			map[string]interface{}{"targetPath": "name[0].family", "sourcePath": "_pas_envelope.patient.lastName"},
-			map[string]interface{}{"targetPath": "name[0].given[0]", "sourcePath": "_pas_envelope.patient.firstName"},
-			map[string]interface{}{"targetPath": "birthDate", "sourcePath": "_pas_envelope.patient.dob"},
-			map[string]interface{}{"targetPath": "gender", "sourcePath": "_pas_derived.gender"},
+			map[string]interface{}{"targetPath": "name[0].family", "sourcePath": pasEnvelopeStepPath + "patient.last_name"},
+			map[string]interface{}{"targetPath": "name[0].given[0]", "sourcePath": pasEnvelopeStepPath + "patient.first_name"},
+			map[string]interface{}{"targetPath": "birthDate", "sourcePath": pasEnvelopeStepPath + "patient.dob"},
+			map[string]interface{}{"targetPath": "gender", "sourcePath": pasDerivedStepPath + "gender"},
 		},
 	}
 }
@@ -185,20 +257,20 @@ func coverageBuildConfig() map[string]interface{} {
 			map[string]interface{}{"targetPath": "id", "literalValue": "coverage-1"},
 			map[string]interface{}{"targetPath": "meta.profile[0]", "literalValue": "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-coverage"},
 			map[string]interface{}{"targetPath": "identifier[0].system", "literalValue": "http://hl7.org/fhir/sid/us-npi"},
-			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": "_pas_envelope.coverage.payerId"},
+			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": pasEnvelopeStepPath + "coverage.payer_id"},
 			map[string]interface{}{"targetPath": "status", "literalValue": "active"},
-			map[string]interface{}{"targetPath": "subscriber.reference", "sourcePath": "_pas_envelope.patient.memberId", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Patient/"}},
-			map[string]interface{}{"targetPath": "subscriberId", "sourcePath": "_pas_envelope.patient.memberId"},
-			map[string]interface{}{"targetPath": "beneficiary.reference", "sourcePath": "_pas_envelope.patient.memberId", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Patient/"}},
+			map[string]interface{}{"targetPath": "subscriber.reference", "sourcePath": pasEnvelopeStepPath + "patient.member_id", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Patient/"}},
+			map[string]interface{}{"targetPath": "subscriberId", "sourcePath": pasEnvelopeStepPath + "patient.member_id"},
+			map[string]interface{}{"targetPath": "beneficiary.reference", "sourcePath": pasEnvelopeStepPath + "patient.member_id", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Patient/"}},
 			map[string]interface{}{"targetPath": "relationship.coding[0].system", "literalValue": "http://terminology.hl7.org/CodeSystem/subscriber-relationship"},
 			map[string]interface{}{"targetPath": "relationship.coding[0].code", "literalValue": "self"},
 			map[string]interface{}{"targetPath": "payor[0].identifier.system", "literalValue": "http://hl7.org/fhir/sid/us-npi"},
-			map[string]interface{}{"targetPath": "payor[0].identifier.value", "sourcePath": "_pas_envelope.coverage.payerId"},
+			map[string]interface{}{"targetPath": "payor[0].identifier.value", "sourcePath": pasEnvelopeStepPath + "coverage.payer_id"},
 		},
 		"repeatingGroups": []interface{}{
 			map[string]interface{}{
 				"targetPath": "class",
-				"rowsPath":   "_pas_derived.coverageClasses",
+				"rowsPath":   pasDerivedStepPath + "coverage_classes",
 				"fields": []interface{}{
 					map[string]interface{}{"targetPath": "type.coding[0].system", "literalValue": "http://terminology.hl7.org/CodeSystem/coverage-class"},
 					map[string]interface{}{"targetPath": "type.coding[0].code", "sourcePath": "type"},
@@ -220,9 +292,13 @@ func practitionerBuildConfig() map[string]interface{} {
 			map[string]interface{}{"targetPath": "id", "literalValue": "practitioner-1"},
 			map[string]interface{}{"targetPath": "meta.profile[0]", "literalValue": "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-practitioner"},
 			map[string]interface{}{"targetPath": "identifier[0].system", "literalValue": "http://hl7.org/fhir/sid/us-npi"},
-			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": "_pas_envelope.provider.npi"},
-			map[string]interface{}{"targetPath": "name[0].family", "sourcePath": "_pas_envelope.provider.lastName"},
-			map[string]interface{}{"targetPath": "name[0].given[0]", "sourcePath": "_pas_envelope.provider.firstName"},
+			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": pasEnvelopeStepPath + "provider.npi"},
+			// V212's own migration SQL patches Zone 1 to collect separate
+			// firstName/lastName mappings (mirroring patient's own pattern),
+			// replacing V91's original single combined "name" field -- see
+			// pasFHIRBuilderInput's own doc comment.
+			map[string]interface{}{"targetPath": "name[0].family", "sourcePath": pasEnvelopeStepPath + "provider.last_name"},
+			map[string]interface{}{"targetPath": "name[0].given[0]", "sourcePath": pasEnvelopeStepPath + "provider.first_name"},
 		},
 	}
 }
@@ -237,9 +313,15 @@ func organizationBuildConfig() map[string]interface{} {
 			map[string]interface{}{"targetPath": "id", "literalValue": "organization-1"},
 			map[string]interface{}{"targetPath": "meta.profile[0]", "literalValue": "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-requestor"},
 			map[string]interface{}{"targetPath": "active", "literalValue": "true"},
+			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": pasEnvelopeStepPath + "provider.facility_npi", "fallbackPaths": []interface{}{pasEnvelopeStepPath + "provider.npi"}},
 			map[string]interface{}{"targetPath": "identifier[0].system", "literalValue": "http://hl7.org/fhir/sid/us-npi"},
-			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": "_pas_envelope.provider.facilityNpi", "fallbackPaths": []interface{}{"_pas_envelope.provider.npi"}},
-			map[string]interface{}{"targetPath": "name", "sourcePath": "_pas_envelope.provider.organizationName", "fallbackPaths": []interface{}{"_pas_derived.providerFullName"}, "literalValue": "Requesting Organization"},
+			// organization_name is not currently collected by V91's own
+			// mapping config (no such lhs is defined there) -- kept as the
+			// first-tier fallback so a future guided-mapping addition would
+			// work without any further config change here; falls through to
+			// the derived (split-from-provider.name) full name, then a
+			// final generic literal.
+			map[string]interface{}{"targetPath": "name", "sourcePath": pasEnvelopeStepPath + "provider.organization_name", "fallbackPaths": []interface{}{pasDerivedStepPath + "provider_full_name"}, "literalValue": "Requesting Organization"},
 		},
 	}
 }
@@ -251,40 +333,40 @@ func claimBuildConfig() map[string]interface{} {
 		"version":      "R4",
 		"outputField":  "message.fhirClaim",
 		"fields": []interface{}{
-			map[string]interface{}{"targetPath": "id", "sourcePath": "_pas_derived.claimId"},
+			map[string]interface{}{"targetPath": "id", "sourcePath": pasDerivedStepPath + "claim_id"},
 			map[string]interface{}{"targetPath": "meta.profile[0]", "literalValue": "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-claim"},
 			map[string]interface{}{"targetPath": "identifier[0].system", "literalValue": "urn:ietf:rfc:3986"},
-			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": "_pas_derived.claimId"},
+			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": pasDerivedStepPath + "claim_id"},
 			map[string]interface{}{"targetPath": "status", "literalValue": "active"},
 			map[string]interface{}{"targetPath": "type.coding[0].system", "literalValue": "http://terminology.hl7.org/CodeSystem/claim-type"},
 			map[string]interface{}{"targetPath": "type.coding[0].code", "literalValue": "professional"},
 			map[string]interface{}{"targetPath": "use", "literalValue": "preauthorization"},
-			map[string]interface{}{"targetPath": "patient.reference", "sourcePath": "_pas_envelope.patient.memberId", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Patient/"}},
-			map[string]interface{}{"targetPath": "created", "sourcePath": "_pas_derived.createdAt"},
+			map[string]interface{}{"targetPath": "patient.reference", "sourcePath": pasEnvelopeStepPath + "patient.member_id", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Patient/"}},
+			map[string]interface{}{"targetPath": "created", "sourcePath": pasDerivedStepPath + "created_at"},
 			map[string]interface{}{"targetPath": "insurer.identifier.system", "literalValue": "http://hl7.org/fhir/sid/us-npi"},
-			map[string]interface{}{"targetPath": "insurer.identifier.value", "sourcePath": "_pas_envelope.coverage.payerId"},
+			map[string]interface{}{"targetPath": "insurer.identifier.value", "sourcePath": pasEnvelopeStepPath + "coverage.payer_id"},
 			map[string]interface{}{"targetPath": "provider.reference", "literalValue": "Organization/organization-1"},
 			map[string]interface{}{"targetPath": "priority.coding[0].system", "literalValue": "http://terminology.hl7.org/CodeSystem/processpriority"},
-			map[string]interface{}{"targetPath": "priority.coding[0].code", "sourcePath": "_pas_derived.priority"},
+			map[string]interface{}{"targetPath": "priority.coding[0].code", "sourcePath": pasDerivedStepPath + "priority"},
 			map[string]interface{}{"targetPath": "insurance[0].sequence", "literalValue": "1"},
 			map[string]interface{}{"targetPath": "insurance[0].focal", "literalValue": "true"},
 			map[string]interface{}{"targetPath": "insurance[0].coverage.reference", "literalValue": "Coverage/coverage-1"},
 			map[string]interface{}{"targetPath": "item[0].sequence", "literalValue": "1"},
 			map[string]interface{}{"targetPath": "item[0].extension[0].url", "literalValue": "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/extension-serviceItemRequestedDate"},
-			map[string]interface{}{"targetPath": "item[0].extension[0].valuePeriod.start", "sourcePath": "_pas_derived.serviceStartDate"},
-			map[string]interface{}{"targetPath": "item[0].extension[0].valuePeriod.end", "sourcePath": "_pas_derived.serviceEndDate"},
+			map[string]interface{}{"targetPath": "item[0].extension[0].valuePeriod.start", "sourcePath": pasDerivedStepPath + "service_start_date"},
+			map[string]interface{}{"targetPath": "item[0].extension[0].valuePeriod.end", "sourcePath": pasDerivedStepPath + "service_end_date"},
 			map[string]interface{}{"targetPath": "item[0].category.coding[0].system", "literalValue": "https://codesystem.x12.org/005010/1365"},
 			map[string]interface{}{"targetPath": "item[0].category.coding[0].code", "literalValue": "1"},
 			map[string]interface{}{"targetPath": "item[0].category.coding[0].display", "literalValue": "Medical Care"},
 			map[string]interface{}{"targetPath": "item[0].productOrService.coding[0].system", "literalValue": "http://www.ama-assn.org/go/cpt"},
-			map[string]interface{}{"targetPath": "item[0].productOrService.coding[0].code", "sourcePath": "_pas_envelope.request.serviceCode"},
-			map[string]interface{}{"targetPath": "item[0].quantity.value", "sourcePath": "_pas_derived.quantity", "transform": "cda_decimal_string_to_number"},
+			map[string]interface{}{"targetPath": "item[0].productOrService.coding[0].code", "sourcePath": pasEnvelopeStepPath + "request.service_code"},
+			map[string]interface{}{"targetPath": "item[0].quantity.value", "sourcePath": pasDerivedStepPath + "quantity", "transform": "cda_decimal_string_to_number"},
 			map[string]interface{}{"targetPath": "item[0].provider.reference", "literalValue": "Practitioner/practitioner-1"},
 		},
 		"repeatingGroups": []interface{}{
 			map[string]interface{}{
 				"targetPath": "diagnosis",
-				"rowsPath":   "_pas_derived.diagnosisCodes",
+				"rowsPath":   pasDerivedStepPath + "diagnosis_codes",
 				"fields": []interface{}{
 					map[string]interface{}{"targetPath": "diagnosisCodeableConcept.coding[0].system", "literalValue": "http://hl7.org/fhir/sid/icd-10-cm"},
 					map[string]interface{}{"targetPath": "diagnosisCodeableConcept.coding[0].code", "sourcePath": "code"},
@@ -363,17 +445,17 @@ func TestPASFHIRBuilder_FullChain_BuildsCleanValidatingBundle(t *testing.T) {
 	initFHIRRegistrySvc(t)
 	data := pasFHIRBuilderInput()
 
-	// Derive
-	result := runScriptSvc(t, "derive_pas_fields", derivePASFieldsScript, data)
-	deriveOut := svcStepOutput(t, result, "derive_pas_fields")
+	// Derive. Step alias here is "derive_pas_computed_fields" -- the
+	// NORMALIZED STEP NAME ("Derive PAS Computed Fields"), matching what a
+	// real pipeline run actually keys "steps.<X>.step_output" by (see
+	// derivePASFieldsScript's own doc comment) -- NOT V212's real, shorter
+	// step_alias "derive_pas_fields", which is a different string.
+	result := runScriptSvc(t, "derive_pas_computed_fields", derivePASFieldsScript, data)
+	deriveOut := svcStepOutput(t, result, "derive_pas_computed_fields")
 	for k, v := range result {
 		data[k] = v
 	}
-	svcInjectStepOutput(data, "derive_pas_fields", deriveOut)
-	// _pas_derived must be flat-accessible too (fhir.build sourcePaths read "_pas_derived.*" directly)
-	if derived, ok := deriveOut["_pas_derived"]; ok {
-		data["_pas_derived"] = derived
-	}
+	svcInjectStepOutput(data, "derive_pas_computed_fields", deriveOut)
 
 	// 5x fhir.build
 	data = runFHIRBuild(t, "build_patient_fhir", patientBuildConfig(), data)
@@ -418,9 +500,9 @@ func TestPASFHIRBuilder_FullChain_BuildsCleanValidatingBundle(t *testing.T) {
 	}
 	svcInjectStepOutput(data, "stamp_bundle_profile", stampOut)
 
-	pasBundle, ok := stampOut["pas_bundle"].(map[string]interface{})
+	pasBundle, ok := stampOut["fhirBundle"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("stamp_bundle_profile did not produce a pas_bundle map: %+v", stampOut)
+		t.Fatalf("stamp_bundle_profile did not produce a fhirBundle map: %+v", stampOut)
 	}
 	if pasBundle["resourceType"] != "Bundle" {
 		t.Fatalf("expected resourceType=Bundle, got %v", pasBundle["resourceType"])
@@ -436,7 +518,7 @@ func TestPASFHIRBuilder_FullChain_BuildsCleanValidatingBundle(t *testing.T) {
 		Config: map[string]interface{}{
 			"profile":             "davinci-pas",
 			"validation_level":    "strict",
-			"source_field":        "steps.stamp_bundle_profile.step_output.pas_bundle",
+			"source_field":        "steps.stamp_bundle_profile.step_output.fhirBundle",
 			"fail_on_error":       false,
 			"required_resources":  []interface{}{"Claim", "Patient", "Coverage"},
 		},

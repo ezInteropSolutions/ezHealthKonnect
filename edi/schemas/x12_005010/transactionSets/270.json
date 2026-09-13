@@ -1,0 +1,93 @@
+{
+  "transactionSetId": "270",
+  "functionalIdentifierCode": "HS",
+  "versionReleaseIndustryCode": "005010X279A1",
+  "version": "005010X279A1",
+  "_sourceRefs": [
+    "Stedi (stedi.com/edi/edi/hipaa/transaction-set/270-B1) — the HIPAA-specific (005010X279A1) 270 Eligibility, Coverage or Benefit Inquiry transaction set, EDI X12 Phase 3. PyX12's own free map repo (azoner/pyx12/pyx12/map) was checked first and confirmed to only ship a 4010/X092 map for 270/271 (no 5010/X279 file exists there) — sourced instead from Stedi's own HIPAA-specific guide page, verified distinct from Stedi's generic (non-HIPAA) 005010/270 page, which the fetch itself flagged as not the HIPAA transaction when asked for lettered-loop/HL03 detail.",
+    "HL03 trigger discriminators (20/21/22/23) reuse the exact X12LoopDef.TriggerDiscriminator mechanism already proven for 837P/837I's own 2000A/B/C ancestor-vs-descendant disambiguation (see edi/loop_engine.go's matchLoops two-pass algorithm) — zero new engine code, pure schema data.",
+    "FunctionalIdentifierCode 'HS' (Health Care Eligibility Benefit Inquiry) and VersionReleaseIndustryCode '005010X279A1' are the well-known, standard values for this transaction — not yet cross-checked against one live real-world sample file the way 835's own GS01/GS08 values were; flag for confirmation the first time a real 270 sample is available.",
+    "Named, deliberate simplifications (matching 837's own 'core fields, not exhaustive' precedent): loop 2117 (LQ) omitted — it appeared only on Stedi's generic, explicitly-non-HIPAA 270 page, never confirmed on the HIPAA-specific 270-B1 page, too low-confidence to model as real; re-confirmed absent by a direct re-fetch of 270-B1 during a later polish pass (no 2117/LQ mentioned anywhere on that page). MPI (Military Personnel Information) omitted from 2100A-D — a narrow, rarely-populated field. TRN (2000C/2000D) reuses the existing globally-shared TRN.json, whose maxUse stays '1' (unchanged, to avoid regressing 835/837's own already-proven TRN usage as a single header segment) even though 270/271 can technically carry up to 3 TRN occurrences per HL instance — a real trading partner sending more than one TRN per subscriber/dependent loop would only have the first captured; named, not attempted.",
+    "Loop 2120 (LS/LE-wrapped Related Entity) does NOT exist in 270 at all — confirmed by a direct re-fetch of Stedi's 270-B1 page during the same later polish pass that added 2120C/2120D to 271.json: the page's detail section ends at 2110C/2110D, with no 2120/LS/LE mentioned anywhere. This is a real, request-vs-response spec asymmetry (271 needs to be able to name a related entity for a benefit it found; 270 has nothing yet to relate one to), not an oversight or a remaining gap on this transaction set."
+  ],
+  "headerSegmentIds": ["ST", "BHT"],
+  "loops": [
+    {
+      "id": "2000A",
+      "name": "Information Source Level",
+      "repeat": ">1",
+      "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "20" },
+      "segmentIds": ["HL"],
+      "loops": [
+        {
+          "id": "2100A",
+          "name": "Information Source Name",
+          "repeat": "1",
+          "segmentIds": ["NM1"]
+        },
+        {
+          "id": "2000B",
+          "name": "Information Receiver Level",
+          "repeat": ">1",
+          "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "21" },
+          "segmentIds": ["HL"],
+          "loops": [
+            {
+              "id": "2100B",
+              "name": "Information Receiver Name",
+              "repeat": "1",
+              "segmentIds": ["NM1", "REF", "N3", "N4", "PRV"]
+            },
+            {
+              "id": "2000C",
+              "name": "Subscriber Level",
+              "repeat": ">1",
+              "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "22" },
+              "segmentIds": ["HL", "TRN"],
+              "loops": [
+                {
+                  "id": "2100C",
+                  "name": "Subscriber Name",
+                  "repeat": "1",
+                  "segmentIds": ["NM1", "REF", "N3", "N4", "PRV", "DMG", "INS", "HI", "DTP"],
+                  "loops": [
+                    {
+                      "id": "2110C",
+                      "name": "Subscriber Eligibility or Benefit Inquiry",
+                      "repeat": "99",
+                      "segmentIds": ["EQ", "AMT", "III", "REF", "DTP"]
+                    }
+                  ]
+                },
+                {
+                  "id": "2000D",
+                  "name": "Dependent Level",
+                  "repeat": ">1",
+                  "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "23" },
+                  "segmentIds": ["HL", "TRN"],
+                  "loops": [
+                    {
+                      "id": "2100D",
+                      "name": "Dependent Name",
+                      "repeat": "1",
+                      "segmentIds": ["NM1", "REF", "N3", "N4", "PRV", "DMG", "INS", "HI", "DTP"],
+                      "loops": [
+                        {
+                          "id": "2110D",
+                          "name": "Dependent Eligibility or Benefit Inquiry",
+                          "repeat": "99",
+                          "segmentIds": ["EQ", "III", "REF", "DTP"]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trailerSegmentIds": ["SE"]
+}

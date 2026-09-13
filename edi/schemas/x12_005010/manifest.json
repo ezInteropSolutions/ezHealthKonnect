@@ -18,6 +18,14 @@
       "file": "837I.json",
       "friendlyId": "837I",
       "name": "Health Care Claim: Institutional"
+    },
+    "270": {
+      "file": "270.json",
+      "name": "Eligibility, Coverage or Benefit Inquiry"
+    },
+    "271": {
+      "file": "271.json",
+      "name": "Eligibility, Coverage or Benefit Information"
     }
   }
 }

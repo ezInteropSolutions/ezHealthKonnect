@@ -30,6 +30,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -217,11 +218,13 @@ func edi837IFixtureLoops() map[string]interface{} {
 
 const derive837IClaimContextsScript = `
 // -- Derive 837I Claim Contexts --
-var parsed = input.parsedEDI || {};
+// See edi_837p_fhir_builder_test.go's own derive script comment for the full
+// "message." nesting rationale -- same fix applies here.
+var parsed = (input.message && input.message.parsedEDI) || input.parsedEDI || {};
 var loops = parsed.loops || {};
 
 if (parsed.transactionSet !== "837I") {
-  return ({ _claim_contexts: [], _billing_provider: {} });
+  return ({ _claim_contexts: [], _coverage_contexts: [], _billing_providers: [] });
 }
 
 function arr(v) {
@@ -244,13 +247,24 @@ function relationshipToFHIR(code) {
   return map[code] || "other";
 }
 
-var billingLevel = first(loops["2000A"]);
-var billingProviderLoop = (billingLevel.loops || {})["2010AA"] || {};
-var billingNM1 = first(billingProviderLoop.NM1);
-var billingProvider = {
-  npi: billingNM1.identificationCode || "",
-  name: billingNM1.nameLastOrOrganizationName || ""
-};
+// See edi_837p_fhir_builder_test.go's own derive script comment for why every
+// 2000A is walked instead of just the first, and for the billingProviderId
+// scheme.
+function billingProviderId(npi, idx) {
+  return "organization-billing-" + (npi || String(idx + 1));
+}
+var billingProviderLevels = arr(loops["2000A"]);
+var billingProviders = [];
+for (var bpIdx = 0; bpIdx < billingProviderLevels.length; bpIdx++) {
+  var bpProviderLoop = (billingProviderLevels[bpIdx].loops || {})["2010AA"] || {};
+  var bpNM1 = first(bpProviderLoop.NM1);
+  var bpNpi = bpNM1.identificationCode || "";
+  billingProviders.push({
+    id: billingProviderId(bpNpi, bpIdx),
+    npi: bpNpi,
+    name: bpNM1.nameLastOrOrganizationName || ""
+  });
+}
 
 // HI is SHARED for diagnosis and procedure codes on 837I, distinguished
 // purely by each repetition's own qualifier. Diagnosis qualifiers come in
@@ -296,7 +310,7 @@ function extractDiagnoses(codes) {
     // data" for a LITERAL system field with no sourcePath of its own, so the
     // Claim config's own condition (checking this field "exists") only works
     // correctly when the key is truly missing from the row, not blank.
-    if (c.presentOnAdmissionIndicator) { entry.onAdmission = c.presentOnAdmissionIndicator; }
+    if (c.presentOnAdmissionIndicator) { entry.on_admission = c.presentOnAdmissionIndicator; }
     out.push(entry);
   }
   return out;
@@ -336,12 +350,12 @@ function extractServiceLines(claimLoops) {
     var svc = resolveServicedDate(dtpList);
     var entry = {
       sequence: parseInt(lx.assignedNumber || String(i + 1), 10),
-      revenueCode: sv2.serviceLineRevenueCode || "",
+      revenue_code: sv2.serviceLineRevenueCode || "",
       quantity: sv2.serviceUnitCount ? Number(sv2.serviceUnitCount) : 1,
       net: sv2.lineItemChargeAmount ? Number(sv2.lineItemChargeAmount) : 0,
-      servicedDate: svc.servicedDate,
-      servicedStart: svc.servicedStart,
-      servicedEnd: svc.servicedEnd
+      serviced_date: svc.servicedDate,
+      serviced_start: svc.servicedStart,
+      serviced_end: svc.servicedEnd
     };
     // Claim.item.productOrService is ALWAYS anchored on the revenue code
     // (Claim config's own productOrService.coding[0], built directly off
@@ -361,8 +375,8 @@ function extractServiceLines(claimLoops) {
     // truly missing key, not an empty string" convention onAdmission
     // already established.
     if (proc.code) {
-      entry.procedureCode = proc.code;
-      entry.procedureSystem = (proc.qualifier === "HC") ? "http://www.ama-assn.org/go/cpt" : "";
+      entry.procedure_code = proc.code;
+      entry.procedure_system = (proc.qualifier === "HC") ? "http://www.ama-assn.org/go/cpt" : "";
     }
     out.push(entry);
   }
@@ -393,6 +407,31 @@ function resolveServicedDate(dtpList) {
 // Institutional care-team roles are genuinely different assignments from
 // professional's own 2310A/2310B (Referring/Rendering) -- 2310A=Attending,
 // 2310B=Operating Physician, 2310D=Rendering, 2310F=Referring.
+// Provider identification prefers NM1's own NPI (identificationCodeQualifier
+// "XX"), but real, spec-compliant claims sometimes carry NO NM1 identifier at
+// all for a pre-NPI-era provider, identifying them via a SEPARATE REF segment
+// instead (e.g. REF*1G = Provider UPIN Number) -- confirmed directly against
+// X12.org's own official "Jones Hospital" 837I example, whose attending
+// physician (NM1*71*1*JONES*JOHN*J, no NM108/09 at all) is followed by
+// REF*1G*B99937. Previously this NM1-only check silently produced an EMPTY
+// care team for exactly this real, non-fabricated case. The REF qualifier
+// itself (1G/0B/G2/...) is carried through as part of the identifier system
+// URI rather than assumed to always be UPIN, since any of several secondary
+// qualifiers are possible here per the base X12 REF01 code list.
+function providerIdentifier(entity) {
+  if (entity.identificationCode) {
+    return { identifier_system: "http://hl7.org/fhir/sid/us-npi", identifier_value: entity.identificationCode };
+  }
+  var ref = first(entity.REF);
+  if (ref.referenceIdentification) {
+    return {
+      identifier_system: "http://ezhealthkonnect.local/x12-ref-qualifier/" + (ref.referenceIdentificationQualifier || "unknown"),
+      identifier_value: ref.referenceIdentification
+    };
+  }
+  return null;
+}
+
 function extractCareTeam(claimLoops) {
   var team = [];
   var roleLoops = [
@@ -405,8 +444,9 @@ function extractCareTeam(claimLoops) {
     var loop = (claimLoops || {})[roleLoops[r].key];
     if (!loop) continue;
     var nm1 = first(loop.NM1);
-    if (nm1.identificationCode) {
-      team.push({ npi: nm1.identificationCode, role: roleLoops[r].role, sequence: team.length + 1 });
+    var ident = providerIdentifier({ identificationCode: nm1.identificationCode, REF: loop.REF });
+    if (ident) {
+      team.push({ identifier_system: ident.identifier_system, identifier_value: ident.identifier_value, role: roleLoops[r].role, sequence: team.length + 1 });
     }
   }
   return team;
@@ -424,121 +464,231 @@ function extractFacility(claimLoops) {
   if (!loop) return {};
   var nm1 = first(loop.NM1);
   if (!nm1.identificationCode) return {};
-  return { facilityNpi: nm1.identificationCode, facilityName: nm1.nameLastOrOrganizationName || "" };
+  return { facility_npi: nm1.identificationCode, facility_name: nm1.nameLastOrOrganizationName || "" };
+}
+
+// See edi_837p_fhir_builder_test.go's own extractOtherPayers/
+// buildInsuranceAndCoverage for the full COB rationale -- 2320/2330B is
+// identical shape across 837P/837I.
+function extractOtherPayers(claimLoops) {
+  var out = [];
+  var list = arr((claimLoops || {})["2320"]);
+  for (var i = 0; i < list.length; i++) {
+    var payerNM1 = first(((list[i].loops || {})["2330B"] || {}).NM1);
+    if (!payerNM1.identificationCode) continue;
+    out.push({ payer_id: payerNM1.identificationCode, payer_name: payerNM1.nameLastOrOrganizationName || "" });
+  }
+  return out;
+}
+
+function buildInsuranceAndCoverage(payerInfo, patientInfo, subscriberInfo, claimLoops, pcn) {
+  var baseId = "coverage-" + pcn;
+  var insuranceList = [{ sequence: 1, focal: true, coverage_id: baseId }];
+  var coverageRows = [{
+    patient_info: patientInfo, subscriber_info: subscriberInfo, payer_info: payerInfo,
+    coverage_id: baseId, sequence: 1, focal: true
+  }];
+  var others = extractOtherPayers(claimLoops);
+  for (var i = 0; i < others.length; i++) {
+    var seq = i + 2;
+    var cid = baseId + "-" + seq;
+    insuranceList.push({ sequence: seq, focal: false, coverage_id: cid });
+    coverageRows.push({
+      patient_info: patientInfo, subscriber_info: subscriberInfo,
+      payer_info: { name: others[i].payer_name, payer_id: others[i].payer_id },
+      coverage_id: cid, sequence: seq, focal: false
+    });
+  }
+  return { insurance_list: insuranceList, coverage_rows: coverageRows };
 }
 
 var nowISO = new Date().toISOString();
 
-function buildClaimContext(patientInfo, subscriberInfo, payerInfo, claimLoop) {
+// See edi_837p_fhir_builder_test.go's own buildClaimContext doc comment for
+// why every returned property name here is snake_case, not camelCase.
+function buildClaimContext(patientInfo, subscriberInfo, payerInfo, claimLoop, billingProviderId) {
   var clm = claimLoop.CLM || {};
   var svcLoc = clm.healthCareServiceLocation || {};
   var facility = extractFacility(claimLoop.loops);
+  var pcn = clm.patientControlNumber || "";
+  var insCov = buildInsuranceAndCoverage(payerInfo, patientInfo, subscriberInfo, claimLoop.loops, pcn);
   var claim = {
-    patientControlNumber: clm.patientControlNumber || "",
-    totalChargeAmount: clm.totalClaimChargeAmount ? Number(clm.totalClaimChargeAmount) : 0,
-    placeOfServiceCode: svcLoc.placeOfServiceCode || "",
-    createdAt: nowISO,
-    diagnosisList: extractDiagnoses(allHICodes(claimLoop.HI)),
-    procedureList: extractProcedures(allHICodes(claimLoop.HI)),
-    institutionalInfo: extractInstitutionalInfo(claimLoop.CL1),
-    serviceLines: extractServiceLines(claimLoop.loops),
-    careTeam: extractCareTeam(claimLoop.loops)
+    patient_control_number: pcn,
+    total_charge_amount: clm.totalClaimChargeAmount ? Number(clm.totalClaimChargeAmount) : 0,
+    place_of_service_code: svcLoc.placeOfServiceCode || "",
+    created_at: nowISO,
+    billing_provider_id: billingProviderId,
+    diagnosis_list: extractDiagnoses(allHICodes(claimLoop.HI)),
+    procedure_list: extractProcedures(allHICodes(claimLoop.HI)),
+    institutional_info: extractInstitutionalInfo(claimLoop.CL1),
+    service_lines: extractServiceLines(claimLoop.loops),
+    care_team: extractCareTeam(claimLoop.loops),
+    insurance_list: insCov.insurance_list
   };
-  if (facility.facilityNpi) {
-    claim.facilityNpi = facility.facilityNpi;
-    claim.facilityName = facility.facilityName;
+  if (facility.facility_npi) {
+    claim.facility_npi = facility.facility_npi;
+    claim.facility_name = facility.facility_name;
   }
   return {
-    patientInfo: patientInfo,
-    subscriberInfo: subscriberInfo,
-    payerInfo: payerInfo,
-    claim: claim
+    context: {
+      patient_info: patientInfo,
+      subscriber_info: subscriberInfo,
+      payer_info: payerInfo,
+      claim: claim
+    },
+    coverage_rows: insCov.coverage_rows
   };
 }
 
 function personFromNM1AndDMG(nm1, dmg, relationshipCode) {
   var gender = dmg.genderCode || "";
   return {
-    firstName: nm1.nameFirst || "",
-    lastName: nm1.nameLastOrOrganizationName || "",
-    memberId: nm1.identificationCode || "",
+    first_name: nm1.nameFirst || "",
+    last_name: nm1.nameLastOrOrganizationName || "",
+    member_id: nm1.identificationCode || "",
     dob: dmg.birthDate || "",
-    genderFHIR: genderToFHIR(gender),
-    relationshipCode: relationshipCode || "",
-    relationshipFHIR: relationshipToFHIR(relationshipCode || "")
+    gender_fhir: genderToFHIR(gender),
+    relationship_code: relationshipCode || "",
+    relationship_fhir: relationshipToFHIR(relationshipCode || "")
   };
 }
 
 var claimContexts = [];
+var coverageContexts = [];
 
-var billingLoops = billingLevel.loops || {};
-var subscriberLevels = arr(billingLoops["2000B"]);
-for (var s = 0; s < subscriberLevels.length; s++) {
-  var subLevel = subscriberLevels[s];
-  var subLoops = subLevel.loops || {};
-  var sbr = subLevel.SBR || {};
+function pushClaimContext(built) {
+  claimContexts.push(built.context);
+  for (var cr = 0; cr < built.coverage_rows.length; cr++) coverageContexts.push(built.coverage_rows[cr]);
+}
 
-  var subNM1 = first((subLoops["2010BA"] || {}).NM1);
-  var subDMG = (subLoops["2010BA"] || {}).DMG || {};
-  var subscriberInfo = personFromNM1AndDMG(subNM1, subDMG, "18");
+for (var bp = 0; bp < billingProviderLevels.length; bp++) {
+  var bpId = billingProviders[bp].id;
+  var billingLoops = billingProviderLevels[bp].loops || {};
+  var subscriberLevels = arr(billingLoops["2000B"]);
+  for (var s = 0; s < subscriberLevels.length; s++) {
+    var subLevel = subscriberLevels[s];
+    var subLoops = subLevel.loops || {};
+    var sbr = subLevel.SBR || {};
 
-  var payerNM1 = first((subLoops["2010BB"] || {}).NM1);
-  var payerInfo = {
-    name: payerNM1.nameLastOrOrganizationName || "",
-    payerId: payerNM1.identificationCode || ""
-  };
+    var subNM1 = first((subLoops["2010BA"] || {}).NM1);
+    var subDMG = (subLoops["2010BA"] || {}).DMG || {};
+    var subscriberInfo = personFromNM1AndDMG(subNM1, subDMG, "18");
 
-  var dependentLevels = arr(subLoops["2000C"]);
-  if (dependentLevels.length > 0) {
-    for (var d = 0; d < dependentLevels.length; d++) {
-      var depLevel = dependentLevels[d];
-      var depLoops = depLevel.loops || {};
-      var depNM1 = first((depLoops["2010CA"] || {}).NM1);
-      var depDMG = (depLoops["2010CA"] || {}).DMG || {};
-      var depPAT = depLevel.PAT || {};
-      // See edi_837p_fhir_builder_test.go's own dependent-relationship comment
-      // -- same real-world PAT01-vs-SBR02 correction applies here (the 2000C
-      // loop and PAT segment are identical shape across 837P/837I).
-      var patientInfo = personFromNM1AndDMG(depNM1, depDMG, depPAT.individualRelationshipCode || sbr.individualRelationshipCode);
-      if (!patientInfo.memberId) patientInfo.memberId = subscriberInfo.memberId + "-DEP" + (d + 1);
+    var payerNM1 = first((subLoops["2010BB"] || {}).NM1);
+    var payerInfo = {
+      name: payerNM1.nameLastOrOrganizationName || "",
+      payer_id: payerNM1.identificationCode || ""
+    };
 
-      var depClaims = arr(depLoops["2300"]);
-      for (var dc = 0; dc < depClaims.length; dc++) {
-        claimContexts.push(buildClaimContext(patientInfo, subscriberInfo, payerInfo, depClaims[dc]));
+    var dependentLevels = arr(subLoops["2000C"]);
+    if (dependentLevels.length > 0) {
+      for (var d = 0; d < dependentLevels.length; d++) {
+        var depLevel = dependentLevels[d];
+        var depLoops = depLevel.loops || {};
+        var depNM1 = first((depLoops["2010CA"] || {}).NM1);
+        var depDMG = (depLoops["2010CA"] || {}).DMG || {};
+        var depPAT = depLevel.PAT || {};
+        // See edi_837p_fhir_builder_test.go's own dependent-relationship comment
+        // -- same real-world PAT01-vs-SBR02 correction applies here (the 2000C
+        // loop and PAT segment are identical shape across 837P/837I).
+        var patientInfo = personFromNM1AndDMG(depNM1, depDMG, depPAT.individualRelationshipCode || sbr.individualRelationshipCode);
+        if (!patientInfo.member_id) patientInfo.member_id = subscriberInfo.member_id + "-DEP" + (d + 1);
+
+        var depClaims = arr(depLoops["2300"]);
+        for (var dc = 0; dc < depClaims.length; dc++) {
+          pushClaimContext(buildClaimContext(patientInfo, subscriberInfo, payerInfo, depClaims[dc], bpId));
+        }
       }
-    }
-  } else {
-    var subClaims = arr(subLoops["2300"]);
-    for (var sc = 0; sc < subClaims.length; sc++) {
-      claimContexts.push(buildClaimContext(subscriberInfo, subscriberInfo, payerInfo, subClaims[sc]));
+    } else {
+      var subClaims = arr(subLoops["2300"]);
+      for (var sc = 0; sc < subClaims.length; sc++) {
+        pushClaimContext(buildClaimContext(subscriberInfo, subscriberInfo, payerInfo, subClaims[sc], bpId));
+      }
     }
   }
 }
 
 return ({
   _claim_contexts: claimContexts,
-  _billing_provider: billingProvider
+  _coverage_contexts: coverageContexts,
+  _billing_providers: billingProviders
 });
 `
 
 // ─────────────────────────────────────────────────────────────────────────────
 // fhir.build configs — transcribed verbatim into V238's SQL. Organization/
-// Patient/Coverage are IDENTICAL in shape to 837P's own configs (same
+// Patient/Coverage are IDENTICAL in SHAPE to 837P's own configs (same
 // underlying row structure: patientInfo/subscriberInfo/payerInfo/claim) —
 // only Claim differs (type code, revenue on item, onAdmission on diagnosis,
-// procedure[] and supportingInfo[] repeatingGroups).
-// ─────────────────────────────────────────────────────────────────────────────
+// procedure[] and supportingInfo[] repeatingGroups). No longer a bare alias
+// of 837P's own functions, though: each variant's rowsPath/sourcePath must
+// reference ITS OWN derive step's alias ("steps.derive_837i_claim_contexts.step_output...",
+// not 837P's "derive_837p_claim_contexts") -- see organization837PBuildConfig's
+// own doc comment for why a bare "_claim_contexts"/"message._claim_contexts"
+// reference doesn't work against a real pipeline run.
+const derive837IStepAlias = "derive_837i_claim_contexts"
 
 func organization837IBuildConfig() map[string]interface{} {
-	return organization837PBuildConfig()
+	return map[string]interface{}{
+		"resourceType": "Organization",
+		"profile":      "base",
+		"version":      "R4",
+		"outputField":  "message.fhirOrganizations",
+		"rowsPath":     "steps." + derive837IStepAlias + ".step_output._billing_providers",
+		"fields": []interface{}{
+			map[string]interface{}{"targetPath": "id", "sourcePath": "id"},
+			map[string]interface{}{"targetPath": "active", "literalValue": "true"},
+			map[string]interface{}{"targetPath": "identifier[0].system", "literalValue": "http://hl7.org/fhir/sid/us-npi"},
+			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": "npi"},
+			map[string]interface{}{"targetPath": "name", "sourcePath": "name"},
+		},
+	}
 }
 
 func patient837IBuildConfig() map[string]interface{} {
-	return patient837PBuildConfig()
+	return map[string]interface{}{
+		"resourceType": "Patient",
+		"profile":      "base",
+		"version":      "R4",
+		"outputField":  "message.fhirPatients",
+		"rowsPath":     "steps." + derive837IStepAlias + ".step_output._claim_contexts",
+		"fields": []interface{}{
+			map[string]interface{}{"targetPath": "id", "sourcePath": "patient_info.member_id"},
+			map[string]interface{}{"targetPath": "identifier[0].system", "literalValue": "http://ezhealthkonnect.local/x12-member-id"},
+			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": "patient_info.member_id"},
+			map[string]interface{}{"targetPath": "name[0].family", "sourcePath": "patient_info.last_name"},
+			map[string]interface{}{"targetPath": "name[0].given[0]", "sourcePath": "patient_info.first_name"},
+			map[string]interface{}{"targetPath": "birthDate", "sourcePath": "patient_info.dob", "transform": "x12_date_to_fhir_date"},
+			map[string]interface{}{"targetPath": "gender", "sourcePath": "patient_info.gender_fhir"},
+		},
+	}
 }
 
 func coverage837IBuildConfig() map[string]interface{} {
-	return coverage837PBuildConfig()
+	return map[string]interface{}{
+		"resourceType": "Coverage",
+		"profile":      "base",
+		"version":      "R4",
+		"outputField":  "message.fhirCoverages",
+		// COB: one row per claim x payer pair -- see coverage837PBuildConfig's own
+		// comment for the full rationale.
+		"rowsPath": "steps." + derive837IStepAlias + ".step_output._coverage_contexts",
+		"fields": []interface{}{
+			map[string]interface{}{"targetPath": "id", "sourcePath": "coverage_id"},
+			map[string]interface{}{"targetPath": "status", "literalValue": "active"},
+			map[string]interface{}{"targetPath": "beneficiary.reference", "sourcePath": "patient_info.member_id", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Patient/"}},
+			map[string]interface{}{"targetPath": "subscriberId", "sourcePath": "subscriber_info.member_id"},
+			map[string]interface{}{
+				"targetPath": "subscriber.reference", "sourcePath": "subscriber_info.member_id", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Patient/"},
+				"condition": map[string]interface{}{"field": "patient_info.relationship_code", "operator": "equals", "value": "18"},
+			},
+			map[string]interface{}{"targetPath": "relationship.coding[0].system", "literalValue": "http://terminology.hl7.org/CodeSystem/subscriber-relationship"},
+			map[string]interface{}{"targetPath": "relationship.coding[0].code", "sourcePath": "patient_info.relationship_fhir"},
+			map[string]interface{}{"targetPath": "payor[0].identifier.system", "literalValue": "http://ezhealthkonnect.local/x12-payer-id"},
+			map[string]interface{}{"targetPath": "payor[0].identifier.value", "sourcePath": "payer_info.payer_id"},
+			map[string]interface{}{"targetPath": "payor[0].display", "sourcePath": "payer_info.name"},
+		},
+	}
 }
 
 func claim837IBuildConfig() map[string]interface{} {
@@ -547,54 +697,52 @@ func claim837IBuildConfig() map[string]interface{} {
 		"profile":      "base",
 		"version":      "R4",
 		"outputField":  "message.fhirClaims",
-		"rowsPath":     "_claim_contexts",
+		"rowsPath":     "steps." + derive837IStepAlias + ".step_output._claim_contexts",
 		"fields": []interface{}{
-			map[string]interface{}{"targetPath": "id", "sourcePath": "claim.patientControlNumber", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "claim-"}},
+			map[string]interface{}{"targetPath": "id", "sourcePath": "claim.patient_control_number", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "claim-"}},
 			map[string]interface{}{"targetPath": "identifier[0].system", "literalValue": "http://ezhealthkonnect.local/x12-claim-control-number"},
-			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": "claim.patientControlNumber"},
+			map[string]interface{}{"targetPath": "identifier[0].value", "sourcePath": "claim.patient_control_number"},
 			map[string]interface{}{"targetPath": "status", "literalValue": "active"},
 			map[string]interface{}{"targetPath": "type.coding[0].system", "literalValue": "http://terminology.hl7.org/CodeSystem/claim-type"},
 			map[string]interface{}{"targetPath": "type.coding[0].code", "literalValue": "institutional"},
 			map[string]interface{}{"targetPath": "use", "literalValue": "claim"},
-			map[string]interface{}{"targetPath": "created", "sourcePath": "claim.createdAt"},
+			map[string]interface{}{"targetPath": "created", "sourcePath": "claim.created_at"},
 			map[string]interface{}{"targetPath": "priority.coding[0].system", "literalValue": "http://terminology.hl7.org/CodeSystem/processpriority"},
 			map[string]interface{}{"targetPath": "priority.coding[0].code", "literalValue": "normal"},
-			map[string]interface{}{"targetPath": "patient.reference", "sourcePath": "patientInfo.memberId", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Patient/"}},
-			map[string]interface{}{"targetPath": "provider.reference", "literalValue": "Organization/organization-billing"},
+			map[string]interface{}{"targetPath": "patient.reference", "sourcePath": "patient_info.member_id", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Patient/"}},
+			// Row-scoped, not a fixed literal -- see claim837PBuildConfig's own comment.
+			map[string]interface{}{"targetPath": "provider.reference", "sourcePath": "claim.billing_provider_id", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Organization/"}},
 			map[string]interface{}{"targetPath": "insurer.identifier.system", "literalValue": "http://ezhealthkonnect.local/x12-payer-id"},
-			map[string]interface{}{"targetPath": "insurer.identifier.value", "sourcePath": "payerInfo.payerId"},
+			map[string]interface{}{"targetPath": "insurer.identifier.value", "sourcePath": "payer_info.payer_id"},
 			// Claim.facility -- see edi_837p_fhir_builder_test.go's own note; here
 			// sourced from 2310E (institutional's own Service Facility Location
 			// position, distinct from 837P's 2310C).
 			map[string]interface{}{
 				"targetPath": "facility.identifier.system", "literalValue": "http://hl7.org/fhir/sid/us-npi",
-				"condition": map[string]interface{}{"field": "claim.facilityNpi", "operator": "exists"},
+				"condition": map[string]interface{}{"field": "claim.facility_npi", "operator": "exists"},
 			},
-			map[string]interface{}{"targetPath": "facility.identifier.value", "sourcePath": "claim.facilityNpi"},
-			map[string]interface{}{"targetPath": "total.value", "sourcePath": "claim.totalChargeAmount"},
+			map[string]interface{}{"targetPath": "facility.identifier.value", "sourcePath": "claim.facility_npi"},
+			map[string]interface{}{"targetPath": "total.value", "sourcePath": "claim.total_charge_amount"},
 			map[string]interface{}{"targetPath": "total.currency", "literalValue": "USD"},
-			map[string]interface{}{"targetPath": "insurance[0].sequence", "literalValue": "1"},
-			map[string]interface{}{"targetPath": "insurance[0].focal", "literalValue": "true"},
-			map[string]interface{}{"targetPath": "insurance[0].coverage.reference", "sourcePath": "claim.patientControlNumber", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Coverage/coverage-"}},
 		},
 		"repeatingGroups": []interface{}{
 			map[string]interface{}{
 				"targetPath": "diagnosis",
-				"rowsPath":   "claim.diagnosisList",
+				"rowsPath":   "claim.diagnosis_list",
 				"fields": []interface{}{
 					map[string]interface{}{"targetPath": "diagnosisCodeableConcept.coding[0].system", "literalValue": "http://hl7.org/fhir/sid/icd-10-cm"},
 					map[string]interface{}{"targetPath": "diagnosisCodeableConcept.coding[0].code", "sourcePath": "code"},
 					map[string]interface{}{"targetPath": "sequence", "sourcePath": "sequence"},
 					map[string]interface{}{
 						"targetPath": "onAdmission.coding[0].system", "literalValue": "https://codesystem.x12.org/005010/1352",
-						"condition": map[string]interface{}{"field": "onAdmission", "operator": "exists"},
+						"condition": map[string]interface{}{"field": "on_admission", "operator": "exists"},
 					},
-					map[string]interface{}{"targetPath": "onAdmission.coding[0].code", "sourcePath": "onAdmission"},
+					map[string]interface{}{"targetPath": "onAdmission.coding[0].code", "sourcePath": "on_admission"},
 				},
 			},
 			map[string]interface{}{
 				"targetPath": "procedure",
-				"rowsPath":   "claim.procedureList",
+				"rowsPath":   "claim.procedure_list",
 				"fields": []interface{}{
 					map[string]interface{}{"targetPath": "procedureCodeableConcept.coding[0].system", "literalValue": "http://www.cms.gov/Medicare/Coding/ICD10"},
 					map[string]interface{}{"targetPath": "procedureCodeableConcept.coding[0].code", "sourcePath": "code"},
@@ -603,7 +751,7 @@ func claim837IBuildConfig() map[string]interface{} {
 			},
 			map[string]interface{}{
 				"targetPath": "supportingInfo",
-				"rowsPath":   "claim.institutionalInfo",
+				"rowsPath":   "claim.institutional_info",
 				"fields": []interface{}{
 					map[string]interface{}{"targetPath": "sequence", "sourcePath": "sequence"},
 					map[string]interface{}{"targetPath": "category.coding[0].code", "sourcePath": "category"},
@@ -612,38 +760,48 @@ func claim837IBuildConfig() map[string]interface{} {
 			},
 			map[string]interface{}{
 				"targetPath": "item",
-				"rowsPath":   "claim.serviceLines",
+				"rowsPath":   "claim.service_lines",
 				"fields": []interface{}{
 					map[string]interface{}{"targetPath": "sequence", "sourcePath": "sequence"},
 					map[string]interface{}{"targetPath": "revenue.coding[0].system", "literalValue": "https://codesystem.x12.org/005010/234"},
-					map[string]interface{}{"targetPath": "revenue.coding[0].code", "sourcePath": "revenueCode"},
+					map[string]interface{}{"targetPath": "revenue.coding[0].code", "sourcePath": "revenue_code"},
 					// productOrService is ALWAYS anchored on the revenue code (coding[0])
 					// -- the one identifier every real institutional line carries -- with
 					// the HCPCS/CPT code (when SV202 is actually present) added as a
 					// SECOND coding (coding[1]), never as a replacement. Both coding[1]
 					// fields use sourcePath (not literalValue), so they naturally resolve
-					// to nothing and get skipped when procedureCode/procedureSystem are
+					// to nothing and get skipped when procedure_code/procedure_system are
 					// absent from the row -- no explicit condition needed.
 					map[string]interface{}{"targetPath": "productOrService.coding[0].system", "literalValue": "https://codesystem.x12.org/005010/234"},
-					map[string]interface{}{"targetPath": "productOrService.coding[0].code", "sourcePath": "revenueCode"},
-					map[string]interface{}{"targetPath": "productOrService.coding[1].system", "sourcePath": "procedureSystem"},
-					map[string]interface{}{"targetPath": "productOrService.coding[1].code", "sourcePath": "procedureCode"},
+					map[string]interface{}{"targetPath": "productOrService.coding[0].code", "sourcePath": "revenue_code"},
+					map[string]interface{}{"targetPath": "productOrService.coding[1].system", "sourcePath": "procedure_system"},
+					map[string]interface{}{"targetPath": "productOrService.coding[1].code", "sourcePath": "procedure_code"},
 					map[string]interface{}{"targetPath": "quantity.value", "sourcePath": "quantity"},
 					map[string]interface{}{"targetPath": "net.value", "sourcePath": "net"},
 					map[string]interface{}{"targetPath": "net.currency", "literalValue": "USD"},
-					map[string]interface{}{"targetPath": "servicedDate", "sourcePath": "servicedDate", "transform": "x12_date_to_fhir_date"},
-					map[string]interface{}{"targetPath": "servicedPeriod.start", "sourcePath": "servicedStart", "transform": "x12_date_to_fhir_date"},
-					map[string]interface{}{"targetPath": "servicedPeriod.end", "sourcePath": "servicedEnd", "transform": "x12_date_to_fhir_date"},
+					map[string]interface{}{"targetPath": "servicedDate", "sourcePath": "serviced_date", "transform": "x12_date_to_fhir_date"},
+					map[string]interface{}{"targetPath": "servicedPeriod.start", "sourcePath": "serviced_start", "transform": "x12_date_to_fhir_date"},
+					map[string]interface{}{"targetPath": "servicedPeriod.end", "sourcePath": "serviced_end", "transform": "x12_date_to_fhir_date"},
 				},
 			},
 			map[string]interface{}{
 				"targetPath": "careTeam",
-				"rowsPath":   "claim.careTeam",
+				"rowsPath":   "claim.care_team",
 				"fields": []interface{}{
 					map[string]interface{}{"targetPath": "sequence", "sourcePath": "sequence"},
 					map[string]interface{}{"targetPath": "role.coding[0].code", "sourcePath": "role"},
-					map[string]interface{}{"targetPath": "provider.identifier.system", "literalValue": "http://hl7.org/fhir/sid/us-npi"},
-					map[string]interface{}{"targetPath": "provider.identifier.value", "sourcePath": "npi"},
+					map[string]interface{}{"targetPath": "provider.identifier.system", "sourcePath": "identifier_system"},
+					map[string]interface{}{"targetPath": "provider.identifier.value", "sourcePath": "identifier_value"},
+				},
+			},
+			// COB: see claim837PBuildConfig's own comment.
+			map[string]interface{}{
+				"targetPath": "insurance",
+				"rowsPath":   "claim.insurance_list",
+				"fields": []interface{}{
+					map[string]interface{}{"targetPath": "sequence", "sourcePath": "sequence"},
+					map[string]interface{}{"targetPath": "focal", "sourcePath": "focal"},
+					map[string]interface{}{"targetPath": "coverage.reference", "sourcePath": "coverage_id", "transform": "string_prefix", "valueMap": map[string]interface{}{"prefix": "Coverage/"}},
 				},
 			},
 		},
@@ -677,8 +835,8 @@ func TestEDI837IFHIRBuilder_MultiClaimMultiLine_BuildsCleanValidatingBundle(t *t
 	if claimContexts, ok := deriveOut["_claim_contexts"]; ok {
 		data["_claim_contexts"] = claimContexts
 	}
-	if billingProvider, ok := deriveOut["_billing_provider"]; ok {
-		data["_billing_provider"] = billingProvider
+	if billingProviders, ok := deriveOut["_billing_providers"]; ok {
+		data["_billing_providers"] = billingProviders
 	}
 
 	claimContexts, _ := data["_claim_contexts"].([]interface{})
@@ -694,6 +852,13 @@ func TestEDI837IFHIRBuilder_MultiClaimMultiLine_BuildsCleanValidatingBundle(t *t
 	message, ok := data["message"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected data[\"message\"] to be a map, got %T", data["message"])
+	}
+	organizations, ok := message["fhirOrganizations"].([]map[string]interface{})
+	if !ok || len(organizations) != 1 {
+		t.Fatalf("expected 1 Organization resource, got %d (ok=%v)", len(organizations), ok)
+	}
+	if organizations[0]["id"] != "organization-billing-9876543210" {
+		t.Errorf("expected NPI-derived Organization id, got %v", organizations[0]["id"])
 	}
 	patients, ok := message["fhirPatients"].([]map[string]interface{})
 	if !ok || len(patients) != 2 {
@@ -759,6 +924,13 @@ func TestEDI837IFHIRBuilder_MultiClaimMultiLine_BuildsCleanValidatingBundle(t *t
 	if firstRole != "attending" {
 		t.Errorf("inpatient claim careTeam[0].role = %v, want attending", firstRole)
 	}
+	if provider, _ := inptClaim["provider"].(map[string]interface{}); provider["reference"] != "Organization/organization-billing-9876543210" {
+		t.Errorf("expected Claim.provider.reference to point at the row's own billing provider, got %v", inptClaim["provider"])
+	}
+	insurance, _ := inptClaim["insurance"].([]interface{})
+	if len(insurance) != 1 {
+		t.Errorf("inpatient claim: expected 1 insurance entry (primary payer only, no COB in this fixture), got %d", len(insurance))
+	}
 
 	outptClaim := claims[1]
 	outptItems, _ := outptClaim["item"].([]interface{})
@@ -782,7 +954,7 @@ func TestEDI837IFHIRBuilder_MultiClaimMultiLine_BuildsCleanValidatingBundle(t *t
 			"fhirBundle": map[string]interface{}{
 				"bundleType": "collection",
 				"resourcePaths": []interface{}{
-					"message.fhirOrganization", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims",
+					"message.fhirOrganizations", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims",
 				},
 			},
 		},
@@ -841,5 +1013,260 @@ func TestEDI837IFHIRBuilder_MultiClaimMultiLine_BuildsCleanValidatingBundle(t *t
 		b, _ := json.MarshalIndent(bundle, "", "  ")
 		t.Errorf("unexpected validation errors beyond the known ClaimTypes ValueSet gap:\n%s\nbundle: %s",
 			strings.Join(unexpected, "\n"), b)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-billing-provider (2000A repeats) — see edi_837p_fhir_builder_test.go's
+// own equivalent test for the full rationale (no real sample carries 2+
+// top-level 2000A levels, so this is self-authored).
+// ─────────────────────────────────────────────────────────────────────────────
+
+func edi837IMultiProviderFixtureLoops() map[string]interface{} {
+	return map[string]interface{}{
+		"2000A": []interface{}{
+			map[string]interface{}{
+				"HL": map[string]interface{}{"hierarchicalIdNumber": "1", "hierarchicalLevelCode": "20", "hierarchicalChildCode": "1"},
+				"loops": map[string]interface{}{
+					"2010AA": map[string]interface{}{
+						"NM1": []interface{}{
+							map[string]interface{}{"entityIdentifierCode": "85", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "FIRST HOSPITAL", "identificationCodeQualifier": "XX", "identificationCode": "1111111111"},
+						},
+					},
+					"2000B": []interface{}{
+						map[string]interface{}{
+							"HL":  map[string]interface{}{"hierarchicalIdNumber": "2", "hierarchicalParentIdNumber": "1", "hierarchicalLevelCode": "22", "hierarchicalChildCode": "0"},
+							"SBR": map[string]interface{}{"payerResponsibilitySequenceNumberCode": "P", "individualRelationshipCode": "18"},
+							"loops": map[string]interface{}{
+								"2010BA": map[string]interface{}{
+									"NM1": []interface{}{
+										map[string]interface{}{"entityIdentifierCode": "IL", "entityTypeQualifier": "1", "nameLastOrOrganizationName": "ALPHA", "nameFirst": "ANNA", "identificationCodeQualifier": "MI", "identificationCode": "SUB-A"},
+									},
+								},
+								"2010BB": map[string]interface{}{
+									"NM1": []interface{}{
+										map[string]interface{}{"entityIdentifierCode": "PR", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "PAYER1", "identificationCodeQualifier": "PI", "identificationCode": "PAYER001"},
+									},
+								},
+								"2300": []interface{}{
+									map[string]interface{}{
+										"CLM": map[string]interface{}{
+											"patientControlNumber": "CLM-A-001", "totalClaimChargeAmount": "1000.00",
+											"healthCareServiceLocation": map[string]interface{}{"placeOfServiceCode": "21", "facilityCodeQualifier": "B", "claimFrequencyCode": "1"},
+										},
+										"HI": []interface{}{
+											map[string]interface{}{"codes": []interface{}{map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "I10"}}}},
+										},
+										"loops": map[string]interface{}{
+											"2400": []interface{}{
+												map[string]interface{}{
+													"LX":  map[string]interface{}{"assignedNumber": "1"},
+													"SV2": map[string]interface{}{"serviceLineRevenueCode": "0250", "lineItemChargeAmount": "1000.00", "unitOfMeasurementCode": "UN", "serviceUnitCount": "1"},
+													"DTP": []interface{}{
+														map[string]interface{}{"dateTimeQualifier": "472", "dateTimePeriodFormatQualifier": "D8", "datePeriod": "20260115"},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			map[string]interface{}{
+				"HL": map[string]interface{}{"hierarchicalIdNumber": "5", "hierarchicalLevelCode": "20", "hierarchicalChildCode": "1"},
+				"loops": map[string]interface{}{
+					"2010AA": map[string]interface{}{
+						"NM1": []interface{}{
+							map[string]interface{}{"entityIdentifierCode": "85", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "SECOND HOSPITAL", "identificationCodeQualifier": "XX", "identificationCode": "2222222222"},
+						},
+					},
+					"2000B": []interface{}{
+						map[string]interface{}{
+							"HL":  map[string]interface{}{"hierarchicalIdNumber": "6", "hierarchicalParentIdNumber": "5", "hierarchicalLevelCode": "22", "hierarchicalChildCode": "0"},
+							"SBR": map[string]interface{}{"payerResponsibilitySequenceNumberCode": "P", "individualRelationshipCode": "18"},
+							"loops": map[string]interface{}{
+								"2010BA": map[string]interface{}{
+									"NM1": []interface{}{
+										map[string]interface{}{"entityIdentifierCode": "IL", "entityTypeQualifier": "1", "nameLastOrOrganizationName": "BETA", "nameFirst": "BOB", "identificationCodeQualifier": "MI", "identificationCode": "SUB-B"},
+									},
+								},
+								"2010BB": map[string]interface{}{
+									"NM1": []interface{}{
+										map[string]interface{}{"entityIdentifierCode": "PR", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "PAYER2", "identificationCodeQualifier": "PI", "identificationCode": "PAYER002"},
+									},
+								},
+								"2300": []interface{}{
+									map[string]interface{}{
+										"CLM": map[string]interface{}{
+											"patientControlNumber": "CLM-B-001", "totalClaimChargeAmount": "2000.00",
+											"healthCareServiceLocation": map[string]interface{}{"placeOfServiceCode": "21", "facilityCodeQualifier": "B", "claimFrequencyCode": "1"},
+										},
+										"HI": []interface{}{
+											map[string]interface{}{"codes": []interface{}{map[string]interface{}{"code": map[string]interface{}{"qualifier": "ABK", "code": "J06.9"}}}},
+										},
+										"loops": map[string]interface{}{
+											"2400": []interface{}{
+												map[string]interface{}{
+													"LX":  map[string]interface{}{"assignedNumber": "1"},
+													"SV2": map[string]interface{}{"serviceLineRevenueCode": "0270", "lineItemChargeAmount": "2000.00", "unitOfMeasurementCode": "UN", "serviceUnitCount": "1"},
+													"DTP": []interface{}{
+														map[string]interface{}{"dateTimeQualifier": "472", "dateTimePeriodFormatQualifier": "D8", "datePeriod": "20260116"},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestEDI837IFHIRBuilder_MultiBillingProvider_BuildsDistinctOrganizationsPerProvider(t *testing.T) {
+	initFHIRRegistrySvc(t)
+
+	data := map[string]interface{}{
+		"parsedEDI": map[string]interface{}{
+			"transactionSet": "837I",
+			"loops":          edi837IMultiProviderFixtureLoops(),
+		},
+	}
+
+	result := runScriptSvc(t, "derive_837i_claim_contexts", derive837IClaimContextsScript, data)
+	deriveOut := svcStepOutput(t, result, "derive_837i_claim_contexts")
+	for k, v := range result {
+		data[k] = v
+	}
+	svcInjectStepOutput(data, "derive_837i_claim_contexts", deriveOut)
+
+	claimContexts, _ := deriveOut["_claim_contexts"].([]interface{})
+	if len(claimContexts) != 2 {
+		t.Fatalf("expected 2 claim contexts (one per billing provider's own subscriber), got %d", len(claimContexts))
+	}
+	billingProviders, _ := deriveOut["_billing_providers"].([]interface{})
+	if len(billingProviders) != 2 {
+		t.Fatalf("expected 2 distinct billing providers, got %d", len(billingProviders))
+	}
+
+	data = runFHIRBuild(t, "build_organization_fhir", organization837IBuildConfig(), data)
+	data = runFHIRBuild(t, "build_claim_fhir", claim837IBuildConfig(), data)
+
+	message := data["message"].(map[string]interface{})
+	organizations, _ := message["fhirOrganizations"].([]map[string]interface{})
+	if len(organizations) != 2 {
+		t.Fatalf("expected 2 Organization resources, got %d", len(organizations))
+	}
+	orgIDs := map[string]bool{}
+	for _, o := range organizations {
+		orgIDs[fmt.Sprintf("%v", o["id"])] = true
+	}
+	if !orgIDs["organization-billing-1111111111"] || !orgIDs["organization-billing-2222222222"] {
+		t.Errorf("expected both NPI-derived Organization ids, got %+v", orgIDs)
+	}
+
+	claims, _ := message["fhirClaims"].([]map[string]interface{})
+	if len(claims) != 2 {
+		t.Fatalf("expected 2 Claim resources, got %d", len(claims))
+	}
+	seenRefs := map[string]bool{}
+	for _, c := range claims {
+		provider, _ := c["provider"].(map[string]interface{})
+		seenRefs[fmt.Sprintf("%v", provider["reference"])] = true
+	}
+	if !seenRefs["Organization/organization-billing-1111111111"] || !seenRefs["Organization/organization-billing-2222222222"] {
+		t.Errorf("expected each claim to reference its OWN billing provider, got refs: %+v", seenRefs)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COB secondary payer (2320/2330B) — synthetic addition, mirroring
+// edi_837p_fhir_builder_test.go's own equivalent test.
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEDI837IFHIRBuilder_COBSecondaryPayer_BuildsSecondCoverageAndInsuranceEntry(t *testing.T) {
+	initFHIRRegistrySvc(t)
+
+	loops := edi837IFixtureLoops()
+	billingLevel := loops["2000A"].([]interface{})[0].(map[string]interface{})
+	subLevels := billingLevel["loops"].(map[string]interface{})["2000B"].([]interface{})
+	subClaim := subLevels[0].(map[string]interface{})["loops"].(map[string]interface{})["2300"].([]interface{})[0].(map[string]interface{})
+	claimLoops := subClaim["loops"].(map[string]interface{})
+	claimLoops["2320"] = []interface{}{
+		map[string]interface{}{
+			"SBR": map[string]interface{}{"payerResponsibilitySequenceNumberCode": "S"},
+			"loops": map[string]interface{}{
+				"2330B": map[string]interface{}{
+					"NM1": []interface{}{
+						map[string]interface{}{"entityIdentifierCode": "PR", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "SECONDARY PAYER", "identificationCodeQualifier": "PI", "identificationCode": "PAYER999"},
+					},
+				},
+			},
+		},
+	}
+
+	data := map[string]interface{}{
+		"parsedEDI": map[string]interface{}{
+			"transactionSet": "837I",
+			"loops":          loops,
+		},
+	}
+
+	result := runScriptSvc(t, "derive_837i_claim_contexts", derive837IClaimContextsScript, data)
+	deriveOut := svcStepOutput(t, result, "derive_837i_claim_contexts")
+	for k, v := range result {
+		data[k] = v
+	}
+	svcInjectStepOutput(data, "derive_837i_claim_contexts", deriveOut)
+
+	data = runFHIRBuild(t, "build_coverage_fhir", coverage837IBuildConfig(), data)
+	data = runFHIRBuild(t, "build_claim_fhir", claim837IBuildConfig(), data)
+
+	message := data["message"].(map[string]interface{})
+	coverages, _ := message["fhirCoverages"].([]map[string]interface{})
+	// 2 claims total (inpatient subscriber's own + dependent's outpatient) --
+	// subscriber's own now has 2 payers (primary + secondary), dependent's
+	// still has 1 -- 3 Coverage resources total.
+	if len(coverages) != 3 {
+		t.Fatalf("expected 3 Coverage resources (primary+secondary for subscriber's claim, primary for dependent's), got %d", len(coverages))
+	}
+	var secondaryCoverage map[string]interface{}
+	for _, c := range coverages {
+		if c["id"] == "coverage-CLM-INPT-001-2" {
+			secondaryCoverage = c
+		}
+	}
+	if secondaryCoverage == nil {
+		t.Fatalf("expected a secondary Coverage with id coverage-CLM-INPT-001-2, got: %+v", coverages)
+	}
+	payor, _ := secondaryCoverage["payor"].([]interface{})
+	if len(payor) == 0 {
+		t.Fatalf("expected secondary Coverage.payor to be populated")
+	}
+	payorMap := payor[0].(map[string]interface{})
+	identifier, _ := payorMap["identifier"].(map[string]interface{})
+	if identifier["value"] != "PAYER999" {
+		t.Errorf("expected secondary payer id PAYER999, got %v", identifier["value"])
+	}
+
+	claims, _ := message["fhirClaims"].([]map[string]interface{})
+	var subClaimOut map[string]interface{}
+	for _, c := range claims {
+		if c["id"] == "claim-CLM-INPT-001" {
+			subClaimOut = c
+		}
+	}
+	if subClaimOut == nil {
+		t.Fatalf("expected claim-CLM-INPT-001 in built Claims, got: %+v", claims)
+	}
+	insurance, _ := subClaimOut["insurance"].([]interface{})
+	if len(insurance) != 2 {
+		t.Fatalf("expected 2 insurance entries (primary+secondary), got %d", len(insurance))
 	}
 }

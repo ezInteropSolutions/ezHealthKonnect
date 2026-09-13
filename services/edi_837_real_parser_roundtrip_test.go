@@ -82,6 +82,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -182,8 +183,8 @@ func TestEDI837RealParserRoundtrip_837P_ProducesValidatingBundle(t *testing.T) {
 	if cc, ok := deriveOut["_claim_contexts"]; ok {
 		data["_claim_contexts"] = cc
 	}
-	if bp, ok := deriveOut["_billing_provider"]; ok {
-		data["_billing_provider"] = bp
+	if bp, ok := deriveOut["_billing_providers"]; ok {
+		data["_billing_providers"] = bp
 	}
 
 	claimContexts, _ := data["_claim_contexts"].([]interface{})
@@ -221,7 +222,7 @@ func TestEDI837RealParserRoundtrip_837P_ProducesValidatingBundle(t *testing.T) {
 		t.Errorf("item.servicedPeriod = %v, want start=2026-02-10 end=2026-02-12", period)
 	}
 
-	bundleJSON := assembleAndValidate837Bundle(t, data, "message.fhirOrganization", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
+	bundleJSON := assembleAndValidate837Bundle(t, data, "message.fhirOrganizations", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
 	_ = bundleJSON
 }
 
@@ -260,8 +261,8 @@ func TestEDI837RealParserRoundtrip_837I_ProducesValidatingBundle(t *testing.T) {
 	if cc, ok := deriveOut["_claim_contexts"]; ok {
 		data["_claim_contexts"] = cc
 	}
-	if bp, ok := deriveOut["_billing_provider"]; ok {
-		data["_billing_provider"] = bp
+	if bp, ok := deriveOut["_billing_providers"]; ok {
+		data["_billing_providers"] = bp
 	}
 
 	claimContexts, _ := data["_claim_contexts"].([]interface{})
@@ -308,7 +309,7 @@ func TestEDI837RealParserRoundtrip_837I_ProducesValidatingBundle(t *testing.T) {
 		t.Fatalf("expected 3 supportingInfo entries from CL1, got %d", len(supportingInfo))
 	}
 
-	bundleJSON := assembleAndValidate837Bundle(t, data, "message.fhirOrganization", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
+	bundleJSON := assembleAndValidate837Bundle(t, data, "message.fhirOrganizations", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
 	_ = bundleJSON
 }
 
@@ -470,8 +471,8 @@ func TestEDI837RealParserRoundtrip_837P_DatabricksSample_ProducesValidatingBundl
 	if cc, ok := deriveOut["_claim_contexts"]; ok {
 		data["_claim_contexts"] = cc
 	}
-	if bp, ok := deriveOut["_billing_provider"]; ok {
-		data["_billing_provider"] = bp
+	if bp, ok := deriveOut["_billing_providers"]; ok {
+		data["_billing_providers"] = bp
 	}
 
 	claimContexts, _ := data["_claim_contexts"].([]interface{})
@@ -513,7 +514,7 @@ func TestEDI837RealParserRoundtrip_837P_DatabricksSample_ProducesValidatingBundl
 		t.Fatalf("expected 2 diagnoses (ABK + ABF), got %d", len(diags))
 	}
 
-	assembleAndValidate837Bundle(t, data, "message.fhirOrganization", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
+	assembleAndValidate837Bundle(t, data, "message.fhirOrganizations", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
 }
 
 func TestEDI837RealParserRoundtrip_837I_DatabricksSample_ProducesValidatingBundle(t *testing.T) {
@@ -552,8 +553,8 @@ func TestEDI837RealParserRoundtrip_837I_DatabricksSample_ProducesValidatingBundl
 	if cc, ok := deriveOut["_claim_contexts"]; ok {
 		data["_claim_contexts"] = cc
 	}
-	if bp, ok := deriveOut["_billing_provider"]; ok {
-		data["_billing_provider"] = bp
+	if bp, ok := deriveOut["_billing_providers"]; ok {
+		data["_billing_providers"] = bp
 	}
 
 	claimContexts, _ := data["_claim_contexts"].([]interface{})
@@ -629,7 +630,7 @@ func TestEDI837RealParserRoundtrip_837I_DatabricksSample_ProducesValidatingBundl
 		}
 	}
 
-	assembleAndValidate837Bundle(t, data, "message.fhirOrganization", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
+	assembleAndValidate837Bundle(t, data, "message.fhirOrganizations", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -673,8 +674,8 @@ func TestEDI837RealParserRoundtrip_837P_X12OrgBenKildareSample_ProducesValidatin
 	if cc, ok := deriveOut["_claim_contexts"]; ok {
 		data["_claim_contexts"] = cc
 	}
-	if bp, ok := deriveOut["_billing_provider"]; ok {
-		data["_billing_provider"] = bp
+	if bp, ok := deriveOut["_billing_providers"]; ok {
+		data["_billing_providers"] = bp
 	}
 
 	// The patient (TED SMITH) is a DEPENDENT of the subscriber (JANE SMITH) --
@@ -688,12 +689,12 @@ func TestEDI837RealParserRoundtrip_837P_X12OrgBenKildareSample_ProducesValidatin
 		t.Fatalf("expected 1 claim context, got %d: %+v", len(claimContexts), claimContexts)
 	}
 	ctx := claimContexts[0].(map[string]interface{})
-	patientInfo := ctx["patientInfo"].(map[string]interface{})
-	if patientInfo["relationshipCode"] != "19" {
-		t.Errorf("patientInfo.relationshipCode = %v, want 19 (from the dependent's own PAT01, not the blank subscriber SBR02)", patientInfo["relationshipCode"])
+	patientInfo := ctx["patient_info"].(map[string]interface{})
+	if patientInfo["relationship_code"] != "19" {
+		t.Errorf("patient_info.relationship_code = %v, want 19 (from the dependent's own PAT01, not the blank subscriber SBR02)", patientInfo["relationship_code"])
 	}
-	if patientInfo["relationshipFHIR"] != "child" {
-		t.Errorf("patientInfo.relationshipFHIR = %v, want child", patientInfo["relationshipFHIR"])
+	if patientInfo["relationship_fhir"] != "child" {
+		t.Errorf("patient_info.relationship_fhir = %v, want child", patientInfo["relationship_fhir"])
 	}
 
 	data = runFHIRBuild(t, "build_organization_fhir", organization837PBuildConfig(), data)
@@ -758,7 +759,7 @@ func TestEDI837RealParserRoundtrip_837P_X12OrgBenKildareSample_ProducesValidatin
 		}
 	}
 
-	assembleAndValidate837Bundle(t, data, "message.fhirOrganization", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
+	assembleAndValidate837Bundle(t, data, "message.fhirOrganizations", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
 }
 
 func TestEDI837RealParserRoundtrip_837I_X12OrgJonesHospitalSample_ProducesValidatingBundle(t *testing.T) {
@@ -797,8 +798,8 @@ func TestEDI837RealParserRoundtrip_837I_X12OrgJonesHospitalSample_ProducesValida
 	if cc, ok := deriveOut["_claim_contexts"]; ok {
 		data["_claim_contexts"] = cc
 	}
-	if bp, ok := deriveOut["_billing_provider"]; ok {
-		data["_billing_provider"] = bp
+	if bp, ok := deriveOut["_billing_providers"]; ok {
+		data["_billing_providers"] = bp
 	}
 
 	claimContexts, _ := data["_claim_contexts"].([]interface{})
@@ -887,7 +888,62 @@ func TestEDI837RealParserRoundtrip_837I_X12OrgJonesHospitalSample_ProducesValida
 		}
 	}
 
-	assembleAndValidate837Bundle(t, data, "message.fhirOrganization", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
+	// This real, official X12.org sample turns out to ALSO carry a genuine
+	// COB secondary payer (SBR*S*01*351630*STATE TEACHERS*****CI, a second,
+	// independent occurrence from Example 3a's own) -- found only by running
+	// the Playwright E2E suite after adding COB support, which caught a
+	// stale "Coverage: 1" bundle-count expectation there; confirmed here at
+	// the Go level too, a second real-sample proof of the same mapping.
+	insurance, _ := claim["insurance"].([]interface{})
+	if len(insurance) != 2 {
+		t.Fatalf("expected 2 insurance entries (primary Medicare + COB secondary STATE TEACHERS), got %d: %+v", len(insurance), insurance)
+	}
+
+	coverages, _ := message["fhirCoverages"].([]map[string]interface{})
+	if len(coverages) != 2 {
+		t.Fatalf("expected 2 Coverage resources (primary + COB secondary), got %d", len(coverages))
+	}
+	var secondaryCoverage map[string]interface{}
+	for _, c := range coverages {
+		if c["id"] == "coverage-756048Q-2" {
+			secondaryCoverage = c
+		}
+	}
+	if secondaryCoverage == nil {
+		t.Fatalf("expected a secondary Coverage with id coverage-756048Q-2, got: %+v", coverages)
+	}
+	payor := secondaryCoverage["payor"].([]interface{})[0].(map[string]interface{})
+	payorID := payor["identifier"].(map[string]interface{})
+	if payorID["value"] != "1135" {
+		t.Errorf("secondary Coverage.payor[0].identifier.value = %v, want 1135 (NM1*PR*2*STATE TEACHERS*...*PI*1135)", payorID["value"])
+	}
+	if payor["display"] != "STATE TEACHERS" {
+		t.Errorf("secondary Coverage.payor[0].display = %v, want STATE TEACHERS", payor["display"])
+	}
+
+	// The real, direct proof of the NPI-fallback fix: this sample's own
+	// attending physician (NM1*71*1*JONES*JOHN*J) carries NO NM108/09 at
+	// all -- only a following REF*1G*B99937 (Provider UPIN Number).
+	// Previously extractCareTeam's NM1-identificationCode-only check
+	// silently produced an EMPTY care team for exactly this real,
+	// non-fabricated case; now it falls back to the REF-carried identifier.
+	careTeam, _ := claim["careTeam"].([]interface{})
+	if len(careTeam) != 1 {
+		t.Fatalf("expected 1 careTeam entry (attending physician via REF*1G fallback, no NPI on NM1*71), got %d: %+v", len(careTeam), careTeam)
+	}
+	attending := careTeam[0].(map[string]interface{})
+	if attending["role"].(map[string]interface{})["coding"].([]interface{})[0].(map[string]interface{})["code"] != "attending" {
+		t.Errorf("careTeam[0].role = %+v, want attending", attending["role"])
+	}
+	attendingIdentifier := attending["provider"].(map[string]interface{})["identifier"].(map[string]interface{})
+	if attendingIdentifier["value"] != "B99937" {
+		t.Errorf("careTeam[0].provider.identifier.value = %v, want B99937 (REF*1G*B99937)", attendingIdentifier["value"])
+	}
+	if attendingIdentifier["system"] != "http://ezhealthkonnect.local/x12-ref-qualifier/1G" {
+		t.Errorf("careTeam[0].provider.identifier.system = %v, want the 1G-qualified fallback system, not the NPI system", attendingIdentifier["system"])
+	}
+
+	assembleAndValidate837Bundle(t, data, "message.fhirOrganizations", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -961,8 +1017,8 @@ func TestEDI837RealParserRoundtrip_837P_X12OrgExample3aCOBSample_ProducesValidat
 	if cc, ok := deriveOut["_claim_contexts"]; ok {
 		data["_claim_contexts"] = cc
 	}
-	if bp, ok := deriveOut["_billing_provider"]; ok {
-		data["_billing_provider"] = bp
+	if bp, ok := deriveOut["_billing_providers"]; ok {
+		data["_billing_providers"] = bp
 	}
 
 	claimContexts, _ := data["_claim_contexts"].([]interface{})
@@ -970,13 +1026,13 @@ func TestEDI837RealParserRoundtrip_837P_X12OrgExample3aCOBSample_ProducesValidat
 		t.Fatalf("expected 1 claim context, got %d: %+v", len(claimContexts), claimContexts)
 	}
 	ctx := claimContexts[0].(map[string]interface{})
-	patientInfo := ctx["patientInfo"].(map[string]interface{})
-	if patientInfo["relationshipFHIR"] != "child" {
-		t.Errorf("patientInfo.relationshipFHIR = %v, want child (PAT*19 in 2000C)", patientInfo["relationshipFHIR"])
+	patientInfo := ctx["patient_info"].(map[string]interface{})
+	if patientInfo["relationship_fhir"] != "child" {
+		t.Errorf("patient_info.relationship_fhir = %v, want child (PAT*19 in 2000C)", patientInfo["relationship_fhir"])
 	}
 	claimMap := ctx["claim"].(map[string]interface{})
-	if claimMap["facilityNpi"] != "1581234567" {
-		t.Errorf("claim.facilityNpi = %v, want 1581234567 (2310C Service Facility Location)", claimMap["facilityNpi"])
+	if claimMap["facility_npi"] != "1581234567" {
+		t.Errorf("claim.facility_npi = %v, want 1581234567 (2310C Service Facility Location)", claimMap["facility_npi"])
 	}
 
 	data = runFHIRBuild(t, "build_organization_fhir", organization837PBuildConfig(), data)
@@ -1039,10 +1095,44 @@ func TestEDI837RealParserRoundtrip_837P_X12OrgExample3aCOBSample_ProducesValidat
 	}
 
 	// 2320/2330A/2330B (secondary payer COB loop, SBR*S*01...NM1*IL...NM1*PR)
-	// must not have broken parsing of anything after it -- already implicitly
-	// proven by the assertions above succeeding, but the bundle must also
-	// still validate cleanly.
-	assembleAndValidate837Bundle(t, data, "message.fhirOrganization", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
+	// -- the direct proof of the COB mapping, now that it's implemented.
+	// CLM*26407789*79.04***11:B:1*Y*A*Y*I*P -> patient control number 26407789.
+	insurance, _ := claim["insurance"].([]interface{})
+	if len(insurance) != 2 {
+		t.Fatalf("expected 2 insurance entries (primary+secondary COB payer), got %d: %+v", len(insurance), insurance)
+	}
+	ins0 := insurance[0].(map[string]interface{})
+	if ins0["focal"] != true || ins0["coverage"].(map[string]interface{})["reference"] != "Coverage/coverage-26407789" {
+		t.Errorf("insurance[0] = %+v, want focal=true, coverage.reference=Coverage/coverage-26407789", ins0)
+	}
+	ins1 := insurance[1].(map[string]interface{})
+	if ins1["focal"] != false || ins1["coverage"].(map[string]interface{})["reference"] != "Coverage/coverage-26407789-2" {
+		t.Errorf("insurance[1] = %+v, want focal=false, coverage.reference=Coverage/coverage-26407789-2", ins1)
+	}
+
+	coverages, _ := message["fhirCoverages"].([]map[string]interface{})
+	if len(coverages) != 2 {
+		t.Fatalf("expected 2 Coverage resources (primary + COB secondary), got %d", len(coverages))
+	}
+	var secondaryCoverage map[string]interface{}
+	for _, c := range coverages {
+		if c["id"] == "coverage-26407789-2" {
+			secondaryCoverage = c
+		}
+	}
+	if secondaryCoverage == nil {
+		t.Fatalf("expected a secondary Coverage with id coverage-26407789-2, got: %+v", coverages)
+	}
+	payor := secondaryCoverage["payor"].([]interface{})[0].(map[string]interface{})
+	payorID := payor["identifier"].(map[string]interface{})
+	if payorID["value"] != "999996666" {
+		t.Errorf("secondary Coverage.payor[0].identifier.value = %v, want 999996666 (NM1*PR*2*KEY INSURANCE COMPANY*...*PI*999996666)", payorID["value"])
+	}
+	if payor["display"] != "KEY INSURANCE COMPANY" {
+		t.Errorf("secondary Coverage.payor[0].display = %v, want KEY INSURANCE COMPANY", payor["display"])
+	}
+
+	assembleAndValidate837Bundle(t, data, "message.fhirOrganizations", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
 }
 
 func TestEDI837RealParserRoundtrip_837P_X12OrgExample5AmbulanceSample_ProducesValidatingBundle(t *testing.T) {
@@ -1081,8 +1171,8 @@ func TestEDI837RealParserRoundtrip_837P_X12OrgExample5AmbulanceSample_ProducesVa
 	if cc, ok := deriveOut["_claim_contexts"]; ok {
 		data["_claim_contexts"] = cc
 	}
-	if bp, ok := deriveOut["_billing_provider"]; ok {
-		data["_billing_provider"] = bp
+	if bp, ok := deriveOut["_billing_providers"]; ok {
+		data["_billing_providers"] = bp
 	}
 
 	// This is the sample proving CR1 (Ambulance Certification), a segment
@@ -1095,8 +1185,8 @@ func TestEDI837RealParserRoundtrip_837P_X12OrgExample5AmbulanceSample_ProducesVa
 	}
 	ctx := claimContexts[0].(map[string]interface{})
 	claimMap := ctx["claim"].(map[string]interface{})
-	if _, hasFacility := claimMap["facilityNpi"]; hasFacility {
-		t.Errorf("claim.facilityNpi = %v, want absent (2310E/F in this sample carry no name/ID, only an address)", claimMap["facilityNpi"])
+	if _, hasFacility := claimMap["facility_npi"]; hasFacility {
+		t.Errorf("claim.facility_npi = %v, want absent (2310E/F in this sample carry no name/ID, only an address)", claimMap["facility_npi"])
 	}
 
 	data = runFHIRBuild(t, "build_organization_fhir", organization837PBuildConfig(), data)
@@ -1149,7 +1239,7 @@ func TestEDI837RealParserRoundtrip_837P_X12OrgExample5AmbulanceSample_ProducesVa
 		}
 	}
 
-	assembleAndValidate837Bundle(t, data, "message.fhirOrganization", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
+	assembleAndValidate837Bundle(t, data, "message.fhirOrganizations", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
 }
 
 func TestEDI837RealParserRoundtrip_837P_X12OrgExample9AnesthesiaSample_ProducesValidatingBundle(t *testing.T) {
@@ -1188,8 +1278,8 @@ func TestEDI837RealParserRoundtrip_837P_X12OrgExample9AnesthesiaSample_ProducesV
 	if cc, ok := deriveOut["_claim_contexts"]; ok {
 		data["_claim_contexts"] = cc
 	}
-	if bp, ok := deriveOut["_billing_provider"]; ok {
-		data["_billing_provider"] = bp
+	if bp, ok := deriveOut["_billing_providers"]; ok {
+		data["_billing_providers"] = bp
 	}
 
 	claimContexts, _ := data["_claim_contexts"].([]interface{})
@@ -1198,8 +1288,8 @@ func TestEDI837RealParserRoundtrip_837P_X12OrgExample9AnesthesiaSample_ProducesV
 	}
 	ctx := claimContexts[0].(map[string]interface{})
 	claimMap := ctx["claim"].(map[string]interface{})
-	if claimMap["facilityNpi"] != "432198765" {
-		t.Errorf("claim.facilityNpi = %v, want 432198765 (2310C, PROVIDER OP HOSP)", claimMap["facilityNpi"])
+	if claimMap["facility_npi"] != "432198765" {
+		t.Errorf("claim.facility_npi = %v, want 432198765 (2310C, PROVIDER OP HOSP)", claimMap["facility_npi"])
 	}
 
 	data = runFHIRBuild(t, "build_organization_fhir", organization837PBuildConfig(), data)
@@ -1248,7 +1338,7 @@ func TestEDI837RealParserRoundtrip_837P_X12OrgExample9AnesthesiaSample_ProducesV
 		t.Errorf("item[0]: quantity.value = %v, want 61 (anesthesia minutes, unit MJ)", qty["value"])
 	}
 
-	assembleAndValidate837Bundle(t, data, "message.fhirOrganization", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
+	assembleAndValidate837Bundle(t, data, "message.fhirOrganizations", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
 }
 
 func TestEDI837RealParserRoundtrip_837I_X12OrgExample2aAutoAccidentSample_ProducesValidatingBundle(t *testing.T) {
@@ -1287,8 +1377,8 @@ func TestEDI837RealParserRoundtrip_837I_X12OrgExample2aAutoAccidentSample_Produc
 	if cc, ok := deriveOut["_claim_contexts"]; ok {
 		data["_claim_contexts"] = cc
 	}
-	if bp, ok := deriveOut["_billing_provider"]; ok {
-		data["_billing_provider"] = bp
+	if bp, ok := deriveOut["_billing_providers"]; ok {
+		data["_billing_providers"] = bp
 	}
 
 	// PAT*21 -- an X12 relationship code this codebase's relationshipToFHIR
@@ -1300,14 +1390,14 @@ func TestEDI837RealParserRoundtrip_837I_X12OrgExample2aAutoAccidentSample_Produc
 		t.Fatalf("expected 1 claim context, got %d: %+v", len(claimContexts), claimContexts)
 	}
 	ctx := claimContexts[0].(map[string]interface{})
-	patientInfo := ctx["patientInfo"].(map[string]interface{})
-	if patientInfo["relationshipFHIR"] != "other" {
-		t.Errorf("patientInfo.relationshipFHIR = %v, want other (PAT*21 is not in relationshipToFHIR's map)", patientInfo["relationshipFHIR"])
+	patientInfo := ctx["patient_info"].(map[string]interface{})
+	if patientInfo["relationship_fhir"] != "other" {
+		t.Errorf("patient_info.relationship_fhir = %v, want other (PAT*21 is not in relationshipToFHIR's map)", patientInfo["relationship_fhir"])
 	}
 	// The patient (RON MEXICO, NM1*QC*1*MEXICO*RON) carries no identification
-	// code at all -- memberId must fall back to subscriberId-DEP1.
-	if patientInfo["memberId"] != "B999777791G-DEP1" {
-		t.Errorf("patientInfo.memberId = %v, want B999777791G-DEP1 (patient NM1 has no ID, falls back to subscriber+DEP suffix)", patientInfo["memberId"])
+	// code at all -- member_id must fall back to subscriberId-DEP1.
+	if patientInfo["member_id"] != "B999777791G-DEP1" {
+		t.Errorf("patient_info.member_id = %v, want B999777791G-DEP1 (patient NM1 has no ID, falls back to subscriber+DEP suffix)", patientInfo["member_id"])
 	}
 
 	data = runFHIRBuild(t, "build_organization_fhir", organization837IBuildConfig(), data)
@@ -1384,5 +1474,147 @@ func TestEDI837RealParserRoundtrip_837I_X12OrgExample2aAutoAccidentSample_Produc
 		}
 	}
 
-	assembleAndValidate837Bundle(t, data, "message.fhirOrganization", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
+	assembleAndValidate837Bundle(t, data, "message.fhirOrganizations", "message.fhirPatients", "message.fhirCoverages", "message.fhirClaims")
+}
+
+// raw837PMultiProviderSample -- self-authored (same convention as
+// raw837PSample: no real sample in edi/testdata/real_samples/ carries 2+
+// top-level 2000A billing-provider hierarchical levels) -- proves the REAL
+// text parser (not just a hand-built Go loops map, as
+// edi_837p_fhir_builder_test.go's own multi-provider test uses) correctly
+// produces an array under loops["2000A"] when a raw file genuinely repeats
+// the 2000A HL trigger. edi/loop_engine.go does not read HL02/HL03
+// semantically (confirmed by direct grep) -- loop matching is purely
+// schema/position-driven, so a second top-level HL*3**20*1 after the first
+// 2000A's own children are exhausted must correctly "pop back up" rather
+// than being absorbed as a 2000B repeat, the same triggerID mechanism that
+// already disambiguates 1000A/1000B's shared NM1 trigger.
+const raw837PMultiProviderSample = "ISA*00*          *00*          *ZZ*SENDER123      *ZZ*RECEIVER456    *260115*1200*^*00501*000000003*0*P*:~" +
+	"GS*HC*SENDER123*RECEIVER456*20260115*1200*1*X*005010X222A1~" +
+	"ST*837*0001*005010X222A1~" +
+	"BHT*0019*00*TX0001*20260115*1200*CH~" +
+	"NM1*41*2*ACME BILLING*****46*SUB001~" +
+	"NM1*40*2*PAYER1*****46*RECV001~" +
+	"HL*1**20*1~" +
+	"NM1*85*2*FIRST CLINIC*****XX*1111111111~" +
+	"HL*2*1*22*0~" +
+	"SBR*P*18**GROUPNAME*****CI~" +
+	"NM1*IL*1*ALPHA*ANNA****MI*SUB-A~" +
+	"DMG*D8*19750322*F~" +
+	"NM1*PR*2*PAYER1*****PI*PAYER001~" +
+	"CLM*CLM-A-001*100***11:B:1*Y*A*Y*Y~" +
+	"HI*ABK:Z0000~" +
+	"LX*1~" +
+	"SV1*HC:99213*100*UN*1***1~" +
+	"DTP*472*D8*20260115~" +
+	"HL*3**20*1~" +
+	"NM1*85*2*SECOND CLINIC*****XX*2222222222~" +
+	"HL*4*3*22*0~" +
+	"SBR*P*18**GROUPNAME*****CI~" +
+	"NM1*IL*1*BETA*BOB****MI*SUB-B~" +
+	"DMG*D8*19800101*M~" +
+	"NM1*PR*2*PAYER2*****PI*PAYER002~" +
+	"CLM*CLM-B-001*200***11:B:1*Y*A*Y*Y~" +
+	"HI*ABK:J0690~" +
+	"LX*1~" +
+	"SV1*HC:99214*200*UN*1***1~" +
+	"DTP*472*D8*20260116~" +
+	"SE*29*0001~" +
+	"GE*1*1~" +
+	"IEA*1*000000003~"
+
+func TestEDI837RealParserRoundtrip_837P_MultiBillingProvider_ProducesTwoOrganizations(t *testing.T) {
+	// This test originally found a REAL, pre-existing bug in the core EDI
+	// loop-matching engine (edi/loop_engine.go): 2000A (Billing Provider) and
+	// 2000B (Subscriber) share the identical trigger segment "HL", both
+	// declared repeat: ">1" in the schema, and matchLoops had no semantic
+	// awareness of HL03 (hierarchical level code) -- it matched purely on
+	// trigger-segment-ID equality within whatever loop list it was handed,
+	// so a second top-level "HL" (meant to start a NEW 2000A) was greedily
+	// consumed as an attempted EXTRA 2000B instance instead, corrupting the
+	// rest of the parse. Fixed generically, with zero new Go code: each
+	// HL-triggered loop tier (2000A/2000B/2000C, in both
+	// transactionSets/837{P,I}.json) now declares its own
+	// triggerDiscriminator on hierarchicalLevelCode ("20"/"22"/"23") --
+	// reusing the exact same mechanism already proven for 837's own
+	// provider-role loops (2310A-F), which was already general enough to
+	// solve this ancestor-vs-descendant ambiguity, not just same-tier
+	// sibling disambiguation.
+	initFHIRRegistrySvc(t)
+
+	loader, err := edi.NewX12SchemaLoader(realSchemaDirSvc(t))
+	if err != nil {
+		t.Fatalf("NewX12SchemaLoader: %v", err)
+	}
+	spec := loader.Spec()
+
+	result, err := edi.ParseTransactionSet(spec, raw837PMultiProviderSample)
+	if err != nil {
+		t.Fatalf("ParseTransactionSet(837P multi-provider): %v\nraw:\n%s", err, raw837PMultiProviderSample)
+	}
+	if result.TransactionSet != "837P" {
+		t.Fatalf("TransactionSet = %q, want 837P", result.TransactionSet)
+	}
+
+	// The direct proof: the real parser's own loops["2000A"] must be a
+	// 2-element array, not a single bare object (which is what a pre-fix
+	// first(loops["2000A"]) would have silently tolerated without error).
+	billingLevels, ok := result.Loops["2000A"].([]map[string]interface{})
+	if !ok || len(billingLevels) != 2 {
+		t.Fatalf("expected real parser to produce 2 top-level 2000A entries, got %T len=%v", result.Loops["2000A"], billingLevels)
+	}
+
+	data := map[string]interface{}{
+		"parsedEDI": map[string]interface{}{
+			"transactionSet": result.TransactionSet,
+			"loops":          result.Loops,
+			"header":         result.Header,
+			"interchange":    result.Interchange,
+		},
+	}
+
+	deriveResult := runScriptSvc(t, "derive_837p_claim_contexts", derive837PClaimContextsScript, data)
+	deriveOut := svcStepOutput(t, deriveResult, "derive_837p_claim_contexts")
+	for k, v := range deriveResult {
+		data[k] = v
+	}
+	svcInjectStepOutput(data, "derive_837p_claim_contexts", deriveOut)
+
+	billingProviders, _ := deriveOut["_billing_providers"].([]interface{})
+	if len(billingProviders) != 2 {
+		t.Fatalf("expected 2 billing providers from the derive script, got %d: %+v", len(billingProviders), billingProviders)
+	}
+	claimContexts, _ := deriveOut["_claim_contexts"].([]interface{})
+	if len(claimContexts) != 2 {
+		t.Fatalf("expected 2 claim contexts (one per provider's own subscriber), got %d", len(claimContexts))
+	}
+
+	data = runFHIRBuild(t, "build_organization_fhir", organization837PBuildConfig(), data)
+	data = runFHIRBuild(t, "build_claim_fhir", claim837PBuildConfig(), data)
+
+	message := data["message"].(map[string]interface{})
+	organizations, _ := message["fhirOrganizations"].([]map[string]interface{})
+	if len(organizations) != 2 {
+		t.Fatalf("expected 2 Organization resources, got %d", len(organizations))
+	}
+	orgIDs := map[string]bool{}
+	for _, o := range organizations {
+		orgIDs[fmt.Sprintf("%v", o["id"])] = true
+	}
+	if !orgIDs["organization-billing-1111111111"] || !orgIDs["organization-billing-2222222222"] {
+		t.Errorf("expected both NPI-derived Organization ids, got %+v", orgIDs)
+	}
+
+	claims, _ := message["fhirClaims"].([]map[string]interface{})
+	if len(claims) != 2 {
+		t.Fatalf("expected 2 Claim resources, got %d", len(claims))
+	}
+	seenRefs := map[string]bool{}
+	for _, c := range claims {
+		provider, _ := c["provider"].(map[string]interface{})
+		seenRefs[fmt.Sprintf("%v", provider["reference"])] = true
+	}
+	if !seenRefs["Organization/organization-billing-1111111111"] || !seenRefs["Organization/organization-billing-2222222222"] {
+		t.Errorf("expected each claim to reference its OWN billing provider, got refs: %+v", seenRefs)
+	}
 }

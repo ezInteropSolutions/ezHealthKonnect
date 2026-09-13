@@ -1,0 +1,16 @@
+{
+  "id": "INS",
+  "name": "Insured Benefit",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "yesNoConditionResponseCode", "dataType": "ID" },
+    { "pos": "02", "key": "individualRelationshipCode", "dataType": "ID" },
+    { "pos": "03", "key": "maintenanceTypeCode", "dataType": "ID" },
+    { "pos": "04", "key": "maintenanceReasonCode", "dataType": "ID" },
+    { "pos": "05", "key": "benefitStatusCode", "dataType": "ID" }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/INS) — X12 005010 INS segment element reference. New for Phase 3 (270/271), used at 2100C/2100D to carry INS01 (Y=subscriber is the insured / N=this is a dependent) and INS02 (Individual Relationship Code — same code set PAT02/SBR02 already use elsewhere in this schema library, e.g. '18'=Self, '01'=Spouse, '19'=Child). INS03-05 (maintenance type/reason, benefit status) modeled as flat elements since they're situational, single-occurrence, no composite complexity — INS06 (Medicare Status composite) and INS10 (Handicapped Indicator) deliberately not modeled (core-fields-only, matching this project's own established 'core fields, not exhaustive' precedent from 835/837)."
+  ]
+}

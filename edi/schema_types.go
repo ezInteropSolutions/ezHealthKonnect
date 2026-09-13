@@ -155,6 +155,33 @@ type X12LoopDef struct {
 	// it. See matchLoops' own doc comment for the two-pass matching
 	// algorithm this enables.
 	TriggerDiscriminator *X12LoopTriggerDiscriminator `json:"triggerDiscriminator,omitempty"`
+
+	// Wrapper marks this loop as WRAPPED: a single Start segment (e.g. "LS")
+	// written/matched ONCE before the FULL repeating set of this loop's own
+	// instances (not once per instance, unlike SegmentIDs/TrailerSegmentIDs),
+	// and a single End segment (e.g. "LE") once after the last instance —
+	// X12's own generic "Loop Header"/"Loop Trailer" bracket, used where a
+	// loop needs an explicit boundary marker its own trigger segment alone
+	// can't provide (271's own loop 2120, Benefit Related Entity, is the
+	// motivating case: NM1-triggered, repeat up to 23, needing LS/LE to mark
+	// where the WHOLE set starts/ends since NM1 alone is already a trigger
+	// shared by other sibling loops at the same nesting level). Nil for every
+	// other loop in this schema — this is a narrow, opt-in mechanism, not a
+	// replacement for TriggerDiscriminator/TrailerSegmentIDs, which solve
+	// different problems (sibling disambiguation, per-instance trailing
+	// segments) at the SAME structural level SegmentIDs already covers.
+	Wrapper *X12LoopWrapperDef `json:"wrapper,omitempty"`
+}
+
+// X12LoopWrapperDef names the Start/End segment IDs bracketing one loop's
+// WHOLE repeating instance set — see X12LoopDef.Wrapper's own doc comment.
+// Both IDs must already exist in the shared segment library (LS/LE are
+// generic, content-free "loop header"/"loop trailer" segments — LS01/LE01
+// simply echo the wrapped loop's own numeric ID, e.g. "LS*2120~"/"LE*2120~" —
+// modeled the same way any other shared segment is, no special-casing here).
+type X12LoopWrapperDef struct {
+	Start string `json:"start"` // e.g. "LS"
+	End   string `json:"end"`   // e.g. "LE"
 }
 
 // X12LoopTriggerDiscriminator names one element (by its own canonical Key,

@@ -24,7 +24,9 @@ services:
 
   # MinIO — S3-compatible object storage for raw messages, parsed content, and logs
   minio:
-    image: minio/minio:latest
+    # Docker Hub's minio/minio now requires authentication to pull (MinIO restricted
+    # anonymous access in 2025) — quay.io/minio/minio is the same official image, still public.
+    image: quay.io/minio/minio:latest
     container_name: ezhealthkonnect-minio
     restart: unless-stopped
     environment:

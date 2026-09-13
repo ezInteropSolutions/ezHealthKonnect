@@ -23,6 +23,7 @@
       "name": "Billing Provider Hierarchical Level",
       "repeat": ">1",
       "segmentIds": ["HL", "PRV", "CUR"],
+      "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "20" },
       "loops": [
         {
           "id": "2010AA",
@@ -47,6 +48,7 @@
           "name": "Subscriber Hierarchical Level",
           "repeat": ">1",
           "segmentIds": ["HL", "SBR", "PAT"],
+          "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "22" },
           "loops": [
             {
               "id": "2010BA",
@@ -66,6 +68,7 @@
               "name": "Patient Hierarchical Level",
               "repeat": ">1",
               "segmentIds": ["HL", "PAT"],
+              "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "23" },
               "loops": [
                 {
                   "id": "2010CA",

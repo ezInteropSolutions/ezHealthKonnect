@@ -60,7 +60,11 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // `req.body &&` check silently skipped forwarding any body at all — found while
 // load-testing that endpoint (2026-07): every request reached Go with an empty
 // body ("cda: empty document") despite the client sending real XML.
-app.use(express.raw({ type: ['application/xml', 'text/xml', 'application/octet-stream'], limit: '10mb' }));
+// application/edi-x12 and text/plain added for the synchronous eligibility
+// endpoint (/api/eligibility/:interfaceId/check), whose raw 270 X12 request
+// body is neither JSON nor form-encoded and would otherwise hit the exact
+// same empty-body bug.
+app.use(express.raw({ type: ['application/xml', 'text/xml', 'application/octet-stream', 'application/edi-x12', 'text/plain'], limit: '10mb' }));
 // Monitor large requests for debugging
 app.use((req, res, next) => {
     if (req.headers['content-length']) {
@@ -417,6 +421,7 @@ app.use('/api/connectivity', forwardToGo); // Connector types + interface connec
 app.use('/api/zsegments',   forwardToGo); // Enterprise Z-segment mapping configuration
 app.use('/api/cda', forwardToGo);          // CDA schema browser + mapping delta APIs
 app.use('/api/edi', forwardToGo);          // EDI X12 schema browser API
+app.use('/api/eligibility', forwardToGo);  // Synchronous 270/271 eligibility check
 // NOTE: /api/ai routes are registered after session middleware below (require req.session.user)
 app.use('/api/code-templates', forwardToGo); // Code Template Libraries (JS function injection into script steps)
 // /api/git is registered below (after session middleware, with requireAuth)

@@ -1,0 +1,12 @@
+{
+  "id": "LE",
+  "name": "Loop Trailer",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    { "pos": "01", "key": "loopIdentifierCode", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "X12's own generic Loop Trailer segment (DE447 Loop Identifier Code) — the closing half of the LS/LE bracket. See LS.json's own sourceRefs note for the shared rationale and why the engine never reads this file's Elements directly."
+  ]
+}

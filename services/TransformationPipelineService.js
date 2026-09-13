@@ -254,63 +254,59 @@ class TransformationPipelineService {
      * Add a connector step (inbound or outbound) to the pipeline
      */
     async addConnectorStep(sequelize, t, pipelineId, direction, connectivityType, wizardConfig = {}) {
-        const SOURCE_TYPE_MAP = {
-            // Legacy short names (from _connectorTypeToLegacy)
-            'tcp':      { typeName: 'tcp_mllp',          name: 'TCP/MLLP Inbound' },
-            'http':     { typeName: 'http_rest',          name: 'HTTP REST Inbound' },
-            'fhir':     { typeName: 'http_fhir_inbound',  name: 'HTTP FHIR Receiver' },
-            'file':     { typeName: 'file_listener',      name: 'File Listener' },
-            'database': { typeName: 'postgresql_inbound', name: 'Database Inbound' },
-            // Full type names (when wizard passes the connector type directly)
-            'http_fhir_inbound':  { typeName: 'http_fhir_inbound',  name: 'HTTP FHIR Receiver' },
-            'http_rest_inbound':  { typeName: 'http_rest_inbound',  name: 'HTTP REST Inbound' },
-            'http_rest':          { typeName: 'http_rest',          name: 'HTTP REST Inbound' },
-            'tcp_mllp_inbound':   { typeName: 'tcp_mllp_inbound',  name: 'TCP/MLLP Inbound' },
-            'tcp_mllp':           { typeName: 'tcp_mllp',          name: 'TCP/MLLP Inbound' },
-            'file_listener':      { typeName: 'file_listener',     name: 'File Listener' },
+        if (!connectivityType) return; // no source/target connector configured for this interface
+
+        // Legacy short-name aliases predating the modern ConnectorConfigBuilder
+        // UI, which now sends real connector type names directly. This is the
+        // ONLY hardcoded mapping left — every real type name resolves
+        // dynamically below instead of a second, parallel hardcoded allowlist,
+        // which is what previously left as2_inbound/as2_outbound (and most
+        // database/warehouse connector types — mongodb, oracle, snowflake,
+        // databricks, azure_blob, kafka, redis, sftp, gcs...) silently
+        // creating NO connector step at all when built via this generic
+        // wizard flow (they only ever worked via a template's own
+        // pre-built pipeline, which bypasses this function entirely).
+        const LEGACY_ALIASES = {
+            inbound:  { tcp: 'tcp_mllp', http: 'http_rest', fhir: 'http_fhir_inbound', file: 'file_listener', database: 'postgresql_inbound' },
+            outbound: { http: 'http_outbound', fhir: 'http_outbound', tcp: 'tcp_mllp_outbound', file: 'file_writer', database: 'postgresql_outbound' },
         };
+        const typeName = (LEGACY_ALIASES[direction] || {})[connectivityType] || connectivityType;
 
-        const TARGET_TYPE_MAP = {
-            // Legacy short names
-            'http':     { typeName: 'http_outbound',        name: 'HTTP Outbound' },
-            'fhir':     { typeName: 'http_outbound',        name: 'FHIR Outbound' },
-            'tcp':      { typeName: 'tcp_mllp_outbound',    name: 'TCP/MLLP Outbound' },
-            'file':     { typeName: 'file_writer',          name: 'File Writer' },
-            'database': { typeName: 'postgresql_outbound',  name: 'Database Outbound' },
-            // Full type names (when wizard passes connectorType directly from ConnectorConfigBuilder)
-            'http_outbound':        { typeName: 'http_outbound',        name: 'HTTP Outbound' },
-            'http_fhir_outbound':   { typeName: 'http_fhir_outbound',   name: 'FHIR HTTP Outbound' },
-            'fhir_r4_outbound':     { typeName: 'fhir_r4_outbound',     name: 'FHIR R4 Outbound' },
-            'tcp_mllp_outbound':    { typeName: 'tcp_mllp_outbound',    name: 'TCP/MLLP Outbound' },
-            'file_writer':          { typeName: 'file_writer',          name: 'File Writer' },
-            'postgresql_outbound':  { typeName: 'postgresql_outbound',  name: 'PostgreSQL Outbound' },
-            'mysql_outbound':       { typeName: 'mysql_outbound',       name: 'MySQL Outbound' },
-            'mongodb_outbound':     { typeName: 'mongodb_outbound',     name: 'MongoDB Outbound' },
-            'sqlserver_outbound':   { typeName: 'sqlserver_outbound',   name: 'SQL Server Outbound' },
-            'kafka_outbound':       { typeName: 'kafka_outbound',       name: 'Kafka Outbound' },
-            'rabbitmq_outbound':    { typeName: 'rabbitmq_outbound',    name: 'RabbitMQ Outbound' },
-            'aws_s3_outbound':      { typeName: 'aws_s3_outbound',      name: 'AWS S3 Outbound' },
-            'azure_blob_outbound':  { typeName: 'azure_blob_outbound',  name: 'Azure Blob Outbound' },
-            'sftp_outbound':        { typeName: 'sftp_outbound',        name: 'SFTP Outbound' },
-            'ftp_outbound':         { typeName: 'ftp_outbound',         name: 'FTP Outbound' },
-        };
-
-        const typeMap  = direction === 'inbound' ? SOURCE_TYPE_MAP : TARGET_TYPE_MAP;
-        const mapping  = typeMap[connectivityType];
-
-        if (!mapping) {
-            console.log(`⚠️ No connector mapping for ${direction} type: ${connectivityType}, skipping`);
-            return;
+        // Best-effort human-readable step name from connectivity_types (the
+        // real connector catalog) — never blocks step creation on this
+        // lookup succeeding. A type with no catalog row (an older bare
+        // alias like tcp_mllp_inbound alongside the catalog's own tcp_mllp,
+        // or a brand-new type whose migration hasn't landed in THIS
+        // database yet) still gets a working step, just with a generated
+        // name instead of the curated one.
+        let displayName = typeName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+        try {
+            const rows = await sequelize.query(
+                `SELECT display_name FROM connectivity_types WHERE type_name = $1 AND category = $2 LIMIT 1`,
+                { bind: [typeName, direction], type: sequelize.QueryTypes.SELECT, transaction: t }
+            );
+            if (rows.length && rows[0].display_name) displayName = rows[0].display_name;
+        } catch (err) {
+            console.warn(`⚠️ connectivity_types lookup failed for ${typeName} (non-fatal, using generated name):`, err.message);
         }
 
         const stepType = `connector.${direction}`;
         const sequence = direction === 'inbound' ? 5 : 295;
-        const normalizedConfig = this.normalizeWizardConfig(wizardConfig, mapping.typeName);
+        const normalizedConfig = this.normalizeWizardConfig(wizardConfig, typeName);
 
-        const config = { connectorType: mapping.typeName, config: normalizedConfig };
+        const config = { connectorType: typeName, config: normalizedConfig };
         if (direction === 'outbound') {
-            config.contentField = 'fhirBundle';
-            config.contentType  = 'application/fhir+json';
+            // EDI/AS2 outbound connectors deliver a built X12 document, never
+            // a FHIR bundle — the FHIR default below predates these types and
+            // would otherwise silently point payload extraction at a field
+            // that's never populated for an EDI-only interface.
+            if (typeName === 'edi_x12_outbound' || typeName === 'as2_outbound') {
+                config.contentField = 'ediX12';
+                config.contentType  = 'application/edi-x12';
+            } else {
+                config.contentField = 'fhirBundle';
+                config.contentType  = 'application/fhir+json';
+            }
         } else {
             config.timeoutMs = 30000;
         }
@@ -325,11 +321,11 @@ class TransformationPipelineService {
                 enabled
             ) VALUES ($1, $2, $3, $4, $5, true)
         `, {
-            bind: [pipelineId, mapping.name, stepType, sequence, JSON.stringify(config)],
+            bind: [pipelineId, displayName, stepType, sequence, JSON.stringify(config)],
             transaction: t
         });
 
-        console.log(`🔌 Added ${direction} connector step: ${mapping.name} (seq ${sequence}, type: ${mapping.typeName})`);
+        console.log(`🔌 Added ${direction} connector step: ${displayName} (seq ${sequence}, type: ${typeName})`);
     }
 
     /**

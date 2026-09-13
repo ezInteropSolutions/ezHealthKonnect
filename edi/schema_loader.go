@@ -383,6 +383,11 @@ func validateSegmentReferences(txSet *X12TransactionSetDef, segments map[string]
 			if err := checkIDs(loop.TrailerSegmentIDs, fmt.Sprintf("loop %q trailer", loop.ID)); err != nil {
 				return err
 			}
+			if loop.Wrapper != nil {
+				if err := checkIDs([]string{loop.Wrapper.Start, loop.Wrapper.End}, fmt.Sprintf("loop %q wrapper", loop.ID)); err != nil {
+					return err
+				}
+			}
 			if err := walkLoops(loop.Loops); err != nil {
 				return err
 			}

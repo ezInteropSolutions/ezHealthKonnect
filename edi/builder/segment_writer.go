@@ -70,6 +70,24 @@ func padOrTruncate(s string, length int) string {
 // writeSegmentSequence builds one segment per entry in segmentIDs whose data
 // is present in data (keyed by segment ID) — required segments missing from
 // data are an error, situational ones are simply skipped.
+//
+// Whether a given segID writes as ONE instance or repeats is decided by the
+// ACTUAL SHAPE of data[segID] (array vs. bare object), never by segDef's own
+// MaxUse. MaxUse is a spec-wide property of one SHARED segment definition
+// (NM1/DTP/REF/HI/... are each authored once and referenced from many loops
+// with different real per-loop cardinality) — it answers "can this segment
+// ever repeat somewhere in the spec", which is also exactly why the read
+// direction needs it >1 for trigger-disambiguation (see matchSegmentSequence's
+// own triggerID parameter), NOT "does it repeat in THIS loop instance".
+// Gating on MaxUse here previously meant any segID with a spec-wide MaxUse of
+// ">1" (e.g. NM1) silently produced ZERO output whenever a caller supplied it
+// as a bare object for a loop where it only ever occurs once (1000A, 1000B,
+// 2010AA, 2010BA, 2010BB, 2330A, 2330B all hit this for 837I) — toInterfaceSlice
+// returned nil for a non-array value, so the "repeat" loop below simply never
+// ran, with no error. Branching on the data's own shape instead — the same
+// flexible, data-driven pattern toInterfaceSlice/writeLoops already use for
+// loop instances — handles both a bare object (one instance) and a real array
+// (N instances) correctly regardless of the segment's own global MaxUse.
 func (w *buildWalker) writeSegmentSequence(segmentIDs []string, data map[string]interface{}) ([]string, error) {
 	var out []string
 	for _, segID := range segmentIDs {
@@ -86,8 +104,8 @@ func (w *buildWalker) writeSegmentSequence(segmentIDs []string, data map[string]
 			continue
 		}
 
-		if segDef.RepeatsMultiple() {
-			for _, inst := range toInterfaceSlice(value) {
+		if arr := toInterfaceSlice(value); arr != nil {
+			for _, inst := range arr {
 				instMap, ok := inst.(map[string]interface{})
 				if !ok {
 					return nil, fmt.Errorf("segment %q repeat instance must be an object", segID)
@@ -211,6 +229,15 @@ func (w *buildWalker) writeLoops(loops []*edi.X12LoopDef, data map[string]interf
 			continue
 		}
 
+		if loop.Wrapper != nil {
+			segs, err := w.writeWrappedLoop(loop, value)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, segs...)
+			continue
+		}
+
 		if loop.RepeatsMultiple() {
 			for _, inst := range toInterfaceSlice(value) {
 				instMap, ok := inst.(map[string]interface{})
@@ -235,6 +262,38 @@ func (w *buildWalker) writeLoops(loops []*edi.X12LoopDef, data map[string]interf
 			out = append(out, segs...)
 		}
 	}
+	return out, nil
+}
+
+// writeWrappedLoop is writeLoops' own mirror of edi/loop_engine.go's
+// matchWrappedLoop: one Start segment (e.g. "LS"), every instance found in
+// value (always an array — a Wrapper loop's whole point is bracketing a
+// repeating set), then one End segment (e.g. "LE"). LS01/LE01 are pure
+// structural echoes of loop's own numeric ID (X12's own boilerplate, not
+// caller-supplied business data — see X12LoopWrapperDef's own doc comment),
+// so they're synthesized directly here rather than round-tripped through
+// writeSegmentInstance/a shared-library segment def, mirroring how the
+// parse direction discards the identical, fully-derivable value instead of
+// retaining it.
+func (w *buildWalker) writeWrappedLoop(loop *edi.X12LoopDef, value interface{}) ([]string, error) {
+	arr := toInterfaceSlice(value)
+	if arr == nil {
+		return nil, fmt.Errorf("loop %q (wrapper) data must be an array", loop.ID)
+	}
+
+	out := []string{loop.Wrapper.Start + w.delimiters.Element + loop.ID}
+	for _, inst := range arr {
+		instMap, ok := inst.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("loop %q repeat instance must be an object", loop.ID)
+		}
+		segs, err := w.writeLoopInstance(loop, instMap)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, segs...)
+	}
+	out = append(out, loop.Wrapper.End+w.delimiters.Element+loop.ID)
 	return out, nil
 }
 
