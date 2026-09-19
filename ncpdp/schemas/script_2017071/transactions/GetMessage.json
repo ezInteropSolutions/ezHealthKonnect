@@ -1,0 +1,10 @@
+{
+  "key": "GetMessage",
+  "name": "Get Message (Mailbox Poll)",
+  "fields": [],
+  "groups": [],
+  "elementOrder": [],
+  "sourceRefs": [
+    "usnistgov/tcamt-2 tcamt-lite-controller/SCRIPT_XML_10_6.xsd (<xs:element name=\"GetMessage\"><xs:complexType><xs:sequence><xs:element name=\"GetMessage\" type=\"xs:anyType\"/></xs:sequence></xs:complexType></xs:element>) -- the SCRIPT SOAP/mailbox transport's own message-pull trigger, confirmed to carry no real structured content of its own (a bare `xs:anyType` placeholder) rather than being an unmodeled gap -- an empty transaction body is the honest, sourced shape here, not a simplification of something richer."
+  ]
+}

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic fixture: EVERY one of the ten structured-SIG component slots appears
+  here under an element name this release does NOT recognize, and each carries a
+  <Text> and a coded <Code>/<Qualifier> so that "absent, with no code and no
+  text" is a real assertion rather than an assertion about an empty element.
+
+  Nine of these names were recognized at the previous release and were removed
+  because no committed artifact carries a field label denoting the component
+  they populated; Frequency is the tenth removed name and also lands on the
+  administration-timing slot. DoseDeliveryMethodModifier is the one name that
+  was never recognized: the dose-delivery-method slot keeps its grounded name,
+  so a neighbouring field label from the same published inventory is used to
+  give that slot an unrecognized-name case too.
+
+  Nothing here may decode: the whole <Sig> must read absent in all ten slots,
+  hasStructuredData must be false, and no lossy warning may fire.
+  Fully synthetic, no real PHI.
+-->
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <MessageID>SYNTH-MSG-SIG-05</MessageID>
+  </Header>
+  <Body>
+    <NewRx>
+      <MedicationPrescribed>
+        <DrugDescription>Synthetic Tablet 250 MG Oral Tablet</DrugDescription>
+        <Sig>
+          <SigText>Take 1 tablet by mouth twice daily for 10 days for infection.</SigText>
+          <Instruction>
+            <DoseDeliveryMethodModifier>
+              <Text>Take</Text>
+              <Code>419652001</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </DoseDeliveryMethodModifier>
+            <Dose>
+              <Text>1</Text>
+              <Code>C48542</Code>
+              <Qualifier>NCI</Qualifier>
+            </Dose>
+            <DoseUnitOfMeasure>
+              <Text>tablet</Text>
+              <Code>C48542</Code>
+              <Qualifier>NCI</Qualifier>
+            </DoseUnitOfMeasure>
+            <RouteOfAdministration>
+              <Text>by mouth</Text>
+              <Code>26643006</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </RouteOfAdministration>
+            <SiteOfAdministration>
+              <Text>oral cavity</Text>
+              <Code>123851003</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </SiteOfAdministration>
+            <TimingAndDuration>
+              <Text>twice daily</Text>
+              <Code>396125000</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </TimingAndDuration>
+            <Frequency>
+              <Text>twice daily</Text>
+              <Code>396125000</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </Frequency>
+            <Duration>
+              <Text>10 days</Text>
+              <Code>258703001</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </Duration>
+            <Vehicle>
+              <Text>water</Text>
+              <Code>11713004</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </Vehicle>
+            <Indication>
+              <Text>for infection</Text>
+              <Code>40733004</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </Indication>
+            <MaximumDoseRestriction>
+              <Text>4 per day</Text>
+              <Code>396125000</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </MaximumDoseRestriction>
+          </Instruction>
+        </Sig>
+      </MedicationPrescribed>
+    </NewRx>
+  </Body>
+</Message>

@@ -1009,6 +1009,10 @@ var buildStepContentFields = map[string]buildStepContentField{
 	// which NormalizeStepOutput's camelCase->snake_case conversion turns into
 	// "edi_x12" by the time this map is consulted.
 	"edi.build": {field: "edi_x12", isObject: false, contentType: "application/edi-x12"},
+	// ncpdptelecom.build's own default outputField is "ncpdpTelecom"
+	// (ncpdptelecom_build_executor.go), which becomes "ncpdp_telecom" after
+	// the same camelCase->snake_case conversion.
+	"ncpdptelecom.build": {field: "ncpdp_telecom", isObject: false, contentType: "application/x-ncpdp-telecom-d0"},
 }
 
 // extractBuildStepPayloadEntry is extractOutboundPayloadEntry's counterpart

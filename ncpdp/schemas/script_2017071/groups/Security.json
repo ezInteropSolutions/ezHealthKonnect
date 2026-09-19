@@ -1,0 +1,12 @@
+{
+  "key": "Security",
+  "xmlElement": "Security",
+  "name": "Header Security",
+  "groups": [
+    { "key": "sender", "groupKey": "TertiaryIdentificationHolder", "xmlElement": "Sender", "required": false, "repeatable": false },
+    { "key": "receiver", "groupKey": "TertiaryIdentificationHolder", "xmlElement": "Receiver", "required": false, "repeatable": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Header/Security)"
+  ]
+}

@@ -1,0 +1,21 @@
+<Message DatatypesVersion="20170715" TransportVersion="20170715" TransactionDomain="SCRIPT" TransactionVersion="20170715" StructuresVersion="20170715" ECLVersion="20170715">
+    <Header>
+        <To Qualifier="D">6128890368017</To>
+        <From Qualifier="P">6557744</From>
+        <MessageID>app-000000000002</MessageID>
+        <RelatesToMessageID>app-000000000001</RelatesToMessageID>
+        <SentTime>2026-09-14T10:05:00Z</SentTime>
+    </Header>
+    <Body>
+        <CancelRxResponse>
+            <RequestReferenceNumber>REQ-0001</RequestReferenceNumber>
+            <Response>
+                <Denied>
+                    <ReasonCode>AB</ReasonCode>
+                    <DenialReason>Already dispensed</DenialReason>
+                    <Note>Patient already picked up medication</Note>
+                </Denied>
+            </Response>
+        </CancelRxResponse>
+    </Body>
+</Message>

@@ -17,6 +17,7 @@ import (
 	"fmt"
 
 	cdaSchema "ezhealthkonnect/cda"
+	"ezhealthkonnect/xmlpath"
 
 	"github.com/beevik/etree"
 )
@@ -570,7 +571,7 @@ func writePatientHeader(root *etree.Element, header map[string]interface{}) {
 	// after both have run, rather than trying to choreograph two unrelated
 	// lists into one combined order.
 	if patient != nil {
-		reorderChildrenByTag(patient, []string{
+		xmlpath.ReorderChildrenByTag(patient, []string{
 			// etree.CreateElement("sdtc:deceasedInd") splits the namespace
 			// prefix into Element.Space, leaving Element.Tag as the bare
 			// local name ("deceasedInd") — reorderChildrenByTag ranks by
@@ -623,7 +624,7 @@ func writeAuthorHeader(root *etree.Element, header map[string]interface{}, opts 
 	// the end rather than restructuring the write calls themselves.
 	// representedOrganization deliberately isn't listed — it already comes
 	// last by construction and belongs last per schema too.
-	reorderChildrenByTag(assignedAuthor, []string{"id", "code", "addr", "telecom", "assignedPerson", "assignedAuthoringDevice"})
+	xmlpath.ReorderChildrenByTag(assignedAuthor, []string{"id", "code", "addr", "telecom", "assignedPerson", "assignedAuthoringDevice"})
 }
 
 // writeNPI writes a fixed-root/data-driven-extension <id> at xpath — the
@@ -631,7 +632,7 @@ func writeAuthorHeader(root *etree.Element, header map[string]interface{}, opts 
 // (a bare NPI-rooted id with no extension when npi data is absent) to match
 // the pre-refactor behavior exactly.
 func writeNPI(root *etree.Element, xpath string, npi interface{}) {
-	id := WriteAtXPath(root, xpath, "")
+	id := xmlpath.WriteAtXPath(root, xpath, "")
 	id.CreateAttr("root", npiOID)
 	if v, ok := stringValue(npi); ok {
 		id.CreateAttr("extension", v)

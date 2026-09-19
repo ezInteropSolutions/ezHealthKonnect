@@ -1,0 +1,16 @@
+<Message DatatypesVersion="20170715" TransportVersion="20170715" TransactionDomain="SCRIPT" TransactionVersion="20170715" StructuresVersion="20170715" ECLVersion="20170715">
+    <Header>
+        <To Qualifier="P">6557744</To>
+        <From Qualifier="D">6128890368017</From>
+        <MessageID>app-000000000009</MessageID>
+        <RelatesToMessageID>app-000000000001</RelatesToMessageID>
+        <SentTime>2026-09-19T13:05:00Z</SentTime>
+    </Header>
+    <Body>
+        <Error>
+            <Code>900</Code>
+            <DescriptionCode>001</DescriptionCode>
+            <Description>Unable to process transaction: unknown patient</Description>
+        </Error>
+    </Body>
+</Message>

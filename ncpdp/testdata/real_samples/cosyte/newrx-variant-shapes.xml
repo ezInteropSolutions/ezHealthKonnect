@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <MessageID>SYNTH-MSG-0006</MessageID>
+  </Header>
+  <Body>
+    <NewRx>
+      <Patient>
+        <HumanPatient>
+          <Name>
+            <LastName>Variant</LastName>
+          </Name>
+          <Gender>U</Gender>
+          <DateOfBirth>1980-01-01</DateOfBirth>
+        </HumanPatient>
+      </Patient>
+      <Prescriber>
+        <NonVeterinarian>
+          <Name>
+            <LastName>Variantmd</LastName>
+          </Name>
+        </NonVeterinarian>
+      </Prescriber>
+      <MedicationPrescribed>
+        <DrugDescription>Synthetic Variant 5 MG Tablet</DrugDescription>
+        <DrugCoded>
+          <DrugDBCode Qualifier="SCT">387467008</DrugDBCode>
+        </DrugCoded>
+        <Quantity>
+          <Value>14</Value>
+          <QuantityUnitOfMeasure>each</QuantityUnitOfMeasure>
+        </Quantity>
+        <Refills>
+          <Value>2</Value>
+        </Refills>
+        <WrittenDate>2026-03-01</WrittenDate>
+      </MedicationPrescribed>
+    </NewRx>
+  </Body>
+</Message>

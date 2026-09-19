@@ -1,0 +1,32 @@
+<Message DatatypesVersion="20170715" TransportVersion="20170715" TransactionDomain="SCRIPT" TransactionVersion="20170715" StructuresVersion="20170715" ECLVersion="20170715">
+    <Header>
+        <To Qualifier="P">6557744</To>
+        <From Qualifier="D">6128890368017</From>
+        <MessageID>app-000000000004</MessageID>
+        <RelatesToMessageID>app-000000000003</RelatesToMessageID>
+        <SentTime>2026-09-14T11:10:00Z</SentTime>
+    </Header>
+    <Body>
+        <RxChangeResponse>
+            <RequestReferenceNumber>REQ-0002</RequestReferenceNumber>
+            <Response>
+                <ApprovedWithChanges>
+                    <ReasonCode>G</ReasonCode>
+                    <Note>Approved generic substitution</Note>
+                </ApprovedWithChanges>
+            </Response>
+            <MedicationPrescribed>
+                <DrugDescription>Ondansetron ODT 4 mg</DrugDescription>
+                <Quantity>
+                    <Value>30</Value>
+                </Quantity>
+                <WrittenDate>
+                    <Date>2026-09-14</Date>
+                </WrittenDate>
+                <Sig>
+                    <SigText>1 tablet orally every 8 hours as needed</SigText>
+                </Sig>
+            </MedicationPrescribed>
+        </RxChangeResponse>
+    </Body>
+</Message>

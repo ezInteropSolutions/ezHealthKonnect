@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <MessageID>SYNTH-MSG-SIG-04</MessageID>
+  </Header>
+  <Body>
+    <NewRx>
+      <MedicationPrescribed>
+        <DrugDescription>Synthetic Inhaler 90 MCG</DrugDescription>
+        <Sig>
+          <SigText>Inhale 2 puffs by mouth every 4 to 6 hours as needed.</SigText>
+        </Sig>
+      </MedicationPrescribed>
+    </NewRx>
+  </Body>
+</Message>

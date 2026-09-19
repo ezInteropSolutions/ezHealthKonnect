@@ -1,0 +1,15 @@
+{
+  "key": "Verify",
+  "name": "Verify Acknowledgment",
+  "fields": [
+    { "key": "code", "xpath": "Code", "name": "Verify Code", "dataType": "code", "required": false },
+    { "key": "descriptionCode", "xpath": "DescriptionCode", "name": "Description Code", "dataType": "code", "required": false },
+    { "key": "description", "xpath": "Description", "name": "Description", "dataType": "string", "required": false }
+  ],
+  "groups": [],
+  "elementOrder": ["Code", "DescriptionCode", "Description"],
+  "sourceRefs": [
+    "cosyte/ncpdp src/script/response.ts (ResponseFields, shared verbatim with Status/Error -- a prescriber's verification acknowledgment) -- this is the source TRUSTED for Verify's shape, since it targets this engine's own v2017071/v2022011 versions directly. usnistgov/tcamt-2's SCRIPT_XML_10_6.xsd own <Verify> element (an OLDER v10.6 wire format) models a materially RICHER, version-specific shape instead (a nested VerifyStatus/Code + optional Pharmacy/Prescriber, apparently for identity/credential verification) -- a real, named disagreement between the two cross-reference sources, resolved in favor of the version-matched one (cosyte) rather than the older, structurally-divergent XSD, per this project's own 'prefer the version-appropriate source' judgment.",
+    "code is modeled as optional here (not required, unlike Status/Error) -- cosyte/ncpdp's own extractResponse() only warns (never blocks) on a missing Code across all 3 kinds, and the older XSD's own Verify shape has no simple top-level required Code either (it nests Code inside the OPTIONAL VerifyStatus sub-element) -- required=false is the more honest, cross-source-consistent choice."
+  ]
+}

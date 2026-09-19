@@ -1,0 +1,11 @@
+{
+  "key": "PhoneNumber",
+  "xmlElement": "PrimaryTelephone",
+  "name": "Phone Number",
+  "fields": [
+    { "key": "number", "xpath": "Number", "name": "Number", "dataType": "string", "required": true }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, CommunicationNumbers/PrimaryTelephone and /Fax)"
+  ]
+}

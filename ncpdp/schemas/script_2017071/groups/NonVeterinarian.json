@@ -1,0 +1,16 @@
+{
+  "key": "NonVeterinarian",
+  "xmlElement": "NonVeterinarian",
+  "name": "Non-Veterinarian Prescriber",
+  "groups": [
+    { "key": "identification", "groupKey": "PrescriberIdentification", "xmlElement": "Identification", "required": true, "repeatable": false },
+    { "key": "practiceLocation", "groupKey": "PracticeLocation", "xmlElement": "PracticeLocation", "required": false, "repeatable": false },
+    { "key": "name", "groupKey": "Name", "xmlElement": "Name", "required": true, "repeatable": false },
+    { "key": "address", "groupKey": "Address", "xmlElement": "Address", "required": false, "repeatable": false },
+    { "key": "communicationNumbers", "groupKey": "CommunicationNumbers", "xmlElement": "CommunicationNumbers", "required": false, "repeatable": false }
+  ],
+  "elementOrder": ["Identification", "PracticeLocation", "Name", "Address", "CommunicationNumbers"],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Body/NewRx/Prescriber/NonVeterinarian). Veterinarian (Supervisor) deliberately deferred to a later phase."
+  ]
+}

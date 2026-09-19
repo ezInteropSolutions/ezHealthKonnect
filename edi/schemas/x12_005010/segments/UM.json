@@ -1,0 +1,108 @@
+{
+  "id": "UM",
+  "name": "Health Care Services Review Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "requestCategoryCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "certificationTypeCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "03",
+      "key": "serviceTypeCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "04",
+      "key": "healthCareServiceLocation",
+      "composite": {
+        "subElements": [
+          {
+            "pos": "1",
+            "key": "facilityCodeValue",
+            "dataType": "AN"
+          },
+          {
+            "pos": "2",
+            "key": "facilityCodeQualifier",
+            "dataType": "ID"
+          },
+          {
+            "pos": "3",
+            "key": "claimFrequencyTypeCode",
+            "dataType": "ID"
+          }
+        ]
+      }
+    },
+    {
+      "pos": "05",
+      "key": "relatedCauses",
+      "composite": {
+        "subElements": [
+          {
+            "pos": "1",
+            "key": "relatedCausesCode1",
+            "dataType": "ID"
+          },
+          {
+            "pos": "2",
+            "key": "relatedCausesCode2",
+            "dataType": "ID"
+          },
+          {
+            "pos": "3",
+            "key": "relatedCausesCode3",
+            "dataType": "ID"
+          },
+          {
+            "pos": "4",
+            "key": "stateOrProvinceCode",
+            "dataType": "ID"
+          },
+          {
+            "pos": "5",
+            "key": "countryCode",
+            "dataType": "ID"
+          }
+        ]
+      }
+    },
+    {
+      "pos": "06",
+      "key": "levelOfServiceCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "07",
+      "key": "currentHealthConditionCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "08",
+      "key": "prognosisCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "09",
+      "key": "releaseOfInformationCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "10",
+      "key": "delayReasonCode",
+      "dataType": "ID"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/UM) — X12 005010 UM segment element reference, read directly from the page's own structured data. New for EDI Phase 7 (278 Health Care Services Review). UM01 (Request Category Code, e.g. \"HS\"=Health Services Review) + UM02 (Certification Type Code, e.g. \"I\"=Initial) + UM03 (Service Type Code, the same code set 270/271's own EQ01/service_type already uses) are the core review-classification fields; UM04 (composite, place-of-service info) and UM05 (composite, related-causes — accident/employment/auto) are situational.",
+    "USAGE NOTE: modeled 'situational' rather than 'required' even though Stedi's own 278-A1 page marks UM as 'M' (Mandatory) at 2000E -- this engine's usage field is GLOBAL per segment ID (no per-loop override exists; SegmentIDs is a plain []string), and UM is ALSO referenced at 2000F (Service Level), where the real spec marks it 'O' (Optional). The same shared-segment-global-usage constraint already documented on CL1.json's own correction note."
+  ]
+}

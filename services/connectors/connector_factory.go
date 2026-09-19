@@ -106,6 +106,13 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	f.RegisterOutbound("http_rest", NewHTTPOutboundConnector)              // Alias for destination type compatibility
 	f.RegisterOutbound("http_fhir_outbound", NewHTTPFHIROutboundConnector) // FHIR-aware delivery (Phase A canonical name)
 
+	// WebSocket — real-time bidirectional connector pair. websocket_outbound
+	// reads a response frame back over the same connection (see
+	// websocket_outbound.go's Send()), surfaced downstream the same way
+	// HTTP outbound's response_body already is.
+	f.RegisterInbound("websocket_inbound", NewWebSocketInboundConnector)
+	f.RegisterOutbound("websocket_outbound", NewWebSocketOutboundConnector)
+
 	// File System Connectors
 	f.RegisterInbound("file_listener", NewFileListenerConnector)
 	f.RegisterOutbound("file_writer", NewFileWriterConnector)

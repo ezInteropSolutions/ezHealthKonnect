@@ -1,0 +1,12 @@
+{
+  "key": "PharmacyIdentification",
+  "xmlElement": "Identification",
+  "name": "Pharmacy Identification",
+  "fields": [
+    { "key": "ncpdpid", "xpath": "NCPDPID", "name": "NCPDP ID", "dataType": "string", "required": false },
+    { "key": "npi", "xpath": "NPI", "name": "NPI", "dataType": "string", "required": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Pharmacy/Identification)"
+  ]
+}

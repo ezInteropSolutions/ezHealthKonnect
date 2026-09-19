@@ -1,0 +1,22 @@
+{
+  "key": "RxFill",
+  "name": "Fill/Dispense Notification",
+  "fields": [],
+  "groups": [
+    { "key": "filled", "groupKey": "OutcomeReason", "xmlElement": "Filled", "required": false, "repeatable": false },
+    { "key": "notFilled", "groupKey": "OutcomeReason", "xmlElement": "NotFilled", "required": false, "repeatable": false },
+    { "key": "partialFill", "groupKey": "OutcomeReason", "xmlElement": "PartialFill", "required": false, "repeatable": false },
+    { "key": "pharmacy", "groupKey": "Pharmacy", "xmlElement": "Pharmacy", "required": true, "repeatable": false },
+    { "key": "prescriber", "groupKey": "Prescriber", "xmlElement": "Prescriber", "required": true, "repeatable": false },
+    { "key": "patient", "groupKey": "Patient", "xmlElement": "Patient", "required": true, "repeatable": false },
+    { "key": "medicationPrescribed", "groupKey": "MedicationPrescribed", "xmlElement": "MedicationPrescribed", "required": false, "repeatable": false },
+    { "key": "medicationDispensed", "groupKey": "MedicationDispensed", "xmlElement": "MedicationDispensed", "required": false, "repeatable": false }
+  ],
+  "elementOrder": ["Filled", "NotFilled", "PartialFill", "Pharmacy", "Prescriber", "Patient", "MedicationPrescribed", "MedicationDispensed"],
+  "sourceRefs": [
+    "usnistgov/tcamt-2 tcamt-lite-controller/SCRIPT_XML_10_6.xsd (NIST-hosted, real official-provenance NCPDP SCRIPT XSD, <xs:element name=\"RxFill\"> ~line 469) -- a pharmacy-to-prescriber notification that a prescription was filled, not filled, or partially filled. Sourced from SCRIPT v10.6 (an OLDER wire format than this engine's own v2017071 target) since no free v2017071 schema/sample containing RxFill exists -- the same class of cross-version structural reference already used for the lifecycle transactions via cosyte/ncpdp, just from an XSD instead of a TypeScript parser. FillStatus (RES) is modeled as a 3-way choice of sibling elements (Filled/NotFilled/PartialFill), reusing the already-built OutcomeReason group's ReasonCode/ReferenceNumber/DenialReason/Note shape (FillStatusType's own NoteType/DeniedFillType sub-shapes are a near-exact match: ReferenceNumber+Note for Filled/PartialFill, ReferenceNumber+Note+FillReasonCode for NotFilled) rather than authoring a new, structurally-identical group.",
+    "Pharmacy/Prescriber/Patient are modeled by REUSING this engine's own existing NewRx-era groups (Pharmacy/Prescriber/Patient) rather than the XSD's own MandatoryAddressPharmacyType/PrescriberRxFillType (a flatter, RxFill-specific shape with Identification/ClinicName/PrescriberAgent fields this engine doesn't otherwise model) -- a deliberate, named simplification trading some RxFill-specific detail for structural consistency with every other already-built transaction type, matching this project's own 'core fields, not exhaustive' precedent.",
+    "Request (a short pass-through echo of the original request, minOccurs=0) is NOT modeled -- no real sample or v2017071-confirmed shape exists for it; a named, deferred gap, not fabricated.",
+    "Supervisor and Facility (both minOccurs=0 in the source XSD) are NOT modeled this pass -- a named, deferred simplification."
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "key": "Quantity",
+  "xmlElement": "Quantity",
+  "name": "Quantity",
+  "fields": [
+    { "key": "value", "xpath": "Value", "name": "Value", "dataType": "decimal", "required": true },
+    { "key": "codeListQualifier", "xpath": "CodeListQualifier", "name": "Code List Qualifier", "dataType": "code", "required": false }
+  ],
+  "groups": [
+    { "key": "quantityUnitOfMeasure", "groupKey": "CodedElement", "xmlElement": "QuantityUnitOfMeasure", "required": false, "repeatable": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, MedicationPrescribed/Quantity)"
+  ]
+}

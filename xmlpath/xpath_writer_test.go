@@ -1,4 +1,4 @@
-package builder
+package xmlpath
 
 import (
 	"fmt"
@@ -168,9 +168,9 @@ func TestWriteAtXPath_SamePredicateSiblings_DisambiguatedByNestedTemplateId(t *t
 	root := newRoot()
 	base := "observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='%s']/value/@code"
 
-	WriteAtXPath(root, fmt.Sprintf(base,"TID-SEVERITY"), "moderate")
-	WriteAtXPath(root, fmt.Sprintf(base,"TID-STATUS"), "active")
-	WriteAtXPath(root, fmt.Sprintf(base,"TID-CRITICALITY"), "high")
+	WriteAtXPath(root, fmt.Sprintf(base, "TID-SEVERITY"), "moderate")
+	WriteAtXPath(root, fmt.Sprintf(base, "TID-STATUS"), "active")
+	WriteAtXPath(root, fmt.Sprintf(base, "TID-CRITICALITY"), "high")
 
 	obs := root.FindElement("observation")
 	rels := obs.SelectElements("entryRelationship")
@@ -315,8 +315,8 @@ func TestWriteAtXPath_NewNestedPredicateTerminal_ReusesExistingSingularAncestor(
 func TestTryFindAtXPath_BacktracksPastWrongSibling(t *testing.T) {
 	root := newRoot()
 	base := "observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='%s']/value/@code"
-	WriteAtXPath(root, fmt.Sprintf(base,"TID-A"), "first")
-	WriteAtXPath(root, fmt.Sprintf(base,"TID-B"), "second")
+	WriteAtXPath(root, fmt.Sprintf(base, "TID-A"), "first")
+	WriteAtXPath(root, fmt.Sprintf(base, "TID-B"), "second")
 
 	found, ok := TryFindAtXPath(root, "observation/entryRelationship[@typeCode='SUBJ',@inversionInd='true']/observation[templateId/@root='TID-B']")
 	if !ok {
@@ -338,7 +338,7 @@ func TestReorderChildrenByTag_MovesListedTagsFirstPreservingRelativeOrder(t *tes
 	el.CreateElement("templateId").CreateAttr("marker", "tid")
 	el.CreateElement("id").CreateAttr("marker", "id2")
 
-	reorderChildrenByTag(el, []string{"templateId", "id"})
+	ReorderChildrenByTag(el, []string{"templateId", "id"})
 
 	got := el.ChildElements()
 	wantTags := []string{"templateId", "id", "id", "manufacturedMaterial"}
@@ -363,7 +363,7 @@ func TestReorderChildrenByTag_NoOpWhenAlreadyInOrder(t *testing.T) {
 	el.CreateElement("code")
 	el.CreateElement("statusCode")
 
-	reorderChildrenByTag(el, []string{"templateId"})
+	ReorderChildrenByTag(el, []string{"templateId"})
 
 	got := el.ChildElements()
 	wantTags := []string{"templateId", "code", "statusCode"}
@@ -375,7 +375,7 @@ func TestReorderChildrenByTag_NoOpWhenAlreadyInOrder(t *testing.T) {
 }
 
 func TestSplitPathSegments_RespectsBracketsContainingSlash(t *testing.T) {
-	segs := splitPathSegments("observation[code/@code='ASSERTION']/value/@code")
+	segs := SplitPathSegments("observation[code/@code='ASSERTION']/value/@code")
 	want := []string{"observation[code/@code='ASSERTION']", "value", "@code"}
 	if len(segs) != len(want) {
 		t.Fatalf("got %d segments %v, want %d", len(segs), segs, len(want))

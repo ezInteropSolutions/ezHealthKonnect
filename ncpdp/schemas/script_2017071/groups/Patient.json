@@ -1,0 +1,11 @@
+{
+  "key": "Patient",
+  "xmlElement": "Patient",
+  "name": "Patient",
+  "groups": [
+    { "key": "humanPatient", "groupKey": "HumanPatient", "xmlElement": "HumanPatient", "required": true, "repeatable": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Body/NewRx/Patient). NonHumanPatient (veterinary) deliberately deferred to a later phase."
+  ]
+}

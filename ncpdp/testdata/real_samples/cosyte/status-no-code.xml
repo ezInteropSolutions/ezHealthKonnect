@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <MessageID>SYNTH-MSG-0105</MessageID>
+    <RelatesToMessageID>SYNTH-MSG-0005</RelatesToMessageID>
+  </Header>
+  <Body>
+    <Status>
+      <Description>Acknowledged without a status code.</Description>
+    </Status>
+  </Body>
+</Message>

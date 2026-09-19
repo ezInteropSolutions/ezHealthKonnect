@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>SurescriptsTestPrescriber</To>
+    <From>SurescriptsTestPharmacy</From>
+    <MessageID>SYNTH-MSG-0101</MessageID>
+    <RelatesToMessageID>SYNTH-MSG-0001</RelatesToMessageID>
+    <SentTime>2026-01-15T09:31:00Z</SentTime>
+  </Header>
+  <Body>
+    <Status>
+      <Code>010</Code>
+      <DescriptionCode>000</DescriptionCode>
+      <Description>Transaction received and queued for processing.</Description>
+    </Status>
+  </Body>
+</Message>

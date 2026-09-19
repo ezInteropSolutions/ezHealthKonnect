@@ -1,0 +1,56 @@
+{
+  "id": "BGN",
+  "name": "Beginning Segment",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "transactionSetPurposeCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "referenceIdentification",
+      "dataType": "AN"
+    },
+    {
+      "pos": "03",
+      "key": "date",
+      "dataType": "DT"
+    },
+    {
+      "pos": "04",
+      "key": "time",
+      "dataType": "TM"
+    },
+    {
+      "pos": "05",
+      "key": "timeCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "06",
+      "key": "referenceIdentification2",
+      "dataType": "AN"
+    },
+    {
+      "pos": "07",
+      "key": "transactionTypeCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "08",
+      "key": "actionCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "09",
+      "key": "securityLevelCode",
+      "dataType": "ID"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/BGN) — new for EDI Phase 7 (834 Benefit Enrollment). BGN01 (Transaction Set Purpose Code, \"00\"=Original) + BGN02 (the sender's own control/reference number) + BGN03 (creation date) are the core required fields; BGN08 (Action Code, \"2\"=Change/\"4\"=Verify) is used by some real-world 834 senders to signal full-file vs. change-only maintenance at the FILE level (distinct from each member's own INS03 maintenance-type-code at the record level)."
+  ]
+}

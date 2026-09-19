@@ -1,0 +1,51 @@
+<Message DatatypesVersion="20170715" TransportVersion="20170715" TransactionDomain="SCRIPT" TransactionVersion="20170715" StructuresVersion="20170715" ECLVersion="20170715">
+    <Header>
+        <To Qualifier="P">6557744</To>
+        <From Qualifier="D">6128890368017</From>
+        <MessageID>app-000000000001</MessageID>
+        <SentTime>2026-09-14T10:00:00Z</SentTime>
+    </Header>
+    <Body>
+        <CancelRx>
+            <RequestReferenceNumber>REQ-0001</RequestReferenceNumber>
+            <Patient>
+                <HumanPatient>
+                    <Name>
+                        <LastName>Jenny</LastName>
+                        <FirstName>Craigling</FirstName>
+                    </Name>
+                    <Gender>F</Gender>
+                </HumanPatient>
+            </Patient>
+            <Pharmacy>
+                <Identification>
+                    <NCPDPID>6557744</NCPDPID>
+                </Identification>
+                <BusinessName>A+ Drugs</BusinessName>
+            </Pharmacy>
+            <Prescriber>
+                <NonVeterinarian>
+                    <Identification>
+                        <NPI>1939842031</NPI>
+                    </Identification>
+                    <Name>
+                        <LastName>Bless</LastName>
+                        <FirstName>Janine</FirstName>
+                    </Name>
+                </NonVeterinarian>
+            </Prescriber>
+            <MedicationPrescribed>
+                <DrugDescription>Ondansetron 8 mg Tab Disintegrating</DrugDescription>
+                <Quantity>
+                    <Value>15</Value>
+                </Quantity>
+                <WrittenDate>
+                    <Date>2022-09-24</Date>
+                </WrittenDate>
+                <Sig>
+                    <SigText>1 tablet orally every 8 hours as needed for nausea</SigText>
+                </Sig>
+            </MedicationPrescribed>
+        </CancelRx>
+    </Body>
+</Message>

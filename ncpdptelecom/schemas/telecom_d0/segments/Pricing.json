@@ -1,0 +1,29 @@
+{
+  "key": "Pricing",
+  "identifier": "11",
+  "name": "Pricing",
+  "fields": [
+    { "key": "ingredientCostSubmitted", "fieldId": "D9", "name": "Ingredient Cost Submitted", "dataType": "RO", "places": 2, "width": 8, "required": true },
+    { "key": "dispensingFeeSubmitted", "fieldId": "DC", "name": "Dispensing Fee Submitted", "dataType": "RO", "places": 2, "width": 8, "required": false },
+    { "key": "professionalServiceFeeSubmitted", "fieldId": "BE", "name": "Professional Service Fee Submitted", "dataType": "RO", "places": 2, "required": false },
+    { "key": "patientPaidAmountSubmitted", "fieldId": "DX", "name": "Patient Paid Amount Submitted", "dataType": "RO", "places": 2, "width": 8, "required": false },
+    { "key": "incentiveAmountSubmitted", "fieldId": "E3", "name": "Incentive Amount Submitted", "dataType": "RO", "places": 2, "required": false },
+    { "key": "otherAmountClaimedSubmittedCount", "fieldId": "H7", "name": "Other Amount Claimed Submitted Count", "dataType": "N", "required": false },
+    { "key": "otherAmountClaimedSubmittedQualifier", "fieldId": "H8", "name": "Other Amount Claimed Submitted Qualifier", "dataType": "AN", "required": false },
+    { "key": "otherAmountClaimedSubmitted", "fieldId": "H9", "name": "Other Amount Claimed Submitted", "dataType": "RO", "places": 2, "required": false },
+    { "key": "flatSalesTaxAmountSubmitted", "fieldId": "HA", "name": "Flat Sales Tax Amount Submitted", "dataType": "RO", "places": 2, "required": false },
+    { "key": "percentageSalesTaxAmountSubmitted", "fieldId": "GE", "name": "Percentage Sales Tax Amount Submitted", "dataType": "RO", "places": 2, "required": false },
+    { "key": "percentageSalesTaxRateSubmitted", "fieldId": "HE", "name": "Percentage Sales Tax Rate Submitted", "dataType": "RO", "places": 4, "required": false },
+    { "key": "percentageSalesTaxBasisSubmitted", "fieldId": "JE", "name": "Percentage Sales Tax Basis Submitted", "dataType": "AN", "required": false },
+    { "key": "usualAndCustomaryCharge", "fieldId": "DQ", "name": "Usual and Customary Charge", "dataType": "R", "places": 2, "width": 8, "required": true },
+    { "key": "grossAmountDue", "fieldId": "DU", "name": "Gross Amount Due", "dataType": "RO", "places": 2, "width": 8, "required": true },
+    { "key": "basisOfCostDetermination", "fieldId": "DN", "name": "Basis of Cost Determination", "dataType": "AN", "required": false },
+    { "key": "medicaidPaidAmount", "fieldId": "N3", "name": "Medicaid Paid Amount", "dataType": "RO", "places": 2, "required": false }
+  ],
+  "sourceRefs": [
+    "apiv/dzero lib/dzero/segments/11_pricing.rb (field-id-to-symbol dictionary, read directly) cross-confirmed against eduardonunesp/ncpdp-telecom-fmt-book docs/segments.md's own worked Pricing Segment (AM11) example.",
+    "ingredientCostSubmitted/dispensingFeeSubmitted/patientPaidAmountSubmitted/grossAmountDue (D9/DC/DX/DU) width=8, dataType RO, places=2 -- directly, byte-for-byte confirmed from data-types.md's own worked examples (D9=0000057A->5.71, DC=0000027E->2.75, DX=0000016B->1.62, DU=0000084F->8.46, each exactly 8 raw characters).",
+    "usualAndCustomaryCharge (DQ) is a REAL, sourced correction from an initial draft of this schema: the segments.md worked example's own raw byte sequence ('DQ00000000') has NO trailing overpunch letter -- 8 plain digits, unlike its 3 sibling amount fields in the SAME example which all end in a letter (D9=...A, DC=...E, DX=...B, DU=...F). Modeled as dataType R (plain decimal), not RO -- Usual and Customary Charge is inherently non-negative, consistent with not needing a sign-carrying encoding.",
+    "Every other field in this segment (BE/E3/H7/H8/H9/HA/GE/HE/JE/DN/N3) has NO independently-confirmed width in either source's own worked examples -- width left unset (no zero-padding enforced on build) rather than guessing a plausible-looking number, matching this codebase's own discipline of never fabricating unconfirmed structural detail. percentageSalesTaxRateSubmitted's own places=4 is likewise an educated placement (percentage rates conventionally carry more implied precision than dollar amounts), not independently confirmed."
+  ]
+}

@@ -64,7 +64,15 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // endpoint (/api/eligibility/:interfaceId/check), whose raw 270 X12 request
 // body is neither JSON nor form-encoded and would otherwise hit the exact
 // same empty-body bug.
-app.use(express.raw({ type: ['application/xml', 'text/xml', 'application/octet-stream', 'application/edi-x12', 'text/plain'], limit: '10mb' }));
+// application/x-ncpdp-telecom-d0 added for the synchronous pharmacy claim
+// endpoint (/api/pharmacy-claim/:interfaceId/submit) — an EMPTY body sent
+// with this content type otherwise fell through to express.json()'s own
+// default req.body = {} (never undefined), which forwardToGo then
+// JSON.stringifies into a non-empty "{}" string — Go's own len(body)==0
+// empty-body guard silently never fired, and the request proceeded past it
+// into a genuine pipeline-lookup 404 instead of the correct 400. Found via
+// this endpoint's own Playwright E2E test, not assumed.
+app.use(express.raw({ type: ['application/xml', 'text/xml', 'application/octet-stream', 'application/edi-x12', 'text/plain', 'application/x-ncpdp-telecom-d0'], limit: '10mb' }));
 // Monitor large requests for debugging
 app.use((req, res, next) => {
     if (req.headers['content-length']) {
@@ -421,7 +429,12 @@ app.use('/api/connectivity', forwardToGo); // Connector types + interface connec
 app.use('/api/zsegments',   forwardToGo); // Enterprise Z-segment mapping configuration
 app.use('/api/cda', forwardToGo);          // CDA schema browser + mapping delta APIs
 app.use('/api/edi', forwardToGo);          // EDI X12 schema browser API
+app.use('/api/ncpdp', forwardToGo);        // NCPDP SCRIPT schema browser API
+app.use('/api/ncpdp-telecom', forwardToGo); // NCPDP Telecommunication D.0 schema browser API
+app.use('/api/pharmacy-claim', forwardToGo); // Synchronous NCPDP Telecom D.0 B1 pharmacy claim submit
 app.use('/api/eligibility', forwardToGo);  // Synchronous 270/271 eligibility check
+app.use('/api/claim-status', forwardToGo); // Synchronous 276/277 claim status check
+app.use('/api/prior-auth', forwardToGo); // Synchronous 278 prior authorization check
 // NOTE: /api/ai routes are registered after session middleware below (require req.session.user)
 app.use('/api/code-templates', forwardToGo); // Code Template Libraries (JS function injection into script steps)
 // /api/git is registered below (after session middleware, with requireAuth)

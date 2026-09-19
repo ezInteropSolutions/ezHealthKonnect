@@ -111,7 +111,7 @@ type CDASectionDef struct {
 	// only by their OWN nested templateId — see StructuralTemplateAnchor.Path
 	// for how that disambiguation is expressed). Applied AFTER every field is
 	// written, and only when Path already resolves to a node a real field
-	// write created (see cda/builder.TryFindAtXPath) — never force-creates an
+	// write created (see xmlpath.TryFindAtXPath) — never force-creates an
 	// empty container just to hold a templateId with no data.
 	StructuralTemplateIDs []StructuralTemplateAnchor `json:"structuralTemplateIds,omitempty"`
 
@@ -444,8 +444,8 @@ type StructuralTemplateAnchor struct {
 // whole group is only emitted if at least one Component has data) may be
 // present per real document.
 //
-// This shape can't be built with WriteAtXPath's own predicate-matching
-// (xpath_writer.go's findOrCreateChild/candidatesForSegment): disambiguating
+// This shape can't be built with xmlpath.WriteAtXPath's own predicate-matching
+// (xmlpath's findOrCreateChild/candidatesForSegment): disambiguating
 // repeated same-tag siblings there requires the AMBIGUOUS segment itself to
 // carry a "[predicate]" (the discriminator-lookahead only fires when the
 // CURRENT segment has one). A UDI Organizer's own <component> wrapper has no

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>SurescriptsTestPharmacy</To>
+    <From>SurescriptsTestPrescriber</From>
+    <MessageID>SYNTH-MSG-0401</MessageID>
+    <SentTime>2026-02-03T08:00:00Z</SentTime>
+  </Header>
+  <Body>
+    <CancelRx>
+      <RequestReferenceNumber>SYNTH-REF-0401</RequestReferenceNumber>
+      <Patient>
+        <HumanPatient>
+          <Name>
+            <LastName>Testpatient</LastName>
+            <FirstName>Avery</FirstName>
+          </Name>
+        </HumanPatient>
+      </Patient>
+      <Prescriber>
+        <NonVeterinarian>
+          <Identification>
+            <NPI>1888888888</NPI>
+          </Identification>
+          <Name>
+            <LastName>Testprescriber</LastName>
+            <FirstName>Jordan</FirstName>
+          </Name>
+        </NonVeterinarian>
+      </Prescriber>
+      <MedicationPrescribed>
+        <DrugDescription>Atorvastatin 20 MG Oral Tablet</DrugDescription>
+        <DrugCoded>
+          <ProductCode Qualifier="ND">00000000001</ProductCode>
+        </DrugCoded>
+      </MedicationPrescribed>
+    </CancelRx>
+  </Body>
+</Message>

@@ -1,0 +1,12 @@
+{
+  "code": "B1",
+  "name": "Claim Billing (Response)",
+  "direction": "response",
+  "transmissionGroupSegments": ["ResponseMessage"],
+  "transactionGroupSegments": ["ResponseStatus", "ResponseClaim", "ResponsePricing"],
+  "sourceRefs": [
+    "eduardonunesp/ncpdp-telecom-fmt-book docs/response.md's own segment table (20 Response Message, 21 Response Status required, 22 Response Claim, 23 Response Pricing required on approval) plus its own worked B1 request/response example. Response Status/Claim/Pricing are one-per-claim (transaction-group, GS-delimited) -- confirmed byte-for-byte against apiv/dzero's own real b1.2_groups fixture, which carries TWO separate Response Status (21) segments, one per GS-delimited group, for a two-claim response.",
+    "Response Message (20) is modeled as a transmission-group (once-per-transmission) segment -- confirmed against the SAME dzero fixture, whose own single Response Message segment sits BEFORE the first GS separator, outside either transaction group.",
+    "Response DUR/PPS(24)/Response Insurance(25)/Response Prior Authorization(26)/Response Insurance Additional Documentation(27)/Response Coordination of Benefits(28)/Response Patient(29) are all named, deferred -- a pure schema-data addition later, not attempted this phase."
+  ]
+}

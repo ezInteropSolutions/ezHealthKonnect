@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>SurescriptsTestPharmacy</To>
+    <From>SurescriptsTestPrescriber</From>
+    <MessageID>SYNTH-MSG-0303</MessageID>
+    <RelatesToMessageID>SYNTH-MSG-0301</RelatesToMessageID>
+    <SentTime>2026-02-02T10:05:00Z</SentTime>
+  </Header>
+  <Body>
+    <RxChangeResponse>
+      <RequestReferenceNumber>SYNTH-REF-0301</RequestReferenceNumber>
+      <Response>
+        <Denied>
+          <ReasonCode>DG</ReasonCode>
+          <DenialReason>Requested substitution is not clinically appropriate.</DenialReason>
+        </Denied>
+      </Response>
+    </RxChangeResponse>
+  </Body>
+</Message>

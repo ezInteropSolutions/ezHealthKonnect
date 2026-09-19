@@ -1,0 +1,140 @@
+{
+  "transactionSetId": "277",
+  "functionalIdentifierCode": "HN",
+  "versionReleaseIndustryCode": "005010X212",
+  "version": "005010X212",
+  "_sourceRefs": [
+    "Stedi (stedi.com/edi/hipaa/transaction-set/277-A1) — the HIPAA-specific (005010X212) 277 Health Care Claim Status Response transaction set, EDI Phase 6. GS01='HN'/GS08='005010X212' confirmed directly on this page. ST01='277' confirmed.",
+    "PyX12's own free map repo (azoner/pyx12/pyx12/map) DOES ship a genuine 5010 map for this transaction — 277.5010.X212.xml (201KB) — the authoritative primary source used to cross-check HL03 codes and loop structure, matching this project's own established preference for PyX12 over Stedi's HTML summaries when both are available.",
+    "Same 5-level HL hierarchy as 276.json (2000A/B/C/D/E, HL03=20/21/19/22/23 respectively — cross-checked directly against PyX12's raw XML, resolving an inconsistent Stedi HTML-page answer), but with two real, deliberate structural differences from 276: (1) 277 adds its own trace+status loops at the Information-Receiver and Service-Provider levels (2200B, 2200C — TRN+STC, 0/1 each) that 276 has no equivalent of, since only the RESPONSE reports status at every level the request could have asked about; (2) every claim/service-line loop in 277 (2200D/2200E/2220D/2220E) carries STC (Status Information) in addition to 276's own TRN/REF/AMT/DTP shape — STC is the segment that actually carries the claim status category/code/action/paid-amount answer, confirmed Mandatory with max>1 at all 6 of these loop positions.",
+    "STC (new segment, see STC.json's own sourceRefs for its full element sourcing and the honest note that this schema models the full generic 12-position shape rather than a fully per-position-IG-verified subset, since the fetched HIPAA page's own STC usage table wasn't fully captured).",
+    "All other segments (HL, NM1, TRN, REF, DTP, AMT, DMG, SVC) reused unchanged from the existing shared library — same reuse-safety confirmation as 276.json (no hardcoded fixedValue, sufficiently generic shape for this transaction's own needs)."
+  ],
+  "headerSegmentIds": ["ST", "BHT"],
+  "loops": [
+    {
+      "id": "2000A",
+      "name": "Information Source Level",
+      "repeat": ">1",
+      "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "20" },
+      "segmentIds": ["HL"],
+      "loops": [
+        {
+          "id": "2100A",
+          "name": "Payer Name",
+          "repeat": "1",
+          "segmentIds": ["NM1"]
+        },
+        {
+          "id": "2000B",
+          "name": "Information Receiver Level",
+          "repeat": ">1",
+          "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "21" },
+          "segmentIds": ["HL"],
+          "loops": [
+            {
+              "id": "2100B",
+              "name": "Information Receiver Name",
+              "repeat": "1",
+              "segmentIds": ["NM1"],
+              "loops": [
+                {
+                  "id": "2200B",
+                  "name": "Information Receiver Trace",
+                  "repeat": "1",
+                  "segmentIds": ["TRN", "STC"]
+                }
+              ]
+            },
+            {
+              "id": "2000C",
+              "name": "Service Provider Level",
+              "repeat": ">1",
+              "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "19" },
+              "segmentIds": ["HL"],
+              "loops": [
+                {
+                  "id": "2100C",
+                  "name": "Provider Name",
+                  "repeat": "1",
+                  "segmentIds": ["NM1"],
+                  "loops": [
+                    {
+                      "id": "2200C",
+                      "name": "Provider of Service Trace",
+                      "repeat": "1",
+                      "segmentIds": ["TRN", "STC"]
+                    }
+                  ]
+                },
+                {
+                  "id": "2000D",
+                  "name": "Subscriber Level",
+                  "repeat": ">1",
+                  "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "22" },
+                  "segmentIds": ["HL"],
+                  "loops": [
+                    {
+                      "id": "2100D",
+                      "name": "Subscriber Name",
+                      "repeat": "1",
+                      "segmentIds": ["NM1", "DMG"],
+                      "loops": [
+                        {
+                          "id": "2200D",
+                          "name": "Claim Status Tracking",
+                          "repeat": ">1",
+                          "segmentIds": ["TRN", "STC", "REF", "DTP"],
+                          "loops": [
+                            {
+                              "id": "2220D",
+                              "name": "Service Line Information",
+                              "repeat": ">1",
+                              "segmentIds": ["SVC", "STC", "REF", "DTP"]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "2000E",
+                      "name": "Dependent Level",
+                      "repeat": ">1",
+                      "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "23" },
+                      "segmentIds": ["HL"],
+                      "loops": [
+                        {
+                          "id": "2100E",
+                          "name": "Dependent Name",
+                          "repeat": "1",
+                          "segmentIds": ["NM1", "DMG"],
+                          "loops": [
+                            {
+                              "id": "2200E",
+                              "name": "Claim Status Tracking",
+                              "repeat": ">1",
+                              "segmentIds": ["TRN", "STC", "REF", "DTP"],
+                              "loops": [
+                                {
+                                  "id": "2220E",
+                                  "name": "Service Line Information",
+                                  "repeat": ">1",
+                                  "segmentIds": ["SVC", "STC", "REF", "DTP"]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trailerSegmentIds": ["SE"]
+}

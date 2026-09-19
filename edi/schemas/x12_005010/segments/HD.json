@@ -1,0 +1,66 @@
+{
+  "id": "HD",
+  "name": "Health Coverage",
+  "usage": "required",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "maintenanceTypeCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "maintenanceReasonCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "03",
+      "key": "insuranceLineCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "04",
+      "key": "planCoverageDescription",
+      "dataType": "AN"
+    },
+    {
+      "pos": "05",
+      "key": "coverageLevelCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "06",
+      "key": "count1",
+      "dataType": "N0"
+    },
+    {
+      "pos": "07",
+      "key": "count2",
+      "dataType": "N0"
+    },
+    {
+      "pos": "08",
+      "key": "underwritingDecisionCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "09",
+      "key": "yesNoConditionResponseCode1",
+      "dataType": "ID"
+    },
+    {
+      "pos": "10",
+      "key": "drugHouseCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "11",
+      "key": "yesNoConditionResponseCode2",
+      "dataType": "ID"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/HD) — the actual health-coverage/plan-enrollment fact at 834's own 2300 loop. HD01 (maintenanceTypeCode, same code set INS03 already uses — \"021\"=Change, \"024\"=Addition, \"030\"=Cancellation/Termination) is the real per-PLAN maintenance action (distinct from INS03's own per-MEMBER action); HD03 (insuranceLineCode, e.g. \"HLT\"=Health, \"DEN\"=Dental, \"VIS\"=Vision) + HD04 (plan coverage description, the plan/product name or code) are the core plan-identity fields this schema's own Coverage FHIR mapping reads."
+  ]
+}

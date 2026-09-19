@@ -1,0 +1,101 @@
+{
+  "id": "CR5",
+  "name": "Oxygen Therapy Certification",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "certificationTypeCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "quantity1",
+      "dataType": "R"
+    },
+    {
+      "pos": "03",
+      "key": "oxygenEquipmentTypeCode1",
+      "dataType": "ID"
+    },
+    {
+      "pos": "04",
+      "key": "oxygenEquipmentTypeCode2",
+      "dataType": "ID"
+    },
+    {
+      "pos": "05",
+      "key": "description1",
+      "dataType": "AN"
+    },
+    {
+      "pos": "06",
+      "key": "quantity2",
+      "dataType": "R"
+    },
+    {
+      "pos": "07",
+      "key": "quantity3",
+      "dataType": "R"
+    },
+    {
+      "pos": "08",
+      "key": "quantity4",
+      "dataType": "R"
+    },
+    {
+      "pos": "09",
+      "key": "description2",
+      "dataType": "AN"
+    },
+    {
+      "pos": "10",
+      "key": "quantity5",
+      "dataType": "R"
+    },
+    {
+      "pos": "11",
+      "key": "quantity6",
+      "dataType": "R"
+    },
+    {
+      "pos": "12",
+      "key": "oxygenTestConditionCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "13",
+      "key": "oxygenTestFindingsCode1",
+      "dataType": "ID"
+    },
+    {
+      "pos": "14",
+      "key": "oxygenTestFindingsCode2",
+      "dataType": "ID"
+    },
+    {
+      "pos": "15",
+      "key": "oxygenTestFindingsCode3",
+      "dataType": "ID"
+    },
+    {
+      "pos": "16",
+      "key": "quantity7",
+      "dataType": "R"
+    },
+    {
+      "pos": "17",
+      "key": "oxygenDeliverySystemCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "18",
+      "key": "oxygenEquipmentTypeCode3",
+      "dataType": "ID"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/CR5) — a niche, deeply optional 278 certification-detail segment (home oxygen therapy medical necessity). Several positions share the same generic X12 data element (Quantity/380 appears 7×, Oxygen Equipment Type Code/1348 appears 3×) with no per-position semantic label available from the generic element reference (only a per-transaction-set Implementation Guide would name each one specifically) — modeled with disambiguating positional suffixes (quantity1..7, oxygenEquipmentTypeCode1..3), the same \"shared-library generic-shape\" trade-off PER.json's own sourceRefs already document for a repeated-element segment. Included for full completeness per this round's own scope decision; not expected to carry real FHIR-mapping weight (no oxygen-therapy-specific FHIR field exists in this engine's Claim mapping)."
+  ]
+}

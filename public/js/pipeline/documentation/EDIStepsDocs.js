@@ -9,9 +9,17 @@
  * already used by every step's Configuration-tab builder
  * (public/js/pipeline/components/EDIStepBuilder.js).
  *
- * All 4 step types are phase-1 scoped to the 835 (Health Care Claim
- * Payment/Advice) transaction set — see CLAUDE.md's "EDI X12 Support" section
- * for the full engine design and named future phases (837, 270/271, AS2).
+ * All 4 step types are transaction-set-agnostic and schema-driven — a new
+ * transaction set is a schema file, not new Go code. Currently supported:
+ * 835 (Health Care Claim Payment/Advice), 837P/837I (Professional/
+ * Institutional claims), 999 (Functional Acknowledgment), and 270/271
+ * (real-time eligibility, transform-only). See CLAUDE.md's "EDI X12 Support"
+ * sections for the full engine design.
+ *
+ * Not covered by these 4 steps: edi.generate_999 (auto-generates a 999
+ * acknowledgment from validation results — see its own doc entry below) and
+ * AS2 transport, which is a separate connector pair (as2_inbound/
+ * as2_outbound), not an edi.* pipeline step.
  */
 (function () {
     const docs = {};
@@ -20,7 +28,7 @@
         description: 'Parses raw X12 EDI content into a structured JSON document map — {_format, transactionSet, envelopePresent, interchange, header, loops, trailer} — without doing any FHIR or canonical mapping. Note: EDI content received by an edi_x12_inbound connector is already parsed automatically right after ingestion (the same generic MessageParserService/ParserFactory path HL7 and CDA use) — you only need an explicit edi.parse step to re-parse EDI content that shows up mid-pipeline from somewhere other than the original connector (a DB lookup step, a mid-pipeline connector.inbound pull, etc.).',
         useCases: [
             'Re-parse raw X12 content fetched by a database or file step mid-pipeline (not the original inbound connector)',
-            'Inspect parsed 835 fields in a Script or conditional step to drive routing decisions before edi.validate/edi.build run',
+            'Inspect parsed 835/837/999 fields in a Script or conditional step to drive routing decisions before edi.validate/edi.build run',
             'Feed edi.map_to_canonical or a custom mapping step that reads the structured loops/header JSON directly',
         ],
         example: {
@@ -46,17 +54,17 @@
             },
             {
                 issue: 'The "Transaction Set" dropdown in the config panel doesn\'t seem to change anything',
-                cause: 'Known gap: the Form UI collects this into step.config.transactionSet, but the backend executor\'s config struct does not read that key at all — the parser always auto-detects the transaction set from the message\'s own ST segment (ST01).',
-                fix: 'Not fixable from the UI today. The dropdown currently only has one real option (835) anyway, so this has no practical effect in phase 1.',
+                cause: 'By design, not a bug: the parser always auto-detects the real transaction set from the message\'s own envelope (ST01 for 835/999; ST01+GS08 together for 837, since 837P and 837I are both literally "837" on ST01 alone — GS08 is the real disambiguator).',
+                fix: 'The dropdown is informational only for edi.parse — it never needs to match the file\'s actual content. It matters more on edi.build and edi.map_to_canonical, which have no inbound envelope to detect from and must be told which transaction set\'s schema/loop tree to use.',
             },
         ],
         stepOutput: {
             description: 'Available to every step after this one.',
             fields: [
                 { name: '_stepOutput.parsedEDI', type: 'object', description: 'The full structured document: {_format, transactionSet, envelopePresent, interchange, header, loops, trailer}.' },
-                { name: '_stepOutput.parsedEDI.transactionSet', type: 'string', description: 'X12 transaction set identifier, e.g. "835".' },
-                { name: '_stepOutput.parsedEDI.header', type: 'object', description: '835 header segments: ST, BPR (payment method/amount), TRN (trace/check number), CUR, REF, DTM.' },
-                { name: '_stepOutput.parsedEDI.loops', type: 'object', description: 'Loop-ID-keyed nested structure. 1000A (Payer) and 1000B (Payee) are single objects. loops["2000"] is an array of header-number loops, each with loops["2100"] (an array of claims), each with loops["2110"] (an array of service lines) — cardinality (single object vs. array) is decided by the X12 schema itself, not by how many actually appear in a given file.' },
+                { name: '_stepOutput.parsedEDI.transactionSet', type: 'string', description: 'X12 transaction set identifier, e.g. "835", "837P", "837I", "999". For 837, this is resolved from ST01+GS08 together (ST01 alone is just "837" for both variants).' },
+                { name: '_stepOutput.parsedEDI.header', type: 'object', description: 'Header segments — shape depends on the transaction set. 835: ST, BPR (payment method/amount), TRN (trace/check number), CUR, REF, DTM. 837: ST, BHT. 999: ST, AK1.' },
+                { name: '_stepOutput.parsedEDI.loops', type: 'object', description: 'Loop-ID-keyed nested structure. Cardinality (single object vs. array) and depth are decided by the X12 schema for the resolved transaction set, not by how many actually appear in a given file. 835: 1000A/1000B (single objects), loops["2000"] → loops["2100"] (claims) → loops["2110"] (service lines). 837P/837I: a much deeper subscriber/dependent/claim tree (2000A→2000B→2000C→2300→2400, plus repeated sibling provider-role loops like 2310A-F disambiguated by their own trigger element, e.g. entityIdentifierCode). 999: AK1 → AK2 (per-segment results) → IK3/IK4/IK5.' },
                 { name: '_stepOutput.parsedEDI.trailer', type: 'object', description: 'PLB (provider-level adjustments, an array) and SE (transaction set trailer).' },
                 { name: '_stepOutput.fieldCount', type: 'number', description: 'Number of flat, loop-qualified fields extracted from the source content.' },
             ],
@@ -141,10 +149,10 @@
     };
 
     docs['edi.map_to_canonical'] = {
-        description: 'The no-code, format-agnostic on-ramp for building an 835 from data that never went through edi.parse at all — maps CSV columns, database query columns, or arbitrary upstream JSON fields onto the same canonical header/loops JSON edi.parse itself produces, so edi.build can serialize a complete interchange from any source system with zero new code, only step configuration. Not a reuse of cda.map_to_canonical — X12\'s loop-ID-keyed shape genuinely nests (835 alone needs 2000 → 2100 → 2110, three levels deep), which needed its own recursive mapper.',
+        description: 'The no-code, format-agnostic on-ramp for building an X12 document from data that never went through edi.parse at all — maps CSV columns, database query columns, or arbitrary upstream JSON fields onto the same canonical header/loops JSON edi.parse itself produces, so edi.build can serialize a complete interchange from any source system with zero new code, only step configuration. Not a reuse of cda.map_to_canonical — X12\'s loop-ID-keyed shape genuinely nests (835 needs 2000 → 2100 → 2110, three levels deep; 837P/837I go deeper still — 2000A→2000B→2000C→2300→2400), which needed its own recursive mapper. A "Transaction Set" picker in the config panel selects which schema/loop tree this step consults — resetting it clears any prior loop mappings, since they addressed the old tree\'s loop IDs.',
         useCases: [
-            'Generate an outbound 835 directly from a payer\'s claims-adjudication database, with no upstream X12 content at all',
-            'Reshape a CSV export of claim payment rows into the exact canonical JSON edi.build expects',
+            'Generate an outbound 835, 837P, or 837I directly from a payer/provider\'s own claims database, with no upstream X12 content at all',
+            'Reshape a CSV export of claim payment or claim submission rows into the exact canonical JSON edi.build expects',
             'Combine with edi.build to round-trip test the X12 engine from synthetic/manually-authored data',
         ],
         example: {
@@ -163,7 +171,7 @@
         },
         parameters: [
             { name: 'outputField', type: 'string', required: false, description: 'Where the canonical JSON is written. Default: "canonicalEDI".' },
-            { name: 'transactionSet', type: 'string', required: false, description: 'Which transaction set\'s loop tree to consult for cardinality decisions. Default: "835".' },
+            { name: 'transactionSet', type: 'string', required: false, description: 'Which transaction set\'s loop tree to consult for cardinality decisions. Default: "835" — also supports "837P", "837I", and "999". Changing this in the config panel re-fetches the real loop catalog and clears any loop mappings that addressed the previous tree.' },
             { name: 'header', type: 'array', required: false, description: 'Flat, single-instance header segment mappings: [{segmentId, elementKey, sourcePath, transform?, literalValue?}], for ST/BPR/TRN/CUR/REF/DTM.' },
             { name: 'loops', type: 'array', required: false, description: 'Recursive loop mappings: [{loopId, rowsPath?, fields: [...same shape as header...], loops?: [...nested, same shape...]}]. rowsPath selects which row(s) to map — for a nested loop, resolved RELATIVE TO the parent loop\'s current row, not the whole pipeline data. Omitting rowsPath maps from the current single row.' },
         ],
@@ -190,11 +198,11 @@
     };
 
     docs['edi.build'] = {
-        description: 'Builds a complete ISA...IEA X12 interchange from canonical JSON — the same header/loops shape edi.parse\'s own output and edi.map_to_canonical\'s own output both produce, so a parse → build or map_to_canonical → build chain needs no reshaping. The write-direction mirror of edi.parse, via the same schema-driven engine (a new transaction set is a schema file, not new Go code).',
+        description: 'Builds a complete ISA...IEA X12 interchange from canonical JSON — the same header/loops shape edi.parse\'s own output and edi.map_to_canonical\'s own output both produce, so a parse → build or map_to_canonical → build chain needs no reshaping. The write-direction mirror of edi.parse, via the same schema-driven engine (a new transaction set is a schema file, not new Go code). Also generates 999 Functional Acknowledgments (edi.generate_999 is the dedicated step for that — see its own doc entry — rather than 999 being a mode of this step).',
         useCases: [
-            'Deliver a built 835 to a payer\'s SFTP endpoint via connector.outbound (edi_x12_outbound)',
+            'Deliver a built 835, 837P, or 837I to a payer/clearinghouse\'s SFTP endpoint via connector.outbound (edi_x12_outbound)',
             'Round-trip test the X12 engine: edi.parse → (modify fields) → edi.build → edi.validate',
-            'Build an outbound 835 entirely from edi.map_to_canonical\'s output, with no upstream X12 content at all',
+            'Build an outbound 835/837P/837I entirely from edi.map_to_canonical\'s output, with no upstream X12 content at all',
         ],
         example: {
             sourceField: 'parsedEDI',
@@ -205,7 +213,7 @@
         },
         parameters: [
             { name: 'sourceField', type: 'string', required: false, description: 'Dot-path to the canonical source data (interchange/header/loops/trailer shape). Default: "parsedEDI".' },
-            { name: 'transactionSet', type: 'string', required: false, description: 'Which transaction set to build. Default: "835" — the only one implemented end-to-end in phase 1.' },
+            { name: 'transactionSet', type: 'string', required: false, description: 'Which transaction set to build. Default: "835" — also supports "837P" and "837I".' },
             { name: 'outputField', type: 'string', required: false, description: 'Dot-path to write the built EDI text to. Default: "ediX12".' },
             { name: 'isaSenderId', type: 'string', required: false, description: 'ISA06 — your deployment\'s trading-partner sender identifier.' },
             { name: 'isaReceiverId', type: 'string', required: false, description: 'ISA08 — the receiving trading partner\'s identifier.' },
@@ -223,6 +231,42 @@
             description: 'Available to every step after this one.',
             fields: [
                 { name: '_stepOutput.ediX12', type: 'string', description: 'The complete built ISA...IEA X12 interchange text, ready to send as-is.' },
+            ],
+        },
+    };
+
+    docs['edi.generate_999'] = {
+        description: 'Generates a real 999 (Functional Acknowledgment) for a previously-received EDI file — re-parses and re-validates the ORIGINAL raw content (not a prior step\'s already-JSON-shaped output, since the validator\'s checks need the typed parse data), maps every validation issue onto IK3 (segment-level) / IK4 (element-level, nested under the IK3 for the same segment occurrence) detail, and computes AK9/IK5\'s accept/reject code from whether any ERROR-severity issue exists (warnings are still reported but never flip the code). Not a hidden, automatic side-effect of ingestion — add this step explicitly wherever you want a 999 sent back, matching this project\'s explicit composable-pipeline-steps philosophy.',
+        useCases: [
+            'Send a real 999 back to a trading partner after edi.validate runs, acknowledging or rejecting their 837/835 submission',
+            'Automate compliance with a trading partner agreement that requires a 999 for every inbound X12 file',
+        ],
+        example: {
+            sourceField: 'raw',
+            outputField: 'ack999',
+            senderId: 'EZHEALTHKONNECT',
+            receiverId: 'TRADINGPARTNER',
+        },
+        parameters: [
+            { name: 'sourceField', type: 'string', required: false, description: 'Pipeline field holding the ORIGINAL raw X12 EDI string this 999 acknowledges. Default: "raw".' },
+            { name: 'outputField', type: 'string', required: false, description: 'Where the built 999 text is written. Default: "ack999".' },
+            { name: 'senderId', type: 'string', required: false, description: 'AK1/GS-level sender identifier echoed into the 999. Falls back to the original message\'s own known identifiers when the source has no real envelope (envelopePresent=false).' },
+            { name: 'receiverId', type: 'string', required: false, description: 'AK1/GS-level receiver identifier echoed into the 999.' },
+        ],
+        troubleshooting: [
+            {
+                issue: 'This step type doesn\'t appear in the pipeline builder toolbox',
+                cause: 'Known gap: edi.generate_999 has no toolbox entry or dedicated Configuration-tab builder yet, unlike edi.parse/edi.validate/edi.map_to_canonical/edi.build. The backend executor is real and tested, but it isn\'t addable from the UI today.',
+                fix: 'Not fixable from the UI today — add the step via the pipeline API/database directly if needed, or ask for the toolbox/config-UI gap to be closed as a follow-up.',
+            },
+        ],
+        stepOutput: {
+            description: 'Available to every step after this one.',
+            fields: [
+                { name: '_stepOutput.ack999', type: 'string', description: 'The complete built 999 acknowledgment text (whatever outputField was configured as), ready to send as-is via connector.outbound.' },
+                { name: '_stepOutput.ackCode', type: 'string', description: '"A" (Accepted) or "R" (Rejected) — the same code written into AK9/IK5, computed from whether any ERROR-severity validation issue exists.' },
+                { name: '_stepOutput.errorCount', type: 'number', description: 'Count of ERROR-severity issues reflected in the generated IK3/IK4 detail.' },
+                { name: '_stepOutput.ik3Count', type: 'number', description: 'Number of IK3 (segment-level) entries generated — one per erroring segment occurrence, which may nest multiple IK4s for multiple element errors in that same occurrence.' },
             ],
         },
     };

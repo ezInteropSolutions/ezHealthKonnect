@@ -1,0 +1,160 @@
+{
+  "id": "SV3",
+  "name": "Dental Service",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "compositeMedicalProcedureIdentifier",
+      "composite": {
+        "subElements": [
+          {
+            "pos": "1",
+            "key": "productOrServiceIDQualifier",
+            "dataType": "ID"
+          },
+          {
+            "pos": "2",
+            "key": "productOrServiceID",
+            "dataType": "AN"
+          },
+          {
+            "pos": "3",
+            "key": "procedureModifier1",
+            "dataType": "AN"
+          },
+          {
+            "pos": "4",
+            "key": "procedureModifier2",
+            "dataType": "AN"
+          },
+          {
+            "pos": "5",
+            "key": "procedureModifier3",
+            "dataType": "AN"
+          },
+          {
+            "pos": "6",
+            "key": "procedureModifier4",
+            "dataType": "AN"
+          },
+          {
+            "pos": "7",
+            "key": "description",
+            "dataType": "AN"
+          },
+          {
+            "pos": "8",
+            "key": "productOrServiceIDSecondary",
+            "dataType": "AN"
+          }
+        ]
+      }
+    },
+    {
+      "pos": "02",
+      "key": "monetaryAmount",
+      "dataType": "R"
+    },
+    {
+      "pos": "03",
+      "key": "facilityCodeValue",
+      "dataType": "AN"
+    },
+    {
+      "pos": "04",
+      "key": "oralCavityDesignation",
+      "composite": {
+        "subElements": [
+          {
+            "pos": "1",
+            "key": "oralCavityDesignationCode1",
+            "dataType": "ID"
+          },
+          {
+            "pos": "2",
+            "key": "oralCavityDesignationCode2",
+            "dataType": "ID"
+          },
+          {
+            "pos": "3",
+            "key": "oralCavityDesignationCode3",
+            "dataType": "ID"
+          },
+          {
+            "pos": "4",
+            "key": "oralCavityDesignationCode4",
+            "dataType": "ID"
+          },
+          {
+            "pos": "5",
+            "key": "oralCavityDesignationCode5",
+            "dataType": "ID"
+          }
+        ]
+      }
+    },
+    {
+      "pos": "05",
+      "key": "prosthesisCrownOrInlayCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "06",
+      "key": "quantity",
+      "dataType": "R"
+    },
+    {
+      "pos": "07",
+      "key": "description",
+      "dataType": "AN"
+    },
+    {
+      "pos": "08",
+      "key": "copayStatusCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "09",
+      "key": "providerAgreementCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "10",
+      "key": "yesNoConditionResponseCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "11",
+      "key": "compositeDiagnosisCodePointer",
+      "composite": {
+        "subElements": [
+          {
+            "pos": "1",
+            "key": "diagnosisCodePointer1",
+            "dataType": "N0"
+          },
+          {
+            "pos": "2",
+            "key": "diagnosisCodePointer2",
+            "dataType": "N0"
+          },
+          {
+            "pos": "3",
+            "key": "diagnosisCodePointer3",
+            "dataType": "N0"
+          },
+          {
+            "pos": "4",
+            "key": "diagnosisCodePointer4",
+            "dataType": "N0"
+          }
+        ]
+      }
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/SV3) — the 278/837 dental service-line segment (this schema library's own SV1/professional and SV2/institutional service-line precedent, extended for dental). SV301 mirrors SV101's own compositeMedicalProcedureIdentifier shape (procedure code + up to 4 modifiers). Used at 278's own 2000F Service Level loop alongside SV1/SV2 — a claim/review carries exactly one of the three depending on the service's own professional/institutional/dental nature."
+  ]
+}

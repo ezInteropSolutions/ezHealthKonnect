@@ -1,0 +1,17 @@
+{
+  "key": "Pharmacy",
+  "xmlElement": "Pharmacy",
+  "name": "Pharmacy",
+  "fields": [
+    { "key": "businessName", "xpath": "BusinessName", "name": "Business Name", "dataType": "string", "required": true }
+  ],
+  "groups": [
+    { "key": "identification", "groupKey": "PharmacyIdentification", "xmlElement": "Identification", "required": true, "repeatable": false },
+    { "key": "address", "groupKey": "Address", "xmlElement": "Address", "required": false, "repeatable": false },
+    { "key": "communicationNumbers", "groupKey": "CommunicationNumbers", "xmlElement": "CommunicationNumbers", "required": false, "repeatable": false }
+  ],
+  "elementOrder": ["Identification", "BusinessName", "Address", "CommunicationNumbers"],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Body/NewRx/Pharmacy)"
+  ]
+}

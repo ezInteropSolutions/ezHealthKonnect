@@ -1,0 +1,29 @@
+{
+  "key": "ResponsePricing",
+  "identifier": "23",
+  "name": "Response Pricing",
+  "fields": [
+    { "key": "grossAmountDue", "fieldId": "F5", "name": "Gross Amount Due", "dataType": "RO", "places": 2, "width": 8, "required": false },
+    { "key": "ingredientCostPaid", "fieldId": "F6", "name": "Ingredient Cost Paid", "dataType": "RO", "places": 2, "width": 8, "required": false },
+    { "key": "dispensingFeePaid", "fieldId": "F7", "name": "Dispensing Fee Paid", "dataType": "RO", "places": 2, "width": 8, "required": false },
+    { "key": "professionalServiceFeePaid", "fieldId": "J1", "name": "Professional Service Fee Paid", "dataType": "RO", "places": 2, "required": false },
+    { "key": "incentiveAmountPaid", "fieldId": "FL", "name": "Incentive Amount Paid", "dataType": "RO", "places": 2, "required": false },
+    { "key": "totalAmountPaid", "fieldId": "F9", "name": "Total Amount Paid", "dataType": "RO", "places": 2, "width": 8, "required": false },
+    { "key": "basisOfReimbursementDetermination", "fieldId": "FM", "name": "Basis of Reimbursement Determination", "dataType": "AN", "required": false },
+    { "key": "amountAttributedToSalesTax", "fieldId": "FN", "name": "Amount Attributed to Sales Tax", "dataType": "RO", "places": 2, "required": false },
+    { "key": "accumulatedDeductibleAmount", "fieldId": "FC", "name": "Accumulated Deductible Amount", "dataType": "RO", "places": 2, "required": false },
+    { "key": "remainingDeductibleAmount", "fieldId": "FD", "name": "Remaining Deductible Amount", "dataType": "RO", "places": 2, "required": false },
+    { "key": "remainingBenefitAmount", "fieldId": "FE", "name": "Remaining Benefit Amount", "dataType": "RO", "places": 2, "required": false },
+    { "key": "amountOfCopay", "fieldId": "FI", "name": "Amount of Copay", "dataType": "RO", "places": 2, "width": 8, "required": false },
+    { "key": "benefitStageCount", "fieldId": "MU", "name": "Benefit Stage Count", "dataType": "N", "required": false },
+    { "key": "benefitStageQualifier", "fieldId": "MV", "name": "Benefit Stage Qualifier", "dataType": "AN", "required": false },
+    { "key": "benefitStageAmount", "fieldId": "MW", "name": "Benefit Stage Amount", "dataType": "RO", "places": 2, "required": false }
+  ],
+  "sourceRefs": [
+    "apiv/dzero lib/dzero/segments/23_response_pricing.rb (field-id-to-symbol dictionary, read directly) cross-confirmed against eduardonunesp/ncpdp-telecom-fmt-book docs/response.md's own worked Response Pricing (23) example. All 4 confirmed amount fields (F5/F6/F7/FI) modeled at width=8, matching the request-side Pricing.json's own D9/DC/DX/DU convention exactly.",
+    "F5/F6/F9's own width is a REAL, deliberate correction found by cross-checking response.md's raw code block ('F500000846F'/'F900000846F', implying a 9-character value '00000846F') against data-types.md's own careful, arithmetically-self-verified step-by-step decode walkthrough for the SAME numeric result (8.46), which uses an 8-character value ('0000084F') and shows its own working ('0000084'+F(=6)->'00000846'/100=8.46). response.md's own raw block has an extra digit inserted before the letter relative to that verified arithmetic -- a real transcription typo in that specific worked example, not a genuine 9-character field width (leading zeros don't change the decoded value, but an extra SIGNIFICANT digit immediately before the letter does: '00000846'+6->...466 hundredths, not ...46). Trusted the arithmetically-verified source (data-types.md) over the un-worked table entry; F5/F6/F9 modeled at width=8 to match.",
+    "grossAmountDue/totalAmountPaid (F5/F9) CORRECTED from required=true to required=false (2026-09-19) -- a real bug found by running a comprehensive, diverse battery of self-authored B1 response scenarios (approved/rejected/duplicate/error, single and multi-claim) through the real ncpdptelecom.validate pipeline step: every rejected/duplicate/error sample (a REALISTIC construction -- a denied claim carries no pricing to echo) failed validation with 'required segment ResponsePricing is missing', even though this same file's own PRIOR sourceRef claimed 'F9 always carries SOME total, even $0.00, on a fully-denied claim' -- an assumption made without a real sample to confirm it, now contradicted by direct pipeline testing. Neither this schema's own two free sources nor NCPDP's own paid IG (inaccessible) were re-consulted to definitively settle which real-world convention is correct; rather than guess, this correction follows the SAME 'flexible, not rigid, no fabricated conditional-requirement business rules' boundary this validator's own package doc comment already commits to -- ResponsePricing's presence (and therefore these 2 fields) is no longer treated as unconditionally mandatory. A real payer integration should confirm its own trading-partner behavior via a companion guide before assuming either convention.",
+    "dzero's own field dictionary for this segment carries ~45 fields total (tax-exempt indicator, per-plan percentage-sales-tax breakdowns, coinsurance, spending-account/coverage-gap/product-selection cost attributions, contracted-reimbursable amounts, etc.) -- this file models the ~15 core fields both sources' own worked examples and prose actually exercise; the rest are a named, deferred simplification (core fields, not exhaustive, matching this codebase's own EDI 835/837 precedent), addable later as a pure schema-data edit.",
+    "benefitStageCount/Qualifier/Amount (MU/MV/MW) carry the same last-occurrence-wins simplification already noted on ResponseStatus.json's own rejectCode -- a claim with multiple benefit stages (e.g. both deductible AND coverage-gap) will only surface the LAST one parsed this phase."
+  ]
+}

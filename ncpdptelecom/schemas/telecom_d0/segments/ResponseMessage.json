@@ -1,0 +1,11 @@
+{
+  "key": "ResponseMessage",
+  "identifier": "20",
+  "name": "Response Message",
+  "fields": [
+    { "key": "message", "fieldId": "F4", "name": "Message", "dataType": "AN", "required": false }
+  ],
+  "sourceRefs": [
+    "apiv/dzero lib/dzero/segments/20_response_message.rb (field-id-to-symbol dictionary, read directly) -- a free-text message segment from the payer, per eduardonunesp/ncpdp-telecom-fmt-book docs/response.md's own segment overview table."
+  ]
+}

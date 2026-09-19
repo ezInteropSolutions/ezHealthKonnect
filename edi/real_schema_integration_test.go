@@ -454,7 +454,7 @@ func TestRealSchema_837P_BuildAndRoundTrip_LoopRefResolvesIndependently(t *testi
 					map[string]interface{}{
 						"LX": map[string]interface{}{"assignedNumber": "1"},
 						"SV1": map[string]interface{}{
-							"procedureCode": map[string]interface{}{"qualifier": "HC", "code": "99213"},
+							"procedureCode":        map[string]interface{}{"qualifier": "HC", "code": "99213"},
 							"lineItemChargeAmount": "250.00", "unitOfMeasurementCode": "UN", "serviceUnitCount": "1",
 							"diagnosisCodePointer": map[string]interface{}{"pointer1": "1"},
 						},
@@ -474,7 +474,7 @@ func TestRealSchema_837P_BuildAndRoundTrip_LoopRefResolvesIndependently(t *testi
 			"BHT": map[string]interface{}{
 				"hierarchicalStructureCode": "0019", "transactionSetPurposeCode": "00",
 				"originatorApplicationTransactionIdentifier": "TX0001",
-				"transactionSetCreationDate": "20260115", "transactionSetCreationTime": "1200",
+				"transactionSetCreationDate":                 "20260115", "transactionSetCreationTime": "1200",
 				"claimOrEncounterIdentifier": "CH",
 			},
 		},
@@ -635,7 +635,7 @@ func TestRealSchema_837I_BuildAndRoundTrip_DistinctFrom837P(t *testing.T) {
 			"BHT": map[string]interface{}{
 				"hierarchicalStructureCode": "0019", "transactionSetPurposeCode": "00",
 				"originatorApplicationTransactionIdentifier": "TX0002",
-				"transactionSetCreationDate": "20260115", "transactionSetCreationTime": "1200",
+				"transactionSetCreationDate":                 "20260115", "transactionSetCreationTime": "1200",
 				"claimOrEncounterIdentifier": "CH",
 			},
 		},
@@ -804,7 +804,7 @@ func TestRealSchema_270_BuildAndRoundTrip_SubscriberAndDependent(t *testing.T) {
 			"BHT": map[string]interface{}{
 				"hierarchicalStructureCode": "0022", "transactionSetPurposeCode": "13",
 				"originatorApplicationTransactionIdentifier": "ELIG0001",
-				"transactionSetCreationDate": "20260115", "transactionSetCreationTime": "1200",
+				"transactionSetCreationDate":                 "20260115", "transactionSetCreationTime": "1200",
 			},
 		},
 		Loops: map[string]interface{}{
@@ -950,7 +950,7 @@ func TestRealSchema_271_BuildAndRoundTrip_ActiveCoverageAndRejection(t *testing.
 			"BHT": map[string]interface{}{
 				"hierarchicalStructureCode": "0022", "transactionSetPurposeCode": "11",
 				"originatorApplicationTransactionIdentifier": "ELIG0001",
-				"transactionSetCreationDate": "20260115", "transactionSetCreationTime": "1201",
+				"transactionSetCreationDate":                 "20260115", "transactionSetCreationTime": "1201",
 			},
 		},
 		Loops: map[string]interface{}{
@@ -1070,6 +1070,703 @@ func TestRealSchema_271_BuildAndRoundTrip_ActiveCoverageAndRejection(t *testing.
 	for _, issue := range valResult.Issues {
 		if issue.Severity == "error" {
 			t.Errorf("unexpected error-severity issue on a self-built, correctly-enveloped 271: %+v", issue)
+		}
+	}
+}
+
+// TestRealSchema_276_BuildAndRoundTrip_SubscriberAndDependentClaimStatus
+// proves the real, spec-sourced 276 schema (EDI Phase 6) round-trips
+// correctly through the same generic engine — a 5-level HL tree one level
+// deeper than 270/271's own 4-level tree (276/277 add a genuine Service
+// Provider HL level, 2000C, that 270/271 fold into a plain PRV segment
+// instead). Exercises 2000A->2100A / 2000B->2100B / 2000C->2100C /
+// 2000D->2100D->2200D->2210D / 2000E->2100E->2200E->2210E and the HL03
+// trigger-discriminator mechanism at all 5 levels (20/21/19/22/23).
+func TestRealSchema_276_BuildAndRoundTrip_SubscriberAndDependentClaimStatus(t *testing.T) {
+	loader, err := edi.NewX12SchemaLoader(realSchemaDir(t))
+	if err != nil {
+		t.Fatalf("NewX12SchemaLoader: %v", err)
+	}
+	spec := loader.Spec()
+
+	txSet := loader.GetTransactionSet("276")
+	if txSet == nil {
+		t.Fatal("GetTransactionSet(276) returned nil")
+	}
+	if txSet.FunctionalIdentifierCode != "HR" {
+		t.Errorf("276 FunctionalIdentifierCode = %q, want HR", txSet.FunctionalIdentifierCode)
+	}
+	if txSet.VersionReleaseIndustryCode != "005010X212" {
+		t.Errorf("276 VersionReleaseIndustryCode = %q, want 005010X212", txSet.VersionReleaseIndustryCode)
+	}
+
+	input := builder.BuildInput{
+		TransactionSet: "276",
+		Interchange:    map[string]interface{}{"senderId": "PROVIDER1", "receiverId": "PAYER1"},
+		Header: map[string]interface{}{
+			"BHT": map[string]interface{}{
+				"hierarchicalStructureCode": "0010", "transactionSetPurposeCode": "13",
+				"originatorApplicationTransactionIdentifier": "CLMSTAT01",
+				"transactionSetCreationDate":                 "20260115", "transactionSetCreationTime": "1200",
+			},
+		},
+		Loops: map[string]interface{}{
+			"2000A": []interface{}{
+				map[string]interface{}{
+					"HL": map[string]interface{}{"hierarchicalIdNumber": "1", "hierarchicalLevelCode": "20", "hierarchicalChildCode": "1"},
+					"loops": map[string]interface{}{
+						"2100A": map[string]interface{}{"NM1": map[string]interface{}{"entityIdentifierCode": "PR", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "PAYER1", "identificationCodeQualifier": "PI", "identificationCode": "PAYER001"}},
+						"2000B": []interface{}{
+							map[string]interface{}{
+								"HL": map[string]interface{}{"hierarchicalIdNumber": "2", "hierarchicalParentIdNumber": "1", "hierarchicalLevelCode": "21", "hierarchicalChildCode": "1"},
+								"loops": map[string]interface{}{
+									"2100B": map[string]interface{}{"NM1": map[string]interface{}{"entityIdentifierCode": "41", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "ACME CLEARINGHOUSE", "identificationCodeQualifier": "46", "identificationCode": "CLR001"}},
+									"2000C": []interface{}{
+										map[string]interface{}{
+											"HL": map[string]interface{}{"hierarchicalIdNumber": "3", "hierarchicalParentIdNumber": "2", "hierarchicalLevelCode": "19", "hierarchicalChildCode": "1"},
+											"loops": map[string]interface{}{
+												"2100C": map[string]interface{}{"NM1": map[string]interface{}{"entityIdentifierCode": "1P", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "ACME CLINIC", "identificationCodeQualifier": "XX", "identificationCode": "1234567890"}},
+												"2000D": []interface{}{
+													map[string]interface{}{
+														"HL": map[string]interface{}{"hierarchicalIdNumber": "4", "hierarchicalParentIdNumber": "3", "hierarchicalLevelCode": "22", "hierarchicalChildCode": "1"},
+														"loops": map[string]interface{}{
+															"2100D": map[string]interface{}{
+																"NM1": map[string]interface{}{"entityIdentifierCode": "IL", "entityTypeQualifier": "1", "nameLastOrOrganizationName": "SMITH", "nameFirst": "JANE", "identificationCodeQualifier": "MI", "identificationCode": "SUB123"},
+																"DMG": map[string]interface{}{"dateTimePeriodFormatQualifier": "D8", "birthDate": "19800101", "genderCode": "F"},
+																"loops": map[string]interface{}{
+																	"2200D": []interface{}{
+																		map[string]interface{}{
+																			"TRN": map[string]interface{}{"traceTypeCode": "1", "checkOrEFTTraceNumber": "REQTRACE001"},
+																			"REF": map[string]interface{}{"referenceIdentificationQualifier": "EJ", "referenceIdentification": "PCN0001"},
+																			"AMT": map[string]interface{}{"amountQualifierCode": "T3", "monetaryAmount": "250.00"},
+																			"DTP": map[string]interface{}{"dateTimeQualifier": "472", "dateTimePeriodFormatQualifier": "D8", "date": "20260110"},
+																			"loops": map[string]interface{}{
+																				"2210D": []interface{}{
+																					map[string]interface{}{
+																						"SVC": map[string]interface{}{"procedureCode": map[string]interface{}{"qualifier": "HC", "code": "99213"}, "chargeAmount": "250.00"},
+																					},
+																				},
+																			},
+																		},
+																	},
+																},
+															},
+															"2000E": []interface{}{
+																map[string]interface{}{
+																	"HL": map[string]interface{}{"hierarchicalIdNumber": "5", "hierarchicalParentIdNumber": "4", "hierarchicalLevelCode": "23", "hierarchicalChildCode": "0"},
+																	"loops": map[string]interface{}{
+																		"2100E": map[string]interface{}{
+																			"NM1": map[string]interface{}{"entityIdentifierCode": "QC", "entityTypeQualifier": "1", "nameLastOrOrganizationName": "SMITH", "nameFirst": "TOMMY", "identificationCodeQualifier": "MI", "identificationCode": "SUB123"},
+																			"DMG": map[string]interface{}{"dateTimePeriodFormatQualifier": "D8", "birthDate": "20100601", "genderCode": "M"},
+																			"loops": map[string]interface{}{
+																				"2200E": []interface{}{
+																					map[string]interface{}{
+																						"TRN": map[string]interface{}{"traceTypeCode": "1", "checkOrEFTTraceNumber": "REQTRACE002"},
+																						"REF": map[string]interface{}{"referenceIdentificationQualifier": "EJ", "referenceIdentification": "PCN0002"},
+																						"loops": map[string]interface{}{
+																							"2210E": []interface{}{
+																								map[string]interface{}{
+																									"SVC": map[string]interface{}{"procedureCode": map[string]interface{}{"qualifier": "HC", "code": "90460"}, "chargeAmount": "75.00"},
+																								},
+																							},
+																						},
+																					},
+																				},
+																			},
+																		},
+																	},
+																},
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	built, err := builder.BuildDocument(spec, input)
+	if err != nil {
+		t.Fatalf("BuildDocument: %v", err)
+	}
+
+	result, err := edi.ParseTransactionSet(spec, built)
+	if err != nil {
+		t.Fatalf("re-parsing built 276: %v\nbuilt was:\n%s", err, built)
+	}
+
+	if result.TransactionSet != "276" {
+		t.Errorf("TransactionSet = %q, want 276", result.TransactionSet)
+	}
+
+	loop2000A := result.Loops["2000A"].([]map[string]interface{})[0]
+	loop2000B := loop2000A["loops"].(map[string]interface{})["2000B"].([]map[string]interface{})[0]
+	loop2000C := loop2000B["loops"].(map[string]interface{})["2000C"].([]map[string]interface{})[0]
+
+	loop2100C := loop2000C["loops"].(map[string]interface{})["2100C"].(map[string]interface{})
+	if loop2100C["NM1"].(map[string]interface{})["identificationCode"] != "1234567890" {
+		t.Errorf("2100C NM1 = %#v, want identificationCode=1234567890 (proving the Service Provider level is genuinely distinct from Receiver/Payer)", loop2100C["NM1"])
+	}
+
+	loop2000D := loop2000C["loops"].(map[string]interface{})["2000D"].([]map[string]interface{})[0]
+	loop2100D := loop2000D["loops"].(map[string]interface{})["2100D"].(map[string]interface{})
+	if loop2100D["NM1"].(map[string]interface{})["identificationCode"] != "SUB123" {
+		t.Errorf("2100D NM1 = %#v, want identificationCode=SUB123", loop2100D["NM1"])
+	}
+
+	loop2200D := loop2100D["loops"].(map[string]interface{})["2200D"].([]map[string]interface{})
+	if len(loop2200D) != 1 {
+		t.Fatalf("expected 1 instance of loop 2200D, got %d", len(loop2200D))
+	}
+	if loop2200D[0]["TRN"].(map[string]interface{})["checkOrEFTTraceNumber"] != "REQTRACE001" {
+		t.Errorf("2200D TRN = %#v, want checkOrEFTTraceNumber=REQTRACE001", loop2200D[0]["TRN"])
+	}
+	loop2210D := loop2200D[0]["loops"].(map[string]interface{})["2210D"].([]map[string]interface{})
+	if len(loop2210D) != 1 {
+		t.Fatalf("expected 1 instance of loop 2210D, got %d", len(loop2210D))
+	}
+	svc := loop2210D[0]["SVC"].(map[string]interface{})
+	procCode := svc["procedureCode"].(map[string]interface{})
+	if procCode["code"] != "99213" {
+		t.Errorf("2210D SVC.procedureCode = %#v, want code=99213", procCode)
+	}
+
+	// The dependent tier (2000E) is genuinely distinct from the subscriber
+	// tier (2000D), its own HL parent points at the subscriber's own HL id
+	// (proving the "Dependent's parent is always Subscriber, never Provider"
+	// hierarchy semantics), and carries its own independent claim status
+	// inquiry (2200E/2210E), not a copy of the subscriber's.
+	loop2000E := loop2000D["loops"].(map[string]interface{})["2000E"].([]map[string]interface{})[0]
+	loop2100E := loop2000E["loops"].(map[string]interface{})["2100E"].(map[string]interface{})
+	if loop2100E["NM1"].(map[string]interface{})["nameFirst"] != "TOMMY" {
+		t.Errorf("2100E NM1 = %#v, want nameFirst=TOMMY", loop2100E["NM1"])
+	}
+	loop2200E := loop2100E["loops"].(map[string]interface{})["2200E"].([]map[string]interface{})
+	if len(loop2200E) != 1 || loop2200E[0]["TRN"].(map[string]interface{})["checkOrEFTTraceNumber"] != "REQTRACE002" {
+		t.Errorf("2200E TRN = %#v, want checkOrEFTTraceNumber=REQTRACE002", loop2200E)
+	}
+
+	valResult := validator.Validate(spec, result)
+	for _, issue := range valResult.Issues {
+		if issue.Severity == "error" {
+			t.Errorf("unexpected error-severity issue on a self-built, correctly-enveloped 276: %+v", issue)
+		}
+	}
+}
+
+// TestRealSchema_277_BuildAndRoundTrip_AcceptedAndFinalizedStatus proves the
+// real, spec-sourced 277 schema round-trips correctly — a subscriber's claim
+// coming back with an in-process status (STC category+status composite) and
+// a dependent's claim coming back finalized/paid, on the SAME transaction,
+// including 277's own extra receiver/provider-level trace+status loops
+// (2200B/2200C) that 276 has no equivalent of.
+func TestRealSchema_277_BuildAndRoundTrip_AcceptedAndFinalizedStatus(t *testing.T) {
+	loader, err := edi.NewX12SchemaLoader(realSchemaDir(t))
+	if err != nil {
+		t.Fatalf("NewX12SchemaLoader: %v", err)
+	}
+	spec := loader.Spec()
+
+	txSet := loader.GetTransactionSet("277")
+	if txSet == nil {
+		t.Fatal("GetTransactionSet(277) returned nil")
+	}
+	if txSet.FunctionalIdentifierCode != "HN" {
+		t.Errorf("277 FunctionalIdentifierCode = %q, want HN", txSet.FunctionalIdentifierCode)
+	}
+
+	input := builder.BuildInput{
+		TransactionSet: "277",
+		Interchange:    map[string]interface{}{"senderId": "PAYER1", "receiverId": "PROVIDER1"},
+		Header: map[string]interface{}{
+			"BHT": map[string]interface{}{
+				"hierarchicalStructureCode": "0010", "transactionSetPurposeCode": "08",
+				"originatorApplicationTransactionIdentifier": "CLMSTAT01",
+				"transactionSetCreationDate":                 "20260116", "transactionSetCreationTime": "0900",
+			},
+		},
+		Loops: map[string]interface{}{
+			"2000A": []interface{}{
+				map[string]interface{}{
+					"HL": map[string]interface{}{"hierarchicalIdNumber": "1", "hierarchicalLevelCode": "20", "hierarchicalChildCode": "1"},
+					"loops": map[string]interface{}{
+						"2100A": map[string]interface{}{"NM1": map[string]interface{}{"entityIdentifierCode": "PR", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "PAYER1", "identificationCodeQualifier": "PI", "identificationCode": "PAYER001"}},
+						"2000B": []interface{}{
+							map[string]interface{}{
+								"HL": map[string]interface{}{"hierarchicalIdNumber": "2", "hierarchicalParentIdNumber": "1", "hierarchicalLevelCode": "21", "hierarchicalChildCode": "1"},
+								"loops": map[string]interface{}{
+									"2100B": map[string]interface{}{
+										"NM1": map[string]interface{}{"entityIdentifierCode": "41", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "ACME CLEARINGHOUSE", "identificationCodeQualifier": "46", "identificationCode": "CLR001"},
+										"loops": map[string]interface{}{
+											"2200B": map[string]interface{}{
+												"TRN": map[string]interface{}{"traceTypeCode": "2", "checkOrEFTTraceNumber": "RCVTRACE001"},
+												"STC": map[string]interface{}{"healthCareClaimStatus": map[string]interface{}{"categoryCode": "A1", "statusCode": "20"}, "statusInformationEffectiveDate": "20260116"},
+											},
+										},
+									},
+									"2000C": []interface{}{
+										map[string]interface{}{
+											"HL": map[string]interface{}{"hierarchicalIdNumber": "3", "hierarchicalParentIdNumber": "2", "hierarchicalLevelCode": "19", "hierarchicalChildCode": "1"},
+											"loops": map[string]interface{}{
+												"2100C": map[string]interface{}{
+													"NM1": map[string]interface{}{"entityIdentifierCode": "1P", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "ACME CLINIC", "identificationCodeQualifier": "XX", "identificationCode": "1234567890"},
+													"loops": map[string]interface{}{
+														"2200C": map[string]interface{}{
+															"TRN": map[string]interface{}{"traceTypeCode": "2", "checkOrEFTTraceNumber": "PRVTRACE001"},
+															"STC": map[string]interface{}{"healthCareClaimStatus": map[string]interface{}{"categoryCode": "A1", "statusCode": "20"}, "statusInformationEffectiveDate": "20260116"},
+														},
+													},
+												},
+												"2000D": []interface{}{
+													map[string]interface{}{
+														"HL": map[string]interface{}{"hierarchicalIdNumber": "4", "hierarchicalParentIdNumber": "3", "hierarchicalLevelCode": "22", "hierarchicalChildCode": "1"},
+														"loops": map[string]interface{}{
+															"2100D": map[string]interface{}{
+																"NM1": map[string]interface{}{"entityIdentifierCode": "IL", "entityTypeQualifier": "1", "nameLastOrOrganizationName": "SMITH", "nameFirst": "JANE", "identificationCodeQualifier": "MI", "identificationCode": "SUB123"},
+																"loops": map[string]interface{}{
+																	"2200D": []interface{}{
+																		map[string]interface{}{
+																			"TRN": map[string]interface{}{"traceTypeCode": "1", "checkOrEFTTraceNumber": "REQTRACE001"},
+																			"STC": map[string]interface{}{"healthCareClaimStatus": map[string]interface{}{"categoryCode": "F1", "statusCode": "1"}, "statusInformationEffectiveDate": "20260116", "totalSubmittedChargeAmount": "250.00", "totalPaidAmount": "200.00"},
+																			"REF": map[string]interface{}{"referenceIdentificationQualifier": "1K", "referenceIdentification": "PAYERCLM001"},
+																		},
+																	},
+																},
+															},
+															"2000E": []interface{}{
+																map[string]interface{}{
+																	"HL": map[string]interface{}{"hierarchicalIdNumber": "5", "hierarchicalParentIdNumber": "4", "hierarchicalLevelCode": "23", "hierarchicalChildCode": "0"},
+																	"loops": map[string]interface{}{
+																		"2100E": map[string]interface{}{
+																			"NM1": map[string]interface{}{"entityIdentifierCode": "QC", "entityTypeQualifier": "1", "nameLastOrOrganizationName": "SMITH", "nameFirst": "TOMMY", "identificationCodeQualifier": "MI", "identificationCode": "SUB123"},
+																			"loops": map[string]interface{}{
+																				"2200E": []interface{}{
+																					map[string]interface{}{
+																						"TRN": map[string]interface{}{"traceTypeCode": "1", "checkOrEFTTraceNumber": "REQTRACE002"},
+																						"STC": map[string]interface{}{"healthCareClaimStatus": map[string]interface{}{"categoryCode": "A2", "statusCode": "35"}, "statusInformationEffectiveDate": "20260116"},
+																						"REF": map[string]interface{}{"referenceIdentificationQualifier": "1K", "referenceIdentification": "PAYERCLM002"},
+																						"loops": map[string]interface{}{
+																							"2220E": []interface{}{
+																								map[string]interface{}{
+																									"SVC": map[string]interface{}{"procedureCode": map[string]interface{}{"qualifier": "HC", "code": "90460"}, "chargeAmount": "75.00", "paidAmount": "60.00"},
+																									"STC": map[string]interface{}{"healthCareClaimStatus": map[string]interface{}{"categoryCode": "F1", "statusCode": "1"}},
+																								},
+																							},
+																						},
+																					},
+																				},
+																			},
+																		},
+																	},
+																},
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	built, err := builder.BuildDocument(spec, input)
+	if err != nil {
+		t.Fatalf("BuildDocument: %v", err)
+	}
+
+	result, err := edi.ParseTransactionSet(spec, built)
+	if err != nil {
+		t.Fatalf("re-parsing built 277: %v\nbuilt was:\n%s", err, built)
+	}
+
+	if result.TransactionSet != "277" {
+		t.Errorf("TransactionSet = %q, want 277", result.TransactionSet)
+	}
+
+	loop2000A := result.Loops["2000A"].([]map[string]interface{})[0]
+	loop2000B := loop2000A["loops"].(map[string]interface{})["2000B"].([]map[string]interface{})[0]
+
+	// 2200B (Information Receiver Trace) — an STC loop 276 has no equivalent of.
+	loop2100B := loop2000B["loops"].(map[string]interface{})["2100B"].(map[string]interface{})
+	loop2200B := loop2100B["loops"].(map[string]interface{})["2200B"].(map[string]interface{})
+	// STC has maxUse=">1" in its own segment definition, so the parser always
+	// wraps it as an array — schema-driven cardinality, not observed-count-driven,
+	// matching this engine's established precedent (see edi.map_to_canonical's
+	// own "schema decides wrapping" rule) — even a single real occurrence here.
+	stc2200B := loop2200B["STC"].([]map[string]interface{})[0]["healthCareClaimStatus"].(map[string]interface{})
+	if stc2200B["categoryCode"] != "A1" {
+		t.Errorf("2200B STC = %#v, want categoryCode=A1", stc2200B)
+	}
+
+	loop2000C := loop2000B["loops"].(map[string]interface{})["2000C"].([]map[string]interface{})[0]
+	loop2000D := loop2000C["loops"].(map[string]interface{})["2000D"].([]map[string]interface{})[0]
+	loop2100D := loop2000D["loops"].(map[string]interface{})["2100D"].(map[string]interface{})
+	loop2200D := loop2100D["loops"].(map[string]interface{})["2200D"].([]map[string]interface{})
+	if len(loop2200D) != 1 {
+		t.Fatalf("expected 1 instance of loop 2200D, got %d", len(loop2200D))
+	}
+	stc2200Dseg := loop2200D[0]["STC"].([]map[string]interface{})[0]
+	stc2200D := stc2200Dseg["healthCareClaimStatus"].(map[string]interface{})
+	if stc2200D["categoryCode"] != "F1" || stc2200D["statusCode"] != "1" {
+		t.Errorf("2200D STC = %#v, want categoryCode=F1/statusCode=1 (finalized/paid)", stc2200D)
+	}
+	if stc2200Dseg["totalPaidAmount"] != "200.00" {
+		t.Errorf("2200D STC.totalPaidAmount = %#v, want 200.00", stc2200Dseg)
+	}
+
+	// Dependent tier's own independent claim status, including its own
+	// 2220E service-line-level STC — genuinely distinct from the
+	// subscriber's own 2200D status, proving STC repeats correctly at both
+	// the claim and service-line levels on the same built document.
+	loop2000E := loop2000D["loops"].(map[string]interface{})["2000E"].([]map[string]interface{})[0]
+	loop2100E := loop2000E["loops"].(map[string]interface{})["2100E"].(map[string]interface{})
+	loop2200E := loop2100E["loops"].(map[string]interface{})["2200E"].([]map[string]interface{})
+	if len(loop2200E) != 1 {
+		t.Fatalf("expected 1 instance of loop 2200E, got %d", len(loop2200E))
+	}
+	stc2200E := loop2200E[0]["STC"].([]map[string]interface{})[0]["healthCareClaimStatus"].(map[string]interface{})
+	if stc2200E["categoryCode"] != "A2" {
+		t.Errorf("2200E STC = %#v, want categoryCode=A2 (pending/in-process, genuinely distinct from the subscriber's finalized F1)", stc2200E)
+	}
+
+	loop2220E := loop2200E[0]["loops"].(map[string]interface{})["2220E"].([]map[string]interface{})
+	if len(loop2220E) != 1 {
+		t.Fatalf("expected 1 instance of loop 2220E, got %d", len(loop2220E))
+	}
+	svcStc := loop2220E[0]["STC"].([]map[string]interface{})[0]["healthCareClaimStatus"].(map[string]interface{})
+	if svcStc["categoryCode"] != "F1" {
+		t.Errorf("2220E STC = %#v, want categoryCode=F1 (service line finalized even though the claim-level status is still A2/pending)", svcStc)
+	}
+
+	valResult := validator.Validate(spec, result)
+	for _, issue := range valResult.Issues {
+		if issue.Severity == "error" {
+			t.Errorf("unexpected error-severity issue on a self-built, correctly-enveloped 277: %+v", issue)
+		}
+	}
+}
+
+// TestRealSchema_278_BuildAndRoundTrip_RequestAndResponseOnSameUnifiedSchema
+// proves the real, spec-sourced 278 schema (EDI Phase 7, a SINGLE unified
+// schema serving both directions -- see 278.json's own _sourceRefs) round-
+// trips correctly for BOTH a pure REQUEST (the dependent's own patient event,
+// no HCR present) and a RESPONSE carrying a real certification decision (the
+// subscriber's own patient event, HCR present) on the SAME transaction --
+// mirroring 271's own "prove both branches in one document" technique.
+func TestRealSchema_278_BuildAndRoundTrip_RequestAndResponseOnSameUnifiedSchema(t *testing.T) {
+	loader, err := edi.NewX12SchemaLoader(realSchemaDir(t))
+	if err != nil {
+		t.Fatalf("NewX12SchemaLoader: %v", err)
+	}
+	spec := loader.Spec()
+
+	txSet := loader.GetTransactionSet("278")
+	if txSet == nil {
+		t.Fatal("GetTransactionSet(278) returned nil")
+	}
+	if txSet.FunctionalIdentifierCode != "HI" {
+		t.Errorf("278 FunctionalIdentifierCode = %q, want HI", txSet.FunctionalIdentifierCode)
+	}
+	if txSet.VersionReleaseIndustryCode != "005010X217" {
+		t.Errorf("278 VersionReleaseIndustryCode = %q, want 005010X217", txSet.VersionReleaseIndustryCode)
+	}
+
+	input := builder.BuildInput{
+		TransactionSet: "278",
+		Interchange:    map[string]interface{}{"senderId": "ACMEUMO", "receiverId": "ACMECLINIC"},
+		Header: map[string]interface{}{
+			"BHT": map[string]interface{}{
+				"hierarchicalStructureCode": "0078", "transactionSetPurposeCode": "13",
+				"originatorApplicationTransactionIdentifier": "PA0001",
+				"transactionSetCreationDate":                 "20260914", "transactionSetCreationTime": "0900",
+			},
+		},
+		Loops: map[string]interface{}{
+			"2000A": []interface{}{
+				map[string]interface{}{
+					"HL": map[string]interface{}{"hierarchicalIdNumber": "1", "hierarchicalLevelCode": "20", "hierarchicalChildCode": "1"},
+					"loops": map[string]interface{}{
+						"2010A": map[string]interface{}{"NM1": map[string]interface{}{"entityIdentifierCode": "X3", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "ACME UMO", "identificationCodeQualifier": "PI", "identificationCode": "UMO001"}},
+						"2000B": []interface{}{
+							map[string]interface{}{
+								"HL": map[string]interface{}{"hierarchicalIdNumber": "2", "hierarchicalParentIdNumber": "1", "hierarchicalLevelCode": "21", "hierarchicalChildCode": "1"},
+								"loops": map[string]interface{}{
+									"2010B": []interface{}{
+										map[string]interface{}{"NM1": map[string]interface{}{"entityIdentifierCode": "1P", "entityTypeQualifier": "2", "nameLastOrOrganizationName": "ACME CLINIC", "identificationCodeQualifier": "XX", "identificationCode": "1234567890"}},
+									},
+									"2000C": []interface{}{
+										map[string]interface{}{
+											"HL": map[string]interface{}{"hierarchicalIdNumber": "3", "hierarchicalParentIdNumber": "2", "hierarchicalLevelCode": "22", "hierarchicalChildCode": "1"},
+											"loops": map[string]interface{}{
+												"2010C": map[string]interface{}{"NM1": map[string]interface{}{"entityIdentifierCode": "IL", "entityTypeQualifier": "1", "nameLastOrOrganizationName": "SMITH", "nameFirst": "JANE", "identificationCodeQualifier": "MI", "identificationCode": "SUB123"}},
+												// 2000E here is the SUBSCRIBER's own patient event -- a
+												// SIBLING of 2000D within 2000C's own loops (matching the
+												// "Dependent's real HL parent is the Subscriber, never the
+												// Provider" rule this session already learned twice for
+												// 276/277 -- 278's own tree has the SAME shape one level
+												// deeper). This one carries HCR: it is a RESPONSE.
+												"2000D": []interface{}{
+													map[string]interface{}{
+														"HL": map[string]interface{}{"hierarchicalIdNumber": "4", "hierarchicalParentIdNumber": "3", "hierarchicalLevelCode": "23", "hierarchicalChildCode": "1"},
+														"loops": map[string]interface{}{
+															"2010D": map[string]interface{}{"NM1": map[string]interface{}{"entityIdentifierCode": "QC", "entityTypeQualifier": "1", "nameLastOrOrganizationName": "SMITH", "nameFirst": "TOMMY", "identificationCodeQualifier": "MI", "identificationCode": "SUB123"}},
+															// The DEPENDENT's own patient event -- no HCR: a
+															// pure REQUEST, no decision made yet.
+															"2000E": map[string]interface{}{
+																"HL": map[string]interface{}{"hierarchicalIdNumber": "5", "hierarchicalParentIdNumber": "4", "hierarchicalLevelCode": "EV", "hierarchicalChildCode": "1"},
+																"TRN": map[string]interface{}{"traceTypeCode": "1", "checkOrEFTTraceNumber": "EVENTTRACE002"},
+																"UM":  map[string]interface{}{"requestCategoryCode": "HS", "certificationTypeCode": "I", "serviceTypeCode": "1"},
+																"loops": map[string]interface{}{
+																	"2000F": []interface{}{
+																		map[string]interface{}{
+																			"HL":  map[string]interface{}{"hierarchicalIdNumber": "6", "hierarchicalParentIdNumber": "5", "hierarchicalLevelCode": "SS", "hierarchicalChildCode": "0"},
+																			"TRN": map[string]interface{}{"traceTypeCode": "1", "checkOrEFTTraceNumber": "SVCTRACE002"},
+																			"SV1": map[string]interface{}{"procedureCode": map[string]interface{}{"qualifier": "HC", "code": "90471"}},
+																		},
+																	},
+																},
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	// Splice the subscriber's own 2000E (a RESPONSE, HCR present) in as a
+	// sibling of 2000D within 2000C's own loops -- done here via direct map
+	// manipulation (rather than inline above) purely to keep the literal
+	// above readable; the resulting shape is identical to writing it inline.
+	loop2000CInner := input.Loops["2000A"].([]interface{})[0].(map[string]interface{})["loops"].(map[string]interface{})["2000B"].([]interface{})[0].(map[string]interface{})["loops"].(map[string]interface{})["2000C"].([]interface{})[0].(map[string]interface{})["loops"].(map[string]interface{})
+	loop2000CInner["2000E"] = map[string]interface{}{
+		"HL":  map[string]interface{}{"hierarchicalIdNumber": "7", "hierarchicalParentIdNumber": "3", "hierarchicalLevelCode": "EV", "hierarchicalChildCode": "1"},
+		"TRN": map[string]interface{}{"traceTypeCode": "1", "checkOrEFTTraceNumber": "EVENTTRACE001"},
+		"UM":  map[string]interface{}{"requestCategoryCode": "HS", "certificationTypeCode": "I", "serviceTypeCode": "1"},
+		"HCR": map[string]interface{}{"actionCode": "A1", "certificationNumber": "AUTH99001"},
+		"loops": map[string]interface{}{
+			"2000F": []interface{}{
+				map[string]interface{}{
+					"HL":  map[string]interface{}{"hierarchicalIdNumber": "8", "hierarchicalParentIdNumber": "7", "hierarchicalLevelCode": "SS", "hierarchicalChildCode": "0"},
+					"TRN": map[string]interface{}{"traceTypeCode": "1", "checkOrEFTTraceNumber": "SVCTRACE001"},
+					"SV1": map[string]interface{}{"procedureCode": map[string]interface{}{"qualifier": "HC", "code": "99213"}},
+					"HCR": map[string]interface{}{"actionCode": "A1", "certificationNumber": "AUTH99001-SVC"},
+				},
+			},
+		},
+	}
+
+	built, err := builder.BuildDocument(spec, input)
+	if err != nil {
+		t.Fatalf("BuildDocument: %v", err)
+	}
+
+	result, err := edi.ParseTransactionSet(spec, built)
+	if err != nil {
+		t.Fatalf("re-parsing built 278: %v\nbuilt was:\n%s", err, built)
+	}
+	if result.TransactionSet != "278" {
+		t.Errorf("TransactionSet = %q, want 278", result.TransactionSet)
+	}
+
+	loop2000A := result.Loops["2000A"].([]map[string]interface{})[0]
+	loop2000B := loop2000A["loops"].(map[string]interface{})["2000B"].([]map[string]interface{})[0]
+	loop2000C := loop2000B["loops"].(map[string]interface{})["2000C"].([]map[string]interface{})[0]
+
+	// The subscriber's own 2000E (sibling of 2000D) is the RESPONSE.
+	loop2000ESub := loop2000C["loops"].(map[string]interface{})["2000E"].(map[string]interface{})
+	if loop2000ESub["TRN"].(map[string]interface{})["checkOrEFTTraceNumber"] != "EVENTTRACE001" {
+		t.Errorf("subscriber 2000E TRN = %#v, want EVENTTRACE001", loop2000ESub["TRN"])
+	}
+	if loop2000ESub["HCR"] == nil {
+		t.Fatal("subscriber 2000E should carry HCR (a certification decision) -- it's the RESPONSE side")
+	}
+	if loop2000ESub["HCR"].(map[string]interface{})["actionCode"] != "A1" {
+		t.Errorf("subscriber 2000E HCR = %#v, want actionCode=A1", loop2000ESub["HCR"])
+	}
+	loop2000FSub := loop2000ESub["loops"].(map[string]interface{})["2000F"].([]map[string]interface{})[0]
+	if loop2000FSub["SV1"].(map[string]interface{})["procedureCode"].(map[string]interface{})["code"] != "99213" {
+		t.Errorf("subscriber 2000F SV1 = %#v, want procedureCode.code=99213", loop2000FSub["SV1"])
+	}
+
+	// The dependent's own 2000E (nested inside 2000D) is the pure REQUEST --
+	// no HCR present anywhere in this branch.
+	loop2000D := loop2000C["loops"].(map[string]interface{})["2000D"].([]map[string]interface{})[0]
+	if loop2000D["loops"].(map[string]interface{})["2010D"].(map[string]interface{})["NM1"].(map[string]interface{})["nameFirst"] != "TOMMY" {
+		t.Errorf("2010D NM1 = %#v, want nameFirst=TOMMY", loop2000D["loops"].(map[string]interface{})["2010D"])
+	}
+	loop2000EDep := loop2000D["loops"].(map[string]interface{})["2000E"].(map[string]interface{})
+	if loop2000EDep["TRN"].(map[string]interface{})["checkOrEFTTraceNumber"] != "EVENTTRACE002" {
+		t.Errorf("dependent 2000E TRN = %#v, want EVENTTRACE002", loop2000EDep["TRN"])
+	}
+	if loop2000EDep["HCR"] != nil {
+		t.Errorf("dependent 2000E should carry NO HCR (it's a pure REQUEST, no decision made yet), got %#v", loop2000EDep["HCR"])
+	}
+	loop2000FDep := loop2000EDep["loops"].(map[string]interface{})["2000F"].([]map[string]interface{})[0]
+	if loop2000FDep["SV1"].(map[string]interface{})["procedureCode"].(map[string]interface{})["code"] != "90471" {
+		t.Errorf("dependent 2000F SV1 = %#v, want procedureCode.code=90471", loop2000FDep["SV1"])
+	}
+	if loop2000FDep["HCR"] != nil {
+		t.Errorf("dependent 2000F should carry NO HCR, got %#v", loop2000FDep["HCR"])
+	}
+
+	valResult := validator.Validate(spec, result)
+	for _, issue := range valResult.Issues {
+		if issue.Severity == "error" {
+			t.Errorf("unexpected error-severity issue on a self-built, correctly-enveloped 278: %+v", issue)
+		}
+	}
+}
+
+// TestRealSchema_834_BuildAndRoundTrip_ActiveAndTerminatedMembers proves the
+// real, spec-sourced 834 schema (EDI Phase 7, a genuinely different FLAT
+// shape -- no HL hierarchy, every member is its own top-level 2000 instance
+// triggered by INS) round-trips correctly for two members on the same file:
+// a subscriber with an ACTIVE health-coverage enrollment (HD01="021"
+// Addition) and a dependent with a TERMINATED one (HD01="024" Cancellation/
+// Termination -- the real X12 element 875 code, confirmed against X12.org's
+// own official 834 examples) -- proving the maintenance-type-code detail the FHIR mapping's own
+// Coverage.status translation depends on survives a real round trip.
+func TestRealSchema_834_BuildAndRoundTrip_ActiveAndTerminatedMembers(t *testing.T) {
+	loader, err := edi.NewX12SchemaLoader(realSchemaDir(t))
+	if err != nil {
+		t.Fatalf("NewX12SchemaLoader: %v", err)
+	}
+	spec := loader.Spec()
+
+	txSet := loader.GetTransactionSet("834")
+	if txSet == nil {
+		t.Fatal("GetTransactionSet(834) returned nil")
+	}
+	if txSet.FunctionalIdentifierCode != "BE" {
+		t.Errorf("834 FunctionalIdentifierCode = %q, want BE", txSet.FunctionalIdentifierCode)
+	}
+	if txSet.VersionReleaseIndustryCode != "005010X220" {
+		t.Errorf("834 VersionReleaseIndustryCode = %q, want 005010X220", txSet.VersionReleaseIndustryCode)
+	}
+
+	input := builder.BuildInput{
+		TransactionSet: "834",
+		Interchange:    map[string]interface{}{"senderId": "ACMECORP", "receiverId": "PAYER1"},
+		Header: map[string]interface{}{
+			"BGN": map[string]interface{}{"transactionSetPurposeCode": "00", "referenceIdentification": "ENROLL0001", "date": "20260914"},
+		},
+		Loops: map[string]interface{}{
+			"1000A": map[string]interface{}{"N1": map[string]interface{}{"entityIdentifierCode": "P5", "name": "ACME CORP", "identificationCodeQualifier": "FI", "identificationCode": "111223333"}},
+			"1000B": map[string]interface{}{"N1": map[string]interface{}{"entityIdentifierCode": "IN", "name": "PAYER1", "identificationCodeQualifier": "PI", "identificationCode": "PAYER001"}},
+			"2000": []interface{}{
+				map[string]interface{}{
+					"INS": map[string]interface{}{"yesNoConditionResponseCode": "Y", "individualRelationshipCode": "18", "maintenanceTypeCode": "021", "maintenanceReasonCode": "XN"},
+					"REF": map[string]interface{}{"referenceIdentificationQualifier": "0F", "referenceIdentification": "SUB123"},
+					"loops": map[string]interface{}{
+						"2100A": map[string]interface{}{
+							"NM1": map[string]interface{}{"entityIdentifierCode": "IL", "entityTypeQualifier": "1", "nameLastOrOrganizationName": "SMITH", "nameFirst": "JANE", "identificationCodeQualifier": "34", "identificationCode": "999001234"},
+							"DMG": map[string]interface{}{"dateTimePeriodFormatQualifier": "D8", "birthDate": "19800101", "genderCode": "F"},
+						},
+						"2300": []interface{}{
+							map[string]interface{}{
+								"HD": map[string]interface{}{"maintenanceTypeCode": "021", "insuranceLineCode": "HLT", "planCoverageDescription": "GOLD PPO"},
+								"DTP": map[string]interface{}{"dateTimeQualifier": "348", "dateTimePeriodFormatQualifier": "D8", "datePeriod": "20260101"},
+							},
+						},
+					},
+				},
+				map[string]interface{}{
+					"INS": map[string]interface{}{"yesNoConditionResponseCode": "N", "individualRelationshipCode": "19", "maintenanceTypeCode": "024", "maintenanceReasonCode": "XT"},
+					"REF": map[string]interface{}{"referenceIdentificationQualifier": "0F", "referenceIdentification": "SUB123"},
+					"loops": map[string]interface{}{
+						"2100A": map[string]interface{}{
+							"NM1": map[string]interface{}{"entityIdentifierCode": "IL", "entityTypeQualifier": "1", "nameLastOrOrganizationName": "SMITH", "nameFirst": "TOMMY", "identificationCodeQualifier": "34", "identificationCode": "999001234"},
+							"DMG": map[string]interface{}{"dateTimePeriodFormatQualifier": "D8", "birthDate": "20100601", "genderCode": "M"},
+						},
+						"2300": []interface{}{
+							map[string]interface{}{
+								"HD":  map[string]interface{}{"maintenanceTypeCode": "024", "insuranceLineCode": "HLT", "planCoverageDescription": "GOLD PPO"},
+								"DTP": map[string]interface{}{"dateTimeQualifier": "349", "dateTimePeriodFormatQualifier": "D8", "datePeriod": "20260901"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	built, err := builder.BuildDocument(spec, input)
+	if err != nil {
+		t.Fatalf("BuildDocument: %v", err)
+	}
+
+	result, err := edi.ParseTransactionSet(spec, built)
+	if err != nil {
+		t.Fatalf("re-parsing built 834: %v\nbuilt was:\n%s", err, built)
+	}
+	if result.TransactionSet != "834" {
+		t.Errorf("TransactionSet = %q, want 834", result.TransactionSet)
+	}
+
+	loop1000A := result.Loops["1000A"].(map[string]interface{})
+	if loop1000A["N1"].(map[string]interface{})["name"] != "ACME CORP" {
+		t.Errorf("1000A N1 = %#v, want name=ACME CORP", loop1000A["N1"])
+	}
+	loop1000B := result.Loops["1000B"].(map[string]interface{})
+	if loop1000B["N1"].(map[string]interface{})["entityIdentifierCode"] != "IN" {
+		t.Errorf("1000B N1 = %#v, want entityIdentifierCode=IN (Insurer -- the real X12 code 834 uses, confirmed against X12.org's own official examples)", loop1000B["N1"])
+	}
+
+	members := result.Loops["2000"].([]map[string]interface{})
+	if len(members) != 2 {
+		t.Fatalf("expected 2 flat member instances (no HL hierarchy), got %d", len(members))
+	}
+
+	subscriber := members[0]
+	if subscriber["INS"].(map[string]interface{})["individualRelationshipCode"] != "18" {
+		t.Errorf("member[0] INS = %#v, want individualRelationshipCode=18 (self)", subscriber["INS"])
+	}
+	sub2100A := subscriber["loops"].(map[string]interface{})["2100A"].(map[string]interface{})
+	if sub2100A["NM1"].(map[string]interface{})["nameFirst"] != "JANE" {
+		t.Errorf("member[0] 2100A NM1 = %#v, want nameFirst=JANE", sub2100A["NM1"])
+	}
+	sub2300 := subscriber["loops"].(map[string]interface{})["2300"].([]map[string]interface{})
+	if len(sub2300) != 1 || sub2300[0]["HD"].(map[string]interface{})["maintenanceTypeCode"] != "021" {
+		t.Errorf("member[0] 2300 HD = %#v, want maintenanceTypeCode=021 (Addition -- active, real X12 element 875 code)", sub2300)
+	}
+
+	dependent := members[1]
+	if dependent["INS"].(map[string]interface{})["individualRelationshipCode"] != "19" {
+		t.Errorf("member[1] INS = %#v, want individualRelationshipCode=19 (child), proving members are flat siblings, not HL-nested", dependent["INS"])
+	}
+	dep2100A := dependent["loops"].(map[string]interface{})["2100A"].(map[string]interface{})
+	if dep2100A["NM1"].(map[string]interface{})["nameFirst"] != "TOMMY" {
+		t.Errorf("member[1] 2100A NM1 = %#v, want nameFirst=TOMMY", dep2100A["NM1"])
+	}
+	dep2300 := dependent["loops"].(map[string]interface{})["2300"].([]map[string]interface{})
+	if len(dep2300) != 1 || dep2300[0]["HD"].(map[string]interface{})["maintenanceTypeCode"] != "024" {
+		t.Errorf("member[1] 2300 HD = %#v, want maintenanceTypeCode=024 (Cancellation/Termination, the real X12 element 875 code -- confirmed against X12.org's own official 834 examples), genuinely distinct from the subscriber's own Addition", dep2300)
+	}
+
+	valResult := validator.Validate(spec, result)
+	for _, issue := range valResult.Issues {
+		if issue.Severity == "error" {
+			t.Errorf("unexpected error-severity issue on a self-built, correctly-enveloped 834: %+v", issue)
 		}
 	}
 }

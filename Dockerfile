@@ -115,6 +115,22 @@ COPY uscdi/       ./uscdi/
 # image), but silently 503s in a real deployed container without this line.
 COPY edi/         ./edi/
 
+# NCPDP SCRIPT (pharmacy e-prescribing) schema files — read by Go binary at
+# runtime for NewRx/CancelRx/CancelRxResponse/RxChangeRequest/
+# RxChangeResponse parsing/building (ncpdp.parse/validate/map_to_canonical/
+# build). Added proactively alongside cda/uscdi/edi above rather than
+# repeating the exact same "missing COPY line, only caught by a real
+# container smoke test" bug the edi/ line's own comment documents.
+COPY ncpdp/       ./ncpdp/
+
+# NCPDP Telecommunication D.0 (real-time pharmacy claims) schema files —
+# read by Go binary at runtime for B1 Claim Billing parsing/building
+# (ncpdptelecom.parse/validate/map_to_canonical/build + the D.0 schema
+# browser API). Added proactively alongside cda/uscdi/edi/ncpdp above,
+# pre-empting the exact same "missing COPY line, only caught by a real
+# container smoke test" bug the edi/ line's own comment documents.
+COPY ncpdptelecom/ ./ncpdptelecom/
+
 # Runtime directories (overlaid by named volumes in production)
 RUN mkdir -p schemas logs uploads
 

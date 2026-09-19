@@ -1,0 +1,16 @@
+{
+  "key": "Address",
+  "xmlElement": "Address",
+  "name": "Postal Address",
+  "fields": [
+    { "key": "addressLine1", "xpath": "AddressLine1", "name": "Address Line 1", "dataType": "string", "required": true },
+    { "key": "addressLine2", "xpath": "AddressLine2", "name": "Address Line 2", "dataType": "string", "required": false },
+    { "key": "city", "xpath": "City", "name": "City", "dataType": "string", "required": true },
+    { "key": "stateProvince", "xpath": "StateProvince", "name": "State/Province", "dataType": "string", "required": true },
+    { "key": "postalCode", "xpath": "PostalCode", "name": "Postal Code", "dataType": "string", "required": true },
+    { "key": "countryCode", "xpath": "CountryCode", "name": "Country Code", "dataType": "string", "required": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, every Address occurrence)"
+  ]
+}

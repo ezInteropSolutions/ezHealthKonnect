@@ -1,0 +1,23 @@
+{
+  "key": "MedicationPrescribed",
+  "xmlElement": "MedicationPrescribed",
+  "name": "Medication Prescribed",
+  "fields": [
+    { "key": "drugDescription", "xpath": "DrugDescription", "name": "Drug Description", "dataType": "string", "required": true },
+    { "key": "substitutions", "xpath": "Substitutions", "name": "Substitutions", "dataType": "code", "required": false },
+    { "key": "numberOfRefills", "xpath": "NumberOfRefills", "name": "Number Of Refills", "dataType": "decimal", "required": false },
+    { "key": "rxFillIndicator", "xpath": "RxFillIndicator", "name": "Rx Fill Indicator", "dataType": "code", "required": false }
+  ],
+  "groups": [
+    { "key": "drugCoded", "groupKey": "DrugCoded", "xmlElement": "DrugCoded", "required": false, "repeatable": false },
+    { "key": "quantity", "groupKey": "Quantity", "xmlElement": "Quantity", "required": false, "repeatable": false },
+    { "key": "writtenDate", "groupKey": "DateWrapper", "xmlElement": "WrittenDate", "required": false, "repeatable": false },
+    { "key": "sig", "groupKey": "Sig", "xmlElement": "Sig", "required": false, "repeatable": false },
+    { "key": "otherMedicationDate", "groupKey": "OtherMedicationDate", "xmlElement": "OtherMedicationDate", "required": false, "repeatable": false }
+  ],
+  "elementOrder": ["DrugDescription", "DrugCoded", "Quantity", "WrittenDate", "Substitutions", "NumberOfRefills", "Sig", "RxFillIndicator", "OtherMedicationDate"],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Body/NewRx/MedicationPrescribed). Compound drugs (CPD) and structured Sig deliberately deferred to a later phase — this covers the common single-drug, free-text-Sig case.",
+    "quantity/writtenDate/sig CORRECTED from required=true to required=false (2026-09-19) after running 33 real third-party SCRIPT fixtures (cosyte/ncpdp's own MIT-licensed test suite) through the real parse+validate pipeline: this ONE shared MedicationPrescribed group is referenced, unconditionally, by NewRx AND CancelRx/RxChangeRequest/RxRenewalRequest/RxFill alike, but a REAL cancelrx-request.xml sample confirmed a cancellation legitimately carries only DrugDescription+DrugCoded (enough to IDENTIFY the prescription being cancelled) with no Quantity/WrittenDate/Sig at all -- a new, full prescribing order isn't being created, so resending those details makes no sense. This engine has no per-transaction-reference override for a shared group's own internal required flags (the same class of gap the D.0 ResponsePricing fix already hit and resolved the same way) -- rather than build that machinery, this follows the same 'flexible, not rigid' precedent: NewRx's own real fixtures (dgoradia's sample, cosyte's own newrx-basic.xml) still populate all 3 in practice, so real NewRx messages validate cleanly regardless; only the now-correctly-permissive CancelRx/RxChangeRequest/RxRenewalRequest/RxFill case actually changes behavior."
+  ]
+}

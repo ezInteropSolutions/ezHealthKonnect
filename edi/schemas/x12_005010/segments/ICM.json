@@ -1,0 +1,41 @@
+{
+  "id": "ICM",
+  "name": "Individual Income",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "frequencyCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "monetaryAmount",
+      "dataType": "R"
+    },
+    {
+      "pos": "03",
+      "key": "quantity",
+      "dataType": "R"
+    },
+    {
+      "pos": "04",
+      "key": "locationIdentifier",
+      "dataType": "AN"
+    },
+    {
+      "pos": "05",
+      "key": "salaryGrade",
+      "dataType": "AN"
+    },
+    {
+      "pos": "06",
+      "key": "currencyCode",
+      "dataType": "ID"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/ICM) — 834's 2100A Member loop, income detail used for benefit-eligibility/contribution calculations."
+  ]
+}

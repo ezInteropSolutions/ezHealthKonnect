@@ -1,0 +1,124 @@
+{
+  "transactionSetId": "276",
+  "functionalIdentifierCode": "HR",
+  "versionReleaseIndustryCode": "005010X212",
+  "version": "005010X212",
+  "_sourceRefs": [
+    "Stedi (stedi.com/edi/hipaa/transaction-set/276-A1) — the HIPAA-specific (005010X212) 276 Health Care Claim Status Request transaction set, EDI Phase 6. GS01='HR'/GS08='005010X212' confirmed directly on this page (not guessed) — same discipline as every prior EDI phase's GS01/GS08 sourcing (see BPR/CUR/CLM's own historical version-mismatch lessons in this schema library).",
+    "PyX12's own free map repo (azoner/pyx12/pyx12/map) was checked first (via GitHub directory listing) and confirmed to ship only a 4010/X093 map for 276 (276.4010.X093.A1.xml) — no 5010/X212 file exists there for the REQUEST side (a 277.5010.X212.xml DOES exist for the response — see 277.json's own sourceRefs). Sourced from Stedi's HIPAA-specific 276-A1 page instead, mirroring exactly how 270.json was sourced when PyX12 lacked a 5010 270/271 map.",
+    "Loop hierarchy is a 5-level HL tree (2000A Information Source/Payer, 2000B Information Receiver, 2000C Service Provider, 2000D Subscriber, 2000E Dependent) — one level deeper than 270's own 4-level tree (270 has no separate Provider HL level; it folds provider identity into 2100B's own PRV segment instead). HL03 hierarchical-level codes (20/21/19/22/23 for A/B/C/D/E respectively) cross-checked directly against PyX12's raw 277.5010.X212.xml map (azoner/pyx12) after an initial 276-A1 HTML-page fetch returned an internally-inconsistent answer (claimed HL03='22' for both 2000C and 2000D) — resolved via the authoritative primary source, matching this project's documented 'AI-summarization transcription-fidelity risk' precedent from the 837 work. 276 and 277 share the identical HL03 code scheme (confirmed both against the same primary source), reusing the exact same X12LoopDef.TriggerDiscriminator mechanism already proven for 270/271 and 837P/837I — zero new engine code, pure schema data.",
+    "Claim-identifying segments live in loop 2200D/2200E (TRN, plus REF with qualifiers for Payer Claim Control Number, Patient Control Number, Clearinghouse Claim ID, Institutional Bill Type, Group Number, Pharmacy Prescription; AMT for submitted charges; DTP for claim service date) — TRN is the requestor's own trace number, echoed back unchanged in the matching 277 response (per 276-A1's own text: 'This number will be returned in the 277 response'). All segments (HL, NM1, TRN, REF, DTP, AMT, DMG, SVC) reused unchanged from the existing shared segment library — confirmed each has no hardcoded fixedValue and a sufficiently generic element/maxUse shape (REF already >1/situational with a qualifier+identification shape; DMG already carries dateTimePeriodFormatQualifier/birthDate/genderCode; SVC already carries the composite procedure-code shape needed for the service-line-level inquiry) — genuinely zero new segment files needed beyond STC (277-only).",
+    "Named, deliberate simplifications (matching every prior EDI phase's own 'core fields, not exhaustive' precedent): loop 2100C (Provider Name)'s own reported min/max ('2/2' on the fetched page, inconsistent with every sibling Name loop's '1/1') is modeled here as repeat='1' to match the established sibling pattern rather than the likely fetch/table artifact — revisit if a real 276 sample surfaces two real NM1 occurrences at this loop. Loop 2100B's REF/N3/N4/PRV (address/provider-refinement segments 270 carries at its own equivalent loop) are not modeled at 276's 2100B/2100C — not confirmed present on the 276-A1 page's own detail section for this transaction; a narrower claim-status-only inquiry has less need for a full address block than an eligibility check does."
+  ],
+  "headerSegmentIds": ["ST", "BHT"],
+  "loops": [
+    {
+      "id": "2000A",
+      "name": "Information Source Level",
+      "repeat": ">1",
+      "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "20" },
+      "segmentIds": ["HL"],
+      "loops": [
+        {
+          "id": "2100A",
+          "name": "Payer Name",
+          "repeat": "1",
+          "segmentIds": ["NM1"]
+        },
+        {
+          "id": "2000B",
+          "name": "Information Receiver Level",
+          "repeat": ">1",
+          "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "21" },
+          "segmentIds": ["HL"],
+          "loops": [
+            {
+              "id": "2100B",
+              "name": "Information Receiver Name",
+              "repeat": "1",
+              "segmentIds": ["NM1"]
+            },
+            {
+              "id": "2000C",
+              "name": "Service Provider Level",
+              "repeat": ">1",
+              "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "19" },
+              "segmentIds": ["HL"],
+              "loops": [
+                {
+                  "id": "2100C",
+                  "name": "Provider Name",
+                  "repeat": "1",
+                  "segmentIds": ["NM1"]
+                },
+                {
+                  "id": "2000D",
+                  "name": "Subscriber Level",
+                  "repeat": ">1",
+                  "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "22" },
+                  "segmentIds": ["HL"],
+                  "loops": [
+                    {
+                      "id": "2100D",
+                      "name": "Subscriber Name",
+                      "repeat": "1",
+                      "segmentIds": ["NM1", "DMG"],
+                      "loops": [
+                        {
+                          "id": "2200D",
+                          "name": "Subscriber Claim Status",
+                          "repeat": ">1",
+                          "segmentIds": ["TRN", "REF", "AMT", "DTP"],
+                          "loops": [
+                            {
+                              "id": "2210D",
+                              "name": "Subscriber Service Line Detail",
+                              "repeat": ">1",
+                              "segmentIds": ["SVC", "REF", "DTP"]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "2000E",
+                      "name": "Dependent Level",
+                      "repeat": ">1",
+                      "triggerDiscriminator": { "elementKey": "hierarchicalLevelCode", "value": "23" },
+                      "segmentIds": ["HL"],
+                      "loops": [
+                        {
+                          "id": "2100E",
+                          "name": "Dependent Name",
+                          "repeat": "1",
+                          "segmentIds": ["NM1", "DMG"],
+                          "loops": [
+                            {
+                              "id": "2200E",
+                              "name": "Dependent Claim Status",
+                              "repeat": ">1",
+                              "segmentIds": ["TRN", "REF", "AMT", "DTP"],
+                              "loops": [
+                                {
+                                  "id": "2210E",
+                                  "name": "Dependent Service Line Detail",
+                                  "repeat": ">1",
+                                  "segmentIds": ["SVC", "REF", "DTP"]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trailerSegmentIds": ["SE"]
+}

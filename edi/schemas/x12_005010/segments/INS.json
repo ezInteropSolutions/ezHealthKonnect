@@ -8,9 +8,33 @@
     { "pos": "02", "key": "individualRelationshipCode", "dataType": "ID" },
     { "pos": "03", "key": "maintenanceTypeCode", "dataType": "ID" },
     { "pos": "04", "key": "maintenanceReasonCode", "dataType": "ID" },
-    { "pos": "05", "key": "benefitStatusCode", "dataType": "ID" }
+    { "pos": "05", "key": "benefitStatusCode", "dataType": "ID" },
+    {
+      "pos": "06",
+      "key": "medicareStatus",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "medicarePlanCode", "dataType": "ID" },
+          { "pos": "2", "key": "eligibilityReasonCode1", "dataType": "ID" },
+          { "pos": "3", "key": "eligibilityReasonCode2", "dataType": "ID" },
+          { "pos": "4", "key": "eligibilityReasonCode3", "dataType": "ID" }
+        ]
+      }
+    },
+    { "pos": "07", "key": "cobraQualifyingEventCode", "dataType": "ID" },
+    { "pos": "08", "key": "employmentStatusCode", "dataType": "ID" },
+    { "pos": "09", "key": "studentStatusCode", "dataType": "ID" },
+    { "pos": "10", "key": "handicapIndicator", "dataType": "ID" },
+    { "pos": "11", "key": "dateTimePeriodFormatQualifier", "dataType": "ID" },
+    { "pos": "12", "key": "dateTimePeriod", "dataType": "AN" },
+    { "pos": "13", "key": "confidentialityCode", "dataType": "ID" },
+    { "pos": "14", "key": "cityName", "dataType": "AN" },
+    { "pos": "15", "key": "stateOrProvinceCode", "dataType": "ID" },
+    { "pos": "16", "key": "countryCode", "dataType": "ID" },
+    { "pos": "17", "key": "number", "dataType": "N0" }
   ],
   "sourceRefs": [
-    "Stedi (stedi.com/edi/x12-005010/segment/INS) — X12 005010 INS segment element reference. New for Phase 3 (270/271), used at 2100C/2100D to carry INS01 (Y=subscriber is the insured / N=this is a dependent) and INS02 (Individual Relationship Code — same code set PAT02/SBR02 already use elsewhere in this schema library, e.g. '18'=Self, '01'=Spouse, '19'=Child). INS03-05 (maintenance type/reason, benefit status) modeled as flat elements since they're situational, single-occurrence, no composite complexity — INS06 (Medicare Status composite) and INS10 (Handicapped Indicator) deliberately not modeled (core-fields-only, matching this project's own established 'core fields, not exhaustive' precedent from 835/837)."
+    "Stedi (stedi.com/edi/x12-005010/segment/INS) — X12 005010 INS segment element reference. New for Phase 3 (270/271), used at 2100C/2100D to carry INS01 (Y=subscriber is the insured / N=this is a dependent) and INS02 (Individual Relationship Code — same code set PAT02/SBR02 already use elsewhere in this schema library, e.g. '18'=Self, '01'=Spouse, '19'=Child). INS03-05 (maintenance type/reason, benefit status) modeled as flat elements since they're situational, single-occurrence, no composite complexity.",
+    "Extended for EDI Phase 7 (834 Benefit Enrollment, September 2026) with the full remaining generic shape (pos 6-17, re-fetched directly from Stedi's own structured page data): INS06 (Medicare Status, a composite — Medicare Plan Code + up to 3 Eligibility Reason Codes), INS07 (COBRA Qualifying Event Code), INS08 (Employment Status Code), INS09 (Student Status Code), INS10 (Handicap Indicator, re-added — the prior 270/271-era note above deferred it, now in scope since 834's own member-level detail routinely carries it), INS11/12 (Date Time Period Format Qualifier/Period, same qualifier+value shape DTP already establishes elsewhere in this schema library), INS13-17 (confidentiality code, city/state/country, and a trailing generic Number field). Purely additive — no existing position 1-5 changed, so 270/271/837's own existing INS usage is unaffected."
   ]
 }

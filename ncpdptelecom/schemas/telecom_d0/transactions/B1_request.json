@@ -1,0 +1,11 @@
+{
+  "code": "B1",
+  "name": "Claim Billing (Request)",
+  "direction": "request",
+  "transmissionGroupSegments": ["Patient", "PharmacyProvider", "Insurance", "Prescriber"],
+  "transactionGroupSegments": ["Claim", "Pricing"],
+  "sourceRefs": [
+    "eduardonunesp/ncpdp-telecom-fmt-book docs/transactions.md's own 'Segments Per Transaction' table for B1 (Claim Billing): Insurance(04, required), Patient(01, conditional), Claim(07, required), Pricing(11, required), Prescriber(03, conditional) -- Pharmacy Provider(02) added from apiv/dzero's own segment library as the natural 'who is submitting this claim' identity segment every real B1 carries, confirmed structurally consistent with both sources.",
+    "Patient/PharmacyProvider/Insurance/Prescriber are modeled as transmission-group segments (appear once per transmission) and Claim/Pricing as transaction-group segments (one GS-delimited cluster per claim/drug being billed) -- the transmission-group segments describe WHO is involved (one patient, one pharmacy, one insurance plan, one prescriber per submission), while Claim/Pricing describe WHAT is being billed and repeat per line item, matching apiv/dzero's own real fixture's demonstrated GS-cluster mechanism and its README's own 'transaction_groups[2].claim_segment' usage example."
+  ]
+}

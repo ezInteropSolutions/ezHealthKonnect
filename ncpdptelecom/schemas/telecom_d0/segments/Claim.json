@@ -1,0 +1,43 @@
+{
+  "key": "Claim",
+  "identifier": "07",
+  "name": "Claim",
+  "fields": [
+    { "key": "prescriptionReferenceNumberQualifier", "fieldId": "EM", "name": "Prescription Reference Number Qualifier", "dataType": "AN", "required": false },
+    { "key": "prescriptionReferenceNumber", "fieldId": "D2", "name": "Prescription Service Reference Number", "dataType": "AN", "required": true },
+    { "key": "productServiceIdQualifier", "fieldId": "E1", "name": "Product/Service ID Qualifier", "dataType": "AN", "required": true },
+    { "key": "productServiceId", "fieldId": "D7", "name": "Product/Service ID (NDC)", "dataType": "AN", "required": true },
+    { "key": "associatedPrescriptionReferenceNumber", "fieldId": "EN", "name": "Associated Prescription/Service Reference Number", "dataType": "AN", "required": false },
+    { "key": "associatedPrescriptionDate", "fieldId": "EP", "name": "Associated Prescription/Service Date", "dataType": "DT", "required": false },
+    { "key": "quantityDispensed", "fieldId": "E7", "name": "Quantity Dispensed", "dataType": "R", "places": 3, "width": 10, "required": true },
+    { "key": "fillNumber", "fieldId": "D3", "name": "Fill Number", "dataType": "N", "width": 2, "required": true },
+    { "key": "daysSupply", "fieldId": "D5", "name": "Days Supply", "dataType": "N", "width": 3, "required": true },
+    { "key": "compoundCode", "fieldId": "D6", "name": "Compound Code", "dataType": "AN", "required": false },
+    { "key": "dispenseAsWrittenProductSelectionCode", "fieldId": "D8", "name": "Dispense As Written/Product Selection Code", "dataType": "AN", "required": false },
+    { "key": "datePrescriptionWritten", "fieldId": "DE", "name": "Date Prescription Written", "dataType": "DT", "required": true },
+    { "key": "numberOfRefillsAuthorized", "fieldId": "DF", "name": "Number of Refills Authorized", "dataType": "N", "required": false },
+    { "key": "prescriptionOriginCode", "fieldId": "DJ", "name": "Prescription Origin Code", "dataType": "AN", "required": false },
+    { "key": "submissionClarificationCode", "fieldId": "DK", "name": "Submission Clarification Code", "dataType": "AN", "required": false },
+    { "key": "quantityPrescribed", "fieldId": "ET", "name": "Quantity Prescribed", "dataType": "R", "places": 3, "required": false },
+    { "key": "otherCoverageCode", "fieldId": "C8", "name": "Other Coverage Code", "dataType": "AN", "required": false },
+    { "key": "specialPackagingIndicator", "fieldId": "DT", "name": "Special Packaging Indicator", "dataType": "AN", "required": false },
+    { "key": "originallyPrescribedIdQualifier", "fieldId": "EJ", "name": "Originally Prescribed Product/Service ID Qualifier", "dataType": "AN", "required": false },
+    { "key": "originallyPrescribedCode", "fieldId": "EA", "name": "Originally Prescribed Product/Service Code", "dataType": "AN", "required": false },
+    { "key": "originallyPrescribedQuantity", "fieldId": "EB", "name": "Originally Prescribed Quantity", "dataType": "R", "places": 3, "required": false },
+    { "key": "alternateId", "fieldId": "CW", "name": "Alternate ID", "dataType": "AN", "required": false },
+    { "key": "scheduledPrescriptionIdNumber", "fieldId": "EK", "name": "Scheduled Prescription ID Number", "dataType": "AN", "required": false },
+    { "key": "unitOfMeasure", "fieldId": "28", "name": "Unit of Measure", "dataType": "AN", "required": false },
+    { "key": "levelOfService", "fieldId": "DI", "name": "Level of Service", "dataType": "AN", "required": false },
+    { "key": "priorAuthorizationTypeCode", "fieldId": "EU", "name": "Prior Authorization Type Code", "dataType": "AN", "required": false },
+    { "key": "priorAuthorizationNumberSubmitted", "fieldId": "EV", "name": "Prior Authorization Number Submitted", "dataType": "AN", "required": false },
+    { "key": "transactionReferenceNumber", "fieldId": "K5", "name": "Transaction Reference Number", "dataType": "AN", "required": false },
+    { "key": "routeOfAdministration", "fieldId": "E2", "name": "Route of Administration", "dataType": "AN", "required": false },
+    { "key": "compoundType", "fieldId": "G1", "name": "Compound Type", "dataType": "AN", "required": false }
+  ],
+  "sourceRefs": [
+    "apiv/dzero lib/dzero/segments/07_claim.rb (field-id-to-symbol dictionary, read directly) cross-confirmed against eduardonunesp/ncpdp-telecom-fmt-book docs/segments.md's own worked Claim Segment (AM07) example.",
+    "Deliberately NOT modeled this pass (core fields, not exhaustive, matching this codebase's own EDI 835/837 precedent): SE/ER (procedure modifier), EW/EX (intermediary authorization), HD/HF/HG (dispensing status), NV (delay reason code), N4 (Medicaid ICN), U7 (pharmacy service type), MT (patient assignment indicator) -- all present in dzero's own dictionary but genuinely niche for a first-phase B1 claim.",
+    "quantityDispensed modeled with places=3 (NOT the places=2 an initial draft took directly from data-types.md's own PROSE claim of 'implied 2 decimal places') -- a real, deliberate correction found by checking the doc's own WORKED EXAMPLE arithmetic rather than trusting its prose: the raw value '0000030000' (10 digits, =30000 as a plain integer) does NOT reconcile with 2 places (30000/100=300.00, contradicting the doc's own stated '30.00' result) but DOES reconcile cleanly with 3 places (30000/1000=30.000, matching '30.00' modulo one insignificant trailing zero the prose likely rounded off when writing it up). 3 implied decimal places is also the long-established real-world NCPDP convention for quantity fields generally. width=10 is directly, byte-for-byte confirmed from the same example regardless of which precision is right. quantityPrescribed/originallyPrescribedQuantity reuse the same places=3 convention but have no independently confirmed width of their own -- left unset.",
+    "fillNumber (D3) width=2 and daysSupply (D5) width=3 are directly, byte-for-byte confirmed from the same worked Claim Segment example ('D301'->01, 'D5030'->030)."
+  ]
+}

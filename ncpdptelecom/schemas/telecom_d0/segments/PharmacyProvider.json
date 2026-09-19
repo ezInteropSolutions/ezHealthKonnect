@@ -1,0 +1,12 @@
+{
+  "key": "PharmacyProvider",
+  "identifier": "02",
+  "name": "Pharmacy Provider",
+  "fields": [
+    { "key": "providerIdQualifier", "fieldId": "EY", "name": "Provider ID Qualifier", "dataType": "AN", "required": true },
+    { "key": "providerId", "fieldId": "E9", "name": "Provider ID", "dataType": "AN", "required": true }
+  ],
+  "sourceRefs": [
+    "apiv/dzero lib/dzero/segments/02_pharmacy_provider.rb (field-id-to-symbol dictionary, read directly) -- the segment identifying which pharmacy is submitting the claim, per eduardonunesp/ncpdp-telecom-fmt-book docs/segments-reference.md's own segment overview table."
+  ]
+}

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>SurescriptsTestPrescriber</To>
+    <From>SurescriptsTestPharmacy</From>
+    <MessageID>SYNTH-MSG-0201</MessageID>
+    <SentTime>2026-02-01T14:00:00Z</SentTime>
+  </Header>
+  <Body>
+    <RxRenewalRequest>
+      <RequestReferenceNumber>SYNTH-REF-0201</RequestReferenceNumber>
+      <Patient>
+        <HumanPatient>
+          <Name>
+            <LastName>Testpatient</LastName>
+            <FirstName>Avery</FirstName>
+          </Name>
+          <Gender>F</Gender>
+          <DateOfBirth>
+            <Date>1990-04-12</Date>
+          </DateOfBirth>
+        </HumanPatient>
+      </Patient>
+      <Pharmacy>
+        <Identification>
+          <NPI>1999999999</NPI>
+        </Identification>
+        <BusinessName>Synthetic Community Pharmacy</BusinessName>
+      </Pharmacy>
+      <Prescriber>
+        <NonVeterinarian>
+          <Identification>
+            <NPI>1888888888</NPI>
+          </Identification>
+          <Name>
+            <LastName>Testprescriber</LastName>
+            <FirstName>Jordan</FirstName>
+          </Name>
+        </NonVeterinarian>
+      </Prescriber>
+      <MedicationPrescribed>
+        <DrugDescription>Atorvastatin 20 MG Oral Tablet</DrugDescription>
+        <DrugCoded>
+          <ProductCode Qualifier="ND">00000000001</ProductCode>
+        </DrugCoded>
+        <Quantity>
+          <Value>30</Value>
+          <CodeListQualifier>38</CodeListQualifier>
+        </Quantity>
+        <DaysSupply>30</DaysSupply>
+        <NumberOfRefills>0</NumberOfRefills>
+      </MedicationPrescribed>
+    </RxRenewalRequest>
+  </Body>
+</Message>

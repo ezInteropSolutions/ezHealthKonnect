@@ -17,6 +17,8 @@ const (
 	FormatJSON     MessageFormat = "json"
 	FormatEDI      MessageFormat = "edi"
 	FormatCSV      MessageFormat = "csv"
+	FormatNCPDPScript MessageFormat = "ncpdpscript"
+	FormatNCPDPTelecom MessageFormat = "ncpdptelecom"
 	FormatUnknown  MessageFormat = "unknown"
 )
 

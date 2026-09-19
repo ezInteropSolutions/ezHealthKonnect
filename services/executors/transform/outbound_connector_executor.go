@@ -369,22 +369,33 @@ func (e *OutboundConnectorExecutor) Execute(
 	if result != nil {
 		variables["delivery_success"] = result.Success
 		variables["acknowledgment"] = result.Acknowledgment
-		// Surface HTTP response details as accessible pipeline variables
-		if statusCode, ok := result.Metadata["status_code"]; ok {
-			variables["response_status"] = statusCode
-			details["response_status"] = statusCode
-		}
-		if respBody, ok := result.Metadata["response_body"]; ok {
-			variables["response_body"] = respBody
-			// Truncate in details to keep step metadata lean
-			bodyStr := fmt.Sprintf("%v", respBody)
-			if len(bodyStr) > 500 {
-				bodyStr = bodyStr[:500] + "… (truncated)"
+
+		// Surface every connector-reported metadata key as an accessible
+		// pipeline variable (steps.<alias>.step_output.<key>), generically —
+		// rather than one hardcoded "if this key exists" case per connector
+		// type. Two keys keep their historical renamed/truncated shape
+		// because public/js/messages.js's step-execution detail panel reads
+		// them by these exact names (details.response_status,
+		// details.response_body_preview); every other key (response_headers,
+		// ack_code, response_received, response_binary_base64,
+		// response_frame_type, and whatever a future connector adds) forwards
+		// through the generic branch with zero changes needed here.
+		for key, value := range result.Metadata {
+			switch key {
+			case "status_code":
+				variables["response_status"] = value
+				details["response_status"] = value
+			case "response_body":
+				variables["response_body"] = value
+				bodyStr := fmt.Sprintf("%v", value)
+				if len(bodyStr) > 500 {
+					bodyStr = bodyStr[:500] + "… (truncated)"
+				}
+				details["response_body_preview"] = bodyStr
+			default:
+				variables[key] = value
+				details[key] = value
 			}
-			details["response_body_preview"] = bodyStr
-		}
-		if headers, ok := result.Metadata["response_headers"]; ok {
-			details["response_headers"] = headers
 		}
 		details["duration_ms"] = result.DurationMs
 	}

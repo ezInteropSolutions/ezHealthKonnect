@@ -1,0 +1,19 @@
+{
+  "key": "MedicationDispensed",
+  "xmlElement": "MedicationDispensed",
+  "name": "Medication Dispensed",
+  "fields": [
+    { "key": "drugDescription", "xpath": "DrugDescription", "name": "Drug Description", "dataType": "string", "required": true }
+  ],
+  "groups": [
+    { "key": "drugCoded", "groupKey": "DrugCoded", "xmlElement": "DrugCoded", "required": false, "repeatable": false },
+    { "key": "quantity", "groupKey": "Quantity", "xmlElement": "Quantity", "required": true, "repeatable": false },
+    { "key": "writtenDate", "groupKey": "DateWrapper", "xmlElement": "WrittenDate", "required": false, "repeatable": false },
+    { "key": "lastFillDate", "groupKey": "DateWrapper", "xmlElement": "LastFillDate", "required": false, "repeatable": false }
+  ],
+  "elementOrder": ["DrugDescription", "DrugCoded", "Quantity", "WrittenDate", "LastFillDate"],
+  "sourceRefs": [
+    "usnistgov/tcamt-2 tcamt-lite-controller/SCRIPT_XML_10_6.xsd (NIST-hosted, RxFillDispensedMedicationType, ~line 2915) -- a real, official-provenance NCPDP SCRIPT XSD, but for the OLDER SCRIPT v10.6 wire format, not the v2017071 this engine otherwise targets. No free v2017071 schema/sample containing RxFill exists (unlike NewRx); this is the best available structural cross-reference, used the same way cosyte/ncpdp was used for the lifecycle transactions -- a real, sourced shape, not an invention.",
+    "Core fields only (DrugDescription/DrugCoded/Quantity/WrittenDate/LastFillDate) -- the full RxFillDispensedMedicationType also carries DaysSupply, Directions, Note, Refills, Substitutions, ExpirationDate, EffectiveDate, PeriodEnd, DeliveredOnDate, DateValidated, SoldDate, Diagnosis, PriorAuthorization, DrugUseEvaluation, DrugCoverageStatusCode, PriorAuthorizationStatus, StructuredSIG -- deliberately deferred, matching this engine's own established 'core fields, not exhaustive' precedent (e.g. EDI 835/837's own scope notes)."
+  ]
+}

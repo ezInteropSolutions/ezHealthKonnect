@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	cdaSchema "ezhealthkonnect/cda"
+	"ezhealthkonnect/xmlpath"
+
 	"github.com/beevik/etree"
 	"github.com/google/uuid"
 )
@@ -130,7 +132,7 @@ func buildEntryRoot(entryEl *etree.Element, entryElementPath, templateID, templa
 	if entryElementPath == "" {
 		return nil
 	}
-	rootEl := WriteAtXPath(entryEl, stripEntryPrefix(entryElementPath), "")
+	rootEl := xmlpath.WriteAtXPath(entryEl, stripEntryPrefix(entryElementPath), "")
 	applyTagBoilerplate(rootEl, lastSegmentTag(entryElementPath))
 	if templateID != "" {
 		injectTemplateID(rootEl, templateID, templateIDExt)
@@ -147,7 +149,7 @@ func buildEntryRoot(entryEl *etree.Element, entryElementPath, templateID, templa
 // given.
 func applyStructuralTemplateAnchors(entryEl *etree.Element, anchors []cdaSchema.StructuralTemplateAnchor) {
 	for _, anchor := range anchors {
-		el, found := TryFindAtXPath(entryEl, stripEntryPrefix(anchor.Path))
+		el, found := xmlpath.TryFindAtXPath(entryEl, stripEntryPrefix(anchor.Path))
 		if !found {
 			continue
 		}
@@ -198,7 +200,7 @@ func applyStructuralTemplateAnchors(entryEl *etree.Element, anchors []cdaSchema.
 		// created above, well after a field write (e.g. reactionCode's
 		// own predicate-anchored xpath) may have already put <value> in
 		// as this element's first real content.
-		reorderChildrenByTag(el, structuralElementOrder)
+		xmlpath.ReorderChildrenByTag(el, structuralElementOrder)
 	}
 }
 
@@ -220,7 +222,7 @@ func buildAlternateEntry(sectionEl *etree.Element, alt *cdaSchema.AlternateEntry
 	writeComponentGroups(rootEl, alt.ComponentGroups, record)
 
 	if rootEl != nil {
-		reorderChildrenByTag(rootEl, structuralElementOrder)
+		xmlpath.ReorderChildrenByTag(rootEl, structuralElementOrder)
 	}
 	return entryEl
 }
@@ -251,7 +253,7 @@ func buildEntry(sectionEl *etree.Element, sec *cdaSchema.CDASectionDef, record m
 		}
 
 		if sec.ObservationElementPath != "" {
-			obsEl = WriteAtXPath(entryEl, stripEntryPrefix(sec.ObservationElementPath), "")
+			obsEl = xmlpath.WriteAtXPath(entryEl, stripEntryPrefix(sec.ObservationElementPath), "")
 			applyTagBoilerplate(obsEl, lastSegmentTag(sec.ObservationElementPath))
 			if sec.ObsTemplateID != "" {
 				injectTemplateID(obsEl, sec.ObsTemplateID, sec.ObsTemplateIDExt)
@@ -293,8 +295,8 @@ func buildEntry(sectionEl *etree.Element, sec *cdaSchema.CDASectionDef, record m
 
 	applyStructuralTemplateAnchors(entryEl, sec.StructuralTemplateIDs)
 
-	reorderChildrenByTag(rootEl, structuralElementOrder)
-	reorderChildrenByTag(obsEl, structuralElementOrder)
+	xmlpath.ReorderChildrenByTag(rootEl, structuralElementOrder)
+	xmlpath.ReorderChildrenByTag(obsEl, structuralElementOrder)
 
 	writeRepeatingGroups(rootEl, obsEl, sec, record)
 	ensureAssignedEntityIDs(entryEl)
@@ -410,7 +412,7 @@ func ensureAssignedEntityIDs(entryEl *etree.Element) {
 		if ae.SelectElement("telecom") == nil {
 			ae.CreateElement("telecom").CreateAttr("nullFlavor", "UNK")
 		}
-		reorderChildrenByTag(ae, []string{"id", "code", "addr", "telecom", "assignedPerson", "representedOrganization"})
+		xmlpath.ReorderChildrenByTag(ae, []string{"id", "code", "addr", "telecom", "assignedPerson", "representedOrganization"})
 	}
 }
 
@@ -437,7 +439,7 @@ func ensureAuthorParticipationShape(authorEl *etree.Element) {
 	if authorEl.SelectElement("time") == nil {
 		authorEl.CreateElement("time").CreateAttr("nullFlavor", "UNK")
 	}
-	reorderChildrenByTag(authorEl, []string{"templateId", "time", "assignedAuthor"})
+	xmlpath.ReorderChildrenByTag(authorEl, []string{"templateId", "time", "assignedAuthor"})
 
 	// assignedAuthor's own sequence (id*, code?, addr*, telecom*,
 	// assignedPerson, representedOrganization?) needs the same reorder
@@ -449,7 +451,7 @@ func ensureAuthorParticipationShape(authorEl *etree.Element) {
 	// via a live Test Pipeline run (2026-07) producing a schema-invalid
 	// <assignedAuthor><assignedPerson>...</assignedPerson><id .../></assignedAuthor>.
 	if assignedAuthor := authorEl.SelectElement("assignedAuthor"); assignedAuthor != nil {
-		reorderChildrenByTag(assignedAuthor, []string{"id", "code", "addr", "telecom", "assignedPerson", "assignedAuthoringDevice", "representedOrganization"})
+		xmlpath.ReorderChildrenByTag(assignedAuthor, []string{"id", "code", "addr", "telecom", "assignedPerson", "assignedAuthoringDevice", "representedOrganization"})
 	}
 }
 
@@ -511,7 +513,7 @@ func writeRepeatingGroups(rootEl, obsEl *etree.Element, sec *cdaSchema.CDASectio
 
 			targetEl := wrapperEl
 			if group.ObservationElementPath != "" {
-				targetEl = WriteAtXPath(wrapperEl, group.ObservationElementPath, "")
+				targetEl = xmlpath.WriteAtXPath(wrapperEl, group.ObservationElementPath, "")
 				applyTagBoilerplate(targetEl, lastSegmentTag(group.ObservationElementPath))
 				if group.TemplateID != "" {
 					injectTemplateID(targetEl, group.TemplateID, group.TemplateIDExt)
@@ -543,7 +545,7 @@ func writeRepeatingGroups(rootEl, obsEl *etree.Element, sec *cdaSchema.CDASectio
 			// here were built up across three separate steps (anchor
 			// resolution, the fields loop, FixedCode, ensureGeneratedID),
 			// none of which land in schema order by construction alone.
-			reorderChildrenByTag(targetEl, structuralElementOrder)
+			xmlpath.ReorderChildrenByTag(targetEl, structuralElementOrder)
 		}
 	}
 }
@@ -605,12 +607,12 @@ func writeComponentGroups(anchorEl *etree.Element, groups []cdaSchema.ComponentG
 		}
 		if group.OrganizerIDField != "" {
 			if v, ok := stringValue(record[group.OrganizerIDField]); ok {
-				WriteAtXPath(organizerEl, "id/@extension", v)
+				xmlpath.WriteAtXPath(organizerEl, "id/@extension", v)
 			}
 		}
 		if group.OrganizerIDSystemField != "" {
 			if v, ok := stringValue(record[group.OrganizerIDSystemField]); ok {
-				WriteAtXPath(organizerEl, "id/@root", v)
+				xmlpath.WriteAtXPath(organizerEl, "id/@root", v)
 			}
 		}
 		ensureGeneratedID(organizerEl)
@@ -623,7 +625,7 @@ func writeComponentGroups(anchorEl *etree.Element, groups []cdaSchema.ComponentG
 			componentEl := organizerEl.CreateElement(c.ComponentTag)
 			targetEl := componentEl
 			if c.ObsElementPath != "" {
-				targetEl = WriteAtXPath(componentEl, c.ObsElementPath, "")
+				targetEl = xmlpath.WriteAtXPath(componentEl, c.ObsElementPath, "")
 				applyTagBoilerplate(targetEl, lastSegmentTag(c.ObsElementPath))
 				// None of the UDI Organizer's own sub-observation templates
 				// (Device Identifier, Lot/Batch Number, Company Name,
@@ -657,10 +659,10 @@ func writeComponentGroups(anchorEl *etree.Element, groups []cdaSchema.ComponentG
 					codeEl.CreateAttr("displayName", c.FixedCodeDisplay)
 				}
 			}
-			reorderChildrenByTag(targetEl, structuralElementOrder)
+			xmlpath.ReorderChildrenByTag(targetEl, structuralElementOrder)
 		}
 
-		reorderChildrenByTag(organizerEl, structuralElementOrder)
+		xmlpath.ReorderChildrenByTag(organizerEl, structuralElementOrder)
 	}
 }
 
@@ -703,37 +705,37 @@ func requiredPathsPresent(record map[string]interface{}, keys []string) bool {
 // output, 2026-07), the field's own DataType is injected as xsi:type.
 func writeFieldValue(entryEl *etree.Element, field *cdaSchema.CDAFieldDef, record map[string]interface{}) {
 	if field.SkipIfXPathPresent != "" {
-		if _, found := TryFindAtXPath(entryEl, stripEntryPrefix(field.SkipIfXPathPresent)); found {
+		if _, found := xmlpath.TryFindAtXPath(entryEl, stripEntryPrefix(field.SkipIfXPathPresent)); found {
 			return
 		}
 	}
 	if v, ok := stringValue(record[field.Key]); ok && field.XPath != "" {
-		el := WriteAtXPath(entryEl, stripEntryPrefix(field.XPath), v)
+		el := xmlpath.WriteAtXPath(entryEl, stripEntryPrefix(field.XPath), v)
 		injectValueXsiType(el, field)
 		injectNPIRootForAssignedIdentity(el)
 	}
 	if field.XPathDisplay != "" {
 		if v, ok := stringValue(record[field.Key+"Display"]); ok {
-			el := WriteAtXPath(entryEl, stripEntryPrefix(field.XPathDisplay), v)
+			el := xmlpath.WriteAtXPath(entryEl, stripEntryPrefix(field.XPathDisplay), v)
 			injectValueXsiType(el, field)
 		}
 	}
 	if field.XPathSystem != "" {
 		if v, ok := stringValue(record[field.Key+"System"]); ok {
-			el := WriteAtXPath(entryEl, stripEntryPrefix(field.XPathSystem), v)
+			el := xmlpath.WriteAtXPath(entryEl, stripEntryPrefix(field.XPathSystem), v)
 			injectValueXsiType(el, field)
 			injectCodeSystemName(el, v)
 		}
 	}
 	if field.XPathUnit != "" {
 		if v, ok := stringValue(record[field.Key+"Unit"]); ok {
-			el := WriteAtXPath(entryEl, stripEntryPrefix(field.XPathUnit), v)
+			el := xmlpath.WriteAtXPath(entryEl, stripEntryPrefix(field.XPathUnit), v)
 			injectValueXsiType(el, field)
 		}
 	}
 	if field.XPathFamily != "" {
 		if v, ok := stringValue(record[field.Key+"Family"]); ok {
-			WriteAtXPath(entryEl, stripEntryPrefix(field.XPathFamily), v)
+			xmlpath.WriteAtXPath(entryEl, stripEntryPrefix(field.XPathFamily), v)
 		}
 	}
 }
@@ -956,7 +958,7 @@ func stripEntryPrefix(xpath string) string {
 // any "entry/" prefix and any "[predicate]"), e.g.
 // "entry/act/entryRelationship[@typeCode='SUBJ']/observation" -> "observation".
 func lastSegmentTag(path string) string {
-	segments := splitPathSegments(stripEntryPrefix(path))
+	segments := xmlpath.SplitPathSegments(stripEntryPrefix(path))
 	if len(segments) == 0 {
 		return ""
 	}

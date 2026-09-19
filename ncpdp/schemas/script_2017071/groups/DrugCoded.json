@@ -1,0 +1,12 @@
+{
+  "key": "DrugCoded",
+  "xmlElement": "DrugCoded",
+  "name": "Coded Drug Identification",
+  "groups": [
+    { "key": "productCode", "groupKey": "CodedElement", "xmlElement": "ProductCode", "required": false, "repeatable": false },
+    { "key": "drugDBCode", "groupKey": "CodedElement", "xmlElement": "DrugDBCode", "required": false, "repeatable": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, MedicationPrescribed/DrugCoded — ProductCode carries the NDC, DrugDBCode carries the drug-database code e.g. SCD)"
+  ]
+}

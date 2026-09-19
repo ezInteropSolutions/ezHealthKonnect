@@ -1,0 +1,54 @@
+{
+  "id": "TOO",
+  "name": "Tooth Information",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "codeListQualifierCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "industryCode",
+      "dataType": "AN"
+    },
+    {
+      "pos": "03",
+      "key": "toothSurface",
+      "composite": {
+        "subElements": [
+          {
+            "pos": "1",
+            "key": "toothSurfaceCode1",
+            "dataType": "ID"
+          },
+          {
+            "pos": "2",
+            "key": "toothSurfaceCode2",
+            "dataType": "ID"
+          },
+          {
+            "pos": "3",
+            "key": "toothSurfaceCode3",
+            "dataType": "ID"
+          },
+          {
+            "pos": "4",
+            "key": "toothSurfaceCode4",
+            "dataType": "ID"
+          },
+          {
+            "pos": "5",
+            "key": "toothSurfaceCode5",
+            "dataType": "ID"
+          }
+        ]
+      }
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/TOO) — dental Tooth Identification, pairs with SV3. TOO02 (industryCode) carries the actual tooth number/letter (ADA system); TOO01 is the qualifier identifying which code list TOO02 is drawn from. TOO03 (composite, up to 5 tooth-surface codes) is situational."
+  ]
+}

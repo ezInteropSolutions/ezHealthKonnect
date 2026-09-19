@@ -1,0 +1,14 @@
+{
+  "key": "OtherMedicationDate",
+  "xmlElement": "OtherMedicationDate",
+  "name": "Other Medication Date",
+  "fields": [
+    { "key": "otherMedicationDateQualifier", "xpath": "OtherMedicationDateQualifier", "name": "Qualifier", "dataType": "code", "required": true }
+  ],
+  "groups": [
+    { "key": "otherMedicationDate", "groupKey": "DateWrapper", "xmlElement": "OtherMedicationDate", "required": true, "repeatable": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, MedicationPrescribed/OtherMedicationDate — the outer wrapper and its own nested date sub-element share the SAME tag name, OtherMedicationDateQualifier e.g. 'EffectiveDate' distinguishes what the date means)"
+  ]
+}

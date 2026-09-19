@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <MessageID>SYNTH-MSG-SIG-01</MessageID>
+  </Header>
+  <Body>
+    <NewRx>
+      <MedicationPrescribed>
+        <DrugDescription>Synthetic Tablet 250 MG Oral Tablet</DrugDescription>
+        <Quantity>
+          <Value>20</Value>
+        </Quantity>
+        <DaysSupply>10</DaysSupply>
+        <Sig>
+          <SigText>Take 1 tablet by mouth twice daily for 10 days for infection.</SigText>
+          <CodeSystem>SNOMED</CodeSystem>
+          <Instruction>
+            <DoseAdministration>
+              <DoseDeliveryMethod>
+                <Text>Take</Text>
+                <Code>419652001</Code>
+                <Qualifier>SNOMED</Qualifier>
+              </DoseDeliveryMethod>
+              <Dose>
+                <DoseQuantity>1</DoseQuantity>
+                <DoseUnitOfMeasure>
+                  <Text>tablet</Text>
+                  <Code>C48542</Code>
+                  <Qualifier>NCI</Qualifier>
+                </DoseUnitOfMeasure>
+              </Dose>
+            </DoseAdministration>
+            <RouteOfAdministration>
+              <Text>by mouth</Text>
+              <Code>26643006</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </RouteOfAdministration>
+            <SiteOfAdministration>
+              <Text>oral cavity</Text>
+              <Code>123851003</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </SiteOfAdministration>
+            <AdministrationTiming>
+              <Text>twice daily</Text>
+            </AdministrationTiming>
+            <Duration>
+              <Text>10 days</Text>
+            </Duration>
+            <Indication>
+              <Text>for infection</Text>
+            </Indication>
+          </Instruction>
+        </Sig>
+      </MedicationPrescribed>
+    </NewRx>
+  </Body>
+</Message>

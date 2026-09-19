@@ -1,0 +1,377 @@
+{
+  "transactionSetId": "278",
+  "functionalIdentifierCode": "HI",
+  "versionReleaseIndustryCode": "005010X217",
+  "version": "005010X217",
+  "_sourceRefs": [
+    "Stedi (stedi.com/edi/hipaa/transaction-set/278-A1 and /278-A3) — the HIPAA-specific (005010X217) 278 Health Care Services Review Request-for-Review-and-Response transaction set, EDI Phase 7. Both loop/segment trees read directly from the page's own embedded __NEXT_DATA__ JSON, not AI-summarized. PyX12 (azoner/pyx12/pyx12/map, checked via GitHub directory listing) has NO 5010 map for 278 (only 278.4010.X094*.xml) — Stedi's HIPAA-specific pages are the PRIMARY source this round, a deviation from every prior EDI phase's own 'PyX12 primary, Stedi cross-check' discipline, named here rather than silently applied.",
+    "GS01='HI' (Health Information), GS08='005010X217' — standard convention for this transaction set (both request and response share the identical functional group/version codes; there is no envelope-level way to distinguish them, unlike every other request/response pair this engine has built so far — see the ONE-SCHEMA note below).",
+    "A GENUINE, NEW STRUCTURAL FACT (unlike 270/271, 276/277 — different ST01; 837P/837I — same ST01 but different GS08 disambiguated via a composite key): 278 REQUEST and RESPONSE use the SAME ST01='278' AND the SAME GS08='005010X217'. Real trading partners distinguish them by which OPTIONAL segments are actually populated (HCR, the certification/decision segment, and response-only AAA validation occurrences, only appear in a response). This is modeled as ONE unified schema (this file), registered once under bare '278' in manifest.json — no composite-key lookup, no loopRef, no new engine capability. Every segment/loop from BOTH the A1 (request) and A3 (response) trees is unioned into this one tree, matching this project's own 'permissive union' precedent (CTX in the 999 work). The 278-to-FHIR derive script determines 'is this a response' purely from HCR's presence — a structural fact already in the message, never invented (same pattern 271's own AAA-based rejection detection already established).",
+    "HL03 (Hierarchical Level Code, data element 735) values for 278's own 6-level tree were NOT shown per-loop in Stedi's own page data (unlike the segment/loop names, which are) — cross-checked instead against the REAL, standard X12 element 735 code list (stedi.com/edi/x12-005010/element/735, a generic/version-level reference, not an IG-specific summarization): '20'=Information Source (2000A UMO), '21'=Information Receiver (2000B Requester), '22'=Subscriber (2000C, matching 270/271/276/277's own precedent), '23'=Dependent (2000D, same precedent), 'EV'=Event (2000E — a direct, corroborating name-match to Stedi's own 'Patient Event Level' loop name), 'SS'=Services (2000F — a direct, corroborating name-match to Stedi's own 'Service Level' loop name). The EV/SS name-matches give real confidence beyond the A/B/C/D codes' own precedent-based inference.",
+    "A REAL, NAMED SIMPLIFICATION — sibling loops 2010EB/2010EC (under 2000E) and 2010F/2010FB (under 2000F) carry GENUINELY DIFFERENT real-world meanings between the request tree and the response tree at the SAME loop-id slot (e.g. request's 2010EB='Patient Event Transport Information' vs response's 2010EB='Additional Patient Information Contact Name'; response's 2010EC absorbs the transport role request's 2010EB had, while request's own 'Other UMO' 2010EC role has no response-side equivalent shown). Since loop IDs are this engine's own internal bookkeeping labels (X12 does not transmit loop IDs on the wire — segment ORDER is what the engine actually matches), each such slot is modeled with the UNIONED segment set from both directions' own real usage (e.g. 2010EB: NM1+N3+N4+PER+AAA covers both the request's transport-location fields and the response's contact fields) — the same permissive-union philosophy as CTX (999) and the DTP/REF/CRC 'one shared segment ID, N real roles differentiated by qualifier value at runtime' pattern already proven throughout this schema library. Response's own split of the request's flat 2010F ('Service Provider Name') into 2010FA+2010FB is modeled as 2010F (unchanged, covers both request's 2010F and response's 2010FA — same content) plus a new sibling 2010FB (response-only 'Additional Service Information Contact').",
+    "New segments this round: UM, HCR, CR5, CR6, SV3, TOO (6 — see each file's own sourceRefs). Reused, verified-compatible segments: HL, NM1, REF, N3, N4, PER, PRV, DMG, INS, TRN, DTP, HI, HSD, CRC, CL1, CR1, CR2, PWK, MSG, SV1, SV2, AAA (21) — each confirmed against its own current element list before reuse (the '837 CUR-field lesson' discipline), including AAA (already proven by 271's own AAA01/03/04 rejection-reason usage — confirmed identical shape needed here) and INS (already 834-shaped from a separate check this same round, positions 1-5 unaffected).",
+    "A REAL, NAMED LIMITATION: TRN (Patient Event/Service Trace Number) is documented by Stedi as allowing up to 2 occurrences at both 2000E and 2000F ('TRN, O, max=2') — but this schema library's own shared TRN.json has maxUse='1' (matching 270/271/276/277/837's own established, heavily-relied-upon usage as a bare single-map field, not an array). Widening TRN's GLOBAL maxUse to '>1' would silently change the shape of EVERY existing derive script across every other transaction set that reads `claim.TRN.checkOrEFTTraceNumber` as a bare map — a real regression risk audited and deliberately declined this round (the 'Shared Fallback Chain Audit' precedent: verify callers before widening a shared resolver's behavior). Accepted as a named limitation: only the FIRST TRN occurrence at each level is captured if a real file happens to populate two — real-world 278 files predominantly carry exactly one TRN per level in practice (the same pattern already true for every other transaction set's own technically-repeatable-but-practically-single TRN usage).",
+    "A REAL, NAMED LIMITATION found and fixed via a real round-trip parse failure (not assumed): 2000E ('Patient Event Level') is modeled repeat='1' (NOT '>1' as Stedi's own page literally shows) at BOTH tree positions it occurs (nested inside 2000D for the dependent's own event, AND as a direct sibling of 2000D inside 2000C for the subscriber's own event) — a genuinely NEW engine limitation this session surfaced: `selectLoopCandidate`'s own TriggerDiscriminator match is a single elementKey/value check with no awareness of HL02 (hierarchicalParentIdNumber) or tree-depth context, so when the SAME discriminator value ('EV') is used at TWO DIFFERENT tree depths (dependent-nested vs subscriber-sibling), a still-open recursive matchLoops call for the DEEPER position (2000D's own children) will greedily consume a LATER 'EV'-coded HL segment that actually belongs to the SHALLOWER sibling slot, if that deeper loop is left repeat='>1' (unbounded). Capping repeat='1' makes the SECOND 'EV' sighting correctly fail candidacy at the deeper level (already-matched check) and fall through to the correct shallower slot. This is a real, deliberate scope reduction (at most ONE patient event review per subscriber and at most ONE per dependent, per file) — a genuinely new class of engine gotcha (same-discriminator-value reused at different tree depths) worth a permanent CLAUDE.md note for any future transaction set that needs the SAME loop id/discriminator combination at more than one nesting depth."
+  ],
+  "headerSegmentIds": [
+    "ST",
+    "BHT"
+  ],
+  "loops": [
+    {
+      "id": "2000A",
+      "name": "Utilization Management Organization (UMO) Level",
+      "repeat": ">1",
+      "triggerDiscriminator": {
+        "elementKey": "hierarchicalLevelCode",
+        "value": "20"
+      },
+      "segmentIds": [
+        "HL"
+      ],
+      "loops": [
+        {
+          "id": "2010A",
+          "name": "UMO Name",
+          "repeat": "1",
+          "segmentIds": [
+            "NM1",
+            "PER",
+            "AAA"
+          ]
+        },
+        {
+          "id": "2000B",
+          "name": "Requester Level",
+          "repeat": ">1",
+          "triggerDiscriminator": {
+            "elementKey": "hierarchicalLevelCode",
+            "value": "21"
+          },
+          "segmentIds": [
+            "HL"
+          ],
+          "loops": [
+            {
+              "id": "2010B",
+              "name": "Requester Name",
+              "repeat": ">1",
+              "segmentIds": [
+                "NM1",
+                "REF",
+                "N3",
+                "N4",
+                "PER",
+                "PRV",
+                "AAA"
+              ]
+            },
+            {
+              "id": "2000C",
+              "name": "Subscriber Level",
+              "repeat": ">1",
+              "triggerDiscriminator": {
+                "elementKey": "hierarchicalLevelCode",
+                "value": "22"
+              },
+              "segmentIds": [
+                "HL"
+              ],
+              "loops": [
+                {
+                  "id": "2010C",
+                  "name": "Subscriber Name",
+                  "repeat": "1",
+                  "segmentIds": [
+                    "NM1",
+                    "REF",
+                    "N3",
+                    "N4",
+                    "DMG",
+                    "INS",
+                    "AAA"
+                  ]
+                },
+                {
+                  "id": "2000D",
+                  "name": "Dependent Level",
+                  "repeat": ">1",
+                  "triggerDiscriminator": {
+                    "elementKey": "hierarchicalLevelCode",
+                    "value": "23"
+                  },
+                  "segmentIds": [
+                    "HL"
+                  ],
+                  "loops": [
+                    {
+                      "id": "2010D",
+                      "name": "Dependent Name",
+                      "repeat": "1",
+                      "segmentIds": [
+                        "NM1",
+                        "REF",
+                        "N3",
+                        "N4",
+                        "DMG",
+                        "INS",
+                        "AAA"
+                      ]
+                    },
+                    {
+                      "id": "2000E",
+                      "name": "Patient Event Level",
+                      "repeat": "1",
+                      "triggerDiscriminator": {
+                        "elementKey": "hierarchicalLevelCode",
+                        "value": "EV"
+                      },
+                      "segmentIds": [
+                        "HL",
+                        "TRN",
+                        "AAA",
+                        "UM",
+                        "HCR",
+                        "REF",
+                        "DTP",
+                        "HI",
+                        "HSD",
+                        "CRC",
+                        "CL1",
+                        "CR1",
+                        "CR2",
+                        "CR5",
+                        "CR6",
+                        "PWK",
+                        "MSG"
+                      ],
+                      "loops": [
+                        {
+                          "id": "2010EA",
+                          "name": "Patient Event Provider Name",
+                          "repeat": ">1",
+                          "segmentIds": [
+                            "NM1",
+                            "REF",
+                            "N3",
+                            "N4",
+                            "PER",
+                            "AAA",
+                            "PRV"
+                          ]
+                        },
+                        {
+                          "id": "2010EB",
+                          "name": "Patient Event Transport / Additional Contact",
+                          "repeat": ">1",
+                          "segmentIds": [
+                            "NM1",
+                            "N3",
+                            "N4",
+                            "PER",
+                            "AAA"
+                          ]
+                        },
+                        {
+                          "id": "2010EC",
+                          "name": "Patient Event Other UMO / Transport",
+                          "repeat": ">1",
+                          "segmentIds": [
+                            "NM1",
+                            "REF",
+                            "N3",
+                            "N4",
+                            "DTP",
+                            "AAA"
+                          ]
+                        },
+                        {
+                          "id": "2000F",
+                          "name": "Service Level",
+                          "repeat": ">1",
+                          "triggerDiscriminator": {
+                            "elementKey": "hierarchicalLevelCode",
+                            "value": "SS"
+                          },
+                          "segmentIds": [
+                            "HL",
+                            "TRN",
+                            "AAA",
+                            "UM",
+                            "HCR",
+                            "REF",
+                            "DTP",
+                            "HI",
+                            "SV1",
+                            "SV2",
+                            "SV3",
+                            "TOO",
+                            "HSD",
+                            "PWK",
+                            "MSG"
+                          ],
+                          "loops": [
+                            {
+                              "id": "2010F",
+                              "name": "Service Provider Name",
+                              "repeat": ">1",
+                              "segmentIds": [
+                                "NM1",
+                                "REF",
+                                "N3",
+                                "N4",
+                                "PER",
+                                "PRV",
+                                "AAA"
+                              ]
+                            },
+                            {
+                              "id": "2010FB",
+                              "name": "Additional Service Information Contact",
+                              "repeat": "1",
+                              "segmentIds": [
+                                "NM1",
+                                "N3",
+                                "N4",
+                                "PER"
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "2000E",
+                  "name": "Patient Event Level",
+                  "repeat": "1",
+                  "triggerDiscriminator": {
+                    "elementKey": "hierarchicalLevelCode",
+                    "value": "EV"
+                  },
+                  "segmentIds": [
+                    "HL",
+                    "TRN",
+                    "AAA",
+                    "UM",
+                    "HCR",
+                    "REF",
+                    "DTP",
+                    "HI",
+                    "HSD",
+                    "CRC",
+                    "CL1",
+                    "CR1",
+                    "CR2",
+                    "CR5",
+                    "CR6",
+                    "PWK",
+                    "MSG"
+                  ],
+                  "loops": [
+                    {
+                      "id": "2010EA",
+                      "name": "Patient Event Provider Name",
+                      "repeat": ">1",
+                      "segmentIds": [
+                        "NM1",
+                        "REF",
+                        "N3",
+                        "N4",
+                        "PER",
+                        "AAA",
+                        "PRV"
+                      ]
+                    },
+                    {
+                      "id": "2010EB",
+                      "name": "Patient Event Transport / Additional Contact",
+                      "repeat": ">1",
+                      "segmentIds": [
+                        "NM1",
+                        "N3",
+                        "N4",
+                        "PER",
+                        "AAA"
+                      ]
+                    },
+                    {
+                      "id": "2010EC",
+                      "name": "Patient Event Other UMO / Transport",
+                      "repeat": ">1",
+                      "segmentIds": [
+                        "NM1",
+                        "REF",
+                        "N3",
+                        "N4",
+                        "DTP",
+                        "AAA"
+                      ]
+                    },
+                    {
+                      "id": "2000F",
+                      "name": "Service Level",
+                      "repeat": ">1",
+                      "triggerDiscriminator": {
+                        "elementKey": "hierarchicalLevelCode",
+                        "value": "SS"
+                      },
+                      "segmentIds": [
+                        "HL",
+                        "TRN",
+                        "AAA",
+                        "UM",
+                        "HCR",
+                        "REF",
+                        "DTP",
+                        "HI",
+                        "SV1",
+                        "SV2",
+                        "SV3",
+                        "TOO",
+                        "HSD",
+                        "PWK",
+                        "MSG"
+                      ],
+                      "loops": [
+                        {
+                          "id": "2010F",
+                          "name": "Service Provider Name",
+                          "repeat": ">1",
+                          "segmentIds": [
+                            "NM1",
+                            "REF",
+                            "N3",
+                            "N4",
+                            "PER",
+                            "PRV",
+                            "AAA"
+                          ]
+                        },
+                        {
+                          "id": "2010FB",
+                          "name": "Additional Service Information Contact",
+                          "repeat": "1",
+                          "segmentIds": [
+                            "NM1",
+                            "N3",
+                            "N4",
+                            "PER"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trailerSegmentIds": [
+    "SE"
+  ]
+}

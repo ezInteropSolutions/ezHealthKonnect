@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic fixture: the never-a-confident-dose fail-safe. <DoseQuantity> is a
+  recognized name and IS present, so the dose really is matched, but it carries
+  no quantity: the decode must report the dose absent and raise the ambiguous
+  dose warning rather than reaching into the sibling element for a number.
+
+  <DoseUnitOfMeasure> is deliberately left in place. It is no longer a
+  recognized name, so it decodes absent, which keeps a component the message
+  plainly carried from reaching a consumer on an ungrounded name.
+  Fully synthetic, no real PHI.
+-->
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <MessageID>SYNTH-MSG-SIG-02</MessageID>
+  </Header>
+  <Body>
+    <NewRx>
+      <MedicationPrescribed>
+        <DrugDescription>Synthetic Topical Cream 1%</DrugDescription>
+        <Sig>
+          <SigText>Apply topically to the affected area as directed.</SigText>
+          <Instruction>
+            <DoseAdministration>
+              <Dose>
+                <DoseQuantity></DoseQuantity>
+                <DoseUnitOfMeasure>
+                  <Text>application</Text>
+                </DoseUnitOfMeasure>
+              </Dose>
+            </DoseAdministration>
+            <Route>
+              <Code>6064005</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </Route>
+          </Instruction>
+        </Sig>
+      </MedicationPrescribed>
+    </NewRx>
+  </Body>
+</Message>

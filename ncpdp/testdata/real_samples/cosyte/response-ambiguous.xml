@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <MessageID>SYNTH-MSG-0104</MessageID>
+    <RelatesToMessageID>SYNTH-MSG-0004</RelatesToMessageID>
+  </Header>
+  <Body>
+    <Status>
+      <Code>010</Code>
+      <Description>Received.</Description>
+    </Status>
+    <Error>
+      <Code>900</Code>
+      <Description>Downstream rejection.</Description>
+    </Error>
+  </Body>
+</Message>

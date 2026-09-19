@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>SurescriptsTestPharmacy</To>
+    <From>SurescriptsTestPrescriber</From>
+    <MessageID>SYNTH-MSG-0103</MessageID>
+    <RelatesToMessageID>SYNTH-MSG-0003</RelatesToMessageID>
+    <SentTime>2026-01-15T09:33:00Z</SentTime>
+  </Header>
+  <Body>
+    <Verify>
+      <Code>010</Code>
+      <Description>Prescriber confirmed review of the referenced transaction.</Description>
+    </Verify>
+  </Body>
+</Message>

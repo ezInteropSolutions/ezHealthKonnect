@@ -1,0 +1,11 @@
+{
+  "key": "Prescriber",
+  "xmlElement": "Prescriber",
+  "name": "Prescriber",
+  "groups": [
+    { "key": "nonVeterinarian", "groupKey": "NonVeterinarian", "xmlElement": "NonVeterinarian", "required": true, "repeatable": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Body/NewRx/Prescriber)"
+  ]
+}

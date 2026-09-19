@@ -1,0 +1,13 @@
+{
+  "key": "CodedElement",
+  "xmlElement": "ProductCode",
+  "name": "Coded Element (Code + Qualifier)",
+  "fields": [
+    { "key": "code", "xpath": "Code", "fallbackXPath": ".", "name": "Code", "dataType": "code", "required": true },
+    { "key": "qualifier", "xpath": "Qualifier", "fallbackXPath": "@Qualifier", "name": "Qualifier", "dataType": "code", "required": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, DrugCoded/ProductCode and /DrugDBCode share this <X><Code>/<Qualifier> shape; QuantityUnitOfMeasure reuses it with Qualifier absent)",
+    "fallbackXPath added (2026-09-19) after a SECOND real, independent source (cosyte/ncpdp's own MIT-licensed test fixtures) showed a genuinely different, equally real alternate shape for this SAME conceptual element: `<ProductCode Qualifier=\"ND\">00093505601</ProductCode>` (code as the element's own text content, qualifier as an XML attribute) -- confirmed deliberate, not a fixture typo, since newrx-coded-and-strength.xml uses BOTH shapes in the SAME message (ProductCode attribute-form, sibling DrugDBCode nested-form). Found by running 33 real third-party SCRIPT fixtures through the real parse+validate pipeline: every fixture using the attribute form failed validation with 'required field Code is missing' despite carrying a real, present value. Read-side only (fallbackXPath) -- BuildDocument's own write direction is unchanged, always emitting the nested form dgoradia's own sample already confirms as valid."
+  ]
+}

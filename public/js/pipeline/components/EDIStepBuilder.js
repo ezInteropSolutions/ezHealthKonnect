@@ -50,7 +50,7 @@ function ediTransformOptionsHTML(selected) {
 // (edi_build_executor.go, edi_map_to_canonical_executor.go) for backward
 // compatibility with existing pipelines, not because the others are
 // second-class.
-const EDI_TRANSACTION_SETS = ['835', '837P', '837I', '999', '270', '271'];
+const EDI_TRANSACTION_SETS = ['835', '837P', '837I', '999', '270', '271', '276', '277', '278', '834'];
 
 function ediTransactionSetOptionsHTML(selected) {
     return EDI_TRANSACTION_SETS.map(ts =>

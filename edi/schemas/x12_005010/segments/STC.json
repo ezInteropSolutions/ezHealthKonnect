@@ -1,0 +1,58 @@
+{
+  "id": "STC",
+  "name": "Status Information",
+  "usage": "required",
+  "maxUse": ">1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "healthCareClaimStatus",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "categoryCode", "dataType": "ID" },
+          { "pos": "2", "key": "statusCode", "dataType": "ID" },
+          { "pos": "3", "key": "entityIdentifierCode", "dataType": "ID" },
+          { "pos": "4", "key": "codeListQualifierCode", "dataType": "ID" }
+        ]
+      }
+    },
+    { "pos": "02", "key": "statusInformationEffectiveDate", "dataType": "DT" },
+    { "pos": "03", "key": "actionCode", "dataType": "ID" },
+    { "pos": "04", "key": "totalSubmittedChargeAmount", "dataType": "R" },
+    { "pos": "05", "key": "totalPaidAmount", "dataType": "R" },
+    { "pos": "06", "key": "paymentDate", "dataType": "DT" },
+    { "pos": "07", "key": "paymentMethodCode", "dataType": "ID" },
+    { "pos": "08", "key": "checkIssueDate", "dataType": "DT" },
+    { "pos": "09", "key": "checkNumber", "dataType": "AN" },
+    {
+      "pos": "10",
+      "key": "healthCareClaimStatus2",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "categoryCode", "dataType": "ID" },
+          { "pos": "2", "key": "statusCode", "dataType": "ID" },
+          { "pos": "3", "key": "entityIdentifierCode", "dataType": "ID" },
+          { "pos": "4", "key": "codeListQualifierCode", "dataType": "ID" }
+        ]
+      }
+    },
+    {
+      "pos": "11",
+      "key": "healthCareClaimStatus3",
+      "composite": {
+        "subElements": [
+          { "pos": "1", "key": "categoryCode", "dataType": "ID" },
+          { "pos": "2", "key": "statusCode", "dataType": "ID" },
+          { "pos": "3", "key": "entityIdentifierCode", "dataType": "ID" },
+          { "pos": "4", "key": "codeListQualifierCode", "dataType": "ID" }
+        ]
+      }
+    },
+    { "pos": "12", "key": "freeFormMessageText", "dataType": "AN" }
+  ],
+  "sourceRefs": [
+    "New segment for 276/277 (EDI Phase 6, September 2026). Stedi's generic X12 005010 segment reference (stedi.com/edi/x12-005010/segment/STC) — the full 12-position generic shape: STC01/10/11 are each a 4-sub-element composite (C043, Health Care Claim Status: category code, status code, optional entity identifier, optional code list qualifier); STC02/06/08 are dates; STC04/05 are submitted/paid amounts; STC07 payment method; STC09 check number; STC12 free-form text.",
+    "The HIPAA-specific 277 (005010X212) implementation guide (stedi.com/edi/hipaa/transaction-set/277-A1) confirms STC's ROLE (mandatory, repeats >1, present at loops 2200B/2200C/2200D/2220D/2200E/2220E carrying category+status+action+paid info) but its own fetched summary did not surface a complete per-position Not-Used table the way 835/837's own PyX12-XML-sourced segments did. Modeled as the full generic 12-position shape rather than guessing which positions this specific IG restricts — matching this project's own established 'flexible, not rigid' validator philosophy: an unpopulated situational element is harmless, whereas dropping a position the real IG actually uses would silently corrupt a real 277's status detail (STC10/STC11 in particular are routinely used together with STC01 to report multiple simultaneous status codes on one claim, e.g. a category code plus a more specific status code). Revisit with an exhaustive per-position check (matching 835/837's own precedent) if a real 277 sample file surfaces a position this schema doesn't yet cover, or drops one that's genuinely Not Used.",
+    "HL03 hierarchical-level codes for 276/277's own 5-level HL tree (2000A=20 Information Source, 2000B=21 Information Receiver, 2000C=19 Provider of Service, 2000D=22 Subscriber, 2000E=23 Dependent) cross-checked directly against PyX12's own raw 277.5010.X212.xml map (azoner/pyx12) after an initial Stedi HTML-page fetch returned an internally-inconsistent answer (claimed HL03='22' for both 2000C and 2000D) — resolved by going to the authoritative primary source rather than trusting the inconsistent summary, matching this project's own documented 'AI-summarization transcription-fidelity risk' precedent from the 837 work."
+  ]
+}

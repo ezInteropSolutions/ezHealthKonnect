@@ -1,7 +1,7 @@
 {
   "id": "TRN",
   "name": "Reassociation Trace Number",
-  "usage": "required",
+  "usage": "situational",
   "maxUse": "1",
   "elements": [
     { "pos": "01", "key": "traceTypeCode", "dataType": "ID" },
@@ -9,5 +9,8 @@
     { "pos": "03", "key": "payerIdentifier", "dataType": "AN" },
     { "pos": "04", "key": "originatingCompanySupplementalCode", "dataType": "AN" }
   ],
-  "sourceRefs": ["Stedi X12 EDI segment reference — stedi.com/edi/x12/segment/TRN"]
+  "sourceRefs": [
+    "Stedi X12 EDI segment reference — stedi.com/edi/x12/segment/TRN",
+    "USAGE CORRECTION (EDI Phase 7, September 2026): originally modeled usage='required'. 278's own 2000E/2000F both mark TRN 'O' (Optional, stedi.com/edi/hipaa/transaction-set/278-A1) — corrected to 'situational', the same shared-segment-global-usage constraint already documented on CL1.json's own correction note. Zero behavior change for every existing consumer (270/271/276/277/837), which already supplies TRN in every real fixture."
+  ]
 }

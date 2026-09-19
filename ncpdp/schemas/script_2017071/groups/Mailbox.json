@@ -1,0 +1,11 @@
+{
+  "key": "Mailbox",
+  "xmlElement": "Mailbox",
+  "name": "Mailbox",
+  "fields": [
+    { "key": "deliveredID", "xpath": "DeliveredID", "name": "Delivered ID", "dataType": "string", "required": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Header/Mailbox)"
+  ]
+}

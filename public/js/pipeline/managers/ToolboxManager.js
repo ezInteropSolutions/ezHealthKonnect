@@ -563,6 +563,96 @@ class ToolboxManager {
             }),
 
             // ============================================
+            // NCPDP SCRIPT STEPS (pharmacy e-prescribing, Phase 1:
+            // NewRx, CancelRx, CancelRxResponse, RxChangeRequest, RxChangeResponse)
+            // ============================================
+            new StepTemplate({
+                id: 'ncpdp-parse',
+                name: 'NCPDP SCRIPT Parse',
+                type: 'ncpdp.parse',
+                description: 'Parse raw NCPDP SCRIPT (pharmacy e-prescribing) XML into structured JSON (transactionType/header/body)',
+                layer: 'core',
+                icon: this.getIconForType('ncpdp.parse'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'raw', outputField: 'parsedNCPDP' }
+            }),
+            new StepTemplate({
+                id: 'ncpdp-validate',
+                name: 'NCPDP SCRIPT Validate',
+                type: 'ncpdp.validate',
+                description: 'Check a parsed NCPDP SCRIPT message against the schema\'s own required field/group flags',
+                layer: 'core',
+                icon: this.getIconForType('ncpdp.validate'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'parsedNCPDP', outputField: 'ncpdpValidation' }
+            }),
+            new StepTemplate({
+                id: 'ncpdp-map-to-canonical',
+                name: 'NCPDP Map to Canonical',
+                type: 'ncpdp.map_to_canonical',
+                description: 'No-code field mapping from any source shape (CSV, DB rows, generic JSON) into the canonical JSON ncpdp.build consumes',
+                layer: 'core',
+                icon: this.getIconForType('ncpdp.map_to_canonical'),
+                isSystem: true,
+                defaultConfig: { outputField: 'parsedNCPDP', transactionType: 'NewRx', headerFields: [], headerGroups: [], bodyFields: [], bodyGroups: [] }
+            }),
+            new StepTemplate({
+                id: 'ncpdp-build',
+                name: 'NCPDP SCRIPT Build',
+                type: 'ncpdp.build',
+                description: 'Build a complete NCPDP SCRIPT XML message (NewRx, CancelRx, CancelRxResponse, RxChangeRequest, RxChangeResponse) from canonical JSON',
+                layer: 'core',
+                icon: this.getIconForType('ncpdp.build'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'parsedNCPDP', transactionType: 'NewRx', outputField: 'ncpdpScript' }
+            }),
+
+            // ============================================
+            // NCPDP TELECOMMUNICATION D.0 STEPS (real-time pharmacy claims,
+            // Phase 1: B1 Claim Billing request/response)
+            // ============================================
+            new StepTemplate({
+                id: 'ncpdp-telecom-parse',
+                name: 'NCPDP Telecom D.0 Parse',
+                type: 'ncpdptelecom.parse',
+                description: 'Parse a raw NCPDP Telecommunication D.0 real-time pharmacy claim transmission into structured JSON (header/transmissionGroup/transactionGroups)',
+                layer: 'core',
+                icon: this.getIconForType('ncpdptelecom.parse'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'raw', outputField: 'parsedTelecom' }
+            }),
+            new StepTemplate({
+                id: 'ncpdp-telecom-validate',
+                name: 'NCPDP Telecom D.0 Validate',
+                type: 'ncpdptelecom.validate',
+                description: 'Check a parsed D.0 transmission against the schema\'s own required field/segment flags',
+                layer: 'core',
+                icon: this.getIconForType('ncpdptelecom.validate'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'parsedTelecom', outputField: 'telecomValidation' }
+            }),
+            new StepTemplate({
+                id: 'ncpdp-telecom-map-to-canonical',
+                name: 'NCPDP Telecom Map to Canonical',
+                type: 'ncpdptelecom.map_to_canonical',
+                description: 'No-code field mapping from any source shape (CSV, DB rows, generic JSON) into the canonical JSON ncpdptelecom.build consumes',
+                layer: 'core',
+                icon: this.getIconForType('ncpdptelecom.map_to_canonical'),
+                isSystem: true,
+                defaultConfig: { outputField: 'parsedTelecom', transactionCode: 'B1', direction: 'request', headerFields: [], transmissionGroupSegments: [], transactionGroupSegments: [] }
+            }),
+            new StepTemplate({
+                id: 'ncpdp-telecom-build',
+                name: 'NCPDP Telecom D.0 Build',
+                type: 'ncpdptelecom.build',
+                description: 'Build a complete NCPDP Telecommunication D.0 transmission (B1 Claim Billing request/response) from canonical JSON',
+                layer: 'core',
+                icon: this.getIconForType('ncpdptelecom.build'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'parsedTelecom', transactionCode: 'B1', direction: 'request', outputField: 'ncpdpTelecom' }
+            }),
+
+            // ============================================
             // CDA/CCD STEPS
             // ============================================
             new StepTemplate({
@@ -997,6 +1087,18 @@ class ToolboxManager {
             'edi.validate': 'fas fa-stamp',
             'edi.map_to_canonical': 'fas fa-random',
             'edi.build': 'fas fa-file-export',
+
+            // NCPDP SCRIPT (pharmacy e-prescribing)
+            'ncpdp.parse': 'fas fa-prescription-bottle-alt',
+            'ncpdp.validate': 'fas fa-stamp',
+            'ncpdp.map_to_canonical': 'fas fa-random',
+            'ncpdp.build': 'fas fa-file-export',
+
+            // NCPDP Telecommunication D.0 (real-time pharmacy claims)
+            'ncpdptelecom.parse': 'fas fa-receipt',
+            'ncpdptelecom.validate': 'fas fa-stamp',
+            'ncpdptelecom.map_to_canonical': 'fas fa-random',
+            'ncpdptelecom.build': 'fas fa-file-export',
 
             // ============================================
             // CDA/CCD

@@ -1,0 +1,22 @@
+{
+  "key": "Prescriber",
+  "identifier": "03",
+  "name": "Prescriber",
+  "fields": [
+    { "key": "prescriberIdQualifier", "fieldId": "EZ", "name": "Prescriber ID Qualifier", "dataType": "AN", "required": false },
+    { "key": "prescriberId", "fieldId": "DB", "name": "Prescriber ID", "dataType": "AN", "required": false },
+    { "key": "prescriberLastName", "fieldId": "DR", "name": "Prescriber Last Name", "dataType": "AN", "required": false },
+    { "key": "prescriberPhoneNumber", "fieldId": "PM", "name": "Prescriber Phone Number", "dataType": "AN", "required": false },
+    { "key": "primaryCareProviderIdQualifier", "fieldId": "2E", "name": "Primary Care Provider ID Qualifier", "dataType": "AN", "required": false },
+    { "key": "primaryCareProviderId", "fieldId": "DL", "name": "Primary Care Provider ID", "dataType": "AN", "required": false },
+    { "key": "primaryCareProviderLastName", "fieldId": "4E", "name": "Primary Care Provider Last Name", "dataType": "AN", "required": false },
+    { "key": "prescriberFirstName", "fieldId": "2J", "name": "Prescriber First Name", "dataType": "AN", "required": false },
+    { "key": "prescriberStreetAddress", "fieldId": "2K", "name": "Prescriber Street Address", "dataType": "AN", "required": false },
+    { "key": "prescriberCityAddress", "fieldId": "2M", "name": "Prescriber City Address", "dataType": "AN", "required": false },
+    { "key": "prescriberStateProvinceAddress", "fieldId": "2N", "name": "Prescriber State/Province Address", "dataType": "AN", "required": false },
+    { "key": "prescriberZipPostalZone", "fieldId": "2P", "name": "Prescriber ZIP/Postal Zone", "dataType": "AN", "required": false }
+  ],
+  "sourceRefs": [
+    "apiv/dzero lib/dzero/segments/03_prescriber.rb (field-id-to-symbol dictionary, read directly), cross-confirmed against eduardonunesp/ncpdp-telecom-fmt-book docs/segments.md's own worked Prescriber Segment (AM03) example."
+  ]
+}

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>SurescriptsTestPrescriber</To>
+    <From>SurescriptsTestPharmacy</From>
+    <MessageID>SYNTH-MSG-0501</MessageID>
+    <SentTime>2026-02-04T12:00:00Z</SentTime>
+  </Header>
+  <Body>
+    <RxFill>
+      <RequestReferenceNumber>SYNTH-REF-0501</RequestReferenceNumber>
+      <MedicationPrescribed>
+        <DrugDescription>Atorvastatin 20 MG Oral Tablet</DrugDescription>
+      </MedicationPrescribed>
+    </RxFill>
+  </Body>
+</Message>

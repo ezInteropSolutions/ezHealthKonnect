@@ -1,0 +1,46 @@
+{
+  "id": "HLH",
+  "name": "Health Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "healthRelatedCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "height",
+      "dataType": "R"
+    },
+    {
+      "pos": "03",
+      "key": "weight1",
+      "dataType": "R"
+    },
+    {
+      "pos": "04",
+      "key": "weight2",
+      "dataType": "R"
+    },
+    {
+      "pos": "05",
+      "key": "description1",
+      "dataType": "AN"
+    },
+    {
+      "pos": "06",
+      "key": "currentHealthConditionCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "07",
+      "key": "description2",
+      "dataType": "AN"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/HLH) — 834's 2100A Member loop, tobacco-use/health-condition flags occasionally used for wellness-program or rate-tier eligibility."
+  ]
+}

@@ -1,21 +1,30 @@
-// cda/builder/xpath_writer.go
+// xmlpath/xpath_writer.go
 //
-// WriteAtXPath is the construction-direction mirror of
-// services/parsers/cda/generic_section_processor.go's extractValueByXPath:
-// that function reads a CDAFieldDef.XPath (as stored in ccda_2_1.json)
-// relative to an <entry> element via etree.FindElement/SelectAttrValue; this
-// file walks the SAME xpath strings and creates the elements/attributes
-// instead, so cda.parse and cda.build share one schema-driven contract in
-// both directions — adding a section or field is a schema change, not a new
-// Go function on either side.
+// WriteAtXPath is a generic, schema-driven XML tree builder: given an etree
+// root and a restricted XPath-like path string, it walks/creates the
+// element/attribute chain the path describes and writes a leaf value (or, if
+// value is "", just returns the resolved structural anchor). TryFindAtXPath
+// is its read-only counterpart.
 //
-// Supported path grammar is deliberately the same restricted subset
-// GenericSectionProcessor's isEtreeSafePredicate already accepts for
-// reading (a predicate this engine can't safely read back could never have
-// round-tripped anyway), extended with comma-separated multi-attribute
-// conditions (needed because several real C-CDA entryRelationship elements
-// are only uniquely identified by TWO attributes together, e.g.
-// @typeCode='SUBJ' AND @inversionInd='true'):
+// This package has no knowledge of any particular XML vocabulary (no CDA/RIM
+// concepts, no X12, no NCPDP) — it originated in cda/builder as the
+// construction-direction mirror of
+// services/parsers/cda/generic_section_processor.go's extractValueByXPath
+// (that function reads a schema-declared XPath relative to an element via
+// etree.FindElement/SelectAttrValue; this file walks the SAME xpath strings
+// and creates the elements/attributes instead, so a parser and a builder can
+// share one schema-driven contract in both directions — adding a new
+// section/segment/field is a schema change, not a new Go function on either
+// side), then extracted here (2026) once it became clear the mechanism has
+// zero CDA-specific vocabulary and a second XML-based engine (NCPDP SCRIPT)
+// needed the exact same proven, validator-tested predicate-matching
+// machinery rather than a reimplementation or a copy-paste.
+//
+// Supported path grammar (deliberately a restricted subset — a predicate this
+// engine can't safely read back could never round-trip anyway), extended
+// with comma-separated multi-attribute conditions (needed because several
+// real C-CDA entryRelationship elements are only uniquely identified by TWO
+// attributes together, e.g. @typeCode='SUBJ' AND @inversionInd='true'):
 //
 //	tag                              - child element by name
 //	tag/@attr                        - attribute on tag (leaf only)
@@ -23,7 +32,7 @@
 //	tag[child/@attr='value']         - child matched/created by a NESTED element's attribute
 //	tag[@a='x',@b='y']               - child matched/created by TWO+ of its own attributes (AND)
 //	tag[N]                           - child matched/created by 1-based position
-package builder
+package xmlpath
 
 import (
 	"sort"
@@ -51,7 +60,7 @@ func WriteAtXPath(root *etree.Element, path string, value string) *etree.Element
 		return root
 	}
 
-	segments := splitPathSegments(path)
+	segments := SplitPathSegments(path)
 	if len(segments) == 0 {
 		return root
 	}
@@ -75,14 +84,14 @@ func WriteAtXPath(root *etree.Element, path string, value string) *etree.Element
 // TryFindAtXPath is the read-only counterpart to WriteAtXPath: it walks path
 // under root exactly the same way, but never creates anything — it returns
 // (nil, false) as soon as any segment has no existing match. Used to inject
-// a structural templateId only onto a nested node a real field write already
-// created (e.g. a Reaction/Severity/Status Observation), never onto an
-// empty container conjured up just to hold a templateId with no data.
+// a structural anchor (e.g. a templateId) only onto a nested node a real
+// field write already created, never onto an empty container conjured up
+// just to hold it with no data.
 func TryFindAtXPath(root *etree.Element, path string) (*etree.Element, bool) {
 	if root == nil || path == "" {
 		return nil, false
 	}
-	segments := splitPathSegments(path)
+	segments := SplitPathSegments(path)
 	if len(segments) == 0 {
 		return root, true
 	}
@@ -96,12 +105,13 @@ func TryFindAtXPath(root *etree.Element, path string) (*etree.Element, bool) {
 	return tryWalkElements(root, segments)
 }
 
-// splitPathSegments splits a "/"-delimited path into segments, respecting
+// SplitPathSegments splits a "/"-delimited path into segments, respecting
 // "[...]" predicate brackets (which may themselves contain "/", e.g.
 // "observation[code/@code='ASSERTION']") so a predicate is never split
-// across two segments — the construction-direction analogue of
-// fhir_path_writer.go's findTopLevelDot, for "/" instead of ".".
-func splitPathSegments(path string) []string {
+// across two segments. Exported because callers sometimes need just the
+// last segment's tag name (e.g. to name a freshly-created sibling) without
+// walking/creating anything.
+func SplitPathSegments(path string) []string {
 	var segments []string
 	depth := 0
 	start := 0
@@ -183,9 +193,9 @@ func tryWalkElements(root *etree.Element, segments []string) (*etree.Element, bo
 // path segment ("tag", "tag[@attr='value']", "tag[child/@attr='value']",
 // "tag[@a='x',@b='y']", or "tag[N]"), in document order. A bare tag (no
 // predicate) only ever yields its first match — matching etree.FindElement's
-// own single-match semantics on the read side (see xpath_writer.go's package
-// doc comment on the known first-match limitation for unpredicated segments)
-// — predicated segments yield every match, so backtracking can distinguish
+// own single-match semantics on the read side (see this package's doc
+// comment on the known first-match limitation for unpredicated segments) —
+// predicated segments yield every match, so backtracking can distinguish
 // same-predicate siblings by what's nested inside them.
 func candidatesForSegment(parent *etree.Element, segment string) []*etree.Element {
 	tag, pred := splitPredicate(segment)
@@ -283,20 +293,12 @@ func segmentHasPredicate(segment string) bool {
 // discriminatorCond. This is deliberately about CONFLICT, not mere absence:
 //
 //   - c has no discriminatorTag child at all yet → compatible (nothing
-//     built there yet, safe to extend) — e.g. a first-time write of
-//     Encounter Service Delivery Location's playingEntity[@classCode='PLC']
-//     under an already-uniquely-identified participant/participantRole
-//     pair (there is only ever ONE such pair per encounter, so no
-//     disambiguation is even possible, let alone needed, at that level).
+//     built there yet, safe to extend).
 //   - c has a discriminatorTag child that already matches every
 //     discriminatorCond → compatible (same identity) — e.g. a second field
-//     (Reaction Observation's own effectiveTime) targeting the SAME nested
-//     observation[templateId/@root=X] an earlier field already built.
+//     targeting the SAME nested child an earlier field already built.
 //   - c has a discriminatorTag child (or children) but NONE match →
-//     genuinely conflicting identity already present (e.g. Severity's own
-//     entryRelationship already has a nested observation[templateId=
-//     TID-SEVERITY], and Status's field now needs templateId=TID-STATUS on
-//     the SAME shared entryRelationship predicate) → NOT compatible, a
+//     genuinely conflicting identity already present → NOT compatible, a
 //     distinct sibling must be created.
 //
 // No parseable conditions (discriminatorConds empty — e.g. a bare position
@@ -304,22 +306,20 @@ func segmentHasPredicate(segment string) bool {
 // compatible, matching this function's conservative default of preferring
 // reuse over an unnecessary duplicate.
 //
-// Confirmed via two separate live Test Pipeline runs (2026-07): the earlier
-// lookaheadPrefix-based approach (requiring the ENTIRE remaining path,
-// including not-yet-written leaves, to already exist) produced duplicate
-// entryRelationship/observation pairs for Reaction Observation, Problem
-// Status, and a fragmented multi-copy Advance Directive Custodian
-// participant — fixed once, then recurred ONE level deeper (a duplicate
-// <participant>) the moment a new field's own terminal was ITSELF
-// predicated (playingEntity[@classCode='PLC']) rather than a bare tag,
-// because trimming the lookahead to stop earlier still asked "does this
+// Confirmed via two separate live Test Pipeline runs against the original
+// CDA consumer of this code (2026-07): an earlier lookaheadPrefix-based
+// approach (requiring the ENTIRE remaining path, including not-yet-written
+// leaves, to already exist) produced duplicate wrapper/child pairs for
+// several real entry shapes — fixed once, then recurred ONE level deeper the
+// moment a new field's own terminal was ITSELF predicated rather than a bare
+// tag, because trimming the lookahead to stop earlier still asked "does this
 // exact content already exist," the wrong question for an element that can
 // never have more than one real instance in the first place. This
 // conflict-vs-absence check is not sensitive to how deep or how many
 // segments remain — it only ever needs to look at the immediate next
-// segment, because every genuinely different sibling identity in this
-// schema is discriminated by exactly one nested predicate immediately below
-// the shared wrapper.
+// segment, because every genuinely different sibling identity in a
+// well-formed schema is discriminated by exactly one nested predicate
+// immediately below the shared wrapper.
 func candidateCompatibleWithDiscriminator(c *etree.Element, discriminatorTag string, discriminatorConds []condition) bool {
 	children := c.SelectElements(discriminatorTag)
 	if len(children) == 0 {
@@ -355,9 +355,7 @@ type condition struct{ lhs, rhs string }
 
 // parseConditions splits a predicate body on "," into individual conditions
 // — e.g. "@typeCode='SUBJ',@inversionInd='true'" (two conditions that must
-// BOTH hold) — the same comma-separated-AND grammar already used elsewhere
-// in this codebase for entry-match predicates (see MappingRule.EntryMatch,
-// services/cda_fhir/declarative_schema.go).
+// BOTH hold).
 func parseConditions(pred string) []condition {
 	var conds []condition
 	for _, part := range strings.Split(pred, ",") {
@@ -415,9 +413,9 @@ func predicateMatches(el *etree.Element, lhs, rhs string) bool {
 // @attrName already equals rhs" search then can't find that just-created
 // child (it doesn't have the SECOND attribute yet) and wrongly creates a
 // SEPARATE second child instead of adding to the first — confirmed via a
-// real schema validator run (2026-07): Tobacco Use's own <code> needs both
-// @code AND @codeSystem, and ended up as two sibling <code> elements instead
-// of one with both attributes.
+// real schema validator run against the original CDA consumer (2026-07):
+// Tobacco Use's own <code> needs both @code AND @codeSystem, and ended up as
+// two sibling <code> elements instead of one with both attributes.
 func applyPredicateConstraints(el *etree.Element, conds []condition) {
 	type group struct {
 		childTag string // "" means el's own attribute(s), not a nested child
@@ -472,26 +470,24 @@ func applyPredicateConstraints(el *etree.Element, conds []condition) {
 	}
 }
 
-// reorderChildrenByTag reorders el's direct child elements so tags listed in
+// ReorderChildrenByTag reorders el's direct child elements so tags listed in
 // order come first (in the order given), followed by every other existing
 // child in its original relative position — a stable sort, so multiple
 // children sharing one tag (e.g. two <given> elements) never get shuffled
 // relative to each other.
 //
-// Needed because this engine builds an element's children across several
+// Needed because a caller may build an element's children across several
 // independent passes (a field write via WriteAtXPath, then a later
-// StructuralTemplateIDs/injectTemplateID call, etc.) that append in
-// whichever order Go code happens to call them — not necessarily the fixed
-// sequence CDA's own XSD requires (confirmed via a real schema validator
-// run against this builder's own output, 2026-07: e.g. manufacturedProduct's
-// templateId is only known once a StructuralTemplateIDs anchor resolves,
-// which runs AFTER the plain field write that already created its sibling
-// manufacturedMaterial, leaving templateId appended in the wrong, invalid
-// position). Called with a short order list (even just {"templateId"}) at
-// the one anchor/element a real ordering bug was found on — not a sweeping
-// per-tag table applied everywhere, since most of this engine's output
-// already appends in valid schema order by construction.
-func reorderChildrenByTag(el *etree.Element, order []string) {
+// structural-anchor call, etc.) that append in whichever order Go code
+// happens to call them — not necessarily the fixed sequence a target XML
+// schema requires. Confirmed via a real schema validator run against the
+// original CDA consumer of this code (2026-07): several real ordering bugs
+// were found this way, each requiring the caller to add a tag to its own
+// explicit rank list — "construction order != schema order" recurs as new
+// fields are added, so callers should pass a short, deliberately-scoped
+// order list at the specific anchor/element a real ordering bug is found on,
+// not a sweeping per-tag table applied everywhere.
+func ReorderChildrenByTag(el *etree.Element, order []string) {
 	if el == nil {
 		return
 	}

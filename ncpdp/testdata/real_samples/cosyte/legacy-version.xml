@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message version="10.6">
+  <Header>
+    <MessageID>SYNTH-MSG-0005</MessageID>
+  </Header>
+  <Body>
+    <NewRx/>
+  </Body>
+</Message>

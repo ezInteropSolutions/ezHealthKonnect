@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2023011">
+  <Header>
+    <To>1234567</To>
+    <From>1255667788</From>
+    <MessageID>SYNTH-MSG-SS-0002</MessageID>
+    <SentTime>2026-03-02T14:10:00Z</SentTime>
+  </Header>
+  <Body>
+    <NewRx>
+      <Patient>
+        <HumanPatient>
+          <Name>
+            <LastName>Testpatient</LastName>
+            <FirstName>Casey</FirstName>
+          </Name>
+        </HumanPatient>
+      </Patient>
+      <MedicationPrescribed>
+        <DrugDescription>Atorvastatin 20 MG Oral Tablet</DrugDescription>
+        <Quantity>
+          <Value>30</Value>
+        </Quantity>
+        <DaysSupply>30</DaysSupply>
+      </MedicationPrescribed>
+    </NewRx>
+  </Body>
+</Message>

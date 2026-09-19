@@ -1,0 +1,12 @@
+{
+  "key": "CommunicationNumbers",
+  "xmlElement": "CommunicationNumbers",
+  "name": "Communication Numbers",
+  "groups": [
+    { "key": "primaryTelephone", "groupKey": "PhoneNumber", "xmlElement": "PrimaryTelephone", "required": false, "repeatable": false },
+    { "key": "fax", "groupKey": "PhoneNumber", "xmlElement": "Fax", "required": false, "repeatable": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Patient/Pharmacy/Prescriber CommunicationNumbers)"
+  ]
+}

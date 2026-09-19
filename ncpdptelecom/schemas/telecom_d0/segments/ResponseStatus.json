@@ -1,0 +1,23 @@
+{
+  "key": "ResponseStatus",
+  "identifier": "21",
+  "name": "Response Status",
+  "fields": [
+    { "key": "responseStatus", "fieldId": "AN", "name": "Response Status", "dataType": "AN", "required": true },
+    { "key": "authorizationNumber", "fieldId": "F3", "name": "Authorization Number", "dataType": "AN", "required": false },
+    { "key": "rejectCount", "fieldId": "FA", "name": "Reject Count", "dataType": "N", "required": false },
+    { "key": "rejectCode", "fieldId": "FB", "name": "Reject Code", "dataType": "AN", "required": false },
+    { "key": "rejectFieldOccurrenceIndicator", "fieldId": "4F", "name": "Reject Field Occurrence Indicator", "dataType": "AN", "required": false },
+    { "key": "approvedMessageCodeCount", "fieldId": "5F", "name": "Approved Message Code Count", "dataType": "N", "required": false },
+    { "key": "approvedMessageCode", "fieldId": "6F", "name": "Approved Message Code", "dataType": "AN", "required": false },
+    { "key": "helpDeskPhoneNumber", "fieldId": "8F", "name": "Help Desk Phone Number", "dataType": "AN", "required": false },
+    { "key": "transactionReferenceNumber", "fieldId": "K5", "name": "Transaction Reference Number", "dataType": "AN", "required": false },
+    { "key": "internalControlNumber", "fieldId": "A7", "name": "Internal Control Number", "dataType": "AN", "required": false }
+  ],
+  "sourceRefs": [
+    "apiv/dzero lib/dzero/segments/21_response_status.rb (field-id-to-symbol dictionary, read directly) cross-confirmed against eduardonunesp/ncpdp-telecom-fmt-book docs/response.md's own worked Approved (AN=A, F3, 5F, 6F) and Rejected (AN=R, FA, FB, 4F) examples -- the heart of the adjudication result.",
+    "responseStatus's own value vocabulary (confirmed from response.md): A=Approved, C=Captured, D=Duplicate, E=Error, P=Paid, R=Rejected.",
+    "Deliberately NOT modeled this pass: UF/UH/FQ/UG (additional message information group), 7F (help desk phone number qualifier), MA (url) -- present in dzero's own dictionary but genuinely secondary for a first-phase B1 response.",
+    "rejectCount/rejectCode are modeled as ORDINARY scalar fields (last-occurrence-wins on parse), NOT a true repeating group -- dzero's own reference implementation (segments/concerns/parser.rb's Hash[elements.map{...}] construction) exhibits the exact same last-value-wins behavior for a segment with multiple same-ID field occurrences, so this is a real, sourced simplification matching the reference implementation's own behavior, not an invented gap. A claim rejected for more than one reason will only surface its LAST reject code this phase -- named, deferred."
+  ]
+}

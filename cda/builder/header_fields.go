@@ -20,7 +20,11 @@
 //     in a canonical array field (patient ids[], informants[], performers[])
 package builder
 
-import "github.com/beevik/etree"
+import (
+	"ezhealthkonnect/xmlpath"
+
+	"github.com/beevik/etree"
+)
 
 // ─── Flat scalar fields ──────────────────────────────────────────────────────
 
@@ -35,7 +39,7 @@ type headerFieldMapping struct {
 func writeHeaderFields(root *etree.Element, data map[string]interface{}, mappings []headerFieldMapping) {
 	for _, m := range mappings {
 		if v, ok := stringValue(data[m.CanonicalKey]); ok {
-			WriteAtXPath(root, m.XPath, v)
+			xmlpath.WriteAtXPath(root, m.XPath, v)
 		}
 	}
 }
@@ -138,10 +142,10 @@ func writeCodedFields(root *etree.Element, data map[string]interface{}, mappings
 		if !ok {
 			continue
 		}
-		WriteAtXPath(root, m.XPath+"/@code", code)
-		WriteAtXPath(root, m.XPath+"/@codeSystem", m.CodeSystem)
+		xmlpath.WriteAtXPath(root, m.XPath+"/@code", code)
+		xmlpath.WriteAtXPath(root, m.XPath+"/@codeSystem", m.CodeSystem)
 		if disp, ok := stringValue(data[m.DisplayKey]); ok {
-			WriteAtXPath(root, m.XPath+"/@displayName", disp)
+			xmlpath.WriteAtXPath(root, m.XPath+"/@displayName", disp)
 		}
 	}
 }

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>SurescriptsTestPharmacy</To>
+    <From>SurescriptsTestPrescriber</From>
+    <MessageID>SYNTH-MSG-0001</MessageID>
+    <SentTime>2026-01-15T09:30:00Z</SentTime>
+    <PrescriberOrderNumber>SYNTH-ORDER-0001</PrescriberOrderNumber>
+  </Header>
+  <Body>
+    <NewRx>
+      <Patient>
+        <HumanPatient>
+          <Name>
+            <LastName>Testpatient</LastName>
+            <FirstName>Avery</FirstName>
+          </Name>
+          <Gender>F</Gender>
+          <DateOfBirth>
+            <Date>1990-04-12</Date>
+          </DateOfBirth>
+        </HumanPatient>
+      </Patient>
+      <Pharmacy>
+        <Identification>
+          <NPI>1999999999</NPI>
+        </Identification>
+        <BusinessName>Synthetic Community Pharmacy</BusinessName>
+      </Pharmacy>
+      <Prescriber>
+        <NonVeterinarian>
+          <Identification>
+            <NPI>1888888888</NPI>
+          </Identification>
+          <Name>
+            <LastName>Testprescriber</LastName>
+            <FirstName>Jordan</FirstName>
+          </Name>
+        </NonVeterinarian>
+      </Prescriber>
+      <MedicationPrescribed>
+        <DrugDescription>Amoxicillin 500 MG Oral Capsule</DrugDescription>
+        <DrugCoded>
+          <ProductCode Qualifier="ND">00093310501</ProductCode>
+        </DrugCoded>
+        <Quantity>
+          <Value>30</Value>
+          <CodeListQualifier>38</CodeListQualifier>
+          <QuantityUnitOfMeasure>
+            <Code>C48480</Code>
+          </QuantityUnitOfMeasure>
+        </Quantity>
+        <DaysSupply>10</DaysSupply>
+        <Substitutions>0</Substitutions>
+        <NumberOfRefills>1</NumberOfRefills>
+        <WrittenDate>
+          <Date>2026-01-15</Date>
+        </WrittenDate>
+        <Sig>
+          <SigText>Take 1 capsule by mouth three times daily for 10 days.</SigText>
+        </Sig>
+        <Note>Synthetic test note, no real patient.</Note>
+      </MedicationPrescribed>
+    </NewRx>
+  </Body>
+</Message>

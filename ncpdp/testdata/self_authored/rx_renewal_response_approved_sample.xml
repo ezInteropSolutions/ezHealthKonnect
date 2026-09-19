@@ -1,0 +1,20 @@
+<Message DatatypesVersion="20170715" TransportVersion="20170715" TransactionDomain="SCRIPT" TransactionVersion="20170715" StructuresVersion="20170715" ECLVersion="20170715">
+    <Header>
+        <To Qualifier="P">6557744</To>
+        <From Qualifier="D">6128890368017</From>
+        <MessageID>app-000000000006</MessageID>
+        <RelatesToMessageID>app-000000000005</RelatesToMessageID>
+        <SentTime>2026-09-19T09:05:00Z</SentTime>
+    </Header>
+    <Body>
+        <RxRenewalResponse>
+            <RequestReferenceNumber>REQ-0003</RequestReferenceNumber>
+            <Response>
+                <Approved>
+                    <ReasonCode>A</ReasonCode>
+                    <Note>Renewal approved as written</Note>
+                </Approved>
+            </Response>
+        </RxRenewalResponse>
+    </Body>
+</Message>

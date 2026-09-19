@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>SurescriptsTestPrescriber</To>
+    <From>SurescriptsTestPharmacy</From>
+    <MessageID>SYNTH-MSG-0403</MessageID>
+    <RelatesToMessageID>SYNTH-MSG-0401</RelatesToMessageID>
+    <SentTime>2026-02-03T08:35:00Z</SentTime>
+  </Header>
+  <Body>
+    <CancelRxResponse>
+      <RequestReferenceNumber>SYNTH-REF-0401</RequestReferenceNumber>
+      <Response>
+        <Denied>
+          <ReasonCode>AA</ReasonCode>
+          <DenialReason>Prescription was already dispensed and cannot be cancelled.</DenialReason>
+        </Denied>
+      </Response>
+    </CancelRxResponse>
+  </Body>
+</Message>

@@ -1,0 +1,18 @@
+{
+  "key": "CancelRx",
+  "name": "Cancel Prescription",
+  "fields": [
+    { "key": "requestReferenceNumber", "xpath": "RequestReferenceNumber", "name": "Request Reference Number", "dataType": "string", "required": false }
+  ],
+  "groups": [
+    { "key": "patient", "groupKey": "Patient", "xmlElement": "Patient", "required": true, "repeatable": false },
+    { "key": "pharmacy", "groupKey": "Pharmacy", "xmlElement": "Pharmacy", "required": false, "repeatable": false },
+    { "key": "prescriber", "groupKey": "Prescriber", "xmlElement": "Prescriber", "required": true, "repeatable": false },
+    { "key": "medicationPrescribed", "groupKey": "MedicationPrescribed", "xmlElement": "MedicationPrescribed", "required": true, "repeatable": false }
+  ],
+  "elementOrder": ["RequestReferenceNumber", "Patient", "Pharmacy", "Prescriber", "MedicationPrescribed"],
+  "sourceRefs": [
+    "cosyte/ncpdp src/script/lifecycle.ts (LifecycleRequestFields: requestReferenceNumber?, patient?, pharmacy?, prescriber?, medicationPrescribed? — CancelRx extends this unchanged) cross-validated against the SCRIPT v2017071 structural shape already confirmed for NewRx's own Patient/Pharmacy/Prescriber/MedicationPrescribed groups (dgoradia/ncpdp real sample).",
+    "RequestReferenceNumber placement (first child of the transaction element) is a reasonable default, not yet confirmed against a real CancelRx sample — revisit if a real sample surfaces a different position."
+  ]
+}

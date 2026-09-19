@@ -1,0 +1,28 @@
+{
+  "key": "Patient",
+  "identifier": "01",
+  "name": "Patient",
+  "fields": [
+    { "key": "patientIdQualifier", "fieldId": "CX", "name": "Patient ID Qualifier", "dataType": "AN", "required": false },
+    { "key": "patientId", "fieldId": "CY", "name": "Patient ID", "dataType": "AN", "required": false },
+    { "key": "dateOfBirth", "fieldId": "C4", "name": "Date of Birth", "dataType": "DT", "required": false },
+    { "key": "patientGenderCode", "fieldId": "C5", "name": "Patient Gender Code", "dataType": "AN", "required": false },
+    { "key": "patientFirstName", "fieldId": "CA", "name": "Patient First Name", "dataType": "AN", "required": false },
+    { "key": "patientLastName", "fieldId": "CB", "name": "Patient Last Name", "dataType": "AN", "required": true },
+    { "key": "patientStreetAddress", "fieldId": "CM", "name": "Patient Street Address", "dataType": "AN", "required": false },
+    { "key": "patientCity", "fieldId": "CN", "name": "Patient City", "dataType": "AN", "required": false },
+    { "key": "patientStateOrProvince", "fieldId": "CO", "name": "Patient State or Province", "dataType": "AN", "required": false },
+    { "key": "patientZipPostalCode", "fieldId": "CP", "name": "Patient ZIP/Postal Code", "dataType": "AN", "required": false },
+    { "key": "patientPhoneNumber", "fieldId": "CQ", "name": "Patient Phone Number", "dataType": "AN", "required": false },
+    { "key": "placeOfService", "fieldId": "C7", "name": "Place of Service", "dataType": "AN", "required": false },
+    { "key": "employerId", "fieldId": "CZ", "name": "Employer ID", "dataType": "AN", "required": false },
+    { "key": "smokerNonSmokerCode", "fieldId": "1C", "name": "Smoker/Non-Smoker Code", "dataType": "AN", "required": false },
+    { "key": "pregnancyIndicator", "fieldId": "2C", "name": "Pregnancy Indicator", "dataType": "AN", "required": false },
+    { "key": "patientEmailAddress", "fieldId": "HN", "name": "Patient Email Address", "dataType": "AN", "required": false },
+    { "key": "patientResidence", "fieldId": "4X", "name": "Patient Residence", "dataType": "AN", "required": false }
+  ],
+  "sourceRefs": [
+    "apiv/dzero lib/dzero/segments/01_patient.rb (field-id-to-symbol dictionary, read directly) cross-confirmed against eduardonunesp/ncpdp-telecom-fmt-book docs/segments-reference.md's own official NCPDP field reference numbers (111/331/332/304/305/310/311/322/323/324/325/326/307/333/334/335/350/384). No file or fixture copied from either repo (both show license:null on GitHub) -- field/segment structural facts only, self-authored JSON.",
+    "patientLastName modeled as required (situational-but-load-bearing in practice for a real claim to identify a patient) -- neither source states a hard SHALL, matching this engine's own flexible-not-rigid validator philosophy where 'required' means 'a real, useful claim needs this,' not a wire-format mandate."
+  ]
+}

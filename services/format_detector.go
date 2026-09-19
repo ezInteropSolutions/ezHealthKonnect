@@ -110,7 +110,22 @@ func (fd *FormatDetector) DetectFormat(rawContent string) *models.FormatDetectio
 		}
 	}
 
-	// 6. Check for XML (generic)
+	// 6. Check for NCPDP SCRIPT (pharmacy e-prescribing XML) before the
+	// generic XML catch-all — a <Message TransactionDomain="SCRIPT" ...>
+	// root is valid XML too and would otherwise be swallowed by step 7,
+	// same reasoning as CCDA being checked ahead of the generic HL7v3 check
+	// above. No collision risk with CCDA/HL7v3 (NCPDP SCRIPT carries neither
+	// "urn:hl7-org:v3" nor "<ClinicalDocument") or with FHIR/JSON (it's XML,
+	// not JSON).
+	if fd.isNCPDPScript(rawContent) {
+		return &models.FormatDetectionResult{
+			DetectedFormat: models.FormatNCPDPScript,
+			Confidence:     0.95,
+			Indicators:     []string{"Message root element", "TransactionDomain=SCRIPT"},
+		}
+	}
+
+	// 7. Check for XML (generic)
 	if fd.isXML(rawContent) {
 		return &models.FormatDetectionResult{
 			DetectedFormat: models.FormatXML,
@@ -119,7 +134,7 @@ func (fd *FormatDetector) DetectFormat(rawContent string) *models.FormatDetectio
 		}
 	}
 
-	// 7. Check for EDI
+	// 8. Check for EDI
 	if fd.isEDI(rawContent) {
 		return &models.FormatDetectionResult{
 			DetectedFormat: models.FormatEDI,
@@ -128,7 +143,20 @@ func (fd *FormatDetector) DetectFormat(rawContent string) *models.FormatDetectio
 		}
 	}
 
-	// 8. Check for CSV
+	// 9. Check for NCPDP Telecommunication D.0 (pharmacy claims) before the
+	// generic CSV catch-all — D.0's own control-character-delimited content
+	// would never coincidentally match any earlier check (no leading
+	// <?xml/</MSH|/ISA, not valid JSON), but is checked here defensively so
+	// it never falls through to a CSV false-positive either.
+	if fd.isNCPDPTelecom(rawContent) {
+		return &models.FormatDetectionResult{
+			DetectedFormat: models.FormatNCPDPTelecom,
+			Confidence:     0.9,
+			Indicators:     []string{"RS (0x1E) segment separator found", "Version/Release field = D0"},
+		}
+	}
+
+	// 10. Check for CSV
 	if fd.isCSV(rawContent) {
 		return &models.FormatDetectionResult{
 			DetectedFormat: models.FormatCSV,
@@ -171,6 +199,11 @@ func (fd *FormatDetector) isCCDA(content string) bool {
 		strings.Contains(content, "<ClinicalDocument")
 }
 
+func (fd *FormatDetector) isNCPDPScript(content string) bool {
+	return strings.Contains(content, "<Message") &&
+		strings.Contains(content, "TransactionDomain=\"SCRIPT\"")
+}
+
 func (fd *FormatDetector) isJSON(content string) bool {
 	var js json.RawMessage
 	return json.Unmarshal([]byte(content), &js) == nil
@@ -193,6 +226,22 @@ func (fd *FormatDetector) isEDI(content string) bool {
 	// both shapes itself); this only matters for content-sniffing call
 	// sites outside the pipeline.
 	return strings.HasPrefix(trimmed, "ST") && strings.Contains(content, "SE")
+}
+
+// isNCPDPTelecom detects a raw NCPDP Telecommunication D.0 transmission: the
+// fixed-width header's own Version/Release field (positions 7-8, 0-indexed
+// 6-7) is a recognized D.0 version code, AND the body contains at least one
+// 0x1E (RS) segment separator — both conditions together rule out any
+// coincidental match against plain text that happens to start with "D0" at
+// that position.
+func (fd *FormatDetector) isNCPDPTelecom(content string) bool {
+	if len(content) < 8 {
+		return false
+	}
+	if content[6:8] != "D0" {
+		return false
+	}
+	return strings.ContainsRune(content, '\x1E')
 }
 
 func (fd *FormatDetector) isCSV(content string) bool {

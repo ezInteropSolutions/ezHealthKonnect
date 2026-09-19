@@ -1,7 +1,7 @@
 {
   "id": "SV1",
   "name": "Professional Service",
-  "usage": "required",
+  "usage": "situational",
   "maxUse": "1",
   "elements": [
     {
@@ -41,6 +41,7 @@
     { "pos": "15", "key": "coPayStatusCode", "dataType": "ID" }
   ],
   "sourceRefs": [
-    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (loop 2400, the service line's own procedure/charge). SV101 sub08 (Product/Service ID) is N — dropped, 7 subs kept. SV106,08,10,13,14,16-21 are usage=N at the real occurrence — dropped. Diagnosis Code Pointer (C004) sub-elements modeled N0 (integer index into the claim's own HI diagnosis list, e.g. '1','2') rather than AN, since they're genuinely used as numeric pointers, not free text — consistent with LX's own precedent for a similar index/sequence field."
+    "PyX12 (azoner/pyx12) 837.5010.X222.A1.xml — new segment for Phase 2 (loop 2400, the service line's own procedure/charge). SV101 sub08 (Product/Service ID) is N — dropped, 7 subs kept. SV106,08,10,13,14,16-21 are usage=N at the real occurrence — dropped. Diagnosis Code Pointer (C004) sub-elements modeled N0 (integer index into the claim's own HI diagnosis list, e.g. '1','2') rather than AN, since they're genuinely used as numeric pointers, not free text — consistent with LX's own precedent for a similar index/sequence field.",
+    "USAGE CORRECTION (EDI Phase 7, September 2026): originally modeled usage='required' (safe within 837P's own single-occurrence 2400 loop). 278's own 2000F Service Level offers a CHOICE of SV1 (professional) / SV2 (institutional) / SV3 (dental) depending on the service's own nature -- none individually mandatory. Since this engine's usage field is GLOBAL per segment ID (no per-loop override), corrected to 'situational' — the same shared-segment-global-usage constraint already documented on CL1.json's own correction note. Zero behavior change for 837P (which always supplies SV1 in practice regardless)."
   ]
 }

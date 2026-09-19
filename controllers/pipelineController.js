@@ -96,6 +96,74 @@ function encryptSensitiveConfigFields(config) {
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ── Branch-linked step reference resolution ─────────────────────────────────
+// switch_case/if_then_else/control.loop steps reference OTHER steps by id --
+// parent_conditional_step_id (a real column) for branch-skip resolution
+// (branch_resolver.go's GetStepsToSkip), plus config-embedded references for
+// route_to_step's targetStepId/targetStepIds/stepId/skipSteps (switch_case,
+// if_then_else) and control.loop's childStepIds. Two real gaps existed here,
+// both found by reading savePipeline/clonePipeline directly rather than
+// assumed:
+//   1. savePipeline: a TEMPLATE-authored step has no real id at all (Use
+//      Template strips every id before saving, so a template can't know a
+//      sibling step's future UUID) -- so a template could never express
+//      branch membership, only the UI's own incremental step-by-step build
+//      (which already assigns real ids client-side, see PipelineModels.js's
+//      VisualStep) could.
+//   2. clonePipeline: gives every cloned step a FRESH uuidv4() but copies
+//      parent_conditional_step_id verbatim from the SOURCE pipeline -- a
+//      guaranteed dangling reference, confirmed against 2 real branch-linked
+//      pipelines already in the live DB. Cloning either one today silently
+//      produces a clone where GetStepsToSkip never matches anything, so both
+//      branches run unconditionally.
+//
+// One shared resolver fixes both: savePipeline maps step_alias -> newly
+// generated real id (unlocking branch authoring in OOB templates -- a
+// template references a parent step by its OWN step_alias string, since that
+// alias is the one thing a template CAN know ahead of a real UUID existing);
+// clonePipeline maps the source pipeline's own old real id -> the clone's
+// new real id. Any reference value not present in idMap passes through
+// unchanged, so a normal UI-driven save (already using real ids) or a
+// non-branching pipeline is untouched either way.
+const STEP_REF_SINGLE_KEYS = ['targetStepId', 'stepId']; // 'stepId' is route_to_step's legacy single-id name
+const STEP_REF_ARRAY_KEYS = ['targetStepIds', 'childStepIds', 'skipSteps'];
+
+function walkConfigForStepRefs(node, idMap) {
+    if (Array.isArray(node)) {
+        node.forEach(v => walkConfigForStepRefs(v, idMap));
+        return;
+    }
+    if (!node || typeof node !== 'object') return;
+    for (const key of Object.keys(node)) {
+        const value = node[key];
+        if (STEP_REF_SINGLE_KEYS.includes(key) && typeof value === 'string' && idMap.has(value)) {
+            node[key] = idMap.get(value);
+        } else if (STEP_REF_ARRAY_KEYS.includes(key) && Array.isArray(value)) {
+            node[key] = value.map(v => (typeof v === 'string' && idMap.has(v) ? idMap.get(v) : v));
+        } else {
+            walkConfigForStepRefs(value, idMap);
+        }
+    }
+}
+
+/**
+ * Rewrites every step's own parent_conditional_step_id and any config-embedded
+ * step-reference field through idMap, in place. See the module-level comment
+ * above for the two callers (savePipeline: alias -> new id; clonePipeline:
+ * old id -> new id) and why one resolver serves both.
+ */
+function resolveStepReferences(steps, idMap) {
+    for (const step of steps) {
+        const parentId = step.parent_conditional_step_id || step.parentConditionalStepId;
+        if (parentId && idMap.has(parentId)) {
+            const resolved = idMap.get(parentId);
+            step.parent_conditional_step_id = resolved;
+            step.parentConditionalStepId = resolved;
+        }
+        if (step.config) walkConfigForStepRefs(step.config, idMap);
+    }
+}
+
 /**
  * Topological sort for steps based on parent_conditional_step_id relationships
  * Ensures parent steps are inserted before their children (FK constraint)
@@ -490,6 +558,38 @@ exports.savePipeline = async (req, res) => {
 
             // P7 migration: rewrite enriched.* path references in step configs → steps.{ns}.step_output.*
             migrateEnrichedPaths(allSteps);
+
+            // Assign every step's REAL id now (not later, inline in the INSERT loop) --
+            // topologicalSortSteps below needs real ids to key its own stepMap by, and a
+            // TEMPLATE-authored step (Use Template strips every id before saving) has none
+            // yet at this point. Mutates the same step objects flowing through the rest of
+            // this function, so the INSERT loop's own "step.id || uuidv4()" later on is
+            // always just a passthrough read of what's assigned here, never a second
+            // generation.
+            allSteps.forEach(s => { if (!s.id) s.id = uuidv4(); });
+
+            // Build alias -> real-id map so a TEMPLATE can express branch membership
+            // (switch_case/if_then_else parent, control.loop children) by referencing a
+            // step's own step_alias string -- the one stable thing a template CAN know
+            // ahead of a sibling step's real, not-yet-generated UUID. An alias reused by
+            // more than one step in the same pipeline is a template-authoring mistake --
+            // logged and left unmapped (falls back to today's already-existing behavior:
+            // the raw value passes through unresolved) rather than resolved ambiguously.
+            const aliasToId = new Map();
+            const seenAliases = new Set();
+            const ambiguousAliases = new Set();
+            allSteps.forEach(s => {
+                const alias = s.step_alias || s.stepAlias;
+                if (!alias) return;
+                if (seenAliases.has(alias)) { ambiguousAliases.add(alias); return; }
+                seenAliases.add(alias);
+                aliasToId.set(alias, s.id);
+            });
+            ambiguousAliases.forEach(alias => {
+                aliasToId.delete(alias);
+                console.warn(`⚠️  step_alias "${alias}" is used by more than one step in this pipeline -- skipping branch-reference resolution for it`);
+            });
+            resolveStepReferences(allSteps, aliasToId);
 
             // TOPOLOGICAL SORT: Parent steps must be inserted before child steps (FK constraint)
             // This handles multi-level dependencies: A -> B -> C
@@ -945,23 +1045,75 @@ exports.clonePipeline = async (req, res) => {
         const src = rows[0];
         const newId = uuidv4();
 
+        // transformation_pipelines has a real UNIQUE(interface_id, message_type)
+        // constraint (uq_pipeline_interface_message) -- found while testing this fix:
+        // this endpoint's own INSERT previously always reused the SOURCE pipeline's
+        // unchanged interface_id/message_type, so it collided with the very row being
+        // cloned and failed unconditionally on every call, for every pipeline,
+        // regardless of branching (confirmed against the live schema directly). Not
+        // reachable from any UI today (PipelineAPIService.clonePipeline has zero
+        // callers), so this was never noticed.
+        //
+        // Both halves of the constraint's own key are overridable -- clone as the
+        // starting point for a DIFFERENT interface (interface_id override), OR clone
+        // onto the SAME interface under a DIFFERENT message_type (message_type
+        // override, e.g. "I have a working ADT^A01 pipeline, use it as the starting
+        // point for ADT^A04 on this same interface"), OR both. Only the exact
+        // (interface_id, message_type) pair matters to the constraint, so either
+        // override alone is sufficient to avoid the collision. Cloning with NEITHER
+        // override (or overrides that still resolve to the source's own exact pair) is
+        // not a coherent operation under this schema -- V9's own message-type-centric
+        // design deliberately allows only one pipeline per (interface, message_type) --
+        // surfaced as a clear 409 explaining both override options, not a raw Postgres
+        // error.
+        const targetInterfaceId = req.body.interface_id || req.body.interfaceId || src.interface_id;
+        const targetMessageType = req.body.message_type || req.body.messageType || src.message_type;
+
         await sequelize.query(
             `INSERT INTO transformation_pipelines
                  (id, interface_id, message_type, pipeline_name, enabled, version, connections, pipeline_config, created_at, updated_at)
              VALUES ($1, $2, $3, $4, $5, 1, $6, $7, NOW(), NOW())`,
-            { bind: [newId, src.interface_id, src.message_type, newName || src.pipeline_name + ' (copy)',
+            { bind: [newId, targetInterfaceId, targetMessageType, newName || src.pipeline_name + ' (copy)',
                      src.enabled, JSON.stringify(src.connections || []), JSON.stringify(src.pipeline_config || {})] }
-        );
+        ).catch(err => {
+            if (err.original && err.original.code === '23505') {
+                const conflictErr = new Error(
+                    `A pipeline already exists for interface ${targetInterfaceId} + message type "${targetMessageType}". ` +
+                    `Pass a different interface_id and/or message_type in the request body to clone into a new slot.`
+                );
+                conflictErr.statusCode = 409;
+                throw conflictErr;
+            }
+            throw err;
+        });
 
         const steps = await sequelize.query(STEPS_SELECT, { bind: [id], type: QueryTypes.SELECT });
-        for (const step of steps) {
+
+        // Map every step's own OLD real id -> a freshly generated NEW one, then rewrite
+        // BOTH step.id and every parent_conditional_step_id/config-embedded reference
+        // (via the shared resolver savePipeline also uses) into that same new id-space
+        // BEFORE sorting -- previously this loop gave every cloned step a fresh,
+        // UNRELATED uuidv4() per INSERT while copying parent_conditional_step_id
+        // verbatim from the source pipeline, a guaranteed dangling reference (confirmed
+        // against real branch-linked pipelines already in the DB: cloning one silently
+        // produced a clone where neither branch's steps were ever skipped, since nothing
+        // in the new pipeline matched the stale parent id). topologicalSortSteps needs
+        // step.id and parent_conditional_step_id in the SAME id-space to find parents at
+        // all, which is why the rename happens before sorting, not after.
+        const oldToNewId = new Map();
+        steps.forEach(s => oldToNewId.set(s.id, uuidv4()));
+        resolveStepReferences(steps, oldToNewId);
+        steps.forEach(s => { s.id = oldToNewId.get(s.id); });
+
+        const sortedSteps = topologicalSortSteps(steps);
+        for (const step of sortedSteps) {
             await sequelize.query(
                 `INSERT INTO transformation_steps
                      (id, pipeline_id, step_name, step_type, sequence, required, timeout_ms, enabled,
                       config, script_type, script_content, on_error_strategy, position_x, position_y,
                       parent_conditional_step_id, branch_type, case_value, step_alias, description, created_at, updated_at)
                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),NOW())`,
-                { bind: [uuidv4(), newId, step.step_name, step.step_type, step.sequence,
+                { bind: [step.id, newId, step.step_name, step.step_type, step.sequence,
                          step.required, step.timeout_ms, step.enabled,
                          JSON.stringify(step.config || {}), step.script_type, step.script_content,
                          step.on_error_strategy, step.position_x, step.position_y,
@@ -971,7 +1123,7 @@ exports.clonePipeline = async (req, res) => {
         }
         res.json({ success: true, pipeline_id: newId, message: 'Pipeline cloned' });
     } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        res.status(error.statusCode || 500).json({ success: false, error: error.message });
     }
 };
 

@@ -702,6 +702,7 @@ Re-derived directly from ground truth — `connector_stubs.go`'s remaining stub 
 - `snowflake_inbound`, `snowflake_outbound` — [snowflake_inbound.go](services/connectors/snowflake_inbound.go), [snowflake_outbound.go](services/connectors/snowflake_outbound.go) — official `gosnowflake/v2` driver, username/password auth only (key-pair/JWT auth explicitly rejected with a clear error, not silently ignored — unverified against any real cloud warehouse account, no test credentials available in this environment)
 - `as2_inbound`, `as2_outbound` (Phase 4, September 2026) — [as2_inbound.go](services/connectors/as2_inbound.go), [as2_outbound.go](services/connectors/as2_outbound.go) — signed+encrypted HTTP (S/MIME via `github.com/smallstep/pkcs7`, CMS-wrapped signing not multipart/signed) with synchronous MDN; a NEW connector type, not a `transport` branch on `edi_x12_inbound`/`edi_x12_outbound` (those stay SFTP-only permanently) — see `as2_inbound.go`'s own header comment for the architecture reasoning. Async MDN and multipart/signed are named, deferred items, not attempted
 - `direct_messaging_inbound`, `direct_messaging_outbound` (September 2026) — [direct_messaging_inbound.go](services/connectors/direct_messaging_inbound.go), [direct_messaging_outbound.go](services/connectors/direct_messaging_outbound.go) — DirectTrust email (S/MIME over IMAP poll / SMTP send), reusing AS2's own CMS sign+encrypt/decrypt+verify primitives directly (`smime_shared.go`, renamed from `as2_smime.go` once this second connector started depending on it) — see the "Direct Messaging Connector" section below for the full design and full-stack proof. MDN-over-email is a named, deferred item, not attempted
+- `websocket_inbound`, `websocket_outbound` (September 2026, brand-new — not a stub→real conversion, the type names didn't exist before this) — [websocket_inbound.go](services/connectors/websocket_inbound.go), [websocket_outbound.go](services/connectors/websocket_outbound.go) — real-time bidirectional pair via `github.com/gorilla/websocket`; see the "WebSocket Connector" section below for the full design and full-stack proof
 
 **Still stubs (18 registered types, unchanged by the above)**:
 - Analytics DBs — BigQuery, Redshift, Synapse, ClickHouse, TimescaleDB (both directions — 10 types)
@@ -718,6 +719,7 @@ Re-derived directly from ground truth — `connector_stubs.go`'s remaining stub 
 - tcp_mllp_inbound ✅ / tcp_mllp_outbound ✅
 - http_outbound ✅ / http_fhir_inbound ✅ / http_fhir_outbound ✅
 - http_rest_inbound ✅
+- websocket_inbound ✅ / websocket_outbound ✅ (real-time bidirectional pair, `github.com/gorilla/websocket` — see "WebSocket Connector" section below)
 
 **File System Connectors (2 of 2)**:
 - file_listener ✅ / file_writer ✅
@@ -1673,3 +1675,1192 @@ Full-stack: a genuine real-network round trip against `greenmail/standalone` (a 
 
 ### Named future work
 Async MDN-over-email and DNS/LDAP-based partner-certificate auto-discovery remain genuinely separate, not-yet-built items if ever needed — the same two items AS2 itself still has open (async MDN, in AS2's case) plus the LDAP/DNS discovery gap both transports share.
+
+## WebSocket Connector — Real-Time Bidirectional Pair (September 2026)
+
+### What shipped
+A user asked whether HTTP/TCP/WebSocket outbound senders let a downstream pipeline step read the response and use it further. HTTP already did (`response_status`/`response_body`/`response_headers`); TCP/MLLP surfaced the raw ACK text but not the parsed AA/AE/AR code (fixed first, small additive change); WebSocket didn't exist as a connector at all — confirmed via full grep, only a dead `ProtocolWebSocket` enum value with zero wiring. `websocket_inbound` (a real-time server) and `websocket_outbound` (a client that sends a frame and reads back a response over the same connection) close that gap, using `github.com/gorilla/websocket`. Activated via `database/migrations/V249__Add_WebSocket_Connectivity_Types.sql`. Zero frontend changes needed — confirmed the config UI (`ConnectorConfigBuilder.js`), connector-type dropdowns, and toolbox are all schema/DB-driven with no per-type-name branching that would exclude a new type.
+
+### Architecture
+`websocket_inbound.go` mirrors `tcp_mllp_inbound.go`'s `Start()` shape (launches its server in a goroutine and returns immediately) rather than `as2_inbound.go`'s/`http_rest_inbound.go`'s shape (both block on `<-ctx.Done()` before calling `Stop()`) — a real, pre-existing subtlety found while designing this: since `processing/engine.go` always passes `context.Background()` (never cancelled) to `Start()`, that blocking shape leaks a goroutine for the process's lifetime in both of those existing connectors, harmless only because `DeactivateInterface` calls `connector.Stop()` on a separate direct path. Not fixed in those files (out of scope), but not repeated here.
+
+Second subtlety: `gorilla/websocket`'s `Upgrader.Upgrade()` hijacks the connection out of `net/http`'s own tracking, so `http.Server.Shutdown()` (graceful drain) silently does **not** close or wait for any already-upgraded websocket connection. `Stop()` therefore uses `server.Close()` (immediate) plus an explicit close of every tracked `*websocket.Conn` — the same two-step shutdown `tcp_mllp_inbound.go` uses for its own raw `net.Conn` map, regression-guarded by `TestWebSocketInbound_Stop_UnblocksBlockedConnections`.
+
+`websocket_outbound.go` mirrors `tcp_mllp_outbound.go`'s retry-in-`Send()`/persistent-or-per-message shape. A response read timeout or error is **not** treated as a `Send()` failure (the write already succeeded — many real websocket sends are fire-and-forget with no inline reply); it's surfaced as `response_received: false` instead, and marks the persistent connection dead so the next `Send()` transparently redials. A text-frame response lands in `response_body` (reusing the same key HTTP outbound already uses); a binary-frame response is base64-encoded into a separate `response_binary_base64` key (+ `response_frame_type: "binary"`) rather than silently dropped or corrupted by a naive `string()` conversion.
+
+### Generalized response-metadata surfacing (`outbound_connector_executor.go`)
+Before this work, every connector's response data was surfaced into `step_output` via a growing hardcoded `if _, ok := result.Metadata["X"]` chain (one per key, per connector type) — exactly the one-branch-per-type anti-pattern this file's own OOP standards section calls out. Replaced with two special-cased keys (kept exactly as-is because `public/js/messages.js`'s step-execution detail panel reads them by these specific names: `status_code`→`response_status`, `response_body`→full value + truncated `response_body_preview`) plus a generic loop forwarding every other `result.Metadata` key as-is. `ack_code`, `response_headers`, `response_received`, `response_binary_base64`, and `response_frame_type` all flow through automatically now — a future connector's response data needs zero changes to this file.
+
+### Verification
+Go: `services/connectors/websocket_test.go` (13 tests — Initialize/Validate field checks, a real local echo-server round trip proving `response_body` capture, binary-response base64 encoding, a no-response-within-timeout case proving `Send()` still succeeds, persistent-mode reconnect-after-drop, and a real `Stop()`-unblocks-a-blocked-connection test) and `services/executors/transform/outbound_connector_websocket_response_test.go` (proves the generalized surfacing mechanism end-to-end through the real `OutboundConnectorExecutor`) — all pass, plus the full `services/connectors` and `services/executors/transform` package suites re-run with zero regressions (494s + 21s, both green).
+
+Full-stack: real `docker-compose up -d --force-recreate app`, `V249` confirmed live via `psql`. Created a real `websocket_inbound` interface via the real wizard API, activated it, confirmed via `logs/application/app.log` the real listener started (`✅ WebSocket Inbound: Listening on port 9501/ws`); a throwaway Go client (gorilla/websocket, attached to the app's own docker network) sent a real message, confirmed via `GET /api/messages/interface/:id` a real message row landed with the exact byte count. Created a second real interface with `websocket_outbound` as its target pointed at a throwaway Go echo-server container on the same network; sent a real HTTP request into its (real, non-test-mode) inbound side, confirmed via direct `psql` on `step_executions.step_output` that the real echoed response (`"ECHO: ..."`) landed in `response_body`, with `response_received: true` — the exact mechanism the original question was about, proven working end-to-end through the real running app, not just at the connector or dry-run-Test-Pipeline level (Test Pipeline's dry-run mode validates config/previews the payload but never calls `Send()` over the network — a real message had to flow through un-test-mode to prove this). Cleaned up: deactivated + soft-deleted both interfaces, removed the throwaway containers/images/Go files.
+
+### Named scope, deliberate
+- **No pipeline-driven synchronous reply frame on the inbound side** — an inbound-received message is enqueued and acknowledged only at the transport level (no MLLP-style mandatory ACK either); replying with an actual pipeline result would require blocking the connection's goroutine on full async pipeline completion, a genuinely new architecture no existing connector in this codebase has.
+- **Binary responses are base64-encoded, never silently dropped** — a deliberate, user-confirmed choice over simply logging-and-discarding a binary reply.
+
+### Key Files
+- `services/connectors/websocket_inbound.go`, `websocket_outbound.go` (new)
+- `services/connectors/websocket_test.go` (new, 13 tests)
+- `services/connectors/connector_factory.go` (2-line registration)
+- `services/executors/transform/outbound_connector_executor.go` (generalized metadata surfacing)
+- `services/executors/transform/outbound_connector_ack_code_test.go`, `outbound_connector_websocket_response_test.go` (new)
+- `database/migrations/V249__Add_WebSocket_Connectivity_Types.sql`
+- `go.mod`/`go.sum` (new `github.com/gorilla/websocket` dependency)
+
+## EDI X12 276/277 — Claim Status Request/Response, Async + Sync (September 2026)
+
+### Scope
+Following on from 835/837/999/270/271, the user picked 276/277 (Health Care Claim Status Request/Response) as the next transaction set — the cheapest option, since the EDI engine is schema-driven (a new transaction set is a schema file, not new Go code). **278 (prior auth) and 834 (enrollment) are explicitly OUT of scope for this pass** — user-confirmed follow-on phases, not attempted here; 834 in particular has a genuinely different shape (batch member maintenance, not request/response) and deserves its own scoped pass. The user also confirmed this round should include a **synchronous** real-time request/response HTTP endpoint (mirroring Sync Eligibility for 270/271), not just the async SFTP-polling connector path.
+
+### Engine — schema data only, zero new Go engine code
+`edi/schemas/x12_005010/segments/STC.json` (new — Status Information, the 277's own claim-status-carrying segment, 12-position composite-heavy shape) plus `transactionSets/276.json`/`277.json`, registered in `manifest.json`. Both are 5-level HL hierarchies (2000A payer → 2000B clearinghouse/information receiver → 2000C provider → 2000D subscriber → 2000E dependent), sourced from PyX12's real 005010X212 IG map, cross-checked against Stedi's HIPAA-specific pages (`stedi.com/edi/hipaa/transaction-set/276-A1`/`277-A1` — NOT the generic `x12-005010` URL pattern, which 404s for HIPAA transaction sets). 277 additionally carries `STC` at every claim-level loop (`2200B`/`2200C` trace-level, `2200D`/`2200E`/`2220D`/`2220E` claim/service-line-level) and reuses `HL`/`NM1`/`TRN`/`REF`/`AMT`/`DTP` from the existing shared segment library unchanged (each verified against its own element list first — no transaction-set-specific fixed-value collision, unlike the 837 CUR-field lesson). Neither `X12LoopDef.Wrapper` (LS/LE wrapping) nor `TriggerDiscriminator` was needed — 276/277's HL loops are unambiguous by structure alone, same as 270/271.
+
+**The recurring HL-hierarchy nesting bug hit again**: "2000E" (Dependent) is a SIBLING of "2100D" within **2000D's own** `loops` map (Dependent's real HL parent is the Subscriber, not the Provider) — got this wrong on the first pass in 4 separate places (2 Go round-trip tests' `BuildInput` literals, 2 JS derive scripts) before correcting, the same class of mistake 270/271 already logged once. `STC`/`REF`/`AMT`/`DTP` all carry `maxUse: ">1"` in their own segment definitions, so the real parser always array-wraps them even when only one instance is present — this bit the FHIR-mapping derive scripts specifically on `REF` (see the bug note below), not just the round-trip tests' `STC` handling.
+
+### FHIR mapping — Task, not ClaimResponse
+`Task` (not `ClaimResponse`) is the mapping target for both 276 and 277: a claim status REQUEST is an administrative "please tell me the status of this claim" ask, which FHIR's own Task resource (a generic request-for-work-to-be-done) models directly (`status=requested`/`intent=order`); ClaimResponse is reserved for actual adjudication content this transaction set doesn't carry. 277's own X12 STC category code (`A1`-`A8`/`F0`-`F3`/`P0`-`P5`) is translated into FHIR's `Task.status` vocabulary via `stcCategoryToTaskStatus()` — a code-system translation, the same class of transform 270/271 already does for gender/relationship codes, never an invented fact: the status itself always comes straight from the source STC, and the raw category code is preserved alongside the translation on `Task.businessStatus`.
+
+**A real bug caught only by a genuine browser Test Pipeline run, not the Go-level tests**: both derive scripts' `patient_control_number`/`payer_claim_control_number` field read `claim.REF.referenceIdentification` directly — correct against the Go tests' own hand-built fixture (a plain map), silently `null` against the REAL parser's output, because `REF` has `maxUse: ">1"` and is therefore always array-wrapped. The Go-level `*_fhir_builder_test.go` tests never caught this because their fixtures are hand-constructed Go maps, not real parser output — the exact same masking effect the STC `maxUse` bug already demonstrated for the round-trip tests earlier in this same phase, just resurfacing one layer up (FHIR-mapping derive scripts, not engine round-trip tests) and only visible once a real `edi.parse` → `enrichment.script` chain ran through the actual browser Test Pipeline path. Fixed by adding a `first()` helper to both derive scripts (276's script didn't have one yet; 277's already did for STC) and wrapping the REF read accordingly — backward-compatible with the Go tests' own plain-map fixtures, since `first()` treats a non-array as a 1-element array.
+
+### Synchronous endpoint
+`controllers/sync_claim_status_controller.go` — a near-verbatim copy of `sync_eligibility_controller.go`'s structure: resolves the target interface's own configured pipeline by `(interfaceID, messageType="276")`, calls `TransformationPipelineService.ExecutePipeline` directly and synchronously from the HTTP handler (not the usual connector→channel→async-goroutine path), reuses the existing package-level `extractFirstBuildStepPayload` helper unchanged. Registered in `main.go` under `api.Group("/claim-status")` → `POST /:interfaceId/check`, proxied via `app.js`'s `app.use('/api/claim-status', forwardToGo)`.
+
+### Migrations
+`V250` widens `edi_x12_inbound`'s `transaction_types` UI enum (mirrors V241's exact `jsonb_set` pattern). `V251`/`V252` (276→FHIR, 277→FHIR OOB templates) mirror V242/V243's structure — 10-step pipelines (`connector.inbound` → `edi.parse` → `edi.validate` → `enrichment.script` derive → `fhir.build`×3 [Organization/Patient/Task] → `payload.builder` → `fhir_validation` → `connector.outbound`/`sink_outbound`). Both migrations' embedded JSON (including the full JS derive script) were generated programmatically from `services/edi_276_fhir_builder_test.go`/`edi_277_fhir_builder_test.go`'s own Go source via a Node script (avoiding the hand-retyping bug class the 837 work hit once) — regenerated a second time after the `REF` fix above, then re-applied directly via `psql` (the migration files were minutes-old, same-session, unreleased-beyond-this-repo edits, matching the established "safe to re-apply directly, only because it's this fresh" precedent from the 837 work) plus `flyway repair` to reconcile the changed checksum.
+
+**Named simplification, not deduplicated**: the Organization (payer) `fhir.build` step uses the SAME `rowsPath` as Patient/Task (one per claim status context), matching V242's own 270 template precedent — so a file with 2 claim status contexts sharing the same real-world payer produces 2 duplicate Organization Bundle entries, not 1. Harmless per FHIR Bundle semantics, same "not deduplicated across claims" precedent 837P/837I's own Patient/Coverage mapping already established.
+
+### Verification
+Go: `edi/real_schema_integration_test.go`'s 276/277 round-trip tests (subscriber + dependent claim status, 277's `2200B`/`2200C` trace STC plus finalized/pending claim-level STC) and `services/edi_276_fhir_builder_test.go`/`edi_277_fhir_builder_test.go` (derive → `fhir.build`×3 → `payload.builder` → `fhir_validation` strict, zero unexpected errors) — all pass. `controllers/sync_claim_status_controller_test.go` (4 tests: real round trip, unknown interface → 404, empty body → 400, malformed EDI → real error status) — all pass against real Postgres. Full `services`/`edi`/`controllers` package suites re-run with zero regressions.
+
+Full-stack: real `docker-compose build app` + migration apply, `V250`/`V251`/`V252` confirmed live via `psql` (both templates present, transaction types enum widened). `tests/playwright/edi-276-277-to-fhir-e2e.spec.js` drives the real "Use Template" click path for both templates (10 canvas nodes each) then a real "Test Pipeline" run against the self-authored samples (`edi/testdata/real_samples/self_authored_27{6,7}_sample.txt`), asserting real resource counts and field values in the assembled Bundle — this is the run that caught the `REF` array-wrapping bug above. `tests/playwright/sync-claim-status-e2e.spec.js` (4 tests, mirroring `sync-eligibility-e2e.spec.js`) proves the real synchronous round trip against `/api/claim-status/:interfaceId/check` through a real interface + pipeline created via the same REST endpoints the UI itself calls. All throwaway interfaces deactivated + soft-deleted after verification; throwaway `ehk-gobuilder-tmp` image removed.
+
+### Named future phases (STATUS UPDATE — both since closed, kept for history)
+278 (prior auth) and 834 (enrollment) were still out of scope as of this round, but both have SINCE shipped — see the "EDI X12 278 (Prior Authorization) + 834 (Benefit Enrollment) — Full Build" section below for the current status.
+
+### Key Files
+- `edi/schemas/x12_005010/segments/STC.json`, `transactionSets/276.json`, `transactionSets/277.json`, `manifest.json` (registration)
+- `public/js/pipeline/components/EDIStepBuilder.js` (`EDI_TRANSACTION_SETS` widened)
+- `database/migrations/V250__EDI_Inbound_Transaction_Types_Add_276_277.sql`, `V251__EDI_276_To_FHIR_OOB_Pipeline_Template.sql`, `V252__EDI_277_To_FHIR_OOB_Pipeline_Template.sql`
+- `controllers/sync_claim_status_controller.go`, `main.go` (route registration), `app.js` (proxy line)
+- `services/edi_276_fhir_builder_test.go`, `services/edi_277_fhir_builder_test.go`, `controllers/sync_claim_status_controller_test.go`
+- `edi/testdata/real_samples/self_authored_276_sample.txt`, `self_authored_277_sample.txt`
+- `tests/playwright/edi-276-277-to-fhir-e2e.spec.js`, `tests/playwright/sync-claim-status-e2e.spec.js`
+
+## EDI X12 278 (Prior Authorization) + 834 (Benefit Enrollment) — Full Build (September 2026)
+
+### Scope and why it's not redundant with PAS
+The user asked whether 278 was already covered by the already-shipped Da Vinci PAS work — it is not.
+PAS is FHIR-native (`Bundle`/`Claim`/`ClaimResponse` over a REST `$submit` operation, via
+`pas_envelope_mapping` → `field_mapping`); X12 278 (Health Care Services Review Request/Response) is
+the EDI transaction set for the *same real-world business process*, exchanged over SFTP like every
+other transaction set in this engine — genuinely different wire formats, not a duplicate (confirmed
+via a full grep of `edi/` turning up zero prior references to `278`/`834`). User-confirmed scope:
+full completeness for 278 (X217 Request-for-Review-and-Response only — X215 Inquiry/Response and X216
+Notification/Acknowledgment named, deferred), Claim/ClaimResponse as 278's FHIR target (matching
+PAS's own resource choice, not `Task` — 278 carries real clinical/service content and an
+adjudication-style decision Task can't represent), a synchronous `/api/prior-auth/:interfaceId/check`
+endpoint, and full completeness for 834 too (every loop, including the less-common demographic/COB/
+reporting-category ones).
+
+### 278 — a genuinely new structural fact: ONE schema serves BOTH directions
+Unlike every prior request/response pair this engine has built (270/271, 276/277 — different ST01;
+837P/837I — same ST01, disambiguated by a composite `ST01:GS08` key), **278 request and response
+share the IDENTICAL ST01='278' AND GS08='005010X217'** — no envelope-level way to tell them apart.
+Modeled as ONE unified `edi/schemas/x12_005010/278.json`, registered once under bare `"278"` — every
+segment/loop from both the Stedi-sourced A1 (request) and A3 (response) trees unioned into one tree
+(the same permissive-union philosophy CTX already established for 999). The FHIR derive script
+determines "is this a response" purely from **HCR's own presence** (the certification/decision
+segment) — a structural fact already in the message, never invented, the same pattern 271's own
+AAA-based rejection detection already uses. New segments: `UM`, `HCR`, `CR5`, `CR6`, `SV3`, `TOO` (6)
+— 21 more reused from the existing shared library after verifying each one's own element list first.
+
+**A real, new engine limitation found and fixed via an actual round-trip parse failure**: 2000E
+("Patient Event Level") occurs at TWO tree positions with the IDENTICAL discriminator value
+(`hierarchicalLevelCode`="EV") — nested inside 2000D for the dependent's own event, AND as a direct
+sibling of 2000D inside 2000C for the subscriber's own event. `selectLoopCandidate`'s own
+TriggerDiscriminator match has no awareness of HL02 (hierarchicalParentIdNumber) or tree-depth
+context — so a still-open recursive `matchLoops` call for the DEEPER position would greedily consume
+a LATER "EV"-coded HL that actually belonged to the SHALLOWER sibling slot, if left `repeat='>1'`
+(unbounded). Fixed by capping repeat='1' at both occurrences — the second "EV" sighting then correctly
+fails the already-matched check at the deeper level and falls through to the shallower slot. A real,
+named scope reduction (at most one patient event per subscriber, at most one per dependent) — and a
+genuinely new class of gotcha worth remembering for any future transaction set needing the SAME loop
+id/discriminator combination at more than one nesting depth.
+
+**Shared-segment global-`usage` conflicts, the same class as CL1's own 837I-vs-999 lesson**: `UM`
+(required at 2000E, optional at 2000F), `SV1`/`SV2` (required within 837P/837I's own single-position
+use, but 278's 2000F offers a CHOICE of SV1/SV2/SV3 — none individually mandatory), and `TRN`
+(required historically, but genuinely optional at both 278 positions) all needed their GLOBAL `usage`
+widened from `required` to `situational` — this engine has no per-loop override, so a segment's
+`usage` must reflect its LEAST-restrictive real position across every transaction set that shares it.
+Purely permissive widenings — zero behavior change for every existing consumer, which already
+supplies these segments in every real fixture.
+
+**`fhir.build` has no whole-resource-row "condition" gate** (confirmed by reading the executor
+directly — `Condition` exists only on individual fields/repeatingGroups, never at the top-level
+config) — an initial design mistakenly relied on one to gate ClaimResponse to response-only rows,
+which silently built a ClaimResponse for EVERY row instead. Fixed the correct way: the derive script
+itself produces a SECOND, pre-filtered `_response_contexts` array (only rows where `is_response` is
+true), and ClaimResponse's own `rowsPath` points at that narrower array — the same "0-or-1-element
+array so a resource simply isn't built for excluded rows" convention 271's own insurance/rejection
+derive script already established.
+
+### 834 — a genuinely different, flatter shape
+Confirmed directly from Stedi's own page data: 834's repeating unit is `LOOP 2000` (triggered by
+`INS`, not `HL`) — every member is its own flat, top-level instance; `INS02` (relationship code)
+distinguishes self/spouse/child at the SAME nesting level, never HL-nested the way every other
+transaction set in this engine nests dependents inside their subscriber. Zero risk of the "recurring
+HL-nesting bug" this engine has hit twice before (276/277) — 834 needs no HL-parent bookkeeping at
+all. The outer `2700` (Member Reporting Categories) loop is LS/LE-wrapped — the exact same bracketing
+shape already proven for 271's own loop 2120 (`X12LoopDef.Wrapper`), reused unchanged.
+
+**8-way sibling discriminator, the widest yet**: `2100A`-`2100H` all trigger on `NM1` under the SAME
+parent (`2000`). Real fixed values sourced directly from Stedi's own segment notes where available
+(`2100A`="IL" and `2100B`="70", both confirmed word-for-word from 2100B's own note text, not
+inferred) and from the standard Entity Identifier Code list (element 98) by exact or closest semantic
+name-match for the rest (`2100C`="31" Postal Mailing Address, `2100D`="36" Employer, `2100E`="83"
+Subscriber's School, `2100F`="S3" Custodial Parent — an exact match, `2100G`="QD" Responsible Party,
+`2100H`="45" Drop-off Location — an exact match). `1000A`/`1000B` (Sponsor/Payer, sharing `N1` as
+trigger) use "P5"/"PR" (the SAME "PR" code this schema library already uses for payer roles
+throughout 270/271/276/277); `1000C` (TPA/Broker, repeat 2) is deliberately left undiscriminated as a
+pure catch-all — real files use either "TV" or "BR"/"BO" at that slot and the discriminator mechanism
+only supports one expected value, the same "undiscriminated catch-all" precedent 837I's own 2310C
+already established. New segments (11): `BGN`, `EC`, `ICM`, `HLH`, `LUI`, `HD`, `IDC`, `PLA`, `COB`,
+`DSB`, `ACT`. `INS.json` extended with positions 6-17 (Medicare status composite, COBRA/employment/
+student-status codes) purely additively — positions 1-5 (already used by 270/271/837) unaffected.
+
+### FHIR mapping
+**278**: `connector.inbound` → `edi.parse` → `edi.validate` → `enrichment.script` (derive) →
+`fhir.build(Organization)` (UMO, single-resource) → `fhir.build(Patient)` (rowsPath) →
+`fhir.build(Claim)` (rowsPath, ALWAYS built, `use=preauthorization`, diagnosis[] from HI, item[] from
+each service level's own SV1 procedure code) → `fhir.build(ClaimResponse)` (rowsPath against the
+pre-filtered `_response_contexts` array — see the gotcha above) → `payload.builder` →
+`fhir_validation`(strict) → `connector.outbound`(`sink_outbound`). HCR01's own action code (A1
+Certified-in-total, A2 Certified-partial, A3 Not-Certified, A4 Pended, A5 Upheld, A6 Modified,
+sourced directly from element 306's own standard code list) is translated into FHIR's
+outcome/disposition vocabulary — a code-system translation, never an invented fact.
+
+**834**: `connector.inbound` → `edi.parse` → `edi.validate` → `enrichment.script` (derive, producing
+one flattened row per member-coverage pair) → `fhir.build(Organization)` (Sponsor, single-resource)
+→ `fhir.build(Patient)` / `fhir.build(Coverage)` (both rowsPath off the SAME flattened array, not
+deduplicated across a member's own multiple coverages — the same precedent 837P/837I's own Patient/
+Coverage mapping already established) → `payload.builder` → `fhir_validation`(strict) →
+`connector.outbound`(`sink_outbound`). HD01's own maintenance type code (same code set INS03 already
+uses — "021"/"024"/"025" Addition/Change → `active`, "030" Termination → `cancelled`) is translated
+into FHIR's Coverage.status vocabulary. No synchronous endpoint — X12 itself has no 834-response
+transaction set (a pure one-way roster feed), so a real-time request/response pattern doesn't apply.
+
+### Verification
+Go: `edi/real_schema_integration_test.go`'s 278 (proving BOTH a pure request and a real HCR-bearing
+response on one document) and 834 (proving flat, non-HL-nested members with genuinely different
+maintenance-type codes) round-trip tests, `services/edi_278_fhir_builder_test.go`/
+`edi_834_fhir_builder_test.go` (derive → fhir.build chain → payload.builder → fhir_validation strict,
+zero unexpected errors), `controllers/sync_prior_auth_controller_test.go` (4 tests, mirroring
+`sync_claim_status_controller_test.go`) — all pass against real Postgres. Full `edi`/`services`/
+`controllers` package suites re-run with zero regressions (`services` alone: 118s, all subpackages
+green) from the CL1/UM/SV1/SV2/TRN usage widenings and the INS extension.
+
+Full-stack: real `docker-compose build app` + migration apply, `V253`/`V254`/`V255` confirmed live via
+`psql` (both templates present, transaction types enum widened to include 278/834).
+`tests/playwright/edi-278-to-fhir-e2e.spec.js` and `edi-834-to-fhir-e2e.spec.js` drive the real "Use
+Template" click path (11 and 10 canvas nodes respectively) then a real "Test Pipeline" run against the
+self-authored samples (`edi/testdata/real_samples/self_authored_27{8}_sample.txt`,
+`self_authored_834_sample.txt` — each generated via `edi.build` itself and round-trip-verified before
+being committed), asserting real resource counts and field values in the assembled Bundle — this is
+the run that caught the `fhir.build` condition-gate bug above. `tests/playwright/
+sync-prior-auth-e2e.spec.js` (4 tests, mirroring `sync-claim-status-e2e.spec.js`) proves the real
+synchronous round trip. All throwaway interfaces deactivated + soft-deleted after verification;
+throwaway `ehk-gobuilder-tmp` image removed.
+
+### 3 real bugs found only by testing against genuine, third-party X12.org sample data (not this session's own synthetic fixtures)
+Following the exact same discipline 837P/837I's own real-sample verification round already
+established, real 278/834 content was sourced from X12.org's own official worked examples
+(x12.org/examples/005010x217, x12.org/examples/005010x220 — the standards body's own published
+educational material, envelope segments synthesized since the pages show only ST...SE, every body
+segment extracted directly from each page's own raw HTML `<p class="data">` content, not AI-
+summarized or retyped from memory). Six 278 scenarios (Referral request+response, institutional
+Admission for Surgery request+response — a genuine real CL1 occurrence, Home Health Care — CR6 plus a
+genuine two-diagnosis single-HI occurrence and two separate 2000F service levels) and three 834
+scenarios (Enroll Employee in Multiple Products — one real member with three real 2300 occurrences,
+Add Dependent Full-Time Student, Terminate Eligibility) all parsed and, where chained through the full
+FHIR mapping, strict-validated cleanly — but sourcing and testing them surfaced 3 real, consequential
+bugs no synthetic fixture had exercised, all in 834:
+1. **1000B (Payer)'s own discriminator was wrong.** Modeled as `entityIdentifierCode="PR"` by analogy
+   with 270/271/276/277's own payer-role convention — but every one of X12.org's own official 834
+   examples uses `N1*IN*` for this role ("IN" = Insurer), never "PR". A concrete demonstration that a
+   plausible code borrowed from a DIFFERENT transaction set's own established convention is not a
+   substitute for checking this transaction set's own real usage — corrected to "IN".
+2. **2100E (Member School)'s own discriminator was wrong.** Modeled as `"83"` (Subscriber's School) —
+   a best-semantic-match guess against the generic element 98 code list, explicitly flagged in its own
+   sourceRefs as "revisit if a real sample surfaces a different code." X12.org's own official "Add
+   Dependent, Full-Time Student" example uses `NM1*M8*` instead — corrected to "M8" after finding it in
+   real data, exactly the revisit that note called for.
+3. **The most consequential: `maintenanceTypeToCoverageStatus`'s own mapping was BACKWARDS.** The
+   original derive script mapped HD01/INS03 `"024"→"active"` and `"030"→"cancelled"` — checked against
+   Stedi's own generic element 875 code list this time (not skipped), which shows "024" = "Cancellation
+   or Termination" and "030" = "Audit or Compare" (not a termination code at all). Confirmed directly
+   against X12.org's own official "Terminate Eligibility for a Subscriber" example, which uses
+   `INS*Y*18*024*08*A***TE~` — real title, real code, unambiguous. This session's own self-authored
+   834 test fixtures had ALSO used "024" to mean "active, Addition" and "030" to mean "terminated,"
+   compounding the same wrong assumption across the round-trip test, the FHIR-builder test, and the
+   self-authored Playwright sample — all three corrected together, and the migration regenerated and
+   re-applied to the live DB (`flyway repair` reconciling the changed checksum, the same established
+   "safe to re-apply directly, only because it's this fresh" precedent from the 837 work).
+
+278's own real samples caught zero further bugs on this pass — a real, worth-stating finding in its
+own right, corroborating that the repeat=1 Patient Event fix and the CL1/SV1/SV2/UM/TRN usage
+widenings (both found via this session's own synthetic round-trip tests, before real data was sourced)
+were the genuinely load-bearing fixes, not papering over a narrower synthetic-only gap.
+
+### Named future phases
+X215 (278 Inquiry/Response — a lighter authorization-status-check variant, analogous to 276/277 but
+for auth status) and X216 (278 Notification/Acknowledgment) remain explicitly out of scope, per the
+user's own confirmed sequencing. 834's own less-common loops (2100B-H demographic variants, 2200
+disability, 2310/2320/2330 provider + coordination-of-benefits, 2700/2750 reporting categories) are
+schema-complete but not yet mapped into FHIR fields — a named, deferred follow-on, not a schema gap.
+
+### Key Files
+- `edi/schemas/x12_005010/segments/{UM,HCR,CR5,CR6,SV3,TOO,BGN,EC,ICM,HLH,LUI,HD,IDC,PLA,COB,DSB,ACT}.json` (17 new), `INS.json` (extended), `CL1.json`/`SV1.json`/`SV2.json`/`TRN.json` (usage widened)
+- `edi/schemas/x12_005010/transactionSets/278.json`, `834.json` (1000B/2100E discriminators corrected against real data), `manifest.json` (registration)
+- `public/js/pipeline/components/EDIStepBuilder.js` (`EDI_TRANSACTION_SETS` widened to add `'278'`/`'834'`)
+- `database/migrations/V253__EDI_Inbound_Transaction_Types_Add_278_834.sql`, `V254__EDI_278_To_FHIR_OOB_Pipeline_Template.sql`, `V255__EDI_834_To_FHIR_OOB_Pipeline_Template.sql`
+- Real-sample verification: `edi/real_samples_278_834_test.go` (6 tests against X12.org's own official examples, real-parser-only), `services/edi_278_834_real_parser_roundtrip_test.go` (3 tests chaining real parsed data through the full FHIR mapping + strict validation), `edi/testdata/real_samples/x12org_278_{1a_referral_request,1b_referral_response,2a_admission_request,2b_admission_response,4_home_health_request}_sample.txt`, `x12org_834_{1_multi_product_enrollment,2_add_dependent_student,7_terminate_eligibility}_sample.txt`
+- `controllers/sync_prior_auth_controller.go` (new), `main.go` (route registration), `app.js` (proxy line)
+- `services/edi_278_fhir_builder_test.go`, `services/edi_834_fhir_builder_test.go`, `controllers/sync_prior_auth_controller_test.go`
+- `edi/testdata/real_samples/self_authored_278_sample.txt`, `self_authored_834_sample.txt`
+- `tests/playwright/edi-278-to-fhir-e2e.spec.js`, `edi-834-to-fhir-e2e.spec.js`, `sync-prior-auth-e2e.spec.js`
+
+## Universal EDI X12 Receiver — Auto-Route to the Right FHIR Mapping (September 2026)
+
+### Why it exists
+The user asked why EDI, which already auto-detects the transaction set from every file's own
+ST01/GS08 (identically to how HL7 auto-detects from MSH-9), couldn't offer the same "drop any file
+into one interface" experience as HL7's own Universal Receiver — since all 9 existing per-type
+X12-to-FHIR templates (835, 837P, 837I, 270, 271, 276, 277, 278, 834) already exist and are already
+tested. Confirmed buildable with **zero new Go code** — see `edi-universal-to-fhir-sftp`, a 10th,
+purely additive OOB template alongside (not replacing) the 9 per-type ones.
+
+### Two designs considered; one was a dead end found by reading the code, not assumed
+`switch_case` + `route_to_step` + `parent_conditional_step_id` branch-skipping (the obvious first
+idea) is real but **cannot be authored inside an OOB template**: `public/js/dashboard.js`'s
+`useTemplate` flow strips every step's own `id` before saving (`({ id, ...step }) => ({ ...step })`,
+avoiding duplicate-key errors when a template was saved from a real interface), and
+`controllers/pipelineController.js`'s `savePipeline` then generates a **fresh** `uuidv4()` per step
+with no pass that rewrites any `parent_conditional_step_id` reference elsewhere in the same payload to
+match. Confirmed by reading both files directly. This is the exact same root-cause class already
+documented for `control.loop`'s own `childStepIds` (837P/837I's own "EDI X12 837P/837I → FHIR
+Mapping" section above) — a second, previously-undiscovered instance of the same generic gap, not
+something to work around per-feature; fixing `savePipeline`/`clonePipeline` generically to support
+branch-linked steps in a template stays a separate, unstarted item.
+
+The working design needs no branch-skipping at all: every one of the 9 derive scripts already guards
+on `parsed.transactionSet` and returns empty arrays for a non-matching type (this self-gating idiom
+already existed in 8 of the 9 — `derive_835_claim_context` was the one exception, predating the
+convention; given the same guard here). Every downstream `fhir.build` already reads `rowsPath` off
+those arrays, so a non-matching branch's build steps are safe no-ops (0 rows → 0 resources), not
+skipped steps. The cost: all 9 derive scripts and 29 `fhir.build` calls execute on every message even
+though only one branch's worth ever produces output — a real, named step-count/performance trade-off,
+not a correctness one.
+
+### 3 real bugs found by directly querying the 9 live templates and by actually running the merged pipeline — none of them hypothetical
+1. **`outputField` collisions.** Confirmed by querying `interface_templates` directly (not assumed):
+   `message.fhirPatients` is reused by 8 of the 9 branches, `message.fhirOrganization` by both 278 and
+   834, `message.fhirCoverages` by both 834 and 837I/837P, `message.fhirClaims` by both 278 and
+   837I/837P, `message.fhirTasks` by both 276 and 277. Merged naively, whichever branch's (possibly
+   empty) build ran last would silently overwrite an earlier branch's real output at that shared key —
+   a file-corrupting bug, not a hypothetical one. Every one of the 29 `fhir.build` steps' `outputField`
+   (and every one's own generic, also-reused `step_alias`, e.g. `build_patient_fhir` × 8) is renamed
+   with a per-branch suffix.
+2. **3 of the 29 `fhir.build` steps built an unconditional resource regardless of detected type**
+   (278's UMO Organization, 834's Sponsor Organization, 835's PaymentReconciliation — confirmed by
+   querying which steps lacked `rowsPath`, not assumed). Converted to `rowsPath` mode against a new
+   0-or-1-row context array each branch's own derive script now also returns (same convention 278's
+   pre-existing `_response_contexts` already established). For the 2 pure-`literalValue` Organization
+   builds this needed zero field changes — `literalValue` wins regardless of row content, only
+   `rowsPath` + a renamed `outputField` were added.
+3. **The `steps.<alias>.step_output` snapshot recursively snake_cases every key it doesn't already
+   recognize as snake_case — including arbitrarily deep nested content, not just one level** (the same
+   gotcha already named in the 837P/837I section above, rediscovered here in a NEW shape). The first
+   attempt at fixing #2 for 835's PaymentReconciliation embedded the **entire** `parsedEDI` object
+   under one key on the new context row (`{ parsedEDI: parsed }`), reasoning that every existing
+   `sourcePath` would keep working one level down after a `message.parsedEDI.` → `parsedEDI.` prefix
+   strip. Running it for real showed every `sourcePath`-based field resolved empty — the snapshot had
+   silently rewritten the WHOLE embedded structure to `parsed_edi.header.bpr.payment_effective_date`
+   etc., not just top-level keys. Fixed by NOT embedding raw parsed content at all: the new context row
+   instead carries a small set of ALREADY-snake_case scalar fields (`check_or_eft_trace_number`,
+   `payment_effective_date`, `total_actual_provider_payment_amount`, `payer_name`) reusing values the
+   script already computes for `claim_rows`, plus `claim_rows` itself embedded on the same row for the
+   repeating adjustments group (reusing its own already-proven `claim_payment_amount`/
+   `patient_control_number` keys) — no raw nested structure crosses the snapshot boundary at all.
+4. **A sequence-number collision, found only by an actual Test Pipeline run against a real 834
+   sample, not by any static check.** The shared bottom group (`payload.builder`/`fhir_validation`/
+   `connector.outbound`) was originally sequenced at 900/910/990 — but 834 (the last branch, by
+   arbitrary band assignment) was ALSO banded starting at 900, so its own steps landed at 901-904,
+   **above** `payload.builder`'s own sequence 900. The DAG executes in ascending sequence order, so
+   `payload.builder` ran BEFORE 834's own `fhir.build` calls had executed — their `outputField`s
+   genuinely didn't exist yet, resolving to `nil` (not even an empty array, unlike every other
+   branch's already-completed, correctly-empty output) and failing the whole bundle assembly with "no
+   resources resolved from resourcePaths". Fixed by moving the shared bottom group to 9000/9010/9090,
+   safely clear of every branch band's own maximum.
+
+### Verification
+Zero new Go code — this is a pure `interface_templates` data/config addition
+(`database/migrations/V257__EDI_Universal_To_FHIR_OOB_Pipeline_Template.sql`), generated
+programmatically (not hand-retyped) by a scratch Node script that pulls the 9 branches' CURRENTLY LIVE
+`pipeline_config` directly from the DB (the authoritative source — several have had multiple
+superseding migrations, e.g. 837P: V237→V239→V244) rather than re-deriving from historical `.sql`
+files. Full-stack: `tests/playwright/edi-universal-to-fhir-e2e.spec.js` drives the real "Use Template"
+click path (44 canvas nodes: 3 shared top + 9 derive + 29 `fhir.build` + 3 shared bottom), then runs
+"Test Pipeline" **9 separate times** against the SAME saved pipeline — once per already-committed
+real/self-authored sample already used by each transaction set's own standalone e2e spec — asserting
+for every run that the assembled Bundle contains **exactly** that branch's own expected resource types
+and counts and **no other resource type at all** (the isolation proof that actually validates bugs #1
+and #2's fixes, not just "the run succeeded"). All 9 runs pass.
+
+### Named scope, deliberate
+No synchronous endpoint — a sync call is inherently for one specific transaction set by definition, so
+the existing per-type sync controllers (`sync-eligibility`, `sync-claim-status`, `sync-prior-auth`)
+remain the right tool for that use case; this template is async/SFTP-only. A 999 (or any unrecognized)
+file matches none of the 9 branches — every guard returns empty, so the assembled Bundle is spec-valid
+but empty, matching the established "999→FHIR is a non-goal" precedent, not treated as an error.
+
+### Key Files
+- `database/migrations/V257__EDI_Universal_To_FHIR_OOB_Pipeline_Template.sql`
+- `tests/playwright/edi-universal-to-fhir-e2e.spec.js`
+- Read/reused unmodified (confirmed, not touched): `services/executors/transform/fhir_build_executor.go`
+
+## NCPDP SCRIPT Engine — Phase 1 (Pharmacy E-Prescribing: NewRx, CancelRx, CancelRxResponse, RxChangeRequest, RxChangeResponse, September 2026)
+
+### Why it exists
+NCPDP SCRIPT (pharmacy e-prescribing) is a genuinely new clinical domain in this codebase — comparable
+in scope to the entire EDI X12 build, and built the same incremental, schema-driven way. "NCPDP" is
+actually **two unrelated standards under one brand**: SCRIPT (XML, prescriber↔pharmacy e-prescribing —
+what this phase builds) and Telecommunication D.0 (control-character-delimited real-time pharmacy
+**claims**, structurally like X12) — D.0 is explicitly out of scope, a separate future effort, not
+attempted or even schema-stubbed here. NCPDP's own Implementation Guide is a paid document (the same
+constraint EDI X12's TR3 was) — no free official schema exists, so this phase used the same
+free-source-plus-cross-validation discipline EDI X12 already proved out: a complete, real, unedited
+SCRIPT v2017071 NewRx sample (sourced from `dgoradia/ncpdp`'s own test fixtures) as primary ground
+truth, cross-validated against `cosyte/ncpdp` (an actively-maintained, MIT-licensed open-source SCRIPT
+v2017071/v2022011 parser) for CancelRx/CancelRxResponse/RxChangeRequest/RxChangeResponse structure.
+Where neither source could confirm real structure (RxChangeRequest's own change-reason/type
+sub-schema), the schema deliberately does **not** fabricate a field/tag name — it's a named, sourced
+gap in the schema's own `sourceRefs`, not a guess.
+
+### Architecture: simpler than both EDI X12 and CDA, not a hybrid of either
+NCPDP SCRIPT XML (`<Message TransactionDomain="SCRIPT" ...><Header>...</Header><Body><NewRx>...
+</NewRx></Body></Message>`) has **no RIM/classCode/moodCode/templateId model at all** (unlike CDA) and
+**no trigger-segment/loop-matching ambiguity** (unlike EDI X12) — every element is uniquely named at
+its own tree position, so the engine is a plain schema-driven tree walk, simpler than either precedent:
+- **`xmlpath/`** (new top-level package, extracted from `cda/builder/xpath_writer.go` with zero logic
+  changes) — `WriteAtXPath`/`TryFindAtXPath`/`SplitPathSegments`/`ReorderChildrenByTag`, the generic,
+  already-validator-proven declarative XPath-driven XML tree builder over `etree` CDA's own builder
+  had already de-risked. Confirmed to have zero CDA-specific vocabulary before extracting it — `cda/
+  builder` now imports it instead of holding its own copy, verified via the existing CDA golden-
+  snapshot + round-trip test suite (zero regressions) before any NCPDP-specific code was built on it.
+- **`ncpdp/`** — `NCPDPGroupDef`/`NCPDPFieldDef`/`NCPDPGroupRef`/`NCPDPTransactionDef`/`NCPDPSpecDef`
+  (`schema_types.go`), a fail-fast schema loader (`schema_loader.go`), and ONE generic recursive parser
+  (`parser.go`'s `parseNode`, mirroring `edi.ParseTransactionSet`'s "one generic walk" discipline) — no
+  per-transaction-type or per-group Go function anywhere; adding a 6th transaction type (a later phase)
+  is a pure schema-data change. Groups (the segment-library equivalent — Name, Address,
+  CommunicationNumbers, Quantity, DrugCoded, Patient, Prescriber, Pharmacy, MedicationPrescribed, ...)
+  are authored once and referenced by composition, same discipline as EDI's segment library / CDA's
+  `entries/*.json` templates.
+- **`ncpdp/builder/document_builder.go`** — the write-direction mirror (`buildNode`), using the shared
+  `xmlpath` package for every element/attribute write. Several NCPDP groups interleave plain fields and
+  nested groups in the real XML (e.g. HumanPatient: Name, Gender, DateOfBirth, Address,
+  CommunicationNumbers) in a way the schema's own separate Fields/Groups arrays can't express
+  positionally — solved via `NCPDPGroupDef.ElementOrder` + `xmlpath.ReorderChildrenByTag` as a post-hoc
+  pass, the exact same "construction order != schema order" problem and fix `cda/builder` already
+  proved out for C-CDA.
+- **`ncpdp/validator`** — a two-severity model mirroring EDI's own dated (2026-09-01) "flexible, not
+  rigid" decision: a missing/empty REQUIRED field or group is a blocking error; the warning tier is an
+  intentionally EMPTY, ready-to-extend mechanism for Phase 1 — no free source of NCPDP's own
+  conditional-requirement business rules (the equivalent of X12's P/C/L/R/E `SyntaxRule`s) was found,
+  so none are fabricated.
+
+### Pipeline integration
+`ncpdp.parse`/`ncpdp.validate`/`ncpdp.build`/`ncpdp.map_to_canonical`
+(`services/executors/transform/ncpdp_*.go`), registered in `services/executor_registry.go`. `services/
+parsers/ncpdpscript/ncpdp_script_parser_service.go` implements the codebase-wide `MessageParser`
+interface, registered via `ParserFactory.RegisterNCPDPScriptParser` — `services/format_detector.go`
+gained an `isNCPDPScript()` check (root `<Message` + `TransactionDomain="SCRIPT"`), inserted before the
+generic `isXML` catch-all, same ordering discipline CCDA's own detection already established.
+`controllers/ncpdp_schema_controller.go` (`GET /api/ncpdp/schema/groups`, `/transactions`,
+`/transactions/:key/groups`) backs the pipeline UI's own no-code group/field pickers, mirroring `edi_
+schema_controller.go` at the same small scale. **No dedicated connector** — NCPDP SCRIPT rides the SAME
+generic transport connectors every other format uses (`sftp_inbound`/`sftp_outbound` for batch drop,
+`http_outbound`/`http_rest_inbound` for direct HTTPS); real Surescripts network connectivity is
+proprietary/partner-gated with no public API to build against, so a dedicated connector is explicitly
+out of scope, the same reasoning already applied to why EDI X12 never got a Surescripts-specific
+connector either. `ncpdp.map_to_canonical`'s no-code field mapper mirrors `edi.map_to_canonical`'s own
+recursive group-tree UI shape (`headerFields`/`headerGroups`/`bodyFields`/`bodyGroups`, a dot-joined
+groupKey path addressing arbitrarily nested groups) — adapted since NCPDP has TWO independent top-level
+trees (Header, Body) rather than EDI's one (header + loops), and a group's `Repeatable` flag lives
+directly on its own `NCPDPGroupRef` (schema-declared), not a separate method call the executor must
+consult at runtime the way EDI's `X12LoopDef.RepeatsMultiple()` needs.
+
+### UI built into Phase 1, not bolted on after
+Learned directly from EDI X12's own Phase-1 mistake (shipped with zero UI, needed a whole separate
+follow-up round): `public/js/pipeline/components/NCPDPStepBuilder.js` (4 step-builder classes,
+`StepBuilderRegistry`-registered, `<script>` tag in `pipeline-builder.html`), `ToolboxManager.js` gained
+4 new `StepTemplate` entries + icon-map entries, `Dockerfile` gained `COPY ncpdp/ ./ncpdp/` proactively
+— the exact same "schema dir missing from the runtime image, only caught by a real container smoke
+test" bug EDI X12 hit was pre-empted here rather than repeated.
+
+### FHIR mapping — NewRx only this phase, proving the mechanism before extending it
+NewRx → `MedicationRequest` + `Patient` + `Practitioner` (prescriber) + `Organization` (pharmacy) — the
+same core resource set HL7's own NCPDP SCRIPT↔FHIR MedicationRequest mapping guidance names.
+CancelRx/CancelRxResponse/RxChangeRequest/RxChangeResponse → FHIR mapping is a named, deferred
+follow-on (matching 835's own "prove the pattern on one transaction type first" precedent).
+
+**A real, deliberate design simplification, not an oversight**: unlike EVERY EDI X12→FHIR mapping in
+this codebase, NewRx needs **no `enrichment.script` derive step and no `fhir.build` `rowsPath`** — a
+NewRx message carries exactly one patient/prescriber/pharmacy/medication, no repeating claim/service-
+line structure to flatten into row contexts first. Every `fhir.build` field sources straight from
+`steps.parse_new_rx.step_output.parsed_ncpdp.{header,body}` paths — adding row-flattening machinery
+here would have been exactly the kind of premature complexity this project's own standards call out.
+
+**A real gap in NewRx's own schema, named not silently patched over**: as scoped this phase, NewRx
+carries no patient-identifier field (no MRN/insurance-card-ID segment was modeled — that lives in
+NCPDP's own COO/insurance section, deliberately deferred). `Patient.id` and every cross-resource
+reference are therefore derived from the message's own `Header.messageID` — stable within one message,
+but not a real patient identifier and not deduplicated across multiple NewRx messages for the same
+real-world patient, the same "not deduplicated across claims" precedent EDI 837P/837I's own Patient/
+Coverage mapping already established.
+
+**`cda_gender_to_fhir` doesn't work for NCPDP's own gender field** — that transform (`services/
+cda_fhir`'s `DeclarativeTransformRegistry`) expects a CDA-shaped `{"code": "..."}` object, not NCPDP's
+own bare `"M"`/`"F"`/`"U"` string; `remarshalInto` would silently zero it out and the transform would
+skip the write with no error. Fixed with three conditional literal fields (`condition: {field, operator:
+"equals", value}`) mapping NCPDP's own gender vocabulary directly — the same condition-gated-literal
+pattern EDI 837I's own `onAdmission` field already established, not a new mechanism.
+
+### A real bug found ONLY by a genuine Test Pipeline run — a NEW instance of an already-documented
+### gotcha class, but on a parse step, not an enrichment.script step
+Every EDI 837P/278/etc. bug write-up in this file documents "an `enrichment.script` step's own returned
+object is recursively snake-cased by `models.OutputNormalizer.NormalizeStepOutput` before a later step
+can read it via `steps.<alias>.step_output`." This phase found the SAME mechanism firing on `ncpdp.
+parse`'s own step_output — NOT a script step at all — because `NormalizeStepOutput` snake-cases
+*every* step's snapshot uniformly, regardless of step type. `ncpdp.parse`'s `ParsedJSON` uses the ncpdp
+schema's own deliberately-camelCase field.Key convention (`medicationPrescribed`, `humanPatient`,
+`drugCoded`, `addressLine1`, ...) — reachable UNCHANGED via a direct `sourceField` read (proven by the
+full Go-level executor-chain test, `services/executors/transform/ncpdp_executors_test.go`, which reads
+`parsedNCPDP` directly with zero normalization in between) — but silently rewritten to
+`medication_prescribed`/`human_patient`/`drug_coded`/`address_line1`/etc. the ONE TIME a LATER step
+addresses it via `steps.parse_new_rx.step_output.parsedNCPDP...`. Every `fhir.build` field in the
+OOB template uses exactly that addressing form, so every sourcePath-driven field on every one of the 4
+resources resolved silently empty (`literalValue`-only fields still worked, masking the scope of the
+bug until the resulting `MedicationRequest.subject` — the one base-FHIR-REQUIRED reference field among
+several equally-broken ones — surfaced as a strict-validation error).
+
+The Go-level FHIR-builder test (`services/ncpdp_newrx_fhir_builder_test.go`) originally passed cleanly
+despite this, for the exact same reason CLAUDE.md's own EDI 837/835 write-ups warn about: its
+`svcInjectStepOutput` helper injects a hand-built step_output map directly, bypassing the real
+normalization call entirely — self-consistent (the test's own sourcePath strings matched what it
+itself injected), but blind to whether the real engine would ever produce that exact shape. **Fixed
+generically, not just patched**: `ncpdpRealNewRxData` now passes its injected step_output through the
+REAL `models.NewOutputNormalizer().NormalizeStepOutput(...)` call before injecting it — instead of
+hand-transcribing the snake_case shape a second time (a real, documented transcription-risk class in
+this project's own history), the test now calls the SAME function the real engine calls, guaranteeing
+it can never again silently drift from real behavior. Every `sourcePath`/`condition.field` string in
+both the Go test and the migration was updated to the real snake_case form this produces (verified via
+a real `curl` against the actual running app's Test Pipeline endpoint, not assumed).
+
+A SECOND, independent instance of the already-documented `step_alias`-vs-`NormalizeKey(step_name)`
+gotcha was also caught by the same real Test Pipeline run: the `payload.builder` step's own step_name
+"Assemble New Rx FHIR Bundle" normalizes to `assemble_new_rx_fhir_bundle` (an underscore between "new"
+and "rx", since NormalizeKey splits on the step name's own space-separated words) — the migration's
+own `step_alias` field (and this phase's first Playwright test draft) used `assemble_newrx_fhir_bundle`
+(no underscore) instead, a plausible-looking but wrong guess. This one was purely a *test-authoring*
+risk (nothing in the pipeline's own config addresses this step via `steps.X` — only the Playwright
+spec's own assertions needed the real key to inspect the assembled Bundle) — fixed by renaming the
+alias to match the real key and correcting the spec's own reference.
+
+### Real, working, browser-verified — not just Go-level
+`tests/playwright/ncpdp-newrx-to-fhir-e2e.spec.js` drives the real "Use Template" click path (10 canvas
+nodes, matching the 10 `execution_groups`) then a real "Test Pipeline" run against the real, unedited
+NewRx sample through the complete HTTP/DAG-execution stack — asserting real field values (`Organization.
+name`, `Patient.name`/`gender`/`birthDate`, `Practitioner.name`, `MedicationRequest.status`/`intent`/
+`medicationCodeableConcept.text`/`dispenseRequest.quantity.value`) AND that `subject.reference`/
+`requester.reference` are correctly rewritten to each referenced resource's own real bundle `fullUrl`
+(payload.builder's documented cross-reference rewriting behavior, the same mechanism the EDI 835/837
+templates already rely on and assert against) — not just "the run succeeded." This is the run that
+caught both real bugs above; both are fixed and the spec passes clean, zero console errors.
+
+### Named future phases (STATUS UPDATE — FHIR mapping for CancelRx/CancelRxResponse/RxChangeRequest/
+### RxChangeResponse AND for RxRenewalRequest/RxRenewalResponse are now DONE, see the sections below;
+### kept for history, not a live TODO list)
+RxFill/RxFillIndicatorChange (dispense notifications → `MedicationDispense`), Status/Error/Verify/
+GetMessage (control/acknowledgment transactions, analogous role to X12's 999), RxHistoryRequest/
+RxHistoryResponse, RxTransferRequest/RxTransferResponse/RxTransferConfirm, REMS transactions, Census/
+Resupply/DrugAdministration/Recertification, and NCPDP Telecommunication D.0 (pharmacy claims — a
+separate, X12-shaped standard under the same NCPDP brand, explicitly not SCRIPT) all remain out of
+scope, per the plan's own explicit deferral.
+
+### Key Files
+- Shared XML engine: `xmlpath/xpath_writer.go` (extracted from `cda/builder`, zero CDA-specific code)
+- Engine: `ncpdp/schema_types.go`, `ncpdp/schema_loader.go`, `ncpdp/parser.go`, `ncpdp/util.go`
+- Build direction: `ncpdp/builder/document_builder.go`
+- Validator: `ncpdp/validator/validator.go`
+- Schema data: `ncpdp/schemas/script_2017071/{manifest.json,groups/*.json,transactions/*.json}`
+- Parser adapter: `services/parsers/ncpdpscript/ncpdp_script_parser_service.go`
+- Pipeline steps: `services/executors/transform/ncpdp_{parse,validate,build,map_to_canonical}_executor.go`
+- Schema API: `controllers/ncpdp_schema_controller.go`
+- UI: `public/js/pipeline/components/NCPDPStepBuilder.js`, `ToolboxManager.js` (4 entries + icons)
+- FHIR mapping (source of truth for the migration): `services/ncpdp_newrx_fhir_builder_test.go`
+- Migration: `database/migrations/V258__NCPDP_NewRx_To_FHIR_OOB_Pipeline_Template.sql`
+- Real sample: `ncpdp/testdata/real_samples/dgoradia_sample_newrx.xml` (dgoradia/ncpdp's own test
+  fixture); self-authored lifecycle fixtures: `ncpdp/testdata/self_authored/*.xml`
+- Tests: `ncpdp/newrx_roundtrip_test.go`, `ncpdp/lifecycle_roundtrip_test.go`, `ncpdp/schema_loader_test.go`,
+  `ncpdp/validator/validator_test.go`, `services/executors/transform/ncpdp_executors_test.go`,
+  `xmlpath/xpath_writer_test.go`
+- Full browser click-path E2E: `tests/playwright/ncpdp-newrx-to-fhir-e2e.spec.js`
+
+## NCPDP SCRIPT FHIR Mapping — CancelRx, CancelRxResponse, RxChangeRequest, RxChangeResponse (September 2026)
+
+### Scope
+Closes the FHIR-mapping gap Phase 1 named as deferred: the schema/engine support for these 4
+transaction types was already built in Phase 1 (parse/build/validate all worked); only the
+`fhir.build`/`payload.builder`/`fhir_validation` OOB templates were missing. Same "prove the pattern,
+then extend it" discipline as EDI X12's own phased rollout — no new engine capability needed, purely
+composing already-proven pipeline steps against schema paths that already existed.
+
+### CancelRx and RxChangeRequest → the same 4-resource shape as NewRx
+Both carry the identical body shape as NewRx (Patient/Pharmacy/Prescriber/MedicationPrescribed), so
+both templates mirror V258's own Organization/Patient/Practitioner/MedicationRequest shape almost
+field-for-field — confirmed by direct comparison, not assumed. The only real semantic differences are
+on `MedicationRequest`:
+- **CancelRx**: `status="cancelled"` (the prescriber's own cancellation intent — NCPDP/base FHIR have
+  no "pending cancellation" state, a named simplification) + `identifier[0]` carrying the message's own
+  `RequestReferenceNumber` so a later CancelRxResponse can be correlated back to it downstream.
+- **RxChangeRequest**: `status="draft"` + `intent="proposal"` (both real base-FHIR enum values — a
+  pharmacy's PROPOSED change is not yet prescriber-approved, unlike NewRx's `active`/`order` or
+  CancelRx's `cancelled`) — RxChangeResponse's own outcome then represents the prescriber's actual
+  decision.
+
+### CancelRxResponse and RxChangeResponse → Task, not MedicationRequest
+A real, deliberate design correction from the original plan draft, made by directly re-reading both
+schema files rather than assuming: neither response transaction carries ANY Patient/Prescriber/
+Pharmacy fields — only `RequestReferenceNumber` + one of 6 outcome choices (`Approved`/`Denied`/
+`DenyNewToFollow`/`ApprovedWithChanges`/`Validated`/`Replace`, each with its own `ReasonCode`/
+`ReferenceNumber`/`DenialReason`/`Note`) + an optional `MedicationPrescribed`. Base FHIR
+`MedicationRequest.subject` is 1..1 required; fabricating a Patient reference these messages never
+carry would violate this project's own no-invented-structure discipline. `Task.for` is 0..1 optional,
+so `Task` can honestly represent "the response to a request, correlated by its own business
+identifier" without inventing patient linkage — the same class of correction 837P/837I's own "no
+separate Practitioner resource" design note already established for this codebase.
+
+`Task.status` is derived from WHICHEVER of the 6 outcome groups is actually present on the message
+(`Approved`/`ApprovedWithChanges`/`Validated`/`Replace` → `"completed"`; `Denied`/`DenyNewToFollow` →
+`"rejected"`) via 12 stacked conditional field entries (2 per branch: status + businessStatus code) —
+safe to stack unconditionally since exactly one of the 6 branches is ever present on a real message
+(this schema doesn't structurally enforce mutual exclusion, matching the CDA choice-constraint scope
+boundary precedent already established elsewhere in this codebase). `Task.note[0].text` sources
+whichever branch's own `Note` field is actually present via `fallbackPaths` checked in order (`fhir.
+build`'s own "first present value wins" convention). The one real difference between the two response
+types: RxChangeResponse's own optional `MedicationPrescribed` represents real new prescribing content
+(typically present alongside `ApprovedWithChanges`) — `Task.description` sources its `DrugDescription`
+when present, falling back to a generic literal label, rather than fabricating a second, patient-less
+`MedicationRequest` resource for it.
+
+### Zero new gotchas this round — both previously-documented mechanisms applied proactively
+Unlike NewRx's own Phase-1 round (which discovered both the `ncpdp.parse` step_output snake-casing
+gotcha and the `step_alias`-vs-`NormalizeKey(step_name)` gotcha via a failing Playwright run), all 4
+migrations here were authored with both fixes already applied up front — every `sourcePath`/
+`condition.field` string uses the real snake_case form (`steps.<parse_step_key>.step_output.
+parsed_ncpdp.body...`), and every `step_alias` was chosen to already equal its own step name's real
+`NormalizeKey` output (verified by hand-tracing `toSnakeCase`'s character-by-character behavior before
+writing the SQL, not just copy-pasting a plausible guess). All 4 Playwright specs passed on the first
+real Test Pipeline run, with zero fix-and-rerun cycles — direct evidence the two Phase-1 gotchas are
+now genuinely internalized as a pre-flight check for this pattern, not just documented after the fact.
+
+### Verification
+Go: `services/ncpdp_cancelrx_fhir_builder_test.go`, `services/ncpdp_cancelrx_response_fhir_builder_test.go`,
+`services/ncpdp_rxchangerequest_fhir_builder_test.go`, `services/ncpdp_rxchangeresponse_fhir_builder_test.go`
+— each chains the real executors (`fhir.build` ×N → `payload.builder` → `fhir_validation` strict)
+against the self-authored lifecycle fixtures, using the shared `assembleAndValidateNCPDPBundle` helper
+(a parameterized generalization of NewRx's own `assembleAndValidateNewRxBundle`). All 4 migrations'
+field entries were diffed programmatically against their own Go test source (reusing `validate_and_diff.py`,
+a generalized version of the one-off V258 diff script) before being applied — zero drift confirmed for
+all 4.
+
+Full-stack: real `docker-compose build app` (clean, `ncpdp/` confirmed present in the runtime image),
+`docker-compose run --rm flyway migrate` applied V261/V262 cleanly (V259/V260 were already live from an
+earlier point in this session); all 5 NCPDP templates (NewRx + these 4) confirmed live via `psql`.
+`tests/playwright/ncpdp-{cancelrx,cancelrxresponse,rxchangerequest,rxchangeresponse}-to-fhir-e2e.spec.js`
+each drive the real "Use Template" click path (10 canvas nodes for the 2 Bundle-shaped templates, 7 for
+the 2 Task-shaped ones) then a real "Test Pipeline" run against their own self-authored fixture,
+asserting real field values and — for the 2 MedicationRequest templates — that `subject.reference`/
+`requester.reference` are correctly rewritten to each referenced resource's own real bundle `fullUrl`.
+All 4 pass clean on the first run, zero console errors. Throwaway test interfaces deactivated +
+soft-deleted via the real API after verification.
+
+### Key Files
+- FHIR mapping (source of truth for each migration): `services/ncpdp_cancelrx_fhir_builder_test.go`,
+  `services/ncpdp_cancelrx_response_fhir_builder_test.go`, `services/ncpdp_rxchangerequest_fhir_builder_test.go`,
+  `services/ncpdp_rxchangeresponse_fhir_builder_test.go`
+- Migrations: `database/migrations/V259__NCPDP_CancelRx_To_FHIR_OOB_Pipeline_Template.sql`,
+  `V260__NCPDP_CancelRxResponse_To_FHIR_OOB_Pipeline_Template.sql`,
+  `V261__NCPDP_RxChangeRequest_To_FHIR_OOB_Pipeline_Template.sql`,
+  `V262__NCPDP_RxChangeResponse_To_FHIR_OOB_Pipeline_Template.sql`
+- Full browser click-path E2E: `tests/playwright/ncpdp-cancelrx-to-fhir-e2e.spec.js`,
+  `ncpdp-cancelrxresponse-to-fhir-e2e.spec.js`, `ncpdp-rxchangerequest-to-fhir-e2e.spec.js`,
+  `ncpdp-rxchangeresponse-to-fhir-e2e.spec.js`
+
+## NCPDP SCRIPT FHIR Mapping — RxRenewalRequest, RxRenewalResponse (September 2026)
+
+### Scope and a real structural discovery, cross-validated before writing any schema
+Closes another of Phase 1's own named-deferred items (refills). Direct investigation of `cosyte/
+ncpdp`'s `src/script/lifecycle.ts` (the same cross-validation source Phase 1 used for CancelRx/
+RxChangeRequest/RxChangeResponse) confirmed, before any schema file was written, that
+`RxRenewalRequest` extends the library's own `LifecycleRequestFields` (`requestReferenceNumber?`,
+`patient?`, `pharmacy?`, `prescriber?`, `medicationPrescribed?`) with **zero additional fields of its
+own** — structurally identical to `CancelRx`/`RxChangeRequest` — and `RxRenewalResponse` extends
+`LifecycleResponseFields` with the SAME 6 outcome elements (`Approved`/`Denied`/`DenyNewToFollow`/
+`ApprovedWithChanges`/`Validated`/`Replace`) in the SAME fail-safe denial-first precedence order,
+identical to `CancelRxResponse`/`RxChangeResponse`. This is a genuine, sourced confirmation (not an
+assumption carried over from the other lifecycle types) — `lifecycle.ts`'s own type union
+(`LifecycleRequestKind`/`LifecycleResponseKind`) explicitly groups `RxRenewalRequest` alongside
+`RxChangeRequest`/`CancelRx` as one shared shape.
+
+### Schema addition — pure JSON data, zero new Go code
+`ncpdp/schemas/script_2017071/transactions/RxRenewalRequest.json` and `RxRenewalResponse.json`,
+registered in `manifest.json` — each a near-verbatim copy of `CancelRx.json`/`CancelRxResponse.json`
+with only the transaction key/name changed, confirming the schema-driven "adding a transaction type is
+a pure data change" promise from Phase 1's own design. Verified directly: `ncpdp/parser.go`'s
+`ParseMessage` dispatches via `spec.Transactions[txType]` (a map lookup keyed off the manifest) and
+`ncpdp/builder/document_builder.go` takes `transactionType` as a plain string parameter — grepped both
+files plus `ncpdp/validator/validator.go` for any hardcoded transaction-type name before writing a
+single line of schema; found none.
+
+### FHIR mapping — same shapes as CancelRx/CancelRxResponse, one semantic difference each
+`RxRenewalRequest` → `MedicationRequest` (+ Organization/Patient/Practitioner), mirroring V259's own
+shape, with `status="active"`/`intent="order"` — a renewal request represents the pharmacy asking to
+CONTINUE an existing, currently-active prescription (unlike `RxChangeRequest`'s own "draft"/"proposal"
+pharmacy-PROPOSED alteration, there is no changed content here to mark as unapproved).
+`RxRenewalResponse` → `Task` (same reasoning as `CancelRxResponse`/`RxChangeResponse` — no Patient/
+Prescriber data on a response message, so `MedicationRequest.subject` can't be honestly populated),
+with `Task.description` sourcing `medicationPrescribed.drugDescription` when present (like
+`RxChangeResponse`, since an `ApprovedWithChanges` renewal outcome can carry real revised prescribing
+content) falling back to a generic literal label.
+
+### Zero new gotchas — both Phase-1 mechanisms applied proactively, again
+Same as the CancelRx/RxChangeRequest/RxChangeResponse mapping round above: every `sourcePath`/
+`condition.field` used the real snake_case form and every `step_alias` was pre-verified against its
+own step name's `NormalizeKey` output before being written into the migration. Both Playwright specs
+passed on the first real Test Pipeline run.
+
+### Verification
+Go: 2 new round-trip tests in `ncpdp/lifecycle_roundtrip_test.go` (`TestRxRenewalRequest_
+SelfAuthoredSample_ParseAndRoundTrip`, `TestRxRenewalResponse_SelfAuthoredSample_ApprovedOutcome_
+ParseAndRoundTrip`) plus `services/ncpdp_rxrenewalrequest_fhir_builder_test.go`/
+`ncpdp_rxrenewalresponse_fhir_builder_test.go` (chaining the real executors, reusing the shared
+`assembleAndValidateNCPDPBundle` helper) — all pass, run via a throwaway `docker build --target
+gobuilder` image (schemas/ and tests/ bind-mounted, image removed immediately after each use). Full
+`ncpdp`/`ncpdp/validator`/`services/executors/transform` (NCPDP subset) suites re-run with zero
+regressions.
+
+Full-stack: real `docker-compose build app` (clean, both new schema files baked into the image) +
+`docker-compose up -d app` (which auto-ran Flyway as part of its own dependency chain, applying V263/
+V264 without a separate manual step this time), all 7 NCPDP templates confirmed live via `psql` and
+via `GET /api/ncpdp/schema/transactions`. `tests/playwright/ncpdp-rxrenewalrequest-to-fhir-e2e.spec.js`/
+`ncpdp-rxrenewalresponse-to-fhir-e2e.spec.js` each drive the real "Use Template" click path then a real
+"Test Pipeline" run against their own self-authored fixture — both pass clean on the first run, zero
+console errors. Throwaway test interfaces deactivated + soft-deleted via the real API after
+verification.
+
+### Key Files
+- Schema data: `ncpdp/schemas/script_2017071/transactions/RxRenewalRequest.json`, `RxRenewalResponse.json`
+- Self-authored fixtures: `ncpdp/testdata/self_authored/rx_renewal_request_sample.xml`,
+  `rx_renewal_response_approved_sample.xml`
+- FHIR mapping (source of truth for each migration): `services/ncpdp_rxrenewalrequest_fhir_builder_test.go`,
+  `services/ncpdp_rxrenewalresponse_fhir_builder_test.go`
+- Migrations: `database/migrations/V263__NCPDP_RxRenewalRequest_To_FHIR_OOB_Pipeline_Template.sql`,
+  `V264__NCPDP_RxRenewalResponse_To_FHIR_OOB_Pipeline_Template.sql`
+- Full browser click-path E2E: `tests/playwright/ncpdp-rxrenewalrequest-to-fhir-e2e.spec.js`,
+  `ncpdp-rxrenewalresponse-to-fhir-e2e.spec.js`
+
+## NCPDP SCRIPT FHIR Mapping — RxFill (Fill/Dispense Notification, September 2026)
+
+### A real sourcing gap found and worked around honestly
+Closes another Phase-1-named-deferred item. Direct investigation found `cosyte/ncpdp` (the
+cross-validation source for every lifecycle transaction so far) does **not** actually model RxFill
+structurally at all — `RxFill`/`RxFillIndicatorChange`/`RxHistoryRequest`/`RxTransfer*`/etc. only
+appear in `versions.ts`'s own transaction-NAME registry (for version-negotiation), never parsed. Rather
+than fabricate structure with no source, a broader search found a genuinely usable one: `usnistgov/
+tcamt-2`'s `tcamt-lite-controller/SCRIPT_XML_10_6.xsd` — a real, NIST-hosted, official-provenance
+NCPDP SCRIPT XSD, for the OLDER SCRIPT v10.6 wire format (not this engine's own v2017071 target). Used
+the same way `cosyte/ncpdp` was used for the lifecycle transactions: a real, sourced, cross-version
+structural reference, not an invention — every schema file's own `sourceRefs` names this trade-off
+explicitly. `RxFillIndicatorChange` itself has **no confirmed structural source at all** (absent from
+both `cosyte/ncpdp` and the 10.6 XSD) — left as a named, still-deferred gap rather than guessed.
+
+### Schema — new group + transaction, FillStatus modeled as a 3-way choice reusing OutcomeReason
+`ncpdp/schemas/script_2017071/groups/MedicationDispensed.json` (new — DrugDescription/DrugCoded/
+Quantity/WrittenDate/LastFillDate; the source XSD's own `RxFillDispensedMedicationType` also carries
+DaysSupply/Directions/Refills/Substitutions/Diagnosis/PriorAuthorization/StructuredSIG/etc., deliberately
+deferred — core fields, not exhaustive, matching EDI 835/837's own established precedent) and
+`transactions/RxFill.json` (new — `FillStatus`'s 3-way choice, per the XSD's own `FillStatusType`, is
+modeled as 3 sibling group refs — `filled`/`notFilled`/`partialFill` — REUSING the already-built
+`OutcomeReason` group (ReasonCode/ReferenceNumber/DenialReason/Note) rather than authoring a
+structurally-identical new group, since `FillStatusType`'s own `NoteType`/`DeniedFillType` sub-shapes are
+a near-exact match). Pharmacy/Prescriber/Patient reuse this engine's own existing NewRx-era groups
+rather than the XSD's own RxFill-specific `MandatoryAddressPharmacyType`/`PrescriberRxFillType` — a
+named, deliberate simplification trading some RxFill-specific structural detail (ClinicName,
+PrescriberAgent, a flatter Identification shape) for consistency with every other already-built
+transaction type. `Request`/`Supervisor`/`Facility` (all optional in the source XSD) are not modeled —
+named, deferred gaps.
+
+### FHIR mapping — MedicationDispense, confirmed against the real cardinality schema, not assumed
+`RxFill` → `MedicationDispense` + `Organization` (pharmacy) + `Patient` — **no separate Practitioner
+resource**, since RxFill's own schema (both the 10.6 XSD and this engine's own simplified reuse) carries
+no individual dispensing-pharmacist name, only the pharmacy itself. Verified directly against
+`schemas/fhir/R4/resources/MedicationDispense.gz`'s own `required` list (not assumed from memory) that
+only `status` + `medication[x]` are UNCONDITIONALLY required — `performer.actor` and
+`substitution.wasSubstituted` are conditional on those substructures being present at all — so a
+Patient/Organization-only Bundle is fully spec-conformant. `FillStatus`'s 3-way choice maps onto FHIR's
+own `medicationdispense-status` ValueSet: `Filled` → `"completed"`, `PartialFill` → `"in-progress"` (a
+partial fill is, by definition, not yet complete), `NotFilled` → `"declined"` — a code-system
+translation, never an invented fact.
+
+### Verification
+Go: `TestRxFill_SelfAuthoredSample_FilledOutcome_ParseAndRoundTrip` (`ncpdp/lifecycle_roundtrip_test.go`)
+and `services/ncpdp_rxfill_fhir_builder_test.go` (chaining the real executors, reusing the shared
+`assembleAndValidateNCPDPBundle` helper) — both pass, run via a throwaway `docker build --target
+gobuilder` image (removed immediately after each use, rebuilt once mid-round after a test file was added
+after the image's first build — a real, avoidable timing mistake worth naming: always finish writing
+every test file BEFORE starting the throwaway image build, not during). Full `ncpdp`/`ncpdp/validator`/
+`services/executors/transform` (NCPDP subset) suites re-run with zero regressions.
+
+Full-stack: real `docker-compose build app` (clean, `MedicationDispensed.json`/`RxFill.json` baked into
+the image) + `docker-compose up -d app` (auto-ran Flyway, applying V265 without a separate manual step),
+confirmed live via `psql` and `GET /api/ncpdp/schema/transactions` (8 transaction types now). `tests/
+playwright/ncpdp-rxfill-to-fhir-e2e.spec.js` drives the real "Use Template" click path (9 canvas nodes)
+then a real "Test Pipeline" run — passes clean on the first run, zero console errors, including the
+`performer[0].actor.reference`/`subject.reference` fullUrl-rewrite assertions (the same `payload.
+builder` cross-reference mechanism proven for every other NCPDP template). Throwaway test interface
+deactivated + soft-deleted via the real API after verification.
+
+### Key Files
+- Schema data: `ncpdp/schemas/script_2017071/groups/MedicationDispensed.json`,
+  `transactions/RxFill.json`
+- Self-authored fixture: `ncpdp/testdata/self_authored/rx_fill_filled_sample.xml`
+- FHIR mapping (source of truth for the migration): `services/ncpdp_rxfill_fhir_builder_test.go`
+- Migration: `database/migrations/V265__NCPDP_RxFill_To_FHIR_OOB_Pipeline_Template.sql`
+- Full browser click-path E2E: `tests/playwright/ncpdp-rxfill-to-fhir-e2e.spec.js`
+
+### Named future phases (still deferred)
+`RxFillIndicatorChange` (no confirmed structural source found), `RxHistoryRequest`/`RxHistoryResponse`,
+`RxTransferRequest`/`RxTransferResponse`/`RxTransferConfirm`, REMS transactions, Census/Resupply/
+DrugAdministration/Recertification, and NCPDP Telecommunication D.0 all remain out of scope this round.
+`Status`/`Error`/`Verify`/`GetMessage` are DONE — see the section immediately below.
+
+## NCPDP SCRIPT Engine — Status, Error, Verify, GetMessage (Control/Acknowledgment Transactions, September 2026)
+
+### Scope — engine support only, no FHIR mapping, matching X12 999's own precedent
+Closes the last of Phase 1's originally-named-deferred items with a real, confirmed source. `cosyte/
+ncpdp`'s `src/script/response.ts` models `Status`/`Error`/`Verify` identically — all three share ONE
+`ResponseFields` shape (`code?`, `descriptionCode?`, `description?`) via `extractResponse()`'s own
+generic `childText(el, "Code"|"DescriptionCode"|"Description")` reads — cross-confirmed against
+`usnistgov/tcamt-2`'s `SCRIPT_XML_10_6.xsd` (the same NIST-hosted XSD sourced for RxFill), whose own
+`<Status>`/`<Error>` elements agree exactly on `Code`/`DescriptionCode`/`Description`. `GetMessage`
+(the SCRIPT mailbox transport's own message-pull trigger) is confirmed, not assumed, to carry NO real
+structured content of its own — the XSD's own `<GetMessage>` wraps a bare `xs:anyType` placeholder.
+
+**A real source disagreement, resolved by preferring the version-matched source**: the 10.6 XSD's own
+`<Verify>` element is materially richer (a nested `VerifyStatus`/`Code` + optional `Pharmacy`/
+`Prescriber`, apparently for prescriber identity/credential verification) than `cosyte/ncpdp`'s own flat
+`ResponseFields` model. Resolved in favor of `cosyte/ncpdp` — it targets THIS engine's own v2017071/
+v2022011 versions directly, while the XSD is an admittedly older v10.6 cross-reference — rather than
+guessing which source is "more right" in the abstract; `Verify.json`'s own `sourceRefs` names this
+disagreement and the resolution explicitly.
+
+No FHIR mapping for any of the 4 — matching this codebase's own established, user-confirmed EDI X12 999
+precedent (`CLAUDE.md`'s own "999 → FHIR remains a deliberate non-goal — a transport-layer
+acknowledgment has no natural FHIR analogue"). The identical reasoning applies here: `Status`/`Error`
+are positive/negative acknowledgments of a prior transaction, `Verify` a credential check, `GetMessage`
+a transport-layer mailbox poll — none carry clinical content a FHIR resource could honestly represent.
+
+### Schema — 4 new, structurally trivial transaction files, zero new groups
+`transactions/{Status,Error,Verify,GetMessage}.json` — `Status`/`Error`/`Verify` are each 3 flat
+top-level fields (no nested groups needed, unlike every prior transaction type this engine has built);
+`GetMessage` has zero fields/groups at all (an honestly-empty transaction body, confirmed by the source
+XSD's own degenerate shape, not a placeholder for something unmodeled). `Status.code`/`Error.code` are
+modeled `required: true` (both the XSD's own pattern-restricted `Code` and `cosyte/ncpdp`'s own
+missing-Code warning agree it's the load-bearing field); `Verify.code` is `required: false` (neither
+source treats a missing Verify code as a hard requirement).
+
+**A real generic-engine correctness check performed before writing GetMessage's schema**: confirmed
+directly in `ncpdp/parser.go`/`ncpdp/builder/document_builder.go` that a transaction with empty
+`Fields`/`Groups`/`ElementOrder` is a fully safe, already-correct no-op path (`parseNode`'s two loops
+simply don't execute, `buildNode`'s `len(elementOrder) > 0` guard skips the reorder call) — no new
+engine code needed for the empty-transaction case, it already worked by construction.
+
+### Verification
+Go: 4 new round-trip tests in `ncpdp/lifecycle_roundtrip_test.go` (`TestStatus_SelfAuthoredSample_
+ParseAndRoundTrip`, `TestError_...`, `TestVerify_...`, `TestGetMessage_...`) against 4 new self-authored
+fixtures — all pass, run via a throwaway `docker build --target gobuilder` image (removed immediately
+after use). Full `ncpdp`/`ncpdp/validator`/`services/executors/transform` suites re-run with zero
+regressions (the executor suite's own 467s runtime confirmed clean, not just the NCPDP-scoped subset).
+
+Full-stack: real `docker-compose build app` (clean, all 4 new schema files baked into the image) +
+`docker-compose up -d app` + a real `GET /api/ncpdp/schema/transactions` poll confirming **all 12**
+NCPDP SCRIPT transaction types now resolve correctly through the live running app (`NewRx`, `CancelRx`,
+`CancelRxResponse`, `RxChangeRequest`, `RxChangeResponse`, `RxRenewalRequest`, `RxRenewalResponse`,
+`RxFill`, `Status`, `Error`, `Verify`, `GetMessage`) — no Playwright spec, since there is no OOB
+pipeline template to click through (no FHIR mapping means no `fhir.build`/`payload.builder` chain to
+assemble into a template, matching 999's own precedent of engine-only, template-less support).
+
+### Key Files
+- Schema data: `ncpdp/schemas/script_2017071/transactions/{Status,Error,Verify,GetMessage}.json`
+- Self-authored fixtures: `ncpdp/testdata/self_authored/{status,error,verify,get_message}_sample.xml`
+- Tests: `ncpdp/lifecycle_roundtrip_test.go` (4 new tests)
+
+## NCPDP Telecommunication D.0 Engine — Phase 1 (B1 Claim Billing, September 2026)
+
+### Why it exists
+"NCPDP" is actually **two unrelated standards under one brand**: SCRIPT (XML, prescriber↔pharmacy
+e-prescribing — built above) and Telecommunication D.0 (control-character-delimited real-time pharmacy
+**claims**, structurally like X12) — explicitly named and deferred throughout the SCRIPT work, then
+picked up as its own phase per direct user instruction. This phase builds the whole engine pattern
+end-to-end on the single highest-value transaction — **B1 (Claim Billing)**, request and response —
+the same incremental "prove it on one transaction type first" discipline already used for EDI X12's
+835 and NCPDP SCRIPT's NewRx.
+
+### Sourcing discipline (no free official IG, same constraint SCRIPT/EDI X12 TR3 had)
+NCPDP's own Telecommunication Standard Implementation Guide is a paid document. Two free, structurally
+authoritative sources were read directly (not assumed from training data): **`eduardonunesp/ncpdp-telecom-fmt-book`**
+(a structural walkthrough — separators, headers, segments, fields, data types including signed
+overpunch, transactions, responses) and **`apiv/dzero`** (a real, "battle-tested at Instacart" Ruby D.0
+parser/serializer with a complete field dictionary for all 26 segment types, plus a real fixture pair
+demonstrating the GS repeating-group mechanism byte-for-byte). Both show `license: null` on GitHub —
+matching this project's own standing discipline (the NIST SCRIPT-10.6-XSD / EDI PyX12+Stedi precedent):
+structural facts (field IDs, segment IDs, required-vs-optional shape) are used as sourcing knowledge,
+no file/fixture/code from either repo is vendored. Every schema file records its own `sourceRefs`. All
+test fixtures are self-authored from the confirmed field shapes — no free, real-world D.0 sample exists
+anywhere in this session's own search, unlike NCPDP SCRIPT's NewRx (which had a real `dgoradia/ncpdp`
+fixture) — a named, permanent limitation of this phase, not an oversight.
+
+### Confirmed wire format
+Control-character-delimited, genuinely different from both SCRIPT (XML) and EDI X12 (printable
+delimiters): `0x1C` FS (precedes a 2-char field ID + value), `0x1E` RS (starts a segment), `0x1D` GS
+(delimits repeated clusters of segments within one transmission). Fixed 56-byte header (no separators):
+`binNumber(6) + version(2) + transactionCode(2) + processorControlNumber(10) + transactionCount(1) +
+serviceProviderIdQualifier(2) + serviceProviderId(15) + dateOfService(8) +
+softwareVendorCertificationId(10)`. The body is a **transmission group** (segments appearing once —
+Patient, Insurance, Pharmacy Provider, Prescriber) plus zero-or-more **transaction groups** (GS-delimited
+clusters — Claim, Pricing — one cluster per claim/drug line item), confirmed byte-for-byte from
+`dzero`'s own real fixture. **Signed overpunch** is the one genuinely novel data type: the last digit of
+a decimal is replaced by a letter encoding both the digit and the sign (`{ABCDEFGHI` = positive 0–9,
+`}JKLMNOPQR` = negative 0–9) — e.g. `0000084F` → 8.46 (F=6, positive).
+
+**Request and response share the identical wire transaction code** (`B1` appears in both a claim
+request and its own adjudication response) — disambiguated only by disjoint segment-identifier ranges
+(01–16 request, 20–29 response), a real structural fact confirmed from source, not guessed. `SniffDirection`
+implements this; an explicit `direction` config always wins when the caller already knows it.
+
+### Architecture — a new top-level package `ncpdptelecom/`, mirroring `edi/`'s layering (not `ncpdp/`'s)
+Chosen over extending `ncpdp/` because the wire shape is fundamentally X12-like (fixed delimiters +
+segment/field codes), not XML:
+- **`ncpdptelecom/datatypes.go`** — `TelecomDataType` (string/date/integer/decimal/overpunch),
+  `EncodeOverpunch`/`DecodeOverpunch` (the one genuinely new codec in this whole phase, directly unit-
+  tested both directions against the doc's own worked examples), `Validate`/`Parse`/`Format`.
+- **`ncpdptelecom/schema_types.go`** — `TelecomFieldDef`/`TelecomSegmentDef`/`TelecomTransactionDef`/
+  `TelecomSpecDef`, `TransactionKey(code, direction)` helper, `SegmentByIdentifier` (dispatches a raw
+  segment to its schema def by its own 2-char wire identifier).
+- **`ncpdptelecom/schema_loader.go`** — manifest + `segments/*.json` + `transactions/*.json`, fail-fast
+  cross-reference validation, mirroring `edi/schema_loader.go`'s conventions.
+- **`ncpdptelecom/parser.go`** — `ParseTransmission(spec, direction, raw) (*ParseResult, error)`: reads
+  the fixed header, splits on RS into raw segments, resolves each by its leading `AM` field, buckets
+  into the transmission group (once) or the current transaction-group cluster (a GS byte starts a new
+  cluster) — ONE generic walk, no per-segment/per-transaction-code Go function.
+- **`ncpdptelecom/builder/document_builder.go`** — `BuildTransmission`, the write-direction mirror.
+- **`ncpdptelecom/validator/validator.go`** — two-severity model (missing/malformed required
+  field/segment = blocking error; everything else = non-blocking warning tier, intentionally empty for
+  Phase 1 — no free source of D.0's own conditional-requirement business rules was found, matching
+  EDI's dated 2026-09-01 "flexible, not rigid" precedent and NCPDP SCRIPT's own identical decision).
+
+### Pipeline integration, connectors, sync endpoint — reusing every proven mechanism
+- **Format detection**: `services/format_detector.go`'s `isNCPDPTelecom()` (header bytes 6:8 == "D0"
+  AND the raw content contains the `0x1E` RS byte), inserted before the generic CSV catch-all. New
+  `models.FormatNCPDPTelecom` constant.
+- **Parser adapter**: `services/parsers/ncpdptelecom/ncpdp_telecom_parser_service.go` implements the
+  existing `MessageParser` interface, `Parse()` uses `SniffDirection` for auto-detection; registered via
+  `ParserFactory.RegisterNCPDPTelecomParser(schemaDir)`.
+- **Pipeline steps**: `ncpdptelecom.parse`/`ncpdptelecom.validate`/`ncpdptelecom.build`/
+  `ncpdptelecom.map_to_canonical` (`services/executors/transform/ncpdptelecom_*.go`), the same 4-step
+  shape `edi.*`/`ncpdp.*` already established, all shipped in this one phase (learned directly from EDI
+  X12 Phase 1's own "shipped with zero UI, needed a whole separate follow-up round" mistake — pre-empted
+  here, not repeated a third time).
+- **No dedicated connector** — D.0 rides the same generic SFTP/HTTP transport connectors every other
+  format uses; real D.0 network connectivity is switch/VAN-proprietary with no public API, the same
+  reasoning already applied to why neither SCRIPT nor EDI X12 got a format-specific connector.
+- **A genuinely new synchronous endpoint, shipped in Phase 1 (not added later on request, unlike EDI's
+  own 270/276/278)**: `controllers/sync_pharmacy_claim_controller.go` (`POST
+  /api/pharmacy-claim/:interfaceId/submit`), a near-verbatim structural copy of
+  `sync_claim_status_controller.go` — resolves the interface's own `"B1_REQUEST"` pipeline, calls
+  `TransformationPipelineService.ExecutePipeline` directly from the HTTP handler, extracts the resolved
+  build step's output via the shared `extractFirstBuildStepPayload`/`buildStepContentFields` mechanism (a
+  new `"ncpdptelecom.build"` entry added to that map, `field: "ncpdp_telecom"` — camelCase
+  `outputField: "ncpdpTelecom"` after `NormalizeStepOutput`'s snake-casing —
+  `contentType: "application/x-ncpdp-telecom-d0"`). D.0's entire reason for existing is real-time
+  point-of-sale adjudication — a synchronous request/response is the PRIMARY real-world delivery mode
+  for this specific standard, not an afterthought, so this shipped in Phase 1 deliberately.
+- **Schema browser API**: `controllers/ncpdp_telecom_schema_controller.go` (`GET
+  /api/ncpdp-telecom/schema/segments`, `/transactions`), mirroring `ncpdp_schema_controller.go`/
+  `edi_schema_controller.go` at the same small scale, wired into `main.go` + proxied via `app.js`.
+- **UI**: `public/js/pipeline/components/NCPDPTelecomStepBuilder.js` (4 step-builder classes,
+  `StepBuilderRegistry`-registered), `<script>` tag in `pipeline-builder.html`, `ToolboxManager.js` gains
+  4 new `StepTemplate` entries + icon-map entries — built into this phase, not deferred. D.0's own
+  `map_to_canonical` config is FLATTER than SCRIPT's/EDI's own recursive group/loop trees (no nested
+  sub-groups at all — a flat field list per segment, and exactly ONE repeating construct, transaction
+  groups, addressed by a single `transactionGroupRowsPath` rather than a per-node `rowsPath` at
+  arbitrary depth) — the UI reflects that simpler shape directly rather than reusing the recursive
+  tree-walking UI code EDI/SCRIPT's own map-to-canonical builders need.
+- **Dockerfile**: `COPY ncpdptelecom/ ./ncpdptelecom/` added proactively — the exact EDI Phase-1
+  deployment-bug class (a schema dir missing from the runtime image, only caught by a container smoke
+  test) pre-empted here rather than repeated a third time.
+
+### FHIR mapping — B1 request → Organization + Patient + Claim; B1 response → ClaimResponse
+Confirmed via HL7's own real precedent that `Claim`/`ClaimResponse` (not a custom resource) are the
+correct FHIR targets for a real-time pharmacy claim/adjudication exchange, `type=pharmacy` matching base
+FHIR's own `Claim.type` ValueSet. No `PaymentReconciliation` this phase — that resource models 835-style
+*aggregate* remittance across many claims, not a single real-time adjudication response; `ClaimResponse`
+alone is the correct, sufficient target.
+
+**A real mechanism gap found by reading the code, not assumed** (same class EDI 835's own per-claim EOB
+mapping already found): `fhir.build`'s `rowsPath` mode resolves fields ROW-ONLY (confirmed directly in
+`fhir_build_executor.go`) — a claim row (one GS-delimited transaction group) has no reachable path back
+up to the transmission header. A small `enrichment.script` derive step ("Derive B1 Claim Context")
+copies the one header-level value every claim row needs (`dateOfService`) down onto each row before
+`fhir.build` ever sees it — not avoidable even though D.0's own loop nesting is far shallower than EDI
+837's (no subscriber/dependent hierarchy, no diagnosis/procedure/care-team lists).
+
+Organization (pharmacy) and Patient use **fixed literal ids** (`organization-pharmacy-1`/`patient-1`)
+rather than deriving them from per-row data — a deliberate simplification since B1 carries exactly ONE
+pharmacy and ONE patient per transmission (unlike 837's own subscriber/dependent multiplicity), so
+uniqueness WITHIN one message's own Bundle is all that matters; `Claim.patient.reference`/
+`Claim.provider.reference` are therefore plain literal values (`Patient/patient-1`), not sourced from
+any row data — `payload.builder` still correctly rewrites them to each resource's own real `fullUrl`.
+
+**ClaimResponse's own `patient` field uses a DISPLAY-ONLY Reference** (no `.reference` pointer) — a B1
+response carries NO patient/pharmacy identity data at all (confirmed directly against the schema:
+ResponseMessage/ResponseStatus/ResponseClaim/ResponsePricing carry none), the same real gap that led
+NCPDP SCRIPT's own CancelRxResponse/RxChangeResponse to use `Task` instead of `MedicationRequest`. Since
+the approved plan named `ClaimResponse` as this format's own target (a real, adjudication-bearing
+resource `Task` can't represent as honestly), the display-only Reference satisfies FHIR's structural
+requirement without fabricating a resource or writing a dangling pointer — the same logical-reference
+pattern already used for `Claim.careTeam[].provider` in the EDI 837 work.
+
+**HCR/AN status code translation** (a code-system translation, never an invented fact, sourced directly
+from the confirmed response vocabulary): `A`/`C`/`P` (Approved/Captured/Paid) → `outcome: "complete"`;
+`D`/`E`/`R` (Duplicate/Error/Rejected) → `outcome: "error"`.
+
+### Real bugs found and fixed this phase
+1. **CRITICAL, engine-level: goja can't iterate a concretely-typed Go slice.** `ncpdptelecom.ParseResult.TransactionGroups`
+   was initially typed `[]map[string]interface{}` — goja's reflection-based Go-value wrapping does NOT
+   expose this as a normal iterable JS array (a `for` loop over it in a JS derive script silently sees
+   zero elements, no error anywhere). Every other engine in this codebase (`ncpdp`, `edi`) already used
+   `[]interface{}` for exactly this reason; this was the one place that hadn't, until caught by writing
+   a debug test that dumped the ACTUAL structure via `json.MarshalIndent` (proving the DATA was fine,
+   the CONSUMPTION mechanism was the problem). Fixed by changing the type to `[]interface{}` everywhere
+   across the package and its executors, plus ~12 test call sites (a new `groupAt()` helper in
+   `roundtrip_test.go`).
+2. **`enrichment.script`'s own calling convention: `function transform(input) {...}` is NEVER invoked.**
+   The executor runs script text UNWRAPPED first as a top-level program — a bare function DECLARATION's
+   own completion value is `undefined` (declarations don't produce a runtime value); since nothing calls
+   `transform(input)`, the result silently falls through to an empty pre-injected `output` object with
+   ZERO error at any layer. The correct pattern (confirmed directly from `pas_fhir_builder_test.go`'s own
+   working `derivePASFieldsScript`): bare top-level statements ending in a trailing PARENTHESIZED
+   OBJECT-LITERAL EXPRESSION (`({ claim_rows: claim_rows });`), never a function wrapper. Found via a
+   JS-level debug script dumping `Object.keys()` at each nesting level, not static reasoning alone.
+3. **`ncpdptelecom.map_to_canonical` never populated the wire header at all** — no `headerFields` config
+   option existed, so `ncpdptelecom.build` wrote BLANK transaction-code bytes, unparseable even when
+   every segment's own content was mapped correctly. Fixed by adding a `HeaderFields` config option, with
+   `transactionCode`/`version` auto-defaulting from the step's own config/loaded schema when not
+   explicitly mapped — caught by the executor's own round-trip test, not assumed safe.
+4. **3 schema-data corrections, each found by insisting on byte-level/arithmetic verification rather
+   than trusting a single prose claim or example in isolation** (documented in each schema file's own
+   `sourceRefs`): Pricing's `usualAndCustomaryCharge` (DQ field) was modeled as signed-overpunch (`RO`)
+   but the real worked example (`DQ00000000`) has no trailing letter — corrected to plain `R`, width 8.
+   Claim's `quantityDispensed`/`quantityPrescribed`/`originallyPrescribedQuantity` were modeled with
+   `places: 2` per the source doc's own prose, but the real worked example (`0000030000` → 30.000, not
+   30.00) only reconciles at `places: 3` — corrected, with the doc's own internal inconsistency noted.
+   ResponsePricing's F5/F6/F9 (Gross Amount Due/Ingredient Cost Paid/Total Amount Paid) were modeled at
+   width 9 per a raw code-block example, but `data-types.md`'s own arithmetically-verified example
+   showed width 8 — the raw block had a transcription typo (an extra digit); corrected to 8, matching the
+   request-side Pricing.json's own convention.
+5. **My own Go test files' type assertions were wrong relative to the real engine's own output type** —
+   `fhir.build`'s `rowsPath` mode writes `[]map[string]interface{}` to `outputField` (confirmed directly
+   in `fhir_build_executor.go`'s own `Execute()`), matching every OTHER existing `*_fhir_builder_test.go`
+   in this codebase (e.g. 837P's own `.([]map[string]interface{})`) — the two new D.0 FHIR-builder test
+   files had used `.([]interface{})` instead, a plausible-looking but wrong assumption borrowed from the
+   goja bug fix above (a genuinely different layer: goja's Go↔JS boundary vs. a Go test's own direct type
+   assertion on Go-native data). Both tests failed with a confusing symptom (`%v`-formatted output showed
+   exactly one well-formed element, yet `len(claims) != 1` still fired) until the assertion type itself
+   was corrected to match the real engine.
+6. **A real Node.js proxy bug, found only by this phase's own synchronous-endpoint Playwright test**:
+   `app.js`'s `express.raw()` middleware only recognized a fixed content-type allowlist
+   (`application/edi-x12`, `text/plain`, etc.) for forwarding a request body verbatim as a Buffer. An
+   EMPTY body sent with the new `application/x-ncpdp-telecom-d0` content type fell through to
+   `express.json()`'s own default `req.body = {}` (never `undefined`) — `forwardToGo` then
+   `JSON.stringify`s that into the non-empty string `"{}"`, so Go's own `len(body) == 0` empty-body guard
+   silently never fired, and the request proceeded past it into a genuine pipeline-lookup 404 instead of
+   the correct 400. The Go-level controller test (`httptest`, bypassing the Node proxy entirely) never
+   could have caught this — only a REAL Playwright test through the REAL running app's own proxy layer
+   did. Fixed by adding `application/x-ncpdp-telecom-d0` to the same `express.raw()` type list EDI's own
+   content type already uses.
+
+### Named simplifications (stated up front, not silently dropped)
+- **Telecom standard only, not the batch standard** — no `STX`/`ETX`/`00T`/`G1`/`99` batch
+  header/trailer wrapping; a transmission is always exactly one transaction.
+- **B1 (Claim Billing) only** — B2 (Reversal), B3, E1/E2 (Eligibility), D0/D1 (Prior Authorization), and
+  every other transaction code are named, deferred future phases; the segment library and generic engine
+  make each one a pure schema-data addition later, the same proven claim already made for every other
+  format phase in this codebase.
+- **B1 segment scope**: Insurance/Claim/Pricing/Patient/Prescriber/Pharmacy-Provider (request) +
+  Response Status/Response Pricing/Response Message/Response Claim (response) — DUR/PPS, Coupon,
+  Compound, Coordination of Benefits, Workers' Comp, Prior Authorization, Clinical, Additional
+  Documentation, Facility, Narrative (request) and Response DUR/PPS, Response Insurance, Response Prior
+  Auth, Response Insurance Additional Documentation, Response COB, Response Patient (response) are all
+  named, deferred — the schema is additive, so any of these can be added later as a pure data change.
+- **Multiple transaction groups per transmission** — engine-supported (schema-driven, not hardcoded to
+  1, confirmed via the round-trip test's own GS multi-group test) but only lightly tested; the primary
+  fixture/test scenario throughout this phase is the common single-claim case.
+- **No free, real-world D.0 sample exists** (unlike NCPDP SCRIPT's own real `dgoradia/ncpdp` NewRx
+  fixture) — every test and Playwright fixture in this phase is self-authored from the confirmed field
+  dictionary, a real, permanent sourcing-availability gap for this specific standard, not an oversight.
+
+### Verification
+Go: `ncpdptelecom/datatypes_test.go` (signed overpunch worked examples both directions), `ncpdptelecom/schema_loader_test.go`,
+`ncpdptelecom/roundtrip_test.go` (B1 request/response round trips, GS multi-group test, `SniffDirection`
+test), `ncpdptelecom/validator/validator_test.go`, `services/executors/transform/ncpdptelecom_executors_test.go`
+(full parse→validate→build→map_to_canonical chain), `services/ncpdp_telecom_b1_{request,response}_fhir_builder_test.go`
+(derive → `fhir.build` ×N → `payload.builder` → `fhir_validation` strict, zero unexpected errors),
+`controllers/sync_pharmacy_claim_controller_test.go` (4 tests: real round trip against a real Postgres-
+backed pipeline, unknown interface → 404, empty body → 400, malformed content → real error status). All
+verified via the `/go-build-check` skill plus real `go test` runs through a throwaway `docker build
+--target gobuilder` image (schemas/tests bind-mounted, image removed immediately after each use).
+
+Full-stack: real `docker-compose build app` + `up` (confirmed `ncpdptelecom/` present in the runtime
+image, clean startup, zero errors), `GET /api/ncpdp-telecom/schema/segments`/`/transactions` confirmed
+live via direct `curl` against the real running app, `POST /api/pharmacy-claim/:id/submit` confirmed
+live (404 for an unknown interface, 400 for an empty body after the proxy fix above).
+`tests/playwright/ncpdp-telecom-b1-{request,response}-to-fhir-e2e.spec.js` each drive the real "Use
+Template" click path (10 and 8 canvas nodes, matching each template's own `execution_groups`) then a
+real "Test Pipeline" run against a self-authored B1 sample, asserting real field values (`Organization.name`,
+`Patient.name`/`gender`, `Claim.status`/`identifier`/`item[].productOrService`/`.quantity`/`.net.value`,
+`ClaimResponse.outcome`/`identifier`/`disposition`) AND that `Claim.patient.reference`/
+`.provider.reference` are correctly rewritten to each referenced resource's own real bundle `fullUrl` —
+not just "the run succeeded." `tests/playwright/sync-pharmacy-claim-e2e.spec.js` (4 tests, mirroring
+`sync-claim-status-e2e.spec.js`) proves the real synchronous round trip through a real interface +
+pipeline created via the same REST endpoints the UI itself calls — this is the run that caught the
+`express.raw()` proxy bug above.
+
+Two OOB migrations (V266 request, V267 response), each transcribed programmatically (never hand-retyped
+— a Node script read the Go test source directly and `JSON.stringify`d the extracted config/script text,
+diff-verified byte-for-byte against the generated JSON before being considered done) from
+`services/ncpdp_telecom_b1_{request,response}_fhir_builder_test.go`, applied via `docker-compose run --rm
+flyway` and confirmed live via `psql` (10 and 8 execution groups respectively).
+
+### Diverse sample battery + a real bug it caught (September 2026, post-Phase-1)
+Following up on the phase's own "no free, real-world D.0 sample exists" finding, a second, harder pass
+searched again before accepting that conclusion: `apiv/dzero`'s own `spec/fixtures/b1.2_groups.request`
+IS a real, third-party test fixture, but direct byte-level inspection (comparing it against its own
+declared 56-byte `header_schema` and its own companion `.json` file) showed it's genuinely
+non-conformant — only a 31-byte header, missing `binNumber` entirely, not a byte-accurate real-world
+transmission. Run through the real pipeline anyway (as explicitly requested): the engine correctly
+rejected it with a clear, graceful error (`unsupported transaction "11" direction "request"`, from the
+fixed-width header slicing misaligning against the short input) — no crash, no silent misparse,
+confirming the parser fails safely on malformed input rather than a false negative on real production
+data (there is no such data to test against).
+
+With no usable real sample, a diverse, byte-accurate **18-scenario battery** (10 B1 requests, 8 B1
+responses) was generated via the real `ncpdptelecom/builder.BuildTransmission` itself (not hand-typed
+fixed-width strings) — multi-claim transmissions, minimal-vs-fully-populated fields, fractional
+compound quantities, prior authorization, controlled substances, zero-dollar and large-dollar claims,
+and every response outcome family (Approved/Captured/Paid/Rejected/Duplicate/Error, with and without
+pricing, single and multi-claim) — then run through the REAL running app's full FHIR-mapping pipeline
+(`POST /api/pipelines/test` against real, persisted interfaces backed by the live V266/V267 template
+config), checking both `ncpdptelecom.validate`'s own structural conformance AND `fhir_validation`'s
+strict FHIR conformance for every sample.
+
+**A real bug this found**: every rejected/duplicate/error response sample (which realistically carries
+no `ResponsePricing` segment — a denied claim isn't priced) failed `ncpdptelecom.validate` with
+"required segment ResponsePricing is missing." `ResponsePricing.json`'s own `grossAmountDue`/
+`totalAmountPaid` fields were modeled `required: true`, and the validator has no conditional-
+requirement mechanism (by design — see that package's own doc comment) to express "required only on
+approval," despite the SAME schema file's own prior sourceRefs literally saying "Response Pricing
+required on approval" without the engine actually enforcing that conditionality. Fixed by correcting
+both fields to `required: false`, consistent with the validator's own already-stated "flexible, not
+rigid, no fabricated conditional-requirement business rules" boundary — matching precedent rather than
+inventing a new conditional-segment mechanism. All 18 samples, plus the full existing suite, pass
+cleanly after the fix; zero regressions.
+
+The battery itself is now a **permanent regression guard**, not a one-off script: the 18 generated
+`.txt` fixtures live under `ncpdptelecom/testdata/generated_samples/`, and
+`ncpdptelecom/generated_samples_test.go` parses+validates every one on every test run, asserting
+`Valid: true` — a future schema/engine change that reintroduces this class of bug (or any other on
+these realistic shapes) fails loudly instead of silently.
+
+### Named future phases (not attempted this round)
+B2 (Reversal), B3, E1/E2 (Eligibility), D0/D1 (Prior Authorization), the NCPDP batch standard (STX/ETX/
+00T/G1/99 wrapping), and every named-deferred B1 segment above (DUR/PPS, Coupon, Compound, COB, Workers'
+Comp, Prior Auth, Clinical, Additional Documentation, Facility, Narrative on the request side; Response
+DUR/PPS, Response Insurance, Response Prior Auth, Response Insurance Additional Documentation, Response
+COB, Response Patient on the response side).
+
+### Key Files
+- Shared engine: `ncpdptelecom/datatypes.go`, `ncpdptelecom/schema_types.go`, `ncpdptelecom/schema_loader.go`, `ncpdptelecom/parser.go`
+- Build direction: `ncpdptelecom/builder/document_builder.go`
+- Validator: `ncpdptelecom/validator/validator.go`
+- Schema data: `ncpdptelecom/schemas/telecom_d0/{manifest.json,segments/*.json,transactions/{B1_request,B1_response}.json}`
+- Parser adapter: `services/parsers/ncpdptelecom/ncpdp_telecom_parser_service.go`
+- Pipeline steps: `services/executors/transform/ncpdptelecom_{parse,validate,build,map_to_canonical}_executor.go`
+- Schema API: `controllers/ncpdp_telecom_schema_controller.go`
+- Synchronous endpoint: `controllers/sync_pharmacy_claim_controller.go`
+- UI: `public/js/pipeline/components/NCPDPTelecomStepBuilder.js`, `ToolboxManager.js` (4 entries + icons)
+- FHIR mapping (source of truth for both migrations): `services/ncpdp_telecom_b1_request_fhir_builder_test.go`, `services/ncpdp_telecom_b1_response_fhir_builder_test.go`
+- Migrations: `database/migrations/V266__NCPDP_Telecom_B1_Request_To_FHIR_OOB_Pipeline_Template.sql`, `V267__NCPDP_Telecom_B1_Response_To_FHIR_OOB_Pipeline_Template.sql`
+- Proxy fix: `app.js` (`express.raw()` content-type list)
+- Full browser click-path E2E: `tests/playwright/ncpdp-telecom-b1-request-to-fhir-e2e.spec.js`, `ncpdp-telecom-b1-response-to-fhir-e2e.spec.js`, `sync-pharmacy-claim-e2e.spec.js`
+- Diverse sample battery (permanent regression guard, source of the `ResponsePricing` bug fix): `ncpdptelecom/testdata/generated_samples/*.txt` (18 files), `ncpdptelecom/generated_samples_test.go`
+
+## Real Third-Party Sample Battery — NCPDP SCRIPT (33 fixtures) + a D.0 Bonus Find (September 2026)
+
+### Why it exists
+Following the D.0 sample-battery round above, the user asked the natural follow-up: what about SCRIPT (the "non-D.0" NCPDP format)? A harder, more targeted search than the one that originally built SCRIPT Phase 1 found **`cosyte/ncpdp`'s own `test/fixtures/` directory** — MIT-licensed (unlike `dzero`/`eduardonunesp`, both `license:null`), containing 33 real SCRIPT XML fixtures spanning 10 of the 12 transaction types this engine supports (only `RxFill`/`GetMessage` are absent — `cosyte` itself doesn't structurally model RxFill, matching this engine's own earlier finding), plus 3 real `.ncpdp` (Telecommunication D.0) fixtures — a genuine, unexpected second real source for the format this project had already concluded had none.
+
+### Sourcing discipline, applied consistently
+Same "real fixture, test-only, sourceRefs documented" precedent already established for EDI X12's own real-sample rounds (Databricks 837 samples, X12.org's own examples) — all 33 SCRIPT fixtures vendored to `ncpdp/testdata/real_samples/cosyte/`, all 3 D.0 fixtures to `ncpdptelecom/testdata/real_samples/`, both with a permanent regression test proving the engine still handles them correctly on every future change.
+
+### Goal 1 (process every message): 100% — zero parse failures across all 33 real SCRIPT fixtures
+Every single fixture parsed successfully via `ncpdp.ParseMessage`, including deliberately-adversarial ones (`legacy-version.xml` — SCRIPT v10.6 with an empty `<NewRx/>` body; `newrx-no-version.xml` — no version attribute at all; a root element using an XML namespace `xmlns="http://www.ncpdp.org/schema/SCRIPT"` rather than this engine's own `TransactionDomain="SCRIPT"` detection convention — confirmed harmless since `ParseMessage` itself never inspects that attribute, only `format_detector.go`'s own auto-detection heuristic does, and that heuristic wasn't exercised by this direct-engine-call battery). This is the core "process every message" claim, fully proven against real, independently-authored data.
+
+### 3 real bugs found and fixed — all genuine structural mismatches between the schema's original sourcing and real wire data, none of them fabricated
+1. **`CodedElement`'s Code/Qualifier: two real, independent sources genuinely disagree, and both are right.** `dgoradia/ncpdp`'s own real NewRx sample (this schema's original source) uses `<ProductCode><Code>62135012230</Code><Qualifier>ND</Qualifier></ProductCode>` (nested sub-elements). `cosyte/ncpdp`'s own fixtures use `<ProductCode Qualifier="ND">00093505601</ProductCode>` (code as the element's own text content, qualifier as an XML attribute) — confirmed deliberate, not a fixture typo, since `newrx-coded-and-strength.xml` uses BOTH shapes in the SAME message (`ProductCode` attribute-form, sibling `DrugDBCode` nested-form). Fixed generically (not a `ProductCode`-specific hack): `NCPDPFieldDef` gained a `FallbackXPath` field, tried on PARSE ONLY when the primary `XPath` resolves to nothing. The special value `"."` means "the anchor element's own text content" — handled directly in `parser.go`'s `extractValue` (bypassing `xmlpath`'s own segment walk, which has no "self" concept) rather than polluting the shared `xmlpath` package with NCPDP-specific semantics. Build/serialize direction is unchanged — always emits the nested form both sources agree is valid.
+2. **`MedicationPrescribed`'s `quantity`/`writtenDate`/`sig` were required=true UNCONDITIONALLY, shared by reference across NewRx AND CancelRx/RxChangeRequest/RxRenewalRequest/RxFill alike** — but a real `cancelrx-request.xml` sample confirmed a cancellation legitimately carries only `DrugDescription`+`DrugCoded` (enough to IDENTIFY the prescription being cancelled), no quantity/dates/sig, since no new prescribing order is being created. This engine has no per-transaction-reference override for a shared group's own internal required flags (matching the exact same class of gap the D.0 `ResponsePricing` fix above already hit) — rather than build that machinery, relaxed to `required: false`, the same "flexible, not rigid" precedent. NewRx's own real fixtures (both `dgoradia`'s sample and `cosyte`'s own `newrx-basic.xml`) still populate all 3 in practice, so real NewRx messages validate cleanly regardless.
+3. **CancelRxResponse/RxChangeResponse/RxRenewalResponse's own 6 outcome groups (Approved/Denied/DenyNewToFollow/ApprovedWithChanges/Validated/Replace) are nested one level deeper than originally modeled** — real wire XML is `<CancelRxResponse><Response><Approved>...`, not `<CancelRxResponse><Approved>...` directly. The original sourcing (`cosyte/ncpdp`'s own `lifecycle.ts` TypeScript type definitions) reflected that LIBRARY's own flattened in-memory data model, which drops the `<Response>` wrapper during its own parsing — a real, confirmed lesson that a library's TYPE DEFINITIONS and its ACTUAL WIRE-FORMAT FIXTURES can genuinely disagree, and only the fixtures are authoritative for structure. Fixed with a new shared `ResponseWrapper` group (`xmlElement: "Response"`, containing the 6 outcome group refs), referenced once by each of the 3 response transaction schemas instead of each one re-declaring the 6 refs at its own top level. **This bug was ALSO present, self-consistently, in this project's own self-authored Go-test fixtures** (`cancel_rx_response_denied_sample.xml`, `rx_change_response_approved_with_changes_sample.xml`, `rx_renewal_response_approved_sample.xml` — all 3 lacked the wrapper too, matching this project's own repeatedly-documented "test artifact self-consistent with a wrong assumption, invisible until real data arrives" pattern) — all 3 fixed alongside the schema, plus the 3 corresponding Go round-trip tests' own assertions (which read `result.Body["approved"]` etc. directly) updated to read `result.Body["response"]["approved"]`, plus the 3 live migrations (V260/V262/V264) re-applied directly via `psql` after `flyway repair` (same-session, minutes-old edits — matching the established re-apply-safety precedent).
+
+### Goal 2 (FHIR mapping conformance): 15 of 16 real, FHIR-mapped fixtures pass cleanly; the 1 "failure" is a deliberately-constructed edge case
+Of the 33 real fixtures, 15 map to one of the 7 SCRIPT transaction types with an OOB FHIR template (NewRx ×3, CancelRx, CancelRxResponse ×2, RxChangeRequest, RxChangeResponse ×2, RxRenewalRequest, RxRenewalResponse ×6) and validate cleanly at the NCPDP level — every one of these, run through the REAL running app's real Test Pipeline against a real, persisted interface+pipeline backed by each template's own live config, produced a strict-FHIR-conformant Bundle with zero unexpected errors. The 16th (`rxrenewal-response-no-outcome.xml`) fails `Task.status: required field 'status' is missing` — but its own embedded `<Note>` literally reads "Response carried no recognized outcome choice," deliberately testing the no-outcome case. The engine correctly refuses to fabricate a status rather than guess — this is proof the mapping is honest, not a bug.
+
+### The D.0 bonus find: still no complete, spec-conformant sample exists — 2 more real fixtures confirm it, don't contradict it
+`cosyte/ncpdp`'s own `test/fixtures/telecom/*.ncpdp` (3 files) were checked too, in the same pass. `pbm-reject-unknown.ncpdp`/`pbm-response-dur.ncpdp` are both shorter than the real 56-byte header (cosyte's own minimal unit-test snippets, not full messages) — the engine correctly rejects both with a clear, graceful error, never a crash. `pbm-person-code.ncpdp` IS byte-length-conformant (a genuine, real 56-byte header) but is missing real-world-required segments (`PharmacyProvider`, `Pricing`) and fields (`patientLastName`, `datePrescriptionWritten`) — `cosyte`'s own test focus was narrowly "person code" parsing, not a complete realistic claim. All 3 findings are now a permanent regression test (`ncpdptelecom/real_cosyte_fixtures_test.go`) proving this exact behavior (2 graceful rejections + 1 correctly-flagged-incomplete parse) rather than a one-time assertion.
+
+### Verification
+Go: `ncpdp/real_cosyte_fixtures_test.go` (33 real fixtures, 0 parse failures asserted unconditionally, `Valid: true` asserted for an explicit, individually-confirmed 18-fixture allowlist — the rest are deliberately-incomplete edge cases, logged not asserted), `ncpdptelecom/real_cosyte_fixtures_test.go` (3 real fixtures, the exact 3-way behavior above). Full `ncpdp`/`ncpdp/validator`/`ncpdptelecom`/`ncpdptelecom/validator`/`services` suites re-run after every fix with zero regressions — including 3 pre-existing round-trip tests (`TestCancelRxResponse_SelfAuthoredSample_DeniedOutcome_ParseAndRoundTrip` and its RxChangeResponse/RxRenewalResponse siblings) whose OWN assertions needed updating for the new `response.` nesting level, caught immediately by this same regression run, not silently left broken.
+
+Full-stack: real `docker-compose build app` + restart (twice, once per fix batch) confirmed each fix live; a throwaway Node harness created 7 real interfaces+pipelines from the live V258-V264 template configs and ran all 15 applicable real fixtures through the actual `POST /api/pipelines/test` endpoint — the same mechanism `tests/playwright/ncpdp-*-to-fhir-e2e.spec.js` already uses, just driven directly rather than through a browser, since this was a many-sample sweep rather than a single click-path proof. All 3 fixed migrations (V260/V262/V264) confirmed live via `psql`. Throwaway interfaces deactivated + soft-deleted after verification.
+
+### Key Files
+- Engine fix (generic, not `ProductCode`-specific): `ncpdp/schema_types.go` (`NCPDPFieldDef.FallbackXPath`), `ncpdp/parser.go` (`extractValue`'s `"."` self-reference handling)
+- Schema fixes: `ncpdp/schemas/script_2017071/groups/CodedElement.json`, `MedicationPrescribed.json`, `ResponseWrapper.json` (new), `manifest.json` (registration), `transactions/{CancelRxResponse,RxChangeResponse,RxRenewalResponse}.json`
+- Self-authored fixture fixes (found to share the SAME bug as the schema): `ncpdp/testdata/self_authored/{cancel_rx_response_denied_sample.xml,rx_change_response_approved_with_changes_sample.xml,rx_renewal_response_approved_sample.xml}`
+- Go test fixes: `ncpdp/lifecycle_roundtrip_test.go` (3 assertion updates), `services/ncpdp_{cancelrx_response,rxchangeresponse,rxrenewalresponse}_fhir_builder_test.go` (condition field path updates, source of truth for the 3 re-applied migrations)
+- Migrations re-applied live: `database/migrations/V260__NCPDP_CancelRxResponse_To_FHIR_OOB_Pipeline_Template.sql`, `V262__NCPDP_RxChangeResponse_To_FHIR_OOB_Pipeline_Template.sql`, `V264__NCPDP_RxRenewalResponse_To_FHIR_OOB_Pipeline_Template.sql`
+- Real fixtures + permanent regression tests: `ncpdp/testdata/real_samples/cosyte/*.xml` (33 files) + `ncpdp/real_cosyte_fixtures_test.go`; `ncpdptelecom/testdata/real_samples/*.ncpdp` (3 files) + `ncpdptelecom/real_cosyte_fixtures_test.go`

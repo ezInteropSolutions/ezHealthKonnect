@@ -1,0 +1,30 @@
+{
+  "key": "Insurance",
+  "identifier": "04",
+  "name": "Insurance",
+  "fields": [
+    { "key": "cardholderId", "fieldId": "C2", "name": "Cardholder ID", "dataType": "AN", "required": true },
+    { "key": "cardholderFirstName", "fieldId": "CC", "name": "Cardholder First Name", "dataType": "AN", "required": false },
+    { "key": "cardholderLastName", "fieldId": "CD", "name": "Cardholder Last Name", "dataType": "AN", "required": false },
+    { "key": "homePlan", "fieldId": "CE", "name": "Home Plan", "dataType": "AN", "required": false },
+    { "key": "planId", "fieldId": "FO", "name": "Plan ID", "dataType": "AN", "required": false },
+    { "key": "eligibilityClarificationCode", "fieldId": "C9", "name": "Eligibility Clarification Code", "dataType": "AN", "required": false },
+    { "key": "groupId", "fieldId": "C1", "name": "Group ID", "dataType": "AN", "required": false },
+    { "key": "personCode", "fieldId": "C3", "name": "Person Code", "dataType": "AN", "required": false },
+    { "key": "patientRelationshipCode", "fieldId": "C6", "name": "Patient Relationship Code", "dataType": "AN", "required": false },
+    { "key": "otherPayerBinNumber", "fieldId": "MG", "name": "Other Payer BIN Number", "dataType": "AN", "required": false },
+    { "key": "otherPayerProcessorControlNumber", "fieldId": "MH", "name": "Other Payer Processor Control Number", "dataType": "AN", "required": false },
+    { "key": "otherPayerCardholderId", "fieldId": "NU", "name": "Other Payer Cardholder ID", "dataType": "AN", "required": false },
+    { "key": "otherPayerGroupId", "fieldId": "MJ", "name": "Other Payer Group ID", "dataType": "AN", "required": false },
+    { "key": "medigapId", "fieldId": "2A", "name": "Medigap ID", "dataType": "AN", "required": false },
+    { "key": "medicaidIndicator", "fieldId": "2B", "name": "Medicaid Indicator", "dataType": "AN", "required": false },
+    { "key": "providerAcceptAssignmentIndicator", "fieldId": "2D", "name": "Provider Accept Assignment Indicator", "dataType": "AN", "required": false },
+    { "key": "cmsPartDDefinedQualifiedFacility", "fieldId": "G2", "name": "CMS Part D Defined Qualified Facility", "dataType": "AN", "required": false },
+    { "key": "medicaidIdNumber", "fieldId": "N5", "name": "Medicaid ID Number", "dataType": "AN", "required": false },
+    { "key": "medicaidAgencyNumber", "fieldId": "N6", "name": "Medicaid Agency Number", "dataType": "AN", "required": false }
+  ],
+  "sourceRefs": [
+    "apiv/dzero lib/dzero/segments/04_insurance.rb (field-id-to-symbol dictionary, read directly) cross-confirmed against eduardonunesp/ncpdp-telecom-fmt-book docs/segments-reference.md's own official NCPDP field reference numbers (302/312/313/314/524/309/301/303/306/990/991/356/992/359/360/361/997/115/116).",
+    "cardholderId modeled required -- both sources' own worked B1 examples always populate it; the segment's real-world purpose (eligibility lookup) is meaningless without it."
+  ]
+}

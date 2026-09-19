@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>SurescriptsTestPrescriber</To>
+    <From>SurescriptsTestPharmacy</From>
+    <MessageID>SYNTH-MSG-0402</MessageID>
+    <RelatesToMessageID>SYNTH-MSG-0401</RelatesToMessageID>
+    <SentTime>2026-02-03T08:30:00Z</SentTime>
+  </Header>
+  <Body>
+    <CancelRxResponse>
+      <RequestReferenceNumber>SYNTH-REF-0401</RequestReferenceNumber>
+      <Response>
+        <Approved>
+          <Note>Prescription cancelled; not yet dispensed.</Note>
+        </Approved>
+      </Response>
+    </CancelRxResponse>
+  </Body>
+</Message>

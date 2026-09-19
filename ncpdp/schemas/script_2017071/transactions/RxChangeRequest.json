@@ -1,0 +1,18 @@
+{
+  "key": "RxChangeRequest",
+  "name": "Prescription Change Request",
+  "fields": [
+    { "key": "requestReferenceNumber", "xpath": "RequestReferenceNumber", "name": "Request Reference Number", "dataType": "string", "required": false }
+  ],
+  "groups": [
+    { "key": "patient", "groupKey": "Patient", "xmlElement": "Patient", "required": true, "repeatable": false },
+    { "key": "pharmacy", "groupKey": "Pharmacy", "xmlElement": "Pharmacy", "required": false, "repeatable": false },
+    { "key": "prescriber", "groupKey": "Prescriber", "xmlElement": "Prescriber", "required": true, "repeatable": false },
+    { "key": "medicationPrescribed", "groupKey": "MedicationPrescribed", "xmlElement": "MedicationPrescribed", "required": true, "repeatable": false }
+  ],
+  "elementOrder": ["RequestReferenceNumber", "Patient", "Pharmacy", "Prescriber", "MedicationPrescribed"],
+  "sourceRefs": [
+    "cosyte/ncpdp src/script/lifecycle.ts (LifecycleRequestFields: requestReferenceNumber?, patient?, pharmacy?, prescriber?, medicationPrescribed? — RxChangeRequest extends this unchanged, IDENTICAL shape to CancelRx per that library's own explicit design note: 'All request and response body shapes share identical field structures—no specialized fields exist for specific transaction types').",
+    "NAMED GAP, not silently omitted: the real NCPDP SCRIPT IG's RxChangeRequest almost certainly carries a change-reason/type indicator (Generic Substitution, Therapeutic Interchange, Prior Authorization, Drug Use Evaluation, Out of Stock, Script Clarification, etc.), each with its own sub-schema — but neither source available for this phase (the real dgoradia sample, which is NewRx-only, or the cosyte cross-reference, which deliberately unifies all 6 lifecycle bodies) confirms the real element name(s) or structure for it. Fabricating a field/tag name without confirmation would violate this project's own no-invented-structure discipline. Deferred pending a real RxChangeRequest sample or paid IG access — medicationPrescribed alone carries the proposed replacement drug, which covers the common case."
+  ]
+}

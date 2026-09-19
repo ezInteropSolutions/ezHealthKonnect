@@ -1,0 +1,14 @@
+{
+  "key": "NewRx",
+  "name": "New Prescription",
+  "groups": [
+    { "key": "patient", "groupKey": "Patient", "xmlElement": "Patient", "required": true, "repeatable": false },
+    { "key": "pharmacy", "groupKey": "Pharmacy", "xmlElement": "Pharmacy", "required": false, "repeatable": false },
+    { "key": "prescriber", "groupKey": "Prescriber", "xmlElement": "Prescriber", "required": true, "repeatable": false },
+    { "key": "medicationPrescribed", "groupKey": "MedicationPrescribed", "xmlElement": "MedicationPrescribed", "required": true, "repeatable": false }
+  ],
+  "elementOrder": ["Patient", "Pharmacy", "Prescriber", "MedicationPrescribed"],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, full Body/NewRx structure) — complete, real, unedited sample used verbatim as ground truth for this transaction definition."
+  ]
+}

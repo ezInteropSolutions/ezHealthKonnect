@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>SurescriptsTestPharmacy</To>
+    <From>SurescriptsTestPrescriber</From>
+    <MessageID>SYNTH-MSG-0205</MessageID>
+    <RelatesToMessageID>SYNTH-MSG-0201</RelatesToMessageID>
+    <SentTime>2026-02-01T15:20:00Z</SentTime>
+  </Header>
+  <Body>
+    <RxRenewalResponse>
+      <RequestReferenceNumber>SYNTH-REF-0201</RequestReferenceNumber>
+      <Response>
+        <Approved>
+          <Note>Granted.</Note>
+        </Approved>
+        <Denied>
+          <ReasonCode>AT</ReasonCode>
+        </Denied>
+      </Response>
+    </RxRenewalResponse>
+  </Body>
+</Message>

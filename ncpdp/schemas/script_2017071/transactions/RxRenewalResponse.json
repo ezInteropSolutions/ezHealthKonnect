@@ -1,0 +1,17 @@
+{
+  "key": "RxRenewalResponse",
+  "name": "Prescription Renewal Response",
+  "fields": [
+    { "key": "requestReferenceNumber", "xpath": "RequestReferenceNumber", "name": "Request Reference Number", "dataType": "string", "required": false }
+  ],
+  "groups": [
+    { "key": "response", "groupKey": "ResponseWrapper", "xmlElement": "Response", "required": false, "repeatable": false },
+    { "key": "medicationPrescribed", "groupKey": "MedicationPrescribed", "xmlElement": "MedicationPrescribed", "required": false, "repeatable": false }
+  ],
+  "elementOrder": ["RequestReferenceNumber", "Response", "MedicationPrescribed"],
+  "sourceRefs": [
+    "cosyte/ncpdp src/script/lifecycle.ts — RxRenewalResponse extends LifecycleResponseFields with ZERO additional fields of its own; detectOutcome()'s OUTCOME_ELEMENTS constant is shared verbatim across RxRenewalResponse/RxChangeResponse/CancelRxResponse (same 6 outcome elements, same fail-safe denial-first precedence order) — the exact same shape already built and verified for CancelRxResponse/RxChangeResponse (see those files' own sourceRefs). DenyNewToFollow is semantically most natural for a RENEWAL response specifically (\"denied, a new prescription will follow separately\" — cosyte's own doc comment) but the type is shared identically across all 3 lifecycle response kinds, so it is modeled here unchanged rather than renamed.",
+    "medicationPrescribed's presence/placement for an ApprovedWithChanges outcome carries the same not-fully-confirmed caveat already noted in CancelRxResponse.json/RxChangeResponse.json — modeled as a top-level optional field per the same source.",
+    "CORRECTED 2026-09-19: the 6 outcome groups moved from direct children of RxRenewalResponse to nested one level deeper inside the shared `ResponseWrapper` group (xmlElement 'Response') — see ResponseWrapper.json's own sourceRefs for the full real-fixture-driven correction record (found via 6 real rxrenewal-response-*.xml fixtures, every one nesting its own outcome under `<Response>`)."
+  ]
+}

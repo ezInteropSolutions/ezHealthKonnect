@@ -1,0 +1,17 @@
+{
+  "key": "RxChangeResponse",
+  "name": "Prescription Change Response",
+  "fields": [
+    { "key": "requestReferenceNumber", "xpath": "RequestReferenceNumber", "name": "Request Reference Number", "dataType": "string", "required": false }
+  ],
+  "groups": [
+    { "key": "response", "groupKey": "ResponseWrapper", "xmlElement": "Response", "required": false, "repeatable": false },
+    { "key": "medicationPrescribed", "groupKey": "MedicationPrescribed", "xmlElement": "MedicationPrescribed", "required": false, "repeatable": false }
+  ],
+  "elementOrder": ["RequestReferenceNumber", "Response", "MedicationPrescribed"],
+  "sourceRefs": [
+    "cosyte/ncpdp src/script/lifecycle.ts — same LifecycleResponseFields/OUTCOME_ELEMENTS source as CancelRxResponse; RxChangeResponse shares the IDENTICAL outcome-choice shape per that library's own unified design.",
+    "For RxChangeResponse specifically, medicationPrescribed (when present, typically alongside an ApprovedWithChanges outcome) represents the prescriber's actually-approved/modified medication — the same named-gap caveat as CancelRxResponse.json applies to its exact positional relationship to the outcome choice.",
+    "CORRECTED 2026-09-19: the 6 outcome groups moved from direct children of RxChangeResponse to nested one level deeper inside the shared `ResponseWrapper` group (xmlElement 'Response') — see ResponseWrapper.json's own sourceRefs for the full real-fixture-driven correction record (found via a real rxchange-response-validated.xml fixture whose own `<Validated>` outcome is nested under `<Response>`, not a direct child)."
+  ]
+}

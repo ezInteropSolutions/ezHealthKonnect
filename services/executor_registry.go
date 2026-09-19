@@ -164,6 +164,20 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(transform.NewEDIBuildExecutor())            // edi.build
 	er.Register(transform.NewEDIGenerate999Executor())      // edi.generate_999
 
+	// NCPDP SCRIPT transform executors (pharmacy e-prescribing, Phase 1:
+	// NewRx, CancelRx, CancelRxResponse, RxChangeRequest, RxChangeResponse)
+	er.Register(transform.NewNCPDPParseExecutor())          // ncpdp.parse
+	er.Register(transform.NewNCPDPValidateExecutor())       // ncpdp.validate
+	er.Register(transform.NewNCPDPMapToCanonicalExecutor()) // ncpdp.map_to_canonical
+	er.Register(transform.NewNCPDPBuildExecutor())          // ncpdp.build
+
+	// NCPDP Telecommunication D.0 transform executors (real-time pharmacy
+	// claims, Phase 1: B1 Claim Billing request/response)
+	er.Register(transform.NewNCPDPTelecomParseExecutor())          // ncpdptelecom.parse
+	er.Register(transform.NewNCPDPTelecomValidateExecutor())       // ncpdptelecom.validate
+	er.Register(transform.NewNCPDPTelecomMapToCanonicalExecutor()) // ncpdptelecom.map_to_canonical
+	er.Register(transform.NewNCPDPTelecomBuildExecutor())          // ncpdptelecom.build
+
 	// FHIR transform executors
 	er.Register(transform.NewFHIRBuildExecutor()) // fhir.build
 

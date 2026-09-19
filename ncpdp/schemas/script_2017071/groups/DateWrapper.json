@@ -1,0 +1,11 @@
+{
+  "key": "DateWrapper",
+  "xmlElement": "WrittenDate",
+  "name": "Date Wrapper",
+  "fields": [
+    { "key": "date", "xpath": "Date", "name": "Date", "dataType": "date", "required": true }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, DateOfBirth/WrittenDate/OtherMedicationDate all share this <X><Date>CCYY-MM-DD</Date></X> shape)"
+  ]
+}

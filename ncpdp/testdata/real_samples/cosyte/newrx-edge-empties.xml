@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <MessageID>SYNTH-MSG-0007</MessageID>
+  </Header>
+  <Body>
+    <NewRx>
+      <Patient>
+        <HumanPatient>
+          <Name>
+            <LastName>Edgecase</LastName>
+          </Name>
+          <Gender></Gender>
+          <DateOfBirth></DateOfBirth>
+        </HumanPatient>
+      </Patient>
+      <Pharmacy>
+        <BusinessName></BusinessName>
+      </Pharmacy>
+      <MedicationPrescribed>
+        <DrugDescription>Synthetic Empty-Field 1 MG</DrugDescription>
+        <DrugCoded>
+          <ProductCode Qualifier="ND"></ProductCode>
+          <DrugDBCode>
+            <Code>198440</Code>
+            <Qualifier>RXNORM</Qualifier>
+          </DrugDBCode>
+        </DrugCoded>
+        <Quantity>
+          <Value>20</Value>
+          <QuantityUnitOfMeasure></QuantityUnitOfMeasure>
+        </Quantity>
+        <WrittenDate></WrittenDate>
+      </MedicationPrescribed>
+    </NewRx>
+  </Body>
+</Message>

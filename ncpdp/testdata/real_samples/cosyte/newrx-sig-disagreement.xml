@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic Tier-2 fixture: the structured SIG and the free-text SigText
+  DISAGREE. Free text says "2 tablets ... at bedtime"; the structured view says
+  dose "1" and timing "every morning". The parser must surface BOTH verbatim and
+  never reconcile them. Fully synthetic, no real PHI.
+-->
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2023011">
+  <Header>
+    <MessageID>SYNTH-MSG-SIG-03</MessageID>
+  </Header>
+  <Body>
+    <NewRx>
+      <MedicationPrescribed>
+        <DrugDescription>Synthetic Tablet 5 MG Oral Tablet</DrugDescription>
+        <Sig>
+          <SigText>Take 2 tablets by mouth at bedtime.</SigText>
+          <Instruction>
+            <DoseAdministration>
+              <Dose>
+                <DoseQuantity>1</DoseQuantity>
+                <DoseUnitOfMeasure>
+                  <Text>tablet</Text>
+                </DoseUnitOfMeasure>
+              </Dose>
+            </DoseAdministration>
+            <AdministrationTiming>
+              <Text>every morning</Text>
+            </AdministrationTiming>
+          </Instruction>
+        </Sig>
+      </MedicationPrescribed>
+    </NewRx>
+  </Body>
+</Message>

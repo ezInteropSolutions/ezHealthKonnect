@@ -1,0 +1,30 @@
+{
+  "version": "D0",
+  "headerFields": [
+    { "key": "binNumber", "name": "BIN Number", "dataType": "AN", "width": 6, "required": true },
+    { "key": "version", "name": "Version/Release Number", "dataType": "AN", "width": 2, "required": true },
+    { "key": "transactionCode", "name": "Transaction Code", "dataType": "AN", "width": 2, "required": true },
+    { "key": "processorControlNumber", "name": "Processor Control Number", "dataType": "AN", "width": 10, "required": false },
+    { "key": "transactionCount", "name": "Transaction Count", "dataType": "N", "width": 1, "required": true },
+    { "key": "serviceProviderIdQualifier", "name": "Service Provider ID Qualifier", "dataType": "AN", "width": 2, "required": true },
+    { "key": "serviceProviderId", "name": "Service Provider ID", "dataType": "AN", "width": 15, "required": true },
+    { "key": "dateOfService", "name": "Date of Service", "dataType": "DT", "width": 8, "required": true },
+    { "key": "softwareVendorCertificationId", "name": "Software Vendor/Certification ID", "dataType": "AN", "width": 10, "required": false }
+  ],
+  "segments": {
+    "Patient": "segments/Patient.json",
+    "PharmacyProvider": "segments/PharmacyProvider.json",
+    "Prescriber": "segments/Prescriber.json",
+    "Insurance": "segments/Insurance.json",
+    "Claim": "segments/Claim.json",
+    "Pricing": "segments/Pricing.json",
+    "ResponseMessage": "segments/ResponseMessage.json",
+    "ResponseStatus": "segments/ResponseStatus.json",
+    "ResponseClaim": "segments/ResponseClaim.json",
+    "ResponsePricing": "segments/ResponsePricing.json"
+  },
+  "transactions": {
+    "B1_request": { "file": "transactions/B1_request.json" },
+    "B1_response": { "file": "transactions/B1_response.json" }
+  }
+}

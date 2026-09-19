@@ -1,0 +1,17 @@
+{
+  "key": "CancelRxResponse",
+  "name": "Cancel Prescription Response",
+  "fields": [
+    { "key": "requestReferenceNumber", "xpath": "RequestReferenceNumber", "name": "Request Reference Number", "dataType": "string", "required": false }
+  ],
+  "groups": [
+    { "key": "response", "groupKey": "ResponseWrapper", "xmlElement": "Response", "required": false, "repeatable": false },
+    { "key": "medicationPrescribed", "groupKey": "MedicationPrescribed", "xmlElement": "MedicationPrescribed", "required": false, "repeatable": false }
+  ],
+  "elementOrder": ["RequestReferenceNumber", "Response", "MedicationPrescribed"],
+  "sourceRefs": [
+    "cosyte/ncpdp src/script/lifecycle.ts — LifecycleResponseFields (requestReferenceNumber?, outcome, reason?, medicationPrescribed?) and detectOutcome()'s OUTCOME_ELEMENTS constant confirm the exact 6 outcome element names and their fail-safe precedence order (denials checked first). Exactly one of the 6 outcome groups is expected to be present on any real response — this schema doesn't enforce mutual exclusion (matches this engine's own established 'trust the caller/source data, don't police cross-field business rules structurally' precedent, e.g. the CDA choice-constraint scope boundary).",
+    "medicationPrescribed's presence/placement specifically for an ApprovedWithChanges outcome (a revised prescription) vs. a plain field always available regardless of outcome is NOT fully confirmed by this cross-reference alone (its own field is at the response's top level, not nested inside a specific outcome element) — modeled here as a top-level optional field per that same source. Revisit against a real ApprovedWithChanges sample if one is sourced.",
+    "CORRECTED 2026-09-19: the 6 outcome groups moved from direct children of CancelRxResponse to nested one level deeper inside a shared `ResponseWrapper` group (xmlElement 'Response') — see ResponseWrapper.json's own sourceRefs for the full real-fixture-driven correction record. cosyte/ncpdp's own lifecycle.ts type definitions (this file's original source) reflect that LIBRARY's flattened in-memory model, not the real `<CancelRxResponse><Response><Approved>...` wire shape its own test fixtures actually use."
+  ]
+}

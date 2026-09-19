@@ -1,0 +1,13 @@
+{
+  "key": "SenderSoftware",
+  "xmlElement": "SenderSoftware",
+  "name": "Sender Software",
+  "fields": [
+    { "key": "senderSoftwareDeveloper", "xpath": "SenderSoftwareDeveloper", "name": "Sender Software Developer", "dataType": "string", "required": true },
+    { "key": "senderSoftwareProduct", "xpath": "SenderSoftwareProduct", "name": "Sender Software Product", "dataType": "string", "required": true },
+    { "key": "senderSoftwareVersionRelease", "xpath": "SenderSoftwareVersionRelease", "name": "Sender Software Version/Release", "dataType": "string", "required": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Header/SenderSoftware)"
+  ]
+}

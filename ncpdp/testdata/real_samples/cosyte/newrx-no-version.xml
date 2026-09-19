@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message>
+  <Header>
+    <MessageID>SYNTH-MSG-0003</MessageID>
+  </Header>
+  <Body>
+    <NewRx>
+      <MedicationPrescribed>
+        <DrugDescription>Metformin 500 MG Oral Tablet</DrugDescription>
+        <Quantity>
+          <Value>60</Value>
+        </Quantity>
+        <DaysSupply>30</DaysSupply>
+      </MedicationPrescribed>
+    </NewRx>
+  </Body>
+</Message>

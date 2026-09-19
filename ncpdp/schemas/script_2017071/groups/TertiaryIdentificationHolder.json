@@ -1,0 +1,11 @@
+{
+  "key": "TertiaryIdentificationHolder",
+  "xmlElement": "Sender",
+  "name": "Tertiary Identification Holder",
+  "fields": [
+    { "key": "tertiaryIdentification", "xpath": "TertiaryIdentification", "name": "Tertiary Identification", "dataType": "string", "required": true }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Header/Security/Sender and /Receiver share this shape)"
+  ]
+}

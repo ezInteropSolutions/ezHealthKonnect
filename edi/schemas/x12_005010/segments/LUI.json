@@ -1,0 +1,36 @@
+{
+  "id": "LUI",
+  "name": "Language Use",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "identificationCodeQualifier",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "identificationCode",
+      "dataType": "AN"
+    },
+    {
+      "pos": "03",
+      "key": "description",
+      "dataType": "AN"
+    },
+    {
+      "pos": "04",
+      "key": "useOfLanguageIndicator",
+      "dataType": "ID"
+    },
+    {
+      "pos": "05",
+      "key": "languageProficiencyIndicator",
+      "dataType": "ID"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/LUI) — 834's 2100A Member loop, preferred/spoken-language detail."
+  ]
+}

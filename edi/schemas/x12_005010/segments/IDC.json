@@ -1,0 +1,31 @@
+{
+  "id": "IDC",
+  "name": "Identification Card",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "planCoverageDescription",
+      "dataType": "AN"
+    },
+    {
+      "pos": "02",
+      "key": "identificationCardTypeCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "03",
+      "key": "quantity",
+      "dataType": "R"
+    },
+    {
+      "pos": "04",
+      "key": "actionCode",
+      "dataType": "ID"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/IDC) — 834's 2300 Health Coverage loop, a request to issue/reissue a physical ID card for this plan enrollment."
+  ]
+}

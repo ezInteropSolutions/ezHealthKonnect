@@ -1,0 +1,31 @@
+{
+  "id": "COB",
+  "name": "Coordination of Benefits",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "payerResponsibilitySequenceNumberCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "referenceIdentification",
+      "dataType": "AN"
+    },
+    {
+      "pos": "03",
+      "key": "coordinationOfBenefitsCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "04",
+      "key": "serviceTypeCode",
+      "dataType": "ID"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/COB) — 834's 2320 Coordination of Benefits loop, identifying this member's OTHER (non-primary) coverage and how it coordinates with the plan being enrolled here."
+  ]
+}

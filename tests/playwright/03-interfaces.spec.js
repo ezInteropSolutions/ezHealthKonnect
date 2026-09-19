@@ -72,7 +72,13 @@ test.describe('Interfaces', () => {
     // ── TC-IFACE-006 ─────────────────────────────────────────────────────────────
     test('TC-IFACE-006 wizard step 1 has an interface name input', async ({ page }) => {
         await openWizard(page);
-        const nameInput = page.locator('#wizardInterfaceName, input[name*="name"], input[placeholder*="name"], #interfaceName, #name').first();
+        // Scoped to #wizardModalOverlay, not a page-wide selector -- confirmed via direct
+        // inspection that a SECOND, hidden element sharing id="interfaceName" also exists in
+        // this page's own DOM once the wizard is open (from other dynamically-rendered UI on
+        // the same page, not this wizard). .first() picks DOM order, not visibility, so an
+        // unscoped selector can silently grab the wrong, hidden element instead of the
+        // wizard's own real, visible field.
+        const nameInput = page.locator('#wizardModalOverlay').locator('#wizardInterfaceName, input[name*="name"], input[placeholder*="name"], #interfaceName, #name').first();
         // Element exists in DOM but may be on a wizard step not yet visible
         await expect(nameInput).toBeAttached({ timeout: 8000 });
     });
@@ -89,8 +95,34 @@ test.describe('Interfaces', () => {
     // ── TC-IFACE-008 ─────────────────────────────────────────────────────────────
     test('TC-IFACE-008 submitting wizard step 1 with empty name shows validation', async ({ page }) => {
         await openWizard(page);
-        const nextBtn = page.locator('button').filter({ hasText: /next|continue|proceed/i }).first();
-        if (!await nextBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+        // #wizardNext (public/js/wizard/optimized/WizardView.js's own real id for
+        // the ACTUAL wizard this button opens) -- not a text filter for
+        // "next|continue|proceed" across the whole page, and not "#nextBtn" either.
+        // Two real, independent bugs were found here:
+        //  1. The interfaces LIST page's own pagination control
+        //     (public/js/interfaces.js's goToNextPage()) renders a "Next ›" button
+        //     matching the same "next" text pattern the original locator filtered
+        //     on; .filter({hasText}).first() picked up the pagination button
+        //     (behind the modal, so the click just timed out) instead of the
+        //     wizard's own Next button.
+        //  2. "#nextBtn" (tried as the fix for #1) is a DIFFERENT wizard's own id --
+        //     public/interface-wizard.html, a static page never actually linked
+        //     from interfaces.html's own "New Interface" button (confirmed via a
+        //     full grep: nothing in interfaces.html/interfaces.js references that
+        //     file at all). The wizard this button REALLY opens is the "optimized"
+        //     one (public/js/wizard/optimized/WizardView.js), whose own Next
+        //     button id is #wizardNext -- found only by tracing interfaces.html's
+        //     own <script> includes down to the file that actually builds the
+        //     modal's inner HTML, not by grepping for a plausible-looking id.
+        const nextBtn = page.locator('#wizardNext');
+        // locator.isVisible({timeout}) does NOT actually wait/retry despite taking a
+        // timeout argument -- it's a point-in-time check (only toBeVisible()-style
+        // assertions and waitFor() poll). The wizard's own inner content (including
+        // #wizardNext) renders asynchronously after the overlay itself appears, so
+        // the old isVisible({timeout: 5000}) call fired before the button existed
+        // at all and skipped every run. waitFor() actually polls for up to 5s.
+        const nextBtnAppeared = await nextBtn.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
+        if (!nextBtnAppeared) {
             test.skip();
             return;
         }
@@ -104,7 +136,9 @@ test.describe('Interfaces', () => {
             '.error, .invalid-feedback, [class*="error"], [class*="validation"]'
         ).first();
         const isValid = await validationMsg.isVisible({ timeout: 3000 }).catch(() => false);
-        const stillStep1 = await page.locator(
+        // Scoped to #wizardModalOverlay -- see TC-IFACE-006's own comment on the
+        // duplicate id="interfaceName" element elsewhere in this page's DOM.
+        const stillStep1 = await page.locator('#wizardModalOverlay').locator(
             '#wizardInterfaceName, input[name*="name"], input[placeholder*="name"], #interfaceName'
         ).first().isVisible().catch(() => false);
         expect(isValid || stillStep1).toBe(true);
@@ -268,14 +302,21 @@ test.describe('Interfaces', () => {
     // ── TC-IFACE-017 ─────────────────────────────────────────────────────────────
     test('TC-IFACE-017 filling wizard name and clicking Next advances to step 2', async ({ page }) => {
         await openWizard(page);
-        const nameInput = page.locator('#wizardInterfaceName, input[name*="name"], input[placeholder*="name"], #interfaceName, #name').first();
-        if (!await nameInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+        // Scoped to #wizardModalOverlay -- see TC-IFACE-006's own comment.
+        const nameInput = page.locator('#wizardModalOverlay').locator('#wizardInterfaceName, input[name*="name"], input[placeholder*="name"], #interfaceName, #name').first();
+        // waitFor(), not isVisible({timeout}) -- see TC-IFACE-008's own comment:
+        // isVisible() never actually polls regardless of a timeout argument.
+        const nameInputAppeared = await nameInput.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
+        if (!nameInputAppeared) {
             test.skip();
             return;
         }
         await nameInput.fill('E2E Test Interface');
-        const nextBtn = page.locator('button').filter({ hasText: /next|continue/i }).first();
-        if (await nextBtn.isVisible().catch(() => false)) {
+        // #wizardNext -- see TC-IFACE-008's own comment for why (not a page-wide
+        // text filter, and not "#nextBtn" either -- that's a different, unused
+        // wizard's own id).
+        const nextBtn = page.locator('#wizardNext');
+        if (await nextBtn.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false)) {
             await nextBtn.click();
             await page.waitForTimeout(600);
             // Step 2 should now be active — either indicator or new form fields appear
@@ -292,14 +333,24 @@ test.describe('Interfaces', () => {
     test('TC-IFACE-018 wizard Back button returns to previous step', async ({ page }) => {
         await openWizard(page);
         // Advance to step 2 first
-        const nameInput = page.locator('#wizardInterfaceName, input[name*="name"], input[placeholder*="name"], #interfaceName').first();
-        if (!await nameInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+        // Scoped to #wizardModalOverlay -- see TC-IFACE-006's own comment.
+        const nameInput = page.locator('#wizardModalOverlay').locator('#wizardInterfaceName, input[name*="name"], input[placeholder*="name"], #interfaceName').first();
+        // waitFor(), not isVisible({timeout}) -- see TC-IFACE-008's own comment:
+        // isVisible() never actually polls regardless of a timeout argument, and the
+        // wizard's own inner content (name input, Next/Back buttons) renders
+        // asynchronously after the modal overlay itself appears.
+        const nameInputAppeared = await nameInput.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
+        if (!nameInputAppeared) {
             test.skip();
             return;
         }
         await nameInput.fill('E2E Back Button Test');
-        const nextBtn = page.locator('button').filter({ hasText: /next|continue/i }).first();
-        if (!await nextBtn.isVisible().catch(() => false)) {
+        // #wizardNext/#wizardPrevious -- see TC-IFACE-008's own comment for why
+        // (not page-wide text filters, and not "#nextBtn"/"#prevBtn" either --
+        // those belong to a different, unused wizard).
+        const nextBtn = page.locator('#wizardNext');
+        const nextBtnAppeared = await nextBtn.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
+        if (!nextBtnAppeared) {
             test.skip();
             return;
         }
@@ -307,8 +358,9 @@ test.describe('Interfaces', () => {
         await page.waitForTimeout(600);
 
         // Click Back
-        const backBtn = page.locator('button').filter({ hasText: /back|previous/i }).first();
-        if (!await backBtn.isVisible().catch(() => false)) {
+        const backBtn = page.locator('#wizardPrevious');
+        const backBtnAppeared = await backBtn.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
+        if (!backBtnAppeared) {
             test.skip();
             return;
         }

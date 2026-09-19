@@ -11,6 +11,8 @@ import (
 	"ezhealthkonnect/services/parsers"
 	cdaparser "ezhealthkonnect/services/parsers/cda"
 	edix12parser "ezhealthkonnect/services/parsers/edix12"
+	ncpdpscriptparser "ezhealthkonnect/services/parsers/ncpdpscript"
+	ncpdptelecomparser "ezhealthkonnect/services/parsers/ncpdptelecom"
 )
 
 // MessageParser interface - all parsers implement this
@@ -48,6 +50,17 @@ func (pf *ParserFactory) registerParsers() {
 	// Register X12 EDI parser (835 phase 1) — gracefully skipped if schema
 	// dir is missing, same convention as the CDA parser above.
 	pf.RegisterEDIX12Parser("./edi/schemas/x12_005010")
+
+	// Register NCPDP SCRIPT (pharmacy e-prescribing) parser (Phase 1: NewRx/
+	// CancelRx/CancelRxResponse/RxChangeRequest/RxChangeResponse) —
+	// gracefully skipped if schema dir is missing, same convention as CDA/EDI above.
+	pf.RegisterNCPDPScriptParser("./ncpdp/schemas/script_2017071")
+
+	// Register NCPDP Telecommunication D.0 (real-time pharmacy claims)
+	// parser (Phase 1: B1 Claim Billing request/response) — gracefully
+	// skipped if schema dir is missing, same convention as CDA/EDI/NCPDP
+	// SCRIPT above.
+	pf.RegisterNCPDPTelecomParser("./ncpdptelecom/schemas/telecom_d0")
 
 	// Raw passthrough for every format without a dedicated structured parser.
 	// FHIR is deliberately NOT included here — it's handled entirely by
@@ -97,6 +110,39 @@ func (pf *ParserFactory) RegisterEDIX12Parser(schemaDir string) error {
 	}
 	pf.parsers[models.FormatEDI] = svc
 	log.Printf("✅ EDI X12 parser registered (schema: %s)", schemaDir)
+	return nil
+}
+
+// RegisterNCPDPScriptParser initialises and registers the NCPDP SCRIPT
+// (pharmacy e-prescribing) parser using schema files from schemaDir (e.g.
+// "./ncpdp/schemas/script_2017071"). Returns nil and logs a warning if the
+// schema directory is missing or invalid — existing HL7/CDA/EDI/FHIR
+// processing is unaffected. Mirrors RegisterEDIX12Parser/RegisterCDAParser exactly.
+func (pf *ParserFactory) RegisterNCPDPScriptParser(schemaDir string) error {
+	svc, err := ncpdpscriptparser.NewFromSchemaDir(schemaDir)
+	if err != nil {
+		log.Printf("⚠️  NCPDP SCRIPT parser not registered: %v", err)
+		return err
+	}
+	pf.parsers[models.FormatNCPDPScript] = svc
+	log.Printf("✅ NCPDP SCRIPT parser registered (schema: %s)", schemaDir)
+	return nil
+}
+
+// RegisterNCPDPTelecomParser initialises and registers the NCPDP
+// Telecommunication D.0 (real-time pharmacy claims) parser using schema
+// files from schemaDir (e.g. "./ncpdptelecom/schemas/telecom_d0"). Returns
+// nil and logs a warning if the schema directory is missing or invalid —
+// existing HL7/CDA/EDI/NCPDP SCRIPT/FHIR processing is unaffected. Mirrors
+// RegisterNCPDPScriptParser exactly.
+func (pf *ParserFactory) RegisterNCPDPTelecomParser(schemaDir string) error {
+	svc, err := ncpdptelecomparser.NewFromSchemaDir(schemaDir)
+	if err != nil {
+		log.Printf("⚠️  NCPDP Telecommunication D.0 parser not registered: %v", err)
+		return err
+	}
+	pf.parsers[models.FormatNCPDPTelecom] = svc
+	log.Printf("✅ NCPDP Telecommunication D.0 parser registered (schema: %s)", schemaDir)
 	return nil
 }
 

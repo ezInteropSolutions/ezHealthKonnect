@@ -1,0 +1,15 @@
+{
+  "key": "Status",
+  "name": "Status Acknowledgment",
+  "fields": [
+    { "key": "code", "xpath": "Code", "name": "Status Code", "dataType": "code", "required": true },
+    { "key": "descriptionCode", "xpath": "DescriptionCode", "name": "Description Code", "dataType": "code", "required": false },
+    { "key": "description", "xpath": "Description", "name": "Description", "dataType": "string", "required": false }
+  ],
+  "groups": [],
+  "elementOrder": ["Code", "DescriptionCode", "Description"],
+  "sourceRefs": [
+    "cosyte/ncpdp src/script/response.ts (ResponseFields: code?, descriptionCode?, description?; extractResponse() reads Code/DescriptionCode/Description identically for Status/Error/Verify) -- cross-confirmed against usnistgov/tcamt-2's SCRIPT_XML_10_6.xsd own <Status> element (Code with pattern 000|001|002|003|005|010, DescriptionCode 0..10, Description 0..1). A positive acknowledgment of a prior transaction -- the SCRIPT analogue of X12's own 999 functional acknowledgment, matching that transaction's own precedent of engine support without a FHIR mapping (a transport-layer ack has no natural FHIR resource analogue).",
+    "DescriptionCode's real maxOccurs is 10 per the XSD, but this engine's own field model (like cosyte/ncpdp's own extraction) reads only the first occurrence -- a named simplification matching cosyte's own precedent, not a schema-engine limitation."
+  ]
+}

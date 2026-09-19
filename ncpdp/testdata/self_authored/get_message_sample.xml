@@ -1,0 +1,11 @@
+<Message DatatypesVersion="20170715" TransportVersion="20170715" TransactionDomain="SCRIPT" TransactionVersion="20170715" StructuresVersion="20170715" ECLVersion="20170715">
+    <Header>
+        <To Qualifier="D">6128890368017</To>
+        <From Qualifier="P">6557744</From>
+        <MessageID>app-000000000011</MessageID>
+        <SentTime>2026-09-19T13:15:00Z</SentTime>
+    </Header>
+    <Body>
+        <GetMessage/>
+    </Body>
+</Message>

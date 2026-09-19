@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic fixture: every structured-SIG component here uses the element name
+  this release GROUNDS against the committed field-label inventory, so the
+  coded/derived provenance paths stay exercised after the ungrounded names were
+  removed. Fully synthetic, no real PHI.
+-->
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <MessageID>SYNTH-MSG-SIG-04</MessageID>
+  </Header>
+  <Body>
+    <NewRx>
+      <MedicationPrescribed>
+        <DrugDescription>Synthetic Tablet 250 MG Oral Tablet</DrugDescription>
+        <Sig>
+          <SigText>Take 1 tablet by mouth twice daily for 10 days for infection.</SigText>
+          <Instruction>
+            <DoseAdministration>
+              <DoseDeliveryMethod>
+                <Text>Take</Text>
+                <Code>419652001</Code>
+                <Qualifier>SNOMED</Qualifier>
+              </DoseDeliveryMethod>
+              <DoseQuantity>1</DoseQuantity>
+            </DoseAdministration>
+            <Route>
+              <Text>by mouth</Text>
+              <Code>26643006</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </Route>
+            <Site>
+              <Text>oral cavity</Text>
+              <Code>123851003</Code>
+              <Qualifier>SNOMED</Qualifier>
+            </Site>
+            <AdministrationTiming>
+              <Text>twice daily</Text>
+            </AdministrationTiming>
+          </Instruction>
+        </Sig>
+      </MedicationPrescribed>
+    </NewRx>
+  </Body>
+</Message>

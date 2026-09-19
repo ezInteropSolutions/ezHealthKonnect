@@ -1,0 +1,18 @@
+{
+  "key": "RxRenewalRequest",
+  "name": "Prescription Renewal Request",
+  "fields": [
+    { "key": "requestReferenceNumber", "xpath": "RequestReferenceNumber", "name": "Request Reference Number", "dataType": "string", "required": false }
+  ],
+  "groups": [
+    { "key": "patient", "groupKey": "Patient", "xmlElement": "Patient", "required": true, "repeatable": false },
+    { "key": "pharmacy", "groupKey": "Pharmacy", "xmlElement": "Pharmacy", "required": false, "repeatable": false },
+    { "key": "prescriber", "groupKey": "Prescriber", "xmlElement": "Prescriber", "required": true, "repeatable": false },
+    { "key": "medicationPrescribed", "groupKey": "MedicationPrescribed", "xmlElement": "MedicationPrescribed", "required": true, "repeatable": false }
+  ],
+  "elementOrder": ["RequestReferenceNumber", "Patient", "Pharmacy", "Prescriber", "MedicationPrescribed"],
+  "sourceRefs": [
+    "cosyte/ncpdp src/script/lifecycle.ts — RxRenewalRequest extends LifecycleRequestFields (requestReferenceNumber?, patient?, pharmacy?, prescriber?, medicationPrescribed?) with ZERO additional fields of its own — the exact same shared shape already confirmed and built for CancelRx/RxChangeRequest (see those files' own sourceRefs). A pharmacy-initiated request to renew an existing (previously dispensed) prescription; the medication being renewed is carried in the same MedicationPrescribed group already proven for NewRx/CancelRx/RxChangeRequest.",
+    "RequestReferenceNumber placement (first child of the transaction element) mirrors CancelRx.json's own same-sourced assumption, not yet confirmed against a real RxRenewalRequest sample — revisit if a real sample surfaces a different position."
+  ]
+}

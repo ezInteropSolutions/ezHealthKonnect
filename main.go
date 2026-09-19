@@ -16,6 +16,8 @@ import (
 	cdaSchemaLoader "ezhealthkonnect/cda"
 	cdacoverage "ezhealthkonnect/services/cda_coverage"
 	"ezhealthkonnect/edi"
+	"ezhealthkonnect/ncpdp"
+	"ezhealthkonnect/ncpdptelecom"
 	cdafhir "ezhealthkonnect/services/cda_fhir"
 	cdastorage "ezhealthkonnect/services/cda_storage"
 	cdaterminology "ezhealthkonnect/services/cda_terminology"
@@ -760,6 +762,32 @@ func main() {
 			eligibilityGroup := api.Group("/eligibility")
 			syncEligibilityCtrl.RegisterRoutes(eligibilityGroup)
 
+			// Synchronous 276/277 claim status check — same pattern as
+			// Sync Eligibility above, a dedicated pipeline-service instance,
+			// not shared.
+			syncClaimStatusPipelineSvc := services.NewTransformationPipelineService(db, credStore)
+			syncClaimStatusCtrl := controllers.NewSyncClaimStatusController(syncClaimStatusPipelineSvc)
+			claimStatusGroup := api.Group("/claim-status")
+			syncClaimStatusCtrl.RegisterRoutes(claimStatusGroup)
+
+			// Synchronous 278 prior authorization check — same pattern as
+			// Sync Eligibility/Sync Claim Status above, a dedicated
+			// pipeline-service instance, not shared.
+			syncPriorAuthPipelineSvc := services.NewTransformationPipelineService(db, credStore)
+			syncPriorAuthCtrl := controllers.NewSyncPriorAuthController(syncPriorAuthPipelineSvc)
+			priorAuthGroup := api.Group("/prior-auth")
+			syncPriorAuthCtrl.RegisterRoutes(priorAuthGroup)
+
+			// Synchronous NCPDP Telecom D.0 B1 pharmacy claim submit — same
+			// pattern as Sync Eligibility/Sync Claim Status/Sync Prior Auth
+			// above, a dedicated pipeline-service instance, not shared. D.0's
+			// primary real-world delivery mode IS real-time request/response,
+			// so this ships as part of D.0's own Phase 1, not a later add-on.
+			syncPharmacyClaimPipelineSvc := services.NewTransformationPipelineService(db, credStore)
+			syncPharmacyClaimCtrl := controllers.NewSyncPharmacyClaimController(syncPharmacyClaimPipelineSvc)
+			pharmacyClaimGroup := api.Group("/pharmacy-claim")
+			syncPharmacyClaimCtrl.RegisterRoutes(pharmacyClaimGroup)
+
 			// FHIR Narrative Generator
 			// Accepts a FHIR resource as JSON body and returns XHTML narrative.
 			// If resource.text.div is already populated it is echoed back unchanged.
@@ -889,6 +917,37 @@ func main() {
 				ediSchemaCtrl := controllers.NewEDISchemaController(ediLoader)
 				ediSchemaCtrl.RegisterRoutes(api.Group("/edi"))
 				log.Printf("✅ EDI Schema Controller registered (/api/edi/schema/segments, /api/edi/schema/transaction-sets/:id/loops)")
+			}
+
+			// ADDED: NCPDP SCRIPT Schema Browser API (/api/ncpdp/*) — backs
+			// NCPDPStepBuilder.js's ncpdp.map_to_canonical group/field mapper.
+			// Constructs its own loader the same per-consumer way the EDI
+			// block above does (not shared) — a nil loader just means these
+			// endpoints return 503, not a crash.
+			{
+				ncpdpLoader, ncpdpLoaderErr := ncpdp.NewNCPDPSchemaLoader("./ncpdp/schemas/script_2017071")
+				if ncpdpLoaderErr != nil {
+					log.Printf("⚠️  [ncpdp] Schema loader unavailable: %v — /api/ncpdp/schema endpoints will return 503", ncpdpLoaderErr)
+				}
+				ncpdpSchemaCtrl := controllers.NewNCPDPSchemaController(ncpdpLoader)
+				ncpdpSchemaCtrl.RegisterRoutes(api.Group("/ncpdp"))
+				log.Printf("✅ NCPDP SCRIPT Schema Controller registered (/api/ncpdp/schema/groups, /api/ncpdp/schema/transactions/:key/groups)")
+			}
+
+			// ADDED: NCPDP Telecommunication D.0 Schema Browser API
+			// (/api/ncpdp-telecom/*) — backs NCPDPTelecomStepBuilder.js's
+			// ncpdptelecom.map_to_canonical segment/field mapper. Constructs
+			// its own loader the same per-consumer way the EDI/NCPDP SCRIPT
+			// blocks above do (not shared) — a nil loader just means these
+			// endpoints return 503, not a crash.
+			{
+				ncpdpTelecomLoader, ncpdpTelecomLoaderErr := ncpdptelecom.NewTelecomSchemaLoader("./ncpdptelecom/schemas/telecom_d0")
+				if ncpdpTelecomLoaderErr != nil {
+					log.Printf("⚠️  [ncpdptelecom] Schema loader unavailable: %v — /api/ncpdp-telecom/schema endpoints will return 503", ncpdpTelecomLoaderErr)
+				}
+				ncpdpTelecomSchemaCtrl := controllers.NewNCPDPTelecomSchemaController(ncpdpTelecomLoader)
+				ncpdpTelecomSchemaCtrl.RegisterRoutes(api.Group("/ncpdp-telecom"))
+				log.Printf("✅ NCPDP Telecom D.0 Schema Controller registered (/api/ncpdp-telecom/schema/segments, /api/ncpdp-telecom/schema/transactions)")
 			}
 
 			// ── OOB template rebuild ─────────────────────────────────────────────

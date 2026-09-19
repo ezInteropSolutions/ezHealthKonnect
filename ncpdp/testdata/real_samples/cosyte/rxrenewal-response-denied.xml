@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>SurescriptsTestPharmacy</To>
+    <From>SurescriptsTestPrescriber</From>
+    <MessageID>SYNTH-MSG-0204</MessageID>
+    <RelatesToMessageID>SYNTH-MSG-0201</RelatesToMessageID>
+    <SentTime>2026-02-01T15:10:00Z</SentTime>
+  </Header>
+  <Body>
+    <RxRenewalResponse>
+      <RequestReferenceNumber>SYNTH-REF-0201</RequestReferenceNumber>
+      <Response>
+        <Denied>
+          <ReasonCode>AT</ReasonCode>
+          <DenialReason>Patient is no longer under this prescriber's care.</DenialReason>
+        </Denied>
+      </Response>
+    </RxRenewalResponse>
+  </Body>
+</Message>

@@ -1,0 +1,56 @@
+{
+  "id": "ACT",
+  "name": "Account Identification",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "accountNumber1",
+      "dataType": "AN"
+    },
+    {
+      "pos": "02",
+      "key": "name",
+      "dataType": "AN"
+    },
+    {
+      "pos": "03",
+      "key": "identificationCodeQualifier",
+      "dataType": "ID"
+    },
+    {
+      "pos": "04",
+      "key": "identificationCode",
+      "dataType": "AN"
+    },
+    {
+      "pos": "05",
+      "key": "accountNumberQualifier",
+      "dataType": "ID"
+    },
+    {
+      "pos": "06",
+      "key": "accountNumber2",
+      "dataType": "AN"
+    },
+    {
+      "pos": "07",
+      "key": "description",
+      "dataType": "AN"
+    },
+    {
+      "pos": "08",
+      "key": "paymentMethodTypeCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "09",
+      "key": "benefitStatusCode",
+      "dataType": "ID"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/ACT) — 834's 1100C TPA/Broker Account Information loop (billing/account detail for the third-party administrator or broker, when present)."
+  ]
+}

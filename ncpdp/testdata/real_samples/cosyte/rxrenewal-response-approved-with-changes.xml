@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>SurescriptsTestPharmacy</To>
+    <From>SurescriptsTestPrescriber</From>
+    <MessageID>SYNTH-MSG-0203</MessageID>
+    <RelatesToMessageID>SYNTH-MSG-0201</RelatesToMessageID>
+    <SentTime>2026-02-01T15:05:00Z</SentTime>
+  </Header>
+  <Body>
+    <RxRenewalResponse>
+      <RequestReferenceNumber>SYNTH-REF-0201</RequestReferenceNumber>
+      <Response>
+        <ApprovedWithChanges>
+          <Note>Dose increased to 40 MG; quantity adjusted.</Note>
+        </ApprovedWithChanges>
+      </Response>
+      <MedicationPrescribed>
+        <DrugDescription>Atorvastatin 40 MG Oral Tablet</DrugDescription>
+        <DrugCoded>
+          <ProductCode Qualifier="ND">00000000002</ProductCode>
+        </DrugCoded>
+        <Quantity>
+          <Value>30</Value>
+          <CodeListQualifier>38</CodeListQualifier>
+        </Quantity>
+        <DaysSupply>30</DaysSupply>
+        <NumberOfRefills>3</NumberOfRefills>
+      </MedicationPrescribed>
+    </RxRenewalResponse>
+  </Body>
+</Message>

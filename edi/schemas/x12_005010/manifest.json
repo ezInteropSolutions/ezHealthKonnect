@@ -26,6 +26,22 @@
     "271": {
       "file": "271.json",
       "name": "Eligibility, Coverage or Benefit Information"
+    },
+    "276": {
+      "file": "276.json",
+      "name": "Health Care Claim Status Request"
+    },
+    "277": {
+      "file": "277.json",
+      "name": "Health Care Claim Status Response"
+    },
+    "278": {
+      "file": "278.json",
+      "name": "Health Care Services Review Request for Review and Response"
+    },
+    "834": {
+      "file": "834.json",
+      "name": "Benefit Enrollment and Maintenance"
     }
   }
 }

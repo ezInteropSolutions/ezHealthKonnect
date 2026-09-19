@@ -1,0 +1,51 @@
+{
+  "id": "DSB",
+  "name": "Disability Information",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "disabilityTypeCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "quantity",
+      "dataType": "R"
+    },
+    {
+      "pos": "03",
+      "key": "occupationCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "04",
+      "key": "workIntensityCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "05",
+      "key": "productOptionCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "06",
+      "key": "monetaryAmount",
+      "dataType": "R"
+    },
+    {
+      "pos": "07",
+      "key": "productOrServiceIDQualifier",
+      "dataType": "ID"
+    },
+    {
+      "pos": "08",
+      "key": "medicalCodeValue",
+      "dataType": "AN"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/DSB) — 834's 2200 Disability loop, disability-benefit-eligibility detail (short/long-term disability enrollment)."
+  ]
+}

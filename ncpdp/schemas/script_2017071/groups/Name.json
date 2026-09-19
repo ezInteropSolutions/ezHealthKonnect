@@ -1,0 +1,15 @@
+{
+  "key": "Name",
+  "xmlElement": "Name",
+  "name": "Person Name",
+  "fields": [
+    { "key": "lastName", "xpath": "LastName", "name": "Last Name", "dataType": "string", "required": true },
+    { "key": "firstName", "xpath": "FirstName", "name": "First Name", "dataType": "string", "required": true },
+    { "key": "middleName", "xpath": "MiddleName", "name": "Middle Name", "dataType": "string", "required": false },
+    { "key": "suffix", "xpath": "Suffix", "name": "Suffix", "dataType": "string", "required": false },
+    { "key": "prefix", "xpath": "Prefix", "name": "Prefix", "dataType": "string", "required": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Patient/HumanPatient/Name and Prescriber/NonVeterinarian/Name)"
+  ]
+}

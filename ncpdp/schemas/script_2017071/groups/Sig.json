@@ -1,0 +1,11 @@
+{
+  "key": "Sig",
+  "xmlElement": "Sig",
+  "name": "Directions for Use",
+  "fields": [
+    { "key": "sigText", "xpath": "SigText", "name": "Sig Text", "dataType": "string", "required": true }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, MedicationPrescribed/Sig). Structured (coded) Sig deliberately deferred to a later phase — SigText covers the common free-text case."
+  ]
+}

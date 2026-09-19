@@ -1,0 +1,12 @@
+{
+  "key": "PrescriberIdentification",
+  "xmlElement": "Identification",
+  "name": "Prescriber Identification",
+  "fields": [
+    { "key": "deaNumber", "xpath": "DEANumber", "name": "DEA Number", "dataType": "string", "required": false },
+    { "key": "npi", "xpath": "NPI", "name": "NPI", "dataType": "string", "required": true }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Prescriber/NonVeterinarian/Identification)"
+  ]
+}

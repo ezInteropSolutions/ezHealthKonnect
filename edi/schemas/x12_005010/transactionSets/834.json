@@ -1,0 +1,288 @@
+{
+  "transactionSetId": "834",
+  "functionalIdentifierCode": "BE",
+  "versionReleaseIndustryCode": "005010X220",
+  "version": "005010X220",
+  "_sourceRefs": [
+    "PyX12 (azoner/pyx12/pyx12/map/834.5010.X220.A1.xml) — a REAL 5010 map exists for 834, used as the structural cross-check; Stedi (stedi.com/edi/hipaa/transaction-set/834-A1) read directly from the page's own embedded __NEXT_DATA__ JSON (loop/segment tree, real NM1/N1 fixed-value notes) as the primary structural source this round, EDI Phase 7.",
+    "A GENUINELY DIFFERENT, FLATTER SHAPE than every prior transaction set in this engine — 834 has NO HL hierarchy at all. Its repeating unit is LOOP 2000 (triggered by INS, not HL) — every member (subscriber or dependent) is its own flat, top-level 2000 instance; INS02 (Individual Relationship Code) distinguishes self/spouse/child at the SAME nesting level, never nested inside a parent's own loop tree the way every HL-based transaction set (270/271/276/277/837/278) nests dependents inside their subscriber. Zero risk of the 'recurring HL-nesting bug' this session hit twice for 276/277 — 834 needs no HL-parent bookkeeping, just an ordinary trigger-segment-based repeating loop (already proven by 837's own CLM/2300 claim loops).",
+    "The outer 2700 (Member Reporting Categories) loop is LS/LE-wrapped, confirmed directly from Stedi's own page data (LS immediately precedes LOOP 2700, LE immediately follows it) — the EXACT same bracketing shape already built and tested for 271's own loop 2120 (X12LoopDef.Wrapper, edi/loop_engine.go, edi/builder/loop_wrapper_test.go) — reused unchanged, zero new Go.",
+    "SIBLING-LOOP DISCRIMINATION: 1000A/1000B/1000C all trigger on N1 (siblings, same parent, same trigger segment — the same class of ambiguity 837's own provider-role loops needed TriggerDiscriminator for). 1000A (Sponsor) = 'P5' Plan Sponsor (element 98's own standard code list, stedi.com/edi/x12-005010/element/98). 1000C (TPA/Broker, repeat 2) is left UNDISCRIMINATED — real 834 files use EITHER 'TV' (Third Party Administrator) or 'BR'/'BO' (Broker) at this slot depending on which party is present, and the discriminator mechanism only supports one expected value per loop; an undiscriminated loop acts as a pure catch-all for whatever's left after 1000A/1000B claim their own known values, the exact same 'deliberately left undiscriminated as the group's own catch-all rather than guess' precedent 837I's own 2310C already established.",
+    "REAL-DATA CORRECTION (found testing against X12.org's own official 834 examples, September 2026): 1000B (Payer) was ORIGINALLY modeled as 'PR' Payer, by analogy with 270/271/276/277's own payer-role usage — WRONG for 834 specifically. Every one of X12.org's own official 834 examples (x12.org/examples/005010x220) uses N1*IN* for this role ('IN' = Insurer), never 'PR' — corrected to 'IN'. A real, concrete demonstration that a plausible-looking code borrowed from a DIFFERENT transaction set's own established convention is not a substitute for checking this transaction set's own real usage.",
+    "2100A-H similarly all trigger on NM1 (8-way sibling ambiguity, more than any prior transaction set's own discriminator usage). Real fixed values: 2100A (Member) = 'IL' and 2100B (Incorrect Member Name) = '70' — BOTH confirmed directly from 2100B's own segment note on the real page ('If only the demographics are being changed, the code in NM101 in loop 2100A will be IL, and the code in NM101 in this loop will be 70'), not inferred. 2100C (Member Mailing Address) = '31' Postal Mailing Address, 2100D (Member Employer) = '36' Employer, 2100F (Custodial Parent) = 'S3' Custodial Parent (an exact, unambiguous name match), 2100G (Responsible Person) = 'QD' Responsible Party, 2100H (Drop Off Location) = '45' Drop-off Location (an exact, unambiguous name match) — all sourced from element 98's own standard code list, matched by semantic role name against each loop's own real Stedi page name.",
+    "REAL-DATA CORRECTION: 2100E (Member School) was ORIGINALLY modeled as '83' Subscriber's School (a best-semantic-match guess against the generic element 98 code list, explicitly flagged for revisit) — WRONG. X12.org's own official Example 02 (Add Dependent, Full-Time Student) uses NM1*M8* for the school role ('M8' = a code whose real X12 element 98 label is less directly self-explanatory than 'Subscriber's School', but is the code this IG's own real, published example actually transmits) — corrected to 'M8' after finding it in real data, not guessed a second time.",
+    "New segments this round (11): BGN, EC, ICM, HLH, LUI, HD, IDC, PLA, COB, DSB, ACT (see each file's own sourceRefs). Reused, verified-compatible segments: N1, REF, DTP, QTY, NM1, PER, N3, N4, DMG, AMT, LX, LS, LE, INS (14) — INS.json extended this same round (positions 6-17 added, additive-only, positions 1-5 unaffected) specifically for 834's own full Medicare-status/COBRA/employment/student-status usage.",
+    "Per the user's own explicit 'full completeness' scope decision for 834 (unlike 278, where the same question was answered 'core' for the other transaction set but 'full' was chosen here): every loop from the real spec is modeled, including the less-common 2100B/D/E/F/G/H demographic-variant loops, 2200 (disability), 2310/2320/2330 (provider + coordination-of-benefits), and 2700/2750 (reporting categories) — nothing deferred."
+  ],
+  "headerSegmentIds": [
+    "ST",
+    "BGN",
+    "REF",
+    "DTP",
+    "QTY"
+  ],
+  "loops": [
+    {
+      "id": "1000A",
+      "name": "Sponsor Name",
+      "repeat": "1",
+      "triggerDiscriminator": {
+        "elementKey": "entityIdentifierCode",
+        "value": "P5"
+      },
+      "segmentIds": [
+        "N1"
+      ]
+    },
+    {
+      "id": "1000B",
+      "name": "Payer",
+      "repeat": "1",
+      "triggerDiscriminator": {
+        "elementKey": "entityIdentifierCode",
+        "value": "IN"
+      },
+      "segmentIds": [
+        "N1"
+      ]
+    },
+    {
+      "id": "1000C",
+      "name": "TPA/Broker Name",
+      "repeat": "2",
+      "segmentIds": [
+        "N1"
+      ],
+      "loops": [
+        {
+          "id": "1100C",
+          "name": "TPA/Broker Account Information",
+          "repeat": "1",
+          "segmentIds": [
+            "ACT"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2000",
+      "name": "Member Level Detail",
+      "repeat": ">1",
+      "segmentIds": [
+        "INS",
+        "REF",
+        "DTP"
+      ],
+      "loops": [
+        {
+          "id": "2100A",
+          "name": "Member Name",
+          "repeat": "1",
+          "triggerDiscriminator": {
+            "elementKey": "entityIdentifierCode",
+            "value": "IL"
+          },
+          "segmentIds": [
+            "NM1",
+            "PER",
+            "N3",
+            "N4",
+            "DMG",
+            "EC",
+            "ICM",
+            "AMT",
+            "HLH",
+            "LUI"
+          ]
+        },
+        {
+          "id": "2100B",
+          "name": "Incorrect Member Name",
+          "repeat": "1",
+          "triggerDiscriminator": {
+            "elementKey": "entityIdentifierCode",
+            "value": "70"
+          },
+          "segmentIds": [
+            "NM1",
+            "DMG"
+          ]
+        },
+        {
+          "id": "2100C",
+          "name": "Member Mailing Address",
+          "repeat": "1",
+          "triggerDiscriminator": {
+            "elementKey": "entityIdentifierCode",
+            "value": "31"
+          },
+          "segmentIds": [
+            "NM1",
+            "N3",
+            "N4"
+          ]
+        },
+        {
+          "id": "2100D",
+          "name": "Member Employer",
+          "repeat": "3",
+          "triggerDiscriminator": {
+            "elementKey": "entityIdentifierCode",
+            "value": "36"
+          },
+          "segmentIds": [
+            "NM1",
+            "PER",
+            "N3",
+            "N4"
+          ]
+        },
+        {
+          "id": "2100E",
+          "name": "Member School",
+          "repeat": "3",
+          "triggerDiscriminator": {
+            "elementKey": "entityIdentifierCode",
+            "value": "M8"
+          },
+          "segmentIds": [
+            "NM1",
+            "PER",
+            "N3",
+            "N4"
+          ]
+        },
+        {
+          "id": "2100F",
+          "name": "Custodial Parent",
+          "repeat": "1",
+          "triggerDiscriminator": {
+            "elementKey": "entityIdentifierCode",
+            "value": "S3"
+          },
+          "segmentIds": [
+            "NM1",
+            "PER",
+            "N3",
+            "N4"
+          ]
+        },
+        {
+          "id": "2100G",
+          "name": "Responsible Person",
+          "repeat": "13",
+          "triggerDiscriminator": {
+            "elementKey": "entityIdentifierCode",
+            "value": "QD"
+          },
+          "segmentIds": [
+            "NM1",
+            "PER",
+            "N3",
+            "N4"
+          ]
+        },
+        {
+          "id": "2100H",
+          "name": "Drop Off Location",
+          "repeat": "1",
+          "triggerDiscriminator": {
+            "elementKey": "entityIdentifierCode",
+            "value": "45"
+          },
+          "segmentIds": [
+            "NM1",
+            "N3",
+            "N4"
+          ]
+        },
+        {
+          "id": "2200",
+          "name": "Disability Information",
+          "repeat": ">1",
+          "segmentIds": [
+            "DSB",
+            "DTP"
+          ]
+        },
+        {
+          "id": "2300",
+          "name": "Health Coverage",
+          "repeat": "99",
+          "segmentIds": [
+            "HD",
+            "DTP",
+            "AMT",
+            "REF",
+            "IDC"
+          ],
+          "loops": [
+            {
+              "id": "2310",
+              "name": "Provider Information",
+              "repeat": "30",
+              "segmentIds": [
+                "LX",
+                "NM1",
+                "N3",
+                "N4",
+                "PER",
+                "PLA"
+              ]
+            },
+            {
+              "id": "2320",
+              "name": "Coordination of Benefits",
+              "repeat": "5",
+              "segmentIds": [
+                "COB",
+                "REF",
+                "DTP"
+              ],
+              "loops": [
+                {
+                  "id": "2330",
+                  "name": "Coordination of Benefits Related Entity",
+                  "repeat": "3",
+                  "segmentIds": [
+                    "NM1",
+                    "N3",
+                    "N4",
+                    "PER"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "2700",
+          "name": "Member Reporting Categories",
+          "repeat": ">1",
+          "segmentIds": [
+            "LX"
+          ],
+          "wrapper": {
+            "start": "LS",
+            "end": "LE"
+          },
+          "loops": [
+            {
+              "id": "2750",
+              "name": "Reporting Category",
+              "repeat": "1",
+              "segmentIds": [
+                "N1",
+                "REF",
+                "DTP"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trailerSegmentIds": [
+    "SE"
+  ]
+}

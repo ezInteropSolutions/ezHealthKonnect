@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Message xmlns="http://www.ncpdp.org/schema/SCRIPT" version="2017071">
+  <Header>
+    <To>1234567</To>
+    <From>1255667788</From>
+    <MessageID>SYNTH-MSG-SS-0001</MessageID>
+    <SentTime>2026-03-02T14:05:00Z</SentTime>
+    <PrescriberOrderNumber>SYNTH-ORDER-SS-0001</PrescriberOrderNumber>
+  </Header>
+  <Body>
+    <NewRx>
+      <Patient>
+        <HumanPatient>
+          <Name>
+            <LastName>Testpatient</LastName>
+            <FirstName>Riley</FirstName>
+          </Name>
+          <Gender>M</Gender>
+          <DateOfBirth>
+            <Date>1985-07-22</Date>
+          </DateOfBirth>
+        </HumanPatient>
+      </Patient>
+      <Pharmacy>
+        <Identification>
+          <NCPDPID>1234567</NCPDPID>
+          <NPI>1999999999</NPI>
+        </Identification>
+        <BusinessName>Synthetic Surescripts Test Pharmacy</BusinessName>
+      </Pharmacy>
+      <Prescriber>
+        <NonVeterinarian>
+          <Identification>
+            <NPI>1888888888</NPI>
+          </Identification>
+          <Name>
+            <LastName>Testprescriber</LastName>
+            <FirstName>Morgan</FirstName>
+          </Name>
+        </NonVeterinarian>
+      </Prescriber>
+      <MedicationPrescribed>
+        <DrugDescription>Lisinopril 10 MG Oral Tablet</DrugDescription>
+        <DrugCoded>
+          <ProductCode Qualifier="ND">00093505601</ProductCode>
+        </DrugCoded>
+        <Quantity>
+          <Value>30</Value>
+          <CodeListQualifier>38</CodeListQualifier>
+        </Quantity>
+        <DaysSupply>30</DaysSupply>
+        <Substitutions>0</Substitutions>
+        <NumberOfRefills>3</NumberOfRefills>
+        <WrittenDate>
+          <Date>2026-03-02</Date>
+        </WrittenDate>
+        <Sig>
+          <SigText>Take 1 tablet by mouth once daily.</SigText>
+        </Sig>
+      </MedicationPrescribed>
+    </NewRx>
+  </Body>
+</Message>

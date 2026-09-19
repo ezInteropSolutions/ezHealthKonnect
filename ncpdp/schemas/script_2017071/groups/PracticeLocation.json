@@ -1,0 +1,11 @@
+{
+  "key": "PracticeLocation",
+  "xmlElement": "PracticeLocation",
+  "name": "Prescriber Practice Location",
+  "fields": [
+    { "key": "businessName", "xpath": "BusinessName", "name": "Business Name", "dataType": "string", "required": false }
+  ],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Prescriber/NonVeterinarian/PracticeLocation)"
+  ]
+}

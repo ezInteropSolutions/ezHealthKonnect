@@ -1,0 +1,41 @@
+{
+  "id": "EC",
+  "name": "Employment Class",
+  "usage": "situational",
+  "maxUse": ">1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "employmentClassCode1",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "employmentClassCode2",
+      "dataType": "ID"
+    },
+    {
+      "pos": "03",
+      "key": "employmentClassCode3",
+      "dataType": "ID"
+    },
+    {
+      "pos": "04",
+      "key": "percentageAsDecimal",
+      "dataType": "R"
+    },
+    {
+      "pos": "05",
+      "key": "informationStatusCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "06",
+      "key": "occupationCode",
+      "dataType": "ID"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/EC) — 834's 2100A Member loop, employment classification (full-time/part-time/union code etc.)."
+  ]
+}

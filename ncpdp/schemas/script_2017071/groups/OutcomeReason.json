@@ -1,0 +1,14 @@
+{
+  "key": "OutcomeReason",
+  "xmlElement": "Approved",
+  "name": "Response Outcome Reason",
+  "fields": [
+    { "key": "reasonCode", "xpath": "ReasonCode", "name": "Reason Code", "dataType": "code", "required": false },
+    { "key": "referenceNumber", "xpath": "ReferenceNumber", "name": "Reference Number", "dataType": "string", "required": false },
+    { "key": "denialReason", "xpath": "DenialReason", "name": "Denial Reason", "dataType": "string", "required": false },
+    { "key": "note", "xpath": "Note", "name": "Note", "dataType": "string", "required": false }
+  ],
+  "sourceRefs": [
+    "cosyte/ncpdp src/script/lifecycle.ts (actively-maintained open-source SCRIPT v2017071/v2022011 parser, MIT-licensed) — detectOutcome()/extractReason() confirm a CancelRxResponse/RxChangeResponse's outcome is modeled as a CHOICE of sibling elements (Approved/Denied/DenyNewToFollow/ApprovedWithChanges/Validated/Replace), each carrying the SAME ReasonCode/ReferenceNumber/DenialReason/Note shape, verified against that file's own extractReason() function body (childText(outcomeEl, \"ReasonCode\"|\"ReferenceNumber\"|\"DenialReason\"|\"Note\"))."
+  ]
+}

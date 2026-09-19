@@ -1,0 +1,18 @@
+{
+  "key": "HumanPatient",
+  "xmlElement": "HumanPatient",
+  "name": "Human Patient",
+  "fields": [
+    { "key": "gender", "xpath": "Gender", "name": "Gender", "dataType": "code", "required": false }
+  ],
+  "groups": [
+    { "key": "name", "groupKey": "Name", "xmlElement": "Name", "required": true, "repeatable": false },
+    { "key": "dateOfBirth", "groupKey": "DateWrapper", "xmlElement": "DateOfBirth", "required": false, "repeatable": false },
+    { "key": "address", "groupKey": "Address", "xmlElement": "Address", "required": false, "repeatable": false },
+    { "key": "communicationNumbers", "groupKey": "CommunicationNumbers", "xmlElement": "CommunicationNumbers", "required": false, "repeatable": false }
+  ],
+  "elementOrder": ["Name", "Gender", "DateOfBirth", "Address", "CommunicationNumbers"],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Body/NewRx/Patient/HumanPatient)"
+  ]
+}

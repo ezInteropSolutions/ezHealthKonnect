@@ -703,6 +703,64 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 display: block;
             }
 
+            .connector-config-field-hint {
+                font-size: 12px;
+                color: #94a3b8;
+                line-height: 1.4;
+                margin: -2px 0 6px;
+            }
+
+            .connector-config-checklist-actions {
+                font-size: 12px;
+                margin-bottom: 6px;
+            }
+
+            .connector-config-checklist-actions a {
+                color: #2563eb;
+                text-decoration: none;
+                cursor: pointer;
+            }
+
+            .connector-config-checklist-actions a:hover {
+                text-decoration: underline;
+            }
+
+            .connector-config-array-checklist {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                gap: 6px 12px;
+            }
+
+            .connector-config-chip {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                padding: 5px 8px;
+                background: #f8fafc;
+                border: 1px solid #e2e8f0;
+                border-radius: 6px;
+            }
+
+            .connector-config-chip:has(.form-check-input:checked) {
+                background: #eff6ff;
+                border-color: #bfdbfe;
+            }
+
+            .connector-config-chip .form-check-input {
+                margin: 0;
+                flex-shrink: 0;
+            }
+
+            .connector-config-chip .form-check-label {
+                font-size: 12.5px;
+                color: #334155;
+                margin: 0;
+                cursor: pointer;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
             .connector-extra-fields {
                 margin-bottom: 16px;
                 padding: 12px 14px;
@@ -1486,6 +1544,17 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         label.innerHTML = `${this.escapeHtml(title)}${isRequired ? ' <span class="text-danger">*</span>' : ''}`;
         formGroup.appendChild(label);
 
+        // Hint text, when the schema carries one -- previously read by
+        // nothing in this generic renderer, so every field's own
+        // description (e.g. edi_x12_inbound's own transaction_types,
+        // V256) went completely unseen by the user. Skipped for booleans,
+        // which build their own formGroup content below and return early.
+        if (schema.description && schema.type !== 'boolean') {
+            const hint = this.createElement('div', { class: 'connector-config-field-hint' });
+            hint.textContent = schema.description;
+            formGroup.appendChild(hint);
+        }
+
         let inputEl;
 
         if (schema.enum) {
@@ -1541,12 +1610,22 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             if (schema.maximum !== undefined) inputEl.max = schema.maximum;
             inputEl.placeholder = schema.default !== undefined ? `Default: ${schema.default}` : '';
         } else if (schema.type === 'array' && Array.isArray(schema.items?.enum) && schema.items.enum.length > 0) {
-            // Fixed set of allowed values -- render as a checkbox list instead of
+            // Fixed set of allowed values -- render as a checkbox grid instead of
             // free-text, backed by a hidden field carrying the same comma-joined
             // value shape getConfig() already expects for fieldType 'array'.
+            // schema.items.enumNames (the common JSON-Schema companion-array
+            // convention, same length/order as enum) supplies a friendly label
+            // per option when the caller's own schema provides one -- e.g.
+            // "835 — Remittance Advice" instead of the bare code "835" (V256).
+            // Falls back to the bare enum value when enumNames is absent or
+            // mismatched in length, so fields that never had labels (e.g.
+            // tcp_mllp's own http_methods) render exactly as before.
             const currentArr = Array.isArray(value)
                 ? value
                 : (typeof value === 'string' && value ? value.split(',').map(v => v.trim()).filter(Boolean) : []);
+            const enumNames = Array.isArray(schema.items.enumNames) && schema.items.enumNames.length === schema.items.enum.length
+                ? schema.items.enumNames
+                : null;
 
             const checklistWrapper = this.createElement('div', { class: 'connector-config-array-checklist' });
             const hiddenInput = document.createElement('input');
@@ -1556,10 +1635,28 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             hiddenInput.dataset.fieldType = 'array';
             hiddenInput.value = currentArr.join(', ');
 
+            // "Select all / Clear all" -- worthwhile the moment a field has
+            // more than a handful of options (edi_x12_inbound's own
+            // transaction_types has 10); harmless for shorter lists too.
+            const actions = this.createElement('div', { class: 'connector-config-checklist-actions' });
+            const selectAllLink = document.createElement('a');
+            selectAllLink.href = '#';
+            selectAllLink.textContent = 'Select all';
+            const clearAllLink = document.createElement('a');
+            clearAllLink.href = '#';
+            clearAllLink.textContent = 'Clear all';
+            actions.appendChild(selectAllLink);
+            actions.appendChild(document.createTextNode(' · '));
+            actions.appendChild(clearAllLink);
+
             const checkboxes = [];
-            schema.items.enum.forEach(optVal => {
+            const syncHidden = () => {
+                hiddenInput.value = checkboxes.filter(c => c.cb.checked).map(c => c.optVal).join(', ');
+                this.onChange();
+            };
+            schema.items.enum.forEach((optVal, idx) => {
                 const optId = `connector-field-${fieldName}-${optVal}`.replace(/[^a-zA-Z0-9_-]/g, '_');
-                const optWrapper = this.createElement('div', { class: 'form-check' });
+                const optWrapper = this.createElement('div', { class: 'connector-config-chip' });
                 const cb = document.createElement('input');
                 cb.type = 'checkbox';
                 cb.className = 'form-check-input';
@@ -1570,18 +1667,27 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 const cbLabel = document.createElement('label');
                 cbLabel.className = 'form-check-label';
                 cbLabel.htmlFor = optId;
-                cbLabel.textContent = optVal;
+                cbLabel.textContent = enumNames ? enumNames[idx] : optVal;
 
                 optWrapper.appendChild(cb);
                 optWrapper.appendChild(cbLabel);
                 checklistWrapper.appendChild(optWrapper);
 
-                cb.addEventListener('change', () => {
-                    hiddenInput.value = checkboxes.filter(c => c.cb.checked).map(c => c.optVal).join(', ');
-                    this.onChange();
-                });
+                cb.addEventListener('change', syncHidden);
             });
 
+            selectAllLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                checkboxes.forEach(c => { c.cb.checked = true; });
+                syncHidden();
+            });
+            clearAllLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                checkboxes.forEach(c => { c.cb.checked = false; });
+                syncHidden();
+            });
+
+            formGroup.appendChild(actions);
             formGroup.appendChild(checklistWrapper);
             formGroup.appendChild(hiddenInput);
             return formGroup;

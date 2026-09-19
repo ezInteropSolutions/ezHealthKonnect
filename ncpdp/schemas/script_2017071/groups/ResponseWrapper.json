@@ -1,0 +1,17 @@
+{
+  "key": "ResponseWrapper",
+  "xmlElement": "Response",
+  "name": "Response (outcome wrapper)",
+  "groups": [
+    { "key": "approved", "groupKey": "OutcomeReason", "xmlElement": "Approved", "required": false, "repeatable": false },
+    { "key": "denied", "groupKey": "OutcomeReason", "xmlElement": "Denied", "required": false, "repeatable": false },
+    { "key": "denyNewToFollow", "groupKey": "OutcomeReason", "xmlElement": "DenyNewToFollow", "required": false, "repeatable": false },
+    { "key": "approvedWithChanges", "groupKey": "OutcomeReason", "xmlElement": "ApprovedWithChanges", "required": false, "repeatable": false },
+    { "key": "validated", "groupKey": "OutcomeReason", "xmlElement": "Validated", "required": false, "repeatable": false },
+    { "key": "replace", "groupKey": "OutcomeReason", "xmlElement": "Replace", "required": false, "repeatable": false }
+  ],
+  "elementOrder": ["Approved", "Denied", "DenyNewToFollow", "ApprovedWithChanges", "Validated", "Replace"],
+  "sourceRefs": [
+    "Added 2026-09-19 after running real, third-party CancelRxResponse/RxChangeResponse/RxRenewalResponse fixtures (cosyte/ncpdp's own MIT-licensed test suite) through the real parse+FHIR-mapping pipeline: EVERY real fixture's own outcome element (Approved/Denied/etc.) is nested one level deeper than this engine's own 3 response transaction schemas originally modeled -- `<CancelRxResponse><Response><Approved>...`, not `<CancelRxResponse><Approved>...` directly. The original sourcing (cosyte/ncpdp src/script/lifecycle.ts's own TypeScript type definitions, per each transaction schema's own prior sourceRefs) apparently reflected that LIBRARY's own flattened in-memory data model (which drops the wrapper during its own parsing), not the real wire XML shape -- a real, confirmed lesson that a library's own TYPE DEFINITIONS and its ACTUAL WIRE-FORMAT FIXTURES can genuinely disagree, and only the fixtures are authoritative for structure. This ONE shared wrapper group is now referenced once by each of the 3 response transaction schemas instead of each one re-declaring the same 6 outcome group refs directly at its own top level."
+  ]
+}

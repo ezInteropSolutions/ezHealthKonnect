@@ -1,0 +1,31 @@
+{
+  "id": "HCR",
+  "name": "Health Care Services Review",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "actionCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "certificationNumber",
+      "dataType": "AN"
+    },
+    {
+      "pos": "03",
+      "key": "freeFormMessageText",
+      "dataType": "AN"
+    },
+    {
+      "pos": "04",
+      "key": "yesNoConditionResponseCode",
+      "dataType": "ID"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/HCR) — the 278 RESPONSE's own decision segment. HCR01 (Action Code — e.g. \"A1\"=Certified in total, \"A3\"=Certified partial, \"A4\"=Denied) is the real prior-authorization outcome; HCR02 carries the payer's own certification/authorization number. Only appears on the response side of this engine's single unified 278.json schema — its presence is how the derive script distinguishes a response from a request (see the 278-to-FHIR OOB template's own derive script)."
+  ]
+}

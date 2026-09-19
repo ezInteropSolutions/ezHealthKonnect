@@ -1,0 +1,14 @@
+{
+  "key": "Error",
+  "name": "Error Acknowledgment",
+  "fields": [
+    { "key": "code", "xpath": "Code", "name": "Error Code", "dataType": "code", "required": true },
+    { "key": "descriptionCode", "xpath": "DescriptionCode", "name": "Description Code", "dataType": "code", "required": false },
+    { "key": "description", "xpath": "Description", "name": "Description", "dataType": "string", "required": false }
+  ],
+  "groups": [],
+  "elementOrder": ["Code", "DescriptionCode", "Description"],
+  "sourceRefs": [
+    "cosyte/ncpdp src/script/response.ts (ResponseFields, shared verbatim with Status/Verify -- dispositionOf() maps \"Error\" to \"error\" fail-safe, never coerced to a success) -- cross-confirmed against usnistgov/tcamt-2's SCRIPT_XML_10_6.xsd own <Error> element (Code with pattern 600|601|602|900, DescriptionCode 0..10, Description 0..1). A negative acknowledgment of a prior transaction, matching X12 999's own IK5/AK9 rejection-code precedent -- engine support without a FHIR mapping (a transport-layer nack has no natural FHIR resource analogue)."
+  ]
+}

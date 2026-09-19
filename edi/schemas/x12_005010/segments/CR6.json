@@ -1,0 +1,116 @@
+{
+  "id": "CR6",
+  "name": "Home Health Care Certification",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "prognosisCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "date1",
+      "dataType": "DT"
+    },
+    {
+      "pos": "03",
+      "key": "dateTimePeriodFormatQualifier1",
+      "dataType": "ID"
+    },
+    {
+      "pos": "04",
+      "key": "dateTimePeriod1",
+      "dataType": "AN"
+    },
+    {
+      "pos": "05",
+      "key": "date2",
+      "dataType": "DT"
+    },
+    {
+      "pos": "06",
+      "key": "yesNoConditionResponseCode1",
+      "dataType": "ID"
+    },
+    {
+      "pos": "07",
+      "key": "yesNoConditionResponseCode2",
+      "dataType": "ID"
+    },
+    {
+      "pos": "08",
+      "key": "certificationTypeCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "09",
+      "key": "date3",
+      "dataType": "DT"
+    },
+    {
+      "pos": "10",
+      "key": "productOrServiceIDQualifier",
+      "dataType": "ID"
+    },
+    {
+      "pos": "11",
+      "key": "medicalCodeValue",
+      "dataType": "AN"
+    },
+    {
+      "pos": "12",
+      "key": "date4",
+      "dataType": "DT"
+    },
+    {
+      "pos": "13",
+      "key": "date5",
+      "dataType": "DT"
+    },
+    {
+      "pos": "14",
+      "key": "date6",
+      "dataType": "DT"
+    },
+    {
+      "pos": "15",
+      "key": "dateTimePeriodFormatQualifier2",
+      "dataType": "ID"
+    },
+    {
+      "pos": "16",
+      "key": "dateTimePeriod2",
+      "dataType": "AN"
+    },
+    {
+      "pos": "17",
+      "key": "patientLocationCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "18",
+      "key": "date7",
+      "dataType": "DT"
+    },
+    {
+      "pos": "19",
+      "key": "date8",
+      "dataType": "DT"
+    },
+    {
+      "pos": "20",
+      "key": "date9",
+      "dataType": "DT"
+    },
+    {
+      "pos": "21",
+      "key": "date10",
+      "dataType": "DT"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/CR6) — a niche, deeply optional 278 certification-detail segment (home health care patient certification). Same \"generic shared-shape, positional suffixes\" trade-off as CR5.json (Date/373 appears 10×, Yes/No/1073 appears 2×) — no per-position semantic label available from the generic element reference. Included for full completeness per this round's own scope decision."
+  ]
+}

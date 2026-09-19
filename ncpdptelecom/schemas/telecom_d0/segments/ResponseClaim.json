@@ -1,0 +1,18 @@
+{
+  "key": "ResponseClaim",
+  "identifier": "22",
+  "name": "Response Claim",
+  "fields": [
+    { "key": "prescriptionReferenceNumberQualifier", "fieldId": "EM", "name": "Prescription Reference Number Qualifier", "dataType": "AN", "required": false },
+    { "key": "prescriptionReferenceNumber", "fieldId": "D2", "name": "Prescription Service Reference Number", "dataType": "AN", "required": false },
+    { "key": "preferredProductCount", "fieldId": "9F", "name": "Preferred Product Count", "dataType": "N", "required": false },
+    { "key": "preferredProductIdQualifier", "fieldId": "AP", "name": "Preferred Product ID Qualifier", "dataType": "AN", "required": false },
+    { "key": "preferredProductId", "fieldId": "AR", "name": "Preferred Product ID", "dataType": "AN", "required": false },
+    { "key": "preferredProductIncentive", "fieldId": "AS", "name": "Preferred Product Incentive", "dataType": "AN", "required": false },
+    { "key": "preferredProductCostShareIncentive", "fieldId": "AT", "name": "Preferred Product Cost Share Incentive", "dataType": "AN", "required": false },
+    { "key": "preferredProductDescription", "fieldId": "AU", "name": "Preferred Product Description", "dataType": "AN", "required": false }
+  ],
+  "sourceRefs": [
+    "apiv/dzero lib/dzero/segments/22_response_claim.rb (field-id-to-symbol dictionary, read directly) -- echoes the claim's own reference number back and, when the submitted product isn't the plan's preferred choice, carries preferred-product substitution guidance."
+  ]
+}

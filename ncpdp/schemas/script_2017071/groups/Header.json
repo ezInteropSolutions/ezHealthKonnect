@@ -1,0 +1,26 @@
+{
+  "key": "Header",
+  "xmlElement": "Header",
+  "name": "Message Header",
+  "fields": [
+    { "key": "to", "xpath": "To", "name": "To", "dataType": "string", "required": true },
+    { "key": "toQualifier", "xpath": "To/@Qualifier", "name": "To Qualifier", "dataType": "code", "required": false },
+    { "key": "from", "xpath": "From", "name": "From", "dataType": "string", "required": true },
+    { "key": "fromQualifier", "xpath": "From/@Qualifier", "name": "From Qualifier", "dataType": "code", "required": false },
+    { "key": "messageID", "xpath": "MessageID", "name": "Message ID", "dataType": "string", "required": true },
+    { "key": "relatesToMessageID", "xpath": "RelatesToMessageID", "name": "Relates To Message ID", "dataType": "string", "required": false },
+    { "key": "sentTime", "xpath": "SentTime", "name": "Sent Time", "dataType": "string", "required": true },
+    { "key": "prescriberOrderNumber", "xpath": "PrescriberOrderNumber", "name": "Prescriber Order Number", "dataType": "string", "required": false },
+    { "key": "testMessage", "xpath": "TestMessage", "name": "Test Message", "dataType": "string", "required": false }
+  ],
+  "groups": [
+    { "key": "security", "groupKey": "Security", "xmlElement": "Security", "required": false, "repeatable": false },
+    { "key": "senderSoftware", "groupKey": "SenderSoftware", "xmlElement": "SenderSoftware", "required": false, "repeatable": false },
+    { "key": "mailbox", "groupKey": "Mailbox", "xmlElement": "Mailbox", "required": false, "repeatable": false }
+  ],
+  "elementOrder": ["To", "From", "MessageID", "RelatesToMessageID", "SentTime", "Security", "SenderSoftware", "Mailbox", "PrescriberOrderNumber", "TestMessage"],
+  "sourceRefs": [
+    "dgoradia/ncpdp testdata/sample-newrx.xml (SCRIPT v2017071, Header) confirms To/From/MessageID/SentTime/Security/SenderSoftware/Mailbox/PrescriberOrderNumber and their order.",
+    "RelatesToMessageID and TestMessage are not present in the NewRx sample (request-only message) — their placement here (after MessageID, and at the very end, respectively) is a reasonable default per common SCRIPT usage, NOT yet confirmed against a real response sample. Revisit once a real CancelRxResponse/RxChangeResponse sample is sourced in Step D."
+  ]
+}

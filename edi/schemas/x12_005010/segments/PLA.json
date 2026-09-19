@@ -1,0 +1,36 @@
+{
+  "id": "PLA",
+  "name": "Provider Change Reason",
+  "usage": "situational",
+  "maxUse": "1",
+  "elements": [
+    {
+      "pos": "01",
+      "key": "actionCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "02",
+      "key": "entityIdentifierCode",
+      "dataType": "ID"
+    },
+    {
+      "pos": "03",
+      "key": "date",
+      "dataType": "DT"
+    },
+    {
+      "pos": "04",
+      "key": "time",
+      "dataType": "TM"
+    },
+    {
+      "pos": "05",
+      "key": "maintenanceReasonCode",
+      "dataType": "ID"
+    }
+  ],
+  "sourceRefs": [
+    "Stedi (stedi.com/edi/x12-005010/segment/PLA) — 834's 2310 Provider loop, the action (add/change/delete) being taken on this member's named provider (e.g. PCP assignment change) and its effective date."
+  ]
+}
