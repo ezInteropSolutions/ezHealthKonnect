@@ -1,6 +1,102 @@
 // controllers/interfacesController.js - UPDATED WITH CONNECTIVITY SUPPORT
 console.log('🔧 Loading Enhanced Interfaces Controller with Format + Connectivity Support...');
 const { GO_BACKEND_URL: _GO_URL, internalHeaders: _goHeaders, goClient: _goClient } = require('../services/goBackendClient');
+const auditService = require('../services/auditService');
+// Reuses pipelineController.js's own credential-key heuristic and encryption
+// (mirrors Go's isSensitiveKey()/EncryptConfigFields) rather than a second,
+// drifting definition of "what looks like a credential" — see
+// containsSensitiveField/maskSensitiveFields/resolveMaskedFields below.
+const { isSensitiveConfigKey, encryptSensitiveConfigFields } = require('./pipelineController');
+
+// MASK_PLACEHOLDER matches services/credential_store.go's own
+// MaskSensitiveFields exactly (same literal string) — a connector config
+// sent to the browser (getInterface/getAllInterfaces) never carries a real
+// credential value again once saved, mirroring the Go-side convention this
+// codebase already established for the same problem.
+const MASK_PLACEHOLDER = '••••••••';
+
+// containsSensitiveField walks a connector config object (recursing into
+// nested objects/arrays the same shape encryptSensitiveConfigFields in
+// pipelineController.js does — connector configs commonly nest credentials
+// one level down, e.g. {connectorType, config: {host, password, ...}}) and
+// reports whether any sensitive-shaped key carries a real (non-empty,
+// non-placeholder) value. Used to fire INTERFACE_CREDENTIALS_UPDATED
+// distinctly from a routine rename/status edit — see updateInterface below.
+// The MASK_PLACEHOLDER exclusion matters as of the masking below: without
+// it, EVERY save of EVERY interface with a configured credential would
+// false-positive (the UI always echoes the mask placeholder back for a
+// field the user never touched), defeating the entire point of a distinct
+// high-risk event. Deliberately does not attempt an old-vs-new VALUE diff —
+// see resolveMaskedFields' own doc comment for why the placeholder
+// convention, not a stored-value comparison, is the correct signal here.
+function containsSensitiveField(obj) {
+    if (!obj || typeof obj !== 'object') return false;
+    if (Array.isArray(obj)) return obj.some(containsSensitiveField);
+    for (const [key, value] of Object.entries(obj)) {
+        if (value && typeof value === 'object') {
+            if (containsSensitiveField(value)) return true;
+        } else if (typeof value === 'string' && value !== '' && value !== MASK_PLACEHOLDER && isSensitiveConfigKey(key)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// maskSensitiveFields recursively replaces non-empty sensitive-keyed string
+// values with MASK_PLACEHOLDER before a connector config is sent to the
+// browser. Applied in getInterface/getAllInterfaces below. Returns a new
+// object — the input (freshly parsed from a DB row, not shared/cached) is
+// not mutated, but this function doesn't assume that either.
+function maskSensitiveFields(obj) {
+    if (!obj || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) return obj.map(maskSensitiveFields);
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+        if (value && typeof value === 'object') {
+            result[key] = maskSensitiveFields(value);
+        } else if (typeof value === 'string' && value !== '' && isSensitiveConfigKey(key)) {
+            result[key] = MASK_PLACEHOLDER;
+        } else {
+            result[key] = value;
+        }
+    }
+    return result;
+}
+
+// resolveMaskedFields is the write-side counterpart to maskSensitiveFields:
+// walks freshly-submitted config (incoming) alongside the step's currently
+// stored config (existing), and for any sensitive-keyed field still holding
+// MASK_PLACEHOLDER — i.e. the browser echoed back exactly what
+// maskSensitiveFields sent it, meaning the user never touched that field —
+// substitutes the REAL value already on file (which may itself already be
+// ENC:v1:-encrypted; encryptSensitiveConfigFields is idempotent on those, so
+// re-running it below is safe either way). Without this, saving an
+// unrelated field (e.g. renaming the interface) would silently overwrite
+// every real stored credential with the literal placeholder string. A field
+// the user actually changed (a real new value, or a deliberate empty string
+// to clear it) is never a MASK_PLACEHOLDER match, so it always passes
+// through untouched. Used for every _updateStep write path (full-replacement
+// AND legacy merge-patch) below, uniformly — see _updateStep's own comment
+// for why the current config is fetched first in every branch.
+function resolveMaskedFields(incoming, existing) {
+    if (!incoming || typeof incoming !== 'object') return incoming;
+    if (Array.isArray(incoming)) {
+        const existingArr = Array.isArray(existing) ? existing : [];
+        return incoming.map((item, i) => resolveMaskedFields(item, existingArr[i]));
+    }
+    const existingObj = (existing && typeof existing === 'object' && !Array.isArray(existing)) ? existing : {};
+    const result = {};
+    for (const [key, value] of Object.entries(incoming)) {
+        if (value && typeof value === 'object') {
+            result[key] = resolveMaskedFields(value, existingObj[key]);
+        } else if (typeof value === 'string' && value === MASK_PLACEHOLDER && isSensitiveConfigKey(key)) {
+            result[key] = existingObj[key];
+        } else {
+            result[key] = value;
+        }
+    }
+    return result;
+}
 
 class InterfacesController {
     constructor() {
@@ -193,12 +289,26 @@ class InterfacesController {
                 version: item.version || 1,
                 processingStats: this.parseJsonField(item.processing_stats),
 
-                // Connector step configs — mirror of getInterface so edit modal shows pipeline-accurate data
+                // Connector step configs — mirror of getInterface so edit modal shows pipeline-accurate data.
+                // maskSensitiveFields: a credential value never leaves the server once
+                // saved — see the MASK_PLACEHOLDER/resolveMaskedFields comments above for
+                // the write-side half of this contract (_updateStep, in updateInterface).
                 inboundStepId: item.inbound_step_id || null,
-                inboundStepConfig: this.parseJsonField(item.inbound_step_config),
+                inboundStepConfig: maskSensitiveFields(this.parseJsonField(item.inbound_step_config)),
                 outboundStepId: item.outbound_step_id || null,
-                outboundStepConfig: this.parseJsonField(item.outbound_step_config)
+                outboundStepConfig: maskSensitiveFields(this.parseJsonField(item.outbound_step_config))
             }));
+
+            auditService.logEvent({
+                userId,
+                action: 'INTERFACES_VIEWED',
+                entityType: 'interface',
+                metadata: { count: transformedInterfaces.length },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                result: 'success',
+                riskLevel: 'low'
+            }).catch(err => console.warn('⚠️ Failed to write INTERFACES_VIEWED audit log:', err.message));
 
             return res.json({
                 success: true,
@@ -353,8 +463,7 @@ class InterfacesController {
 
             // 🏗️ AUTO-CREATE: PostgreSQL table + MongoDB collection for new interface
             try {
-                const InterfaceTableManager = require('../services/InterfaceTableManager');
-                const tableManager = new InterfaceTableManager();
+                const tableManager = require('../services/InterfaceTableManager');
 
                 // Create PostgreSQL table for this interface
                 const tableName = await tableManager.ensureInterfaceTable(
@@ -401,6 +510,25 @@ class InterfacesController {
                 version: newInterfaceItem.version || 1
             };
 
+            auditService.logEvent({
+                userId,
+                action: 'INTERFACE_CREATED',
+                entityType: 'interface',
+                entityId: newInterfaceItem.id,
+                newValues: {
+                    name: newInterfaceItem.name,
+                    sourceType: newInterfaceItem.source_type,
+                    sourceConnectivity: newInterfaceItem.source_connectivity,
+                    targetType: newInterfaceItem.target_type,
+                    targetConnectivity: newInterfaceItem.target_connectivity,
+                    messageType: newInterfaceItem.message_type
+                },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                result: 'success',
+                riskLevel: 'medium'
+            }).catch(err => console.warn('⚠️ Failed to write INTERFACE_CREATED audit log:', err.message));
+
             return res.status(201).json({
                 success: true,
                 interface: responseInterface,
@@ -409,6 +537,19 @@ class InterfacesController {
 
         } catch (error) {
             console.error('❌ Create Interface Error:', error);
+
+            auditService.logEvent({
+                userId: req.session?.user?.id,
+                action: 'INTERFACE_CREATE_FAILED',
+                entityType: 'interface',
+                metadata: { attemptedName: req.body?.name, error: error.message },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                result: 'error',
+                riskLevel: 'medium',
+                errorMessage: error.message
+            }).catch(err => console.warn('⚠️ Failed to write INTERFACE_CREATE_FAILED audit log:', err.message));
+
             return res.status(500).json({
                 success: false,
                 error: 'Failed to create interface',
@@ -504,11 +645,15 @@ class InterfacesController {
                 targetConfig: this.parseJsonField(item.target_config),
 
                 // Single source of truth: connector step configs from transformation_steps
-                // Edit modal Source/Target tabs read from and write to these, not source_connectivity
+                // Edit modal Source/Target tabs read from and write to these, not source_connectivity.
+                // maskSensitiveFields — see the MASK_PLACEHOLDER comment near the top of this
+                // file: a credential value never leaves the server once saved; the edit
+                // modal round-trips the placeholder back unchanged for any field the user
+                // doesn't touch, which _updateStep resolves back to the real stored value.
                 inboundStepId: item.inbound_step_id || null,
-                inboundStepConfig: this.parseJsonField(item.inbound_step_config),
+                inboundStepConfig: maskSensitiveFields(this.parseJsonField(item.inbound_step_config)),
                 outboundStepId: item.outbound_step_id || null,
-                outboundStepConfig: this.parseJsonField(item.outbound_step_config),
+                outboundStepConfig: maskSensitiveFields(this.parseJsonField(item.outbound_step_config)),
                 messageType: item.message_type,
                 acceptedMessageFamilies: this.parseJsonField(item.accepted_message_families) || null,
                 processingRules: this.parseJsonField(item.processing_rules),
@@ -561,6 +706,19 @@ class InterfacesController {
             };
 
             console.log(`✅ Found interface: ${item.name}`);
+
+            auditService.logEvent({
+                userId,
+                action: 'INTERFACE_VIEWED',
+                entityType: 'interface',
+                entityId: interfaceId,
+                metadata: { interfaceName: item.name },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                result: 'success',
+                riskLevel: 'low'
+            }).catch(err => console.warn('⚠️ Failed to write INTERFACE_VIEWED audit log:', err.message));
+
             return res.json({
                 success: true,
                 interface: transformedInterface
@@ -937,8 +1095,7 @@ class InterfacesController {
 
             // Step 2: Handle message data based on retention policy
             try {
-                const InterfaceTableManager = require('../services/InterfaceTableManager');
-                const tableManager = new InterfaceTableManager();
+                const tableManager = require('../services/InterfaceTableManager');
                 const tableName = tableManager.getInterfaceTableName(interfaceId);
 
                 if (dataRetention === 'delete_all') {
@@ -983,6 +1140,24 @@ class InterfacesController {
                 dataInfo = 'All message data retained for audit/recovery.';
             }
 
+            // INTERFACE_DELETED — a data-erasure event, same risk class as
+            // CDA_DEDUPE_REGISTRY_PURGED (see cda_dedupe_registry_controller.go)
+            // — 'high' unconditionally (even a soft delete stops PHI
+            // processing for this interface), 'critical' when data was
+            // actually destroyed (hard delete + delete_all).
+            auditService.logEvent({
+                userId,
+                action: 'INTERFACE_DELETED',
+                entityType: 'interface',
+                entityId: interfaceId,
+                oldValues: { name: interfaceItem.name, status: interfaceItem.status },
+                metadata: { deleteType, dataRetention },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                result: 'success',
+                riskLevel: (deleteType === 'hard' && dataRetention === 'delete_all') ? 'critical' : 'high'
+            }).catch(err => console.warn('⚠️ Failed to write INTERFACE_DELETED audit log:', err.message));
+
             return res.json({
                 success: true,
                 message: `Interface "${interfaceItem.name}" deleted successfully`,
@@ -995,6 +1170,20 @@ class InterfacesController {
 
         } catch (error) {
             console.error('❌ Delete Interface Error:', error);
+
+            auditService.logEvent({
+                userId: req.session?.user?.id,
+                action: 'INTERFACE_DELETE_FAILED',
+                entityType: 'interface',
+                entityId: req.params.interfaceId,
+                metadata: { error: error.message },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                result: 'error',
+                riskLevel: 'high',
+                errorMessage: error.message
+            }).catch(err => console.warn('⚠️ Failed to write INTERFACE_DELETE_FAILED audit log:', err.message));
+
             return res.status(500).json({
                 success: false,
                 error: 'Failed to delete interface',
@@ -1322,20 +1511,57 @@ class InterfacesController {
                 const hasInnerConfig = innerConfig && Object.keys(innerConfig).length > 0;
                 if (!hasFullConfig && !hasInnerConfig) return;
                 try {
+                    // Fetch the step's CURRENTLY stored config first — every
+                    // branch below needs it, for two reasons: (1) resolving
+                    // MASK_PLACEHOLDER fields the browser echoed back
+                    // unchanged (see resolveMaskedFields) back to their real,
+                    // already-on-file value, so a save that doesn't touch a
+                    // credential can never overwrite it with the placeholder
+                    // string, and (2) this is also where credentials get
+                    // ENCRYPTED before being written — mirroring
+                    // pipelineController.js's own savePipeline, which already
+                    // calls encryptSensitiveConfigFields before writing this
+                    // same column; this path previously didn't, so editing a
+                    // connector's password via this modal stored it in
+                    // plaintext while editing the identical field via the
+                    // pipeline builder encrypted it — two paths to the same
+                    // column, only one of them safe. This closes that gap.
+                    let currentConfig = null;
+                    if (stepId) {
+                        const rows = await this.database.sequelize.query(
+                            `SELECT config FROM transformation_steps WHERE id = :stepId`,
+                            { replacements: { stepId }, type: this.database.sequelize.QueryTypes.SELECT }
+                        );
+                        if (rows[0]) currentConfig = this.parseJsonField(rows[0].config);
+                    } else {
+                        const rows = await this.database.sequelize.query(`
+                            SELECT ts.config
+                            FROM transformation_steps ts
+                            JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
+                            WHERE tp.interface_id = :interfaceId AND ts.step_type = :stepType
+                            LIMIT 1
+                        `, { replacements: { interfaceId, stepType }, type: this.database.sequelize.QueryTypes.SELECT });
+                        if (rows[0]) currentConfig = this.parseJsonField(rows[0].config);
+                    }
+
                     if (hasFullConfig && stepId) {
                         // Full replacement — connectorType + config in one atomic write
+                        const resolved = resolveMaskedFields(fullConnectorCfg, currentConfig || {});
+                        const encrypted = encryptSensitiveConfigFields(resolved);
                         await this.database.sequelize.query(`
                             UPDATE transformation_steps
                             SET    config = :fullConfig::jsonb,
                                    updated_at = CURRENT_TIMESTAMP
                             WHERE  id = :stepId
                         `, {
-                            replacements: { fullConfig: JSON.stringify(fullConnectorCfg), stepId },
+                            replacements: { fullConfig: JSON.stringify(encrypted), stepId },
                             type: this.database.sequelize.QueryTypes.UPDATE
                         });
                         console.log(`✅ Full config replacement for ${stepType} step ${stepId}: connectorType=${fullConnectorCfg.connectorType}`);
                     } else if (hasFullConfig) {
                         // Full config but no stepId — find by interface + step_type
+                        const resolved = resolveMaskedFields(fullConnectorCfg, currentConfig || {});
+                        const encrypted = encryptSensitiveConfigFields(resolved);
                         await this.database.sequelize.query(`
                             UPDATE transformation_steps ts
                             SET    config = :fullConfig::jsonb,
@@ -1345,24 +1571,30 @@ class InterfacesController {
                               AND  tp.interface_id = :interfaceId
                               AND  ts.step_type = :stepType
                         `, {
-                            replacements: { fullConfig: JSON.stringify(fullConnectorCfg), interfaceId, stepType },
+                            replacements: { fullConfig: JSON.stringify(encrypted), interfaceId, stepType },
                             type: this.database.sequelize.QueryTypes.UPDATE
                         });
                         console.log(`✅ Full config replacement for ${stepType} (by interface): connectorType=${fullConnectorCfg.connectorType}`);
                     } else if (hasInnerConfig && stepId) {
                         // Legacy merge-patch — only inner config fields changed
+                        const existingInner = (currentConfig && currentConfig.config) || {};
+                        const resolved = resolveMaskedFields(innerConfig, existingInner);
+                        const encrypted = encryptSensitiveConfigFields(resolved);
                         await this.database.sequelize.query(`
                             UPDATE transformation_steps
                             SET    config = jsonb_set(config, '{config}', config->'config' || :patch::jsonb, true),
                                    updated_at = CURRENT_TIMESTAMP
                             WHERE  id = :stepId
                         `, {
-                            replacements: { patch: JSON.stringify(innerConfig), stepId },
+                            replacements: { patch: JSON.stringify(encrypted), stepId },
                             type: this.database.sequelize.QueryTypes.UPDATE
                         });
                         console.log(`✅ Merge-patch for ${stepType} step ${stepId}`);
                     } else if (hasInnerConfig) {
                         // Legacy merge-patch — no step ID
+                        const existingInner = (currentConfig && currentConfig.config) || {};
+                        const resolved = resolveMaskedFields(innerConfig, existingInner);
+                        const encrypted = encryptSensitiveConfigFields(resolved);
                         await this.database.sequelize.query(`
                             UPDATE transformation_steps ts
                             SET    config = jsonb_set(ts.config, '{config}', ts.config->'config' || :patch::jsonb, true),
@@ -1372,7 +1604,7 @@ class InterfacesController {
                               AND  tp.interface_id = :interfaceId
                               AND  ts.step_type = :stepType
                         `, {
-                            replacements: { patch: JSON.stringify(innerConfig), interfaceId, stepType },
+                            replacements: { patch: JSON.stringify(encrypted), interfaceId, stepType },
                             type: this.database.sequelize.QueryTypes.UPDATE
                         });
                         console.log(`✅ Merge-patch for ${stepType} (by interface)`);
@@ -1393,6 +1625,43 @@ class InterfacesController {
 
             console.log(`✅ Interface ${interfaceId} updated successfully`);
 
+            auditService.logEvent({
+                userId,
+                action: 'INTERFACE_UPDATED',
+                entityType: 'interface',
+                entityId: interfaceId,
+                oldValues: { name: existingInterface[0].name, status: existingInterface[0].status },
+                newValues: { name: name || undefined, status: status || undefined, sourceType, targetType, messageType },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                result: 'success',
+                riskLevel: 'medium'
+            }).catch(err => console.warn('⚠️ Failed to write INTERFACE_UPDATED audit log:', err.message));
+
+            // INTERFACE_CREDENTIALS_UPDATED — fires ADDITIONALLY, not instead
+            // of INTERFACE_UPDATED above, whenever this save touched a
+            // credential-shaped field (API key, password, token, cert, ...)
+            // anywhere in the source/target connector config. Without this,
+            // rotating a connector's password gets the exact same 'medium'
+            // risk_level as renaming the interface — indistinguishable in
+            // the audit trail from a cosmetic edit, which is the wrong
+            // signal for security review.
+            const credentialFieldChanged = [sourceConfig, targetConfig, sourceConnectorConfig, targetConnectorConfig]
+                .some(containsSensitiveField);
+            if (credentialFieldChanged) {
+                auditService.logEvent({
+                    userId,
+                    action: 'INTERFACE_CREDENTIALS_UPDATED',
+                    entityType: 'interface',
+                    entityId: interfaceId,
+                    metadata: { interfaceName: existingInterface[0].name },
+                    ipAddress: req.ip,
+                    userAgent: req.headers['user-agent'],
+                    result: 'success',
+                    riskLevel: 'high'
+                }).catch(err => console.warn('⚠️ Failed to write INTERFACE_CREDENTIALS_UPDATED audit log:', err.message));
+            }
+
             return res.json({
                 success: true,
                 message: 'Interface updated successfully',
@@ -1401,6 +1670,20 @@ class InterfacesController {
 
         } catch (error) {
             console.error('❌ Update Interface Error:', error);
+
+            auditService.logEvent({
+                userId: req.session?.user?.id,
+                action: 'INTERFACE_UPDATE_FAILED',
+                entityType: 'interface',
+                entityId: req.params.interfaceId,
+                metadata: { error: error.message },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                result: 'error',
+                riskLevel: 'medium',
+                errorMessage: error.message
+            }).catch(err => console.warn('⚠️ Failed to write INTERFACE_UPDATE_FAILED audit log:', err.message));
+
             return res.status(500).json({
                 success: false,
                 error: 'Failed to update interface',
@@ -1658,3 +1941,11 @@ console.log('🔍 Enhanced Controller instance created:', !!controllerInstance);
 console.log('🔍 Enhanced Controller instance.database:', !!controllerInstance.database);
 
 module.exports = controllerInstance;
+
+// Exported for unit testing only (tests/unit/controllers/interfacesController.credentials.test.js).
+// Not part of the HTTP-facing controller API — mirrors pipelineController.js's
+// own "exported for unit testing only" convention for its analogous helpers.
+module.exports.containsSensitiveField = containsSensitiveField;
+module.exports.maskSensitiveFields = maskSensitiveFields;
+module.exports.resolveMaskedFields = resolveMaskedFields;
+module.exports.MASK_PLACEHOLDER = MASK_PLACEHOLDER;

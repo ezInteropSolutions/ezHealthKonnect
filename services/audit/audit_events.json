@@ -1,0 +1,545 @@
+{
+  "MESSAGE_RECEIVED": {
+    "atnaEventId": "110107",
+    "atnaEventIdDisplay": "Import",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "phi_processed": true }
+  },
+  "MESSAGE_DELIVERED": {
+    "atnaEventId": "110106",
+    "atnaEventIdDisplay": "Export",
+    "eventActionCode": "R",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "phi_disclosed": true }
+  },
+  "MESSAGE_DELIVERY_FAILED": {
+    "atnaEventId": "110106",
+    "atnaEventIdDisplay": "Export",
+    "eventActionCode": "R",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "failure",
+    "complianceFlags": { "hipaa": true }
+  },
+  "DLQ_MESSAGE_ENQUEUED": {
+    "atnaEventId": "110106",
+    "atnaEventIdDisplay": "Export",
+    "eventActionCode": "R",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "failure",
+    "complianceFlags": { "hipaa": true }
+  },
+  "DLQ_MESSAGE_REDRIVEN": {
+    "atnaEventId": "110106",
+    "atnaEventIdDisplay": "Export",
+    "eventActionCode": "R",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "INTERFACE_ACTIVATED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "INTERFACE_DEACTIVATED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "APPLICATION_STARTED": {
+    "atnaEventId": "110120",
+    "atnaEventIdDisplay": "Start Session",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "APPLICATION_STOPPED": {
+    "atnaEventId": "110121",
+    "atnaEventIdDisplay": "Stop Session",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "CDA_DEDUPE_REGISTRY_VIEWED": {
+    "atnaEventId": "110112",
+    "atnaEventIdDisplay": "Query",
+    "eventActionCode": "R",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "phi_accessed": true }
+  },
+  "CDA_DEDUPE_REGISTRY_PURGED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "D",
+    "defaultRiskLevel": "high",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "gdpr_erasure": true }
+  },
+  "CDA_DEDUPE_REGISTRY_RETENTION_PURGED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "D",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "retention_purge": true }
+  },
+  "PHI_SAFETY_HALT": {
+    "atnaEventId": "110113",
+    "atnaEventIdDisplay": "Security Alert",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "critical",
+    "defaultResult": "failure",
+    "complianceFlags": { "hipaa_safety_halt": true, "requires_operator_review": true }
+  },
+  "cda_fhir_transform": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "phi_processed": true }
+  },
+  "transformation.pipeline.executed": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "phi_processed": true, "action_type": "hl7_fhir_transform" }
+  },
+  "dlq_redrive": {
+    "atnaEventId": "110106",
+    "atnaEventIdDisplay": "Export",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "dlq_schedule": {
+    "atnaEventId": "110106",
+    "atnaEventIdDisplay": "Export",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "dlq_abandon": {
+    "atnaEventId": "110106",
+    "atnaEventIdDisplay": "Export",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+
+  "table_maintenance": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "table_cleanup": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "D",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "retention_purge": true }
+  },
+
+  "PIPELINE_SAVED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "PIPELINE_SAVE_FAILED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "error",
+    "complianceFlags": { "hipaa": true }
+  },
+  "PIPELINE_CLONED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "PIPELINE_CLONE_FAILED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "error",
+    "complianceFlags": { "hipaa": true }
+  },
+  "PIPELINE_DELETED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "D",
+    "defaultRiskLevel": "high",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "PIPELINE_DELETE_FAILED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "D",
+    "defaultRiskLevel": "high",
+    "defaultResult": "error",
+    "complianceFlags": { "hipaa": true }
+  },
+
+  "fhir_message_received": {
+    "atnaEventId": "110107",
+    "atnaEventIdDisplay": "Import",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "phi_processed": true }
+  },
+  "MESSAGE_VIEWED": {
+    "atnaEventId": "110112",
+    "atnaEventIdDisplay": "Query",
+    "eventActionCode": "R",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "phi_accessed": true }
+  },
+  "MESSAGES_VIEWED": {
+    "atnaEventId": "110112",
+    "atnaEventIdDisplay": "Query",
+    "eventActionCode": "R",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "phi_accessed": true }
+  },
+
+  "INTERFACES_VIEWED": {
+    "atnaEventId": "110112",
+    "atnaEventIdDisplay": "Query",
+    "eventActionCode": "R",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "INTERFACE_VIEWED": {
+    "atnaEventId": "110112",
+    "atnaEventIdDisplay": "Query",
+    "eventActionCode": "R",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "INTERFACE_CREATED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "INTERFACE_CREATE_FAILED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "error",
+    "complianceFlags": { "hipaa": true }
+  },
+  "interface_created": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "INTERFACE_UPDATED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "INTERFACE_UPDATE_FAILED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "error",
+    "complianceFlags": { "hipaa": true }
+  },
+  "INTERFACE_CREDENTIALS_UPDATED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "high",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "credential_change": true }
+  },
+  "INTERFACE_DELETED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "D",
+    "defaultRiskLevel": "high",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "INTERFACE_DELETE_FAILED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "D",
+    "defaultRiskLevel": "high",
+    "defaultResult": "error",
+    "complianceFlags": { "hipaa": true }
+  },
+  "interface_deleted": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "D",
+    "defaultRiskLevel": "high",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "interface_maintenance_error": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "error",
+    "complianceFlags": { "hipaa": true }
+  },
+
+  "LOGIN_SUCCESS": {
+    "atnaEventId": "110114",
+    "atnaEventIdDisplay": "User Authentication",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "LOGIN_FAILED": {
+    "atnaEventId": "110114",
+    "atnaEventIdDisplay": "User Authentication",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "failure",
+    "complianceFlags": { "hipaa": true }
+  },
+  "LOGIN_ERROR": {
+    "atnaEventId": "110114",
+    "atnaEventIdDisplay": "User Authentication",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "error",
+    "complianceFlags": { "hipaa": true }
+  },
+  "LOGIN_FORCE_RESET": {
+    "atnaEventId": "110114",
+    "atnaEventIdDisplay": "User Authentication",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "PASSWORD_RESET_COMPLETED": {
+    "atnaEventId": "110114",
+    "atnaEventIdDisplay": "User Authentication",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+
+  "USERS_VIEWED": {
+    "atnaEventId": "110112",
+    "atnaEventIdDisplay": "Query",
+    "eventActionCode": "R",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "USERS_VIEW_FAILED": {
+    "atnaEventId": "110112",
+    "atnaEventIdDisplay": "Query",
+    "eventActionCode": "R",
+    "defaultRiskLevel": "low",
+    "defaultResult": "error",
+    "complianceFlags": { "hipaa": true }
+  },
+  "USER_CREATED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "USER_CREATE_FAILED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "error",
+    "complianceFlags": { "hipaa": true }
+  },
+  "USER_UPDATED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "USER_DELETED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "D",
+    "defaultRiskLevel": "high",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "USER_STATUS_CHANGED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "access_control": true }
+  },
+  "USER_COMPLIANCE_UPDATED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "gdpr": true }
+  },
+  "USER_PROFILE_UPDATED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "USER_ROLE_CHANGED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "high",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "access_control": true }
+  },
+  "USER_PASSWORD_RESET_BY_ADMIN": {
+    "atnaEventId": "110114",
+    "atnaEventIdDisplay": "User Authentication",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "high",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "access_control": true }
+  },
+  "USER_FORCE_RESET": {
+    "atnaEventId": "110114",
+    "atnaEventIdDisplay": "User Authentication",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "high",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "access_control": true }
+  },
+  "USER_UNLOCKED": {
+    "atnaEventId": "110114",
+    "atnaEventIdDisplay": "User Authentication",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "USER_INVITED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "USER_INVITE_ACCEPTED": {
+    "atnaEventId": "110114",
+    "atnaEventIdDisplay": "User Authentication",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "USERS_BULK_ACTION": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "GDPR_DELETE_REQUESTED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "D",
+    "defaultRiskLevel": "high",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "gdpr": true }
+  },
+  "GDPR_DATA_EXPORTED": {
+    "atnaEventId": "110106",
+    "atnaEventIdDisplay": "Export",
+    "eventActionCode": "R",
+    "defaultRiskLevel": "high",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "gdpr": true, "phi_disclosed": true }
+  },
+  "GDPR_DATA_ERASED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "D",
+    "defaultRiskLevel": "critical",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "gdpr_erasure": true }
+  },
+
+  "wizard_completed": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "wizard_config_saved": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  }
+}

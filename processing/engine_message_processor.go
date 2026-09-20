@@ -16,6 +16,7 @@ import (
 
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/audit"
 	"ezhealthkonnect/services/connectors"
 	"ezhealthkonnect/services/logger"
 	"ezhealthkonnect/services/metrics"
@@ -255,8 +256,34 @@ func (pe *ProcessingEngine) storeMessage(interfaceID string, msg *models.Inbound
 		msg.MessageSize,
 		encoding,
 	)
+	if err != nil {
+		return err
+	}
 
-	return err
+	// MESSAGE_RECEIVED audit — fire-and-forget so a slow/unreachable
+	// audit_logs write never adds latency to inbound ingestion (the same
+	// non-blocking posture every other audit write in this codebase takes).
+	if pe.auditLogger != nil {
+		go func() {
+			if auditErr := pe.auditLogger.Log(context.Background(), audit.AuditEvent{
+				Action:     "MESSAGE_RECEIVED",
+				EntityType: "message",
+				EntityID:   msg.MessageID,
+				Metadata: map[string]interface{}{
+					"interface_id":   interfaceID,
+					"correlation_id": msg.CorrelationID,
+					"source_type":    sourceType,
+					"source_ip":      sourceIP,
+					"message_type":   messageType,
+					"message_size":   msg.MessageSize,
+				},
+			}); auditErr != nil {
+				log.Printf("⚠️  [audit] failed to write MESSAGE_RECEIVED: %v", auditErr)
+			}
+		}()
+	}
+
+	return nil
 }
 
 // sanitizeInterfaceID converts UUID to table-safe format

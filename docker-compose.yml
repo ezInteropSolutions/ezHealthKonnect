@@ -144,7 +144,25 @@ services:
       # Session secrets
       SESSION_SECRET: ezhealthkonnect_session_secret_key_for_development_1234567890123
       JWT_SECRET: ezhealthkonnect_jwt_secret_key_for_development_12345678901234567890
-      
+
+      # Connectivity credential encryption (services/credential_store.go +
+      # controllers/pipelineController.js's mirror-image JS implementation) —
+      # was previously unset, meaning this whole dev stack ran in plaintext
+      # passthrough mode (CredentialStore.LogMode()'s own "disabled" branch).
+      # Dev-only key, same convention as SESSION_SECRET/JWT_SECRET above —
+      # generate a real one for any non-dev deployment: openssl rand -base64 32
+      APP_CREDENTIAL_KEY: ValmmzmZkn3P1lmGAL4GylNB8o7A+Knm0SpyRQIoSzc=
+
+      # ATNA syslog export (services/audit/{atna_message.go,syslog_sender.go,
+      # syslog_audit_logger.go} on the Go side, services/audit/
+      # atnaSyslogExporter.js on the Node side) — opt-in, unset by default.
+      # Set ATNA_SYSLOG_HOST to enable; see either file's own header comment
+      # for the full list of ATNA_SYSLOG_*/ATNA_AUDIT_* environment
+      # variables and their defaults.
+      # ATNA_SYSLOG_HOST: your-arr-hostname
+      # ATNA_SYSLOG_PORT: "514"
+      # ATNA_SYSLOG_PROTOCOL: udp   # udp | tcp | tls
+
       # Feature flags
       ENABLE_POSTGRESQL: true
       HIPAA_COMPLIANCE_MODE: true
@@ -236,16 +254,20 @@ services:
       ollama:
         condition: service_healthy
     
-    command: >
-      sh -c "
-        (while true; do
-          ./go-api;
-          echo 'go-api exited (code $?), restarting in 3s...';
-          sleep 3;
-        done) &
-        sleep 3 &&
-        node server.js
-      "
+    # No command: override here anymore — docker-entrypoint.sh (baked into the
+    # image via the Dockerfile's ENTRYPOINT) is now the single source of truth
+    # for startup/shutdown behavior, instead of this block duplicating (and
+    # silently drifting from) the same shell logic a second time. See that
+    # script's own header comment for why a plain `sh -c "cmd & cmd"` here
+    # never forwarded SIGTERM to its children.
+    #
+    # stop_grace_period: main.go's own graceful shutdown can legitimately
+    # take up to ~45s in the worst case (processingEngine.Stop()'s 30s
+    # in-flight-message drain + a further 15s HTTP drain) — the default 10s
+    # Compose grace period would SIGKILL the container mid-drain even with
+    # signal forwarding now fixed. 60s leaves a safety margin above that
+    # worst case.
+    stop_grace_period: 60s
     restart: unless-stopped
     networks:
       - ezhealthkonnect

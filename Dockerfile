@@ -66,6 +66,13 @@ RUN apk upgrade --no-cache && apk add --no-cache curl && \
 
 WORKDIR /app
 
+# Entrypoint: forwards SIGTERM/SIGINT to both go-api and node server.js so
+# main.go's graceful-shutdown path actually runs on container stop, instead
+# of a plain `sh -c "cmd & cmd"` silently dropping the signal — see the
+# script's own header comment for the full story.
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
+
 # Node.js app
 COPY --from=nodebuilder /app/node_modules ./node_modules
 # Only copy package.json (not package-lock.json) — the lockfile is build
@@ -139,4 +146,4 @@ EXPOSE 3000 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
-CMD ["sh", "-c", "./go-api & sleep 3 && node server.js"]
+ENTRYPOINT ["./docker-entrypoint.sh"]

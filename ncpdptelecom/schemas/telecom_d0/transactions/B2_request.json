@@ -1,0 +1,11 @@
+{
+  "code": "B2",
+  "name": "Claim Reversal (Request)",
+  "direction": "request",
+  "transmissionGroupSegments": ["Insurance"],
+  "transactionGroupSegments": ["Claim"],
+  "sourceRefs": [
+    "State of North Dakota Medicaid NCPDP D.0 payer sheet ('1. NCPDP VERSION D CLAIM BILLING/CLAIM REBILL TEMPLATE' / '2. NCPDP VERSION D CLAIM BILLING/CLAIM REBILL TEMPLATE' combined document, section 2.1 'Request Claim Reversal (B2) Payer Sheet Template'), read directly (pdftotext -layout, then verified line-by-line) -- NOT a guess or a generic industry claim: a real payer's own published implementation. B2's REQUEST lists exactly 3 segment groups: Transaction Header (always), Insurance Segment (04, always), Claim Segment (07, always) -- no Patient, Prescriber, Pharmacy Provider, or Pricing segment at all.",
+    "Claim Segment for B2 is confirmed to carry ONLY Prescription/Service Reference Number Qualifier (455-EM, Mandatory) + Prescription/Service Reference Number (402-D2, Mandatory) -- every other Claim field is excluded from B2's own payer-sheet template (i.e. Not Used), confirmed via the same document's own explicit note: 'For Transaction Code of \"B2\", in the Claim Segment, the Prescription/Service Reference Number Qualifier (455-EM) is \"1\" (Rx Billing).' See segments/Claim.json's own sourceRefs for the corresponding schema widening this required."
+  ]
+}

@@ -80,4 +80,31 @@ async function getSecuritySettings() {
     return { ...SECURITY_DEFAULTS, ...raw };
 }
 
-module.exports = { getSetting, getSecuritySettings, invalidate };
+const ATNA_SYSLOG_DEFAULTS = {
+    enabled: false,
+    host: '',
+    port: 514,
+    protocol: 'udp',
+    facility: 10,
+    app_name: 'ezHealthKonnect',
+    audit_source_id: 'ezHealthKonnect',
+    enterprise_site_id: '',
+    tls_insecure_skip_verify: false,
+};
+
+/**
+ * Returns ATNA syslog export settings merged with defaults — the Node-side
+ * mirror of services.AppSettingsCache.GetATNASyslogSettings() (Go). Used by
+ * services/audit/atnaSyslogExporter.js so an admin enabling/reconfiguring
+ * ATNA export via the settings UI takes effect for Node-emitted audit
+ * events too, not just Go-emitted ones, without a process restart (within
+ * this cache's own 5-minute TTL — the same lag every other settings
+ * category here already accepts, per this file's own header).
+ * @returns {Promise<typeof ATNA_SYSLOG_DEFAULTS>}
+ */
+async function getATNASyslogSettings() {
+    const raw = await getSetting('atna_syslog', ATNA_SYSLOG_DEFAULTS);
+    return { ...ATNA_SYSLOG_DEFAULTS, ...raw };
+}
+
+module.exports = { getSetting, getSecuritySettings, getATNASyslogSettings, invalidate };

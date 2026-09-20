@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/audit"
 	"ezhealthkonnect/services/executors"
 	"ezhealthkonnect/services/executors/control"
 	"ezhealthkonnect/services/logger"
@@ -23,6 +24,7 @@ type TransformationPipelineService struct {
 	branchResolver   *BranchResolverFactory            // OOP-based branch resolution
 	executors        map[string]TransformationExecutor // Legacy - kept for compatibility
 	objectStorage    *storage.ObjectStorageService     // For writing connector delivery logs
+	auditLogger      audit.AuditLogger
 }
 
 // TransformationExecutor interface for step execution
@@ -41,6 +43,7 @@ func NewTransformationPipelineService(db *sql.DB, credStore *CredentialStore) *T
 		branchResolver:   NewBranchResolverFactory(),          // OOP-based branch resolution for conditionals
 		executors:        make(map[string]TransformationExecutor),
 		objectStorage:    nil, // Set via SetObjectStorage after construction
+		auditLogger:      audit.NewPostgresAuditLogger(db),
 	}
 
 	return service
@@ -344,7 +347,7 @@ func (tps *TransformationPipelineService) writeTransformationAudit(
 	durationMs int64,
 	pipelineErr error,
 ) {
-	if tps.db == nil {
+	if tps.auditLogger == nil {
 		return
 	}
 
@@ -359,26 +362,20 @@ func (tps *TransformationPipelineService) writeTransformationAudit(
 		errMsg = pipelineErr.Error()
 	}
 
-	meta := map[string]interface{}{
-		"interface_id":  interfaceID,
-		"message_type":  messageType,
-		"pipeline_id":   pipelineID,
-		"correlation_id": corrID,
-		"duration_ms":   durationMs,
-	}
-	metaJSON, _ := json.Marshal(meta)
-
-	complianceFlags := `{"hipaa":true,"phi_processed":true,"action_type":"hl7_fhir_transform"}`
-
-	_, err := tps.db.ExecContext(context.Background(), `
-		INSERT INTO audit_logs
-		    (action, entity_type, entity_id, metadata, result, error_message,
-		     risk_level, compliance_flags, created_at)
-		VALUES
-		    ($1, 'message', $2, $3::jsonb, $4, $5, 'info', $6::jsonb, NOW())`,
-		"transformation.pipeline.executed", messageID,
-		metaJSON, result, errMsg, complianceFlags,
-	)
+	err := tps.auditLogger.Log(ctx, audit.AuditEvent{
+		Action:       "transformation.pipeline.executed",
+		EntityType:   "message",
+		EntityID:     messageID,
+		Result:       result,
+		ErrorMessage: errMsg,
+		Metadata: map[string]interface{}{
+			"interface_id":   interfaceID,
+			"message_type":   messageType,
+			"pipeline_id":    pipelineID,
+			"correlation_id": corrID,
+			"duration_ms":    durationMs,
+		},
+	})
 	if err != nil {
 		logger.FromContext(ctx).Warn("HIPAA audit write failed", "msg_id", messageID, "error", err)
 	}
@@ -1122,6 +1119,8 @@ func (tps *TransformationPipelineService) ExecuteFromStep(
 ) error {
 	// Load the full pipeline (by ID rather than interface+messageType)
 	var pipeline models.TransformationPipeline
+	var pipelineConfigJSON []byte
+	var connectionsJSON []byte
 	err := tps.db.QueryRowContext(ctx, `
 		SELECT id, interface_id, message_type, pipeline_name, enabled, version,
 		       COALESCE(pipeline_config, '{}') AS pipeline_config,
@@ -1130,10 +1129,16 @@ func (tps *TransformationPipelineService) ExecuteFromStep(
 		FROM transformation_pipelines WHERE id = $1`, pipelineID).
 		Scan(&pipeline.ID, &pipeline.InterfaceID, &pipeline.MessageType,
 			&pipeline.PipelineName, &pipeline.Enabled, &pipeline.Version,
-			&pipeline.PipelineConfig, &pipeline.Connections,
+			&pipelineConfigJSON, &connectionsJSON,
 			&pipeline.CreatedAt, &pipeline.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("ExecuteFromStep: load pipeline %s: %w", pipelineID, err)
+	}
+	if len(pipelineConfigJSON) > 0 {
+		json.Unmarshal(pipelineConfigJSON, &pipeline.PipelineConfig)
+	}
+	if len(connectionsJSON) > 0 {
+		json.Unmarshal(connectionsJSON, &pipeline.Connections)
 	}
 
 	steps, err := tps.GetPipelineSteps(ctx, pipelineID)

@@ -1,0 +1,10 @@
+{
+  "code": "B3",
+  "name": "Claim Rebill (Response)",
+  "direction": "response",
+  "transmissionGroupSegments": ["ResponseMessage"],
+  "transactionGroupSegments": ["ResponseStatus", "ResponseClaim", "ResponsePricing"],
+  "sourceRefs": [
+    "State of North Dakota Medicaid NCPDP D.0 payer sheet, section 1.2 'Response Claim Billing/Claim Rebill Payer Sheet Template' -- read directly; every response variant (Accepted/Paid, Accepted/Rejected, Rejected/Rejected) is explicitly titled '(B1/B3)' and uses one shared template, confirming B3's response shape is identical to B1's. Structural duplicate of B1_response.json with only the code changed, same sourcing discipline as B3_request.json."
+  ]
+}

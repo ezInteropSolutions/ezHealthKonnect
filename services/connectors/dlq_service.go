@@ -20,6 +20,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/audit"
 	"fmt"
 	"log"
 	"math"
@@ -113,19 +115,32 @@ type DLQRow struct {
 
 // DLQService writes failed deliveries to delivery_dlq and manages their lifecycle.
 type DLQService struct {
-	db          *sql.DB
-	pipelineSvc PipelineRedriver // set by SetPipelineRedriver; used for auto-poller and manual redrive
+	db               *sql.DB
+	pipelineSvc      PipelineRedriver        // set by SetPipelineRedriver; used for auto-poller and manual redrive
+	deliveryStatusFn models.DeliveryStatusFn // set by SetDeliveryStatusFn; used to fix up delivery_status after a successful redrive
+	auditLogger      audit.AuditLogger       // DLQ_MESSAGE_ENQUEUED / DLQ_MESSAGE_REDRIVEN
 }
 
 // NewDLQService creates a DLQService backed by the given DB connection.
 func NewDLQService(db *sql.DB) *DLQService {
-	return &DLQService{db: db}
+	return &DLQService{db: db, auditLogger: audit.NewPostgresAuditLogger(db)}
 }
 
 // SetPipelineRedriver wires the pipeline service so ExecuteRedrive and the auto-poller
 // can redrive messages without the caller providing it on each call.
 func (s *DLQService) SetPipelineRedriver(svc PipelineRedriver) {
 	s.pipelineSvc = svc
+}
+
+// SetDeliveryStatusFn wires the same delivery-status callback
+// engine_message_processor.go injects onto ctx for a live message's first pipeline
+// run (processing.ProcessingEngine.updateDeliveryStatus). Without this, a redrive
+// that succeeds still leaves the original message's delivery_status at "failed"
+// forever: OutboundConnectorExecutor's own success path reads this callback via
+// ctx.Value("delivery_status_fn"), and the DLQ poller's background context never
+// had it set (redriveRow injects it per-row — see below).
+func (s *DLQService) SetDeliveryStatusFn(fn models.DeliveryStatusFn) {
+	s.deliveryStatusFn = fn
 }
 
 // DLQServicer is the interface controllers and tests use to access DLQ operations.
@@ -202,7 +217,31 @@ func (s *DLQService) WriteToDLQ(ctx context.Context, p WriteDLQParams) error {
 		p.AttemptCount, nextRetryAt,
 		p.RedriveMode, string(inputJSON), string(dataJSON), p.ExpiresAt,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	if s.auditLogger != nil {
+		go func() {
+			if auditErr := s.auditLogger.Log(context.Background(), audit.AuditEvent{
+				Action:       "DLQ_MESSAGE_ENQUEUED",
+				EntityType:   "message",
+				EntityID:     p.MessageID,
+				ErrorMessage: p.ErrorMessage,
+				Metadata: map[string]interface{}{
+					"interface_id":   p.InterfaceID,
+					"connector_type": p.ConnectorType,
+					"step_name":      p.StepName,
+					"attempt_count":  p.AttemptCount,
+					"redrive_mode":   p.RedriveMode,
+				},
+			}); auditErr != nil {
+				log.Printf("[dlq audit] failed to write DLQ_MESSAGE_ENQUEUED: %v", auditErr)
+			}
+		}()
+	}
+
+	return nil
 }
 
 // Resolve marks a DLQ row as successfully delivered.
@@ -344,6 +383,7 @@ func (s *DLQService) ExecuteRedrive(ctx context.Context, dlqID, modeOverride str
 	if modeOverride != "" {
 		mode = modeOverride
 	}
+	row.RedriveMode = mode // so publishRedrivenAudit reports the mode actually used, not the stale stored value
 
 	if _, err := s.db.ExecContext(ctx, `UPDATE delivery_dlq SET status='retrying', last_attempt_at=NOW() WHERE id=$1`, dlqID); err != nil {
 		return fmt.Errorf("dlq mark retrying: %w", err)
@@ -372,7 +412,11 @@ func (s *DLQService) ExecuteRedrive(ctx context.Context, dlqID, modeOverride str
 	if redriveErr != nil {
 		return s.Fail(ctx, dlqID, redriveErr.Error(), 10, 60*time.Second)
 	}
-	return s.Resolve(ctx, dlqID)
+	if err := s.Resolve(ctx, dlqID); err != nil {
+		return err
+	}
+	s.publishRedrivenAudit(row)
+	return nil
 }
 
 // ScheduleRedrive reactivates any row (including abandoned) and queues it for
@@ -512,8 +556,9 @@ func (s *DLQService) pollAndRedrive(ctx context.Context, pipelineSvc PipelineRed
 			FOR UPDATE SKIP LOCKED
 		)
 		RETURNING id, message_id, interface_id, pipeline_id, failed_step_id, step_name,
-		          connector_type, payload, content_type, error_message, attempt_count,
-		          redrive_mode, pipeline_input_snapshot, pipeline_data_snapshot`)
+		          connector_type, payload, content_type, error_message, attempt_count, status,
+		          redrive_mode, next_retry_at, expires_at, created_at,
+		          pipeline_input_snapshot, pipeline_data_snapshot`)
 	if err != nil {
 		log.Printf("[dlq] poll error: %v", err)
 		return
@@ -545,6 +590,20 @@ func (s *DLQService) pollAndRedrive(ctx context.Context, pipelineSvc PipelineRed
 
 // redriveRow executes redrive and resolves/fails the row.
 func (s *DLQService) redriveRow(ctx context.Context, row *DLQRow, pipelineSvc PipelineRedriver) error {
+	// Re-establish the same ctx values a live message's first pipeline run carries
+	// (engine_message_processor.go sets these before calling ExecutePipeline) — neither
+	// ExecuteFromStep nor ExecuteTransformation(FromInput) sets them internally (confirmed
+	// by reading both: ExecuteTransformation injects interface_id/message_id into each
+	// step's Config instead, a separate channel OutboundConnectorExecutor's success path
+	// never reads), and the DLQ poller's own background context starts from a bare
+	// context.Background() with none of this. Without it, a redrive that actually
+	// succeeds still leaves delivery_status="failed" on the original message forever.
+	ctx = context.WithValue(ctx, "interface_id", row.InterfaceID)
+	ctx = context.WithValue(ctx, "message_id", row.MessageID)
+	if s.deliveryStatusFn != nil {
+		ctx = context.WithValue(ctx, "delivery_status_fn", s.deliveryStatusFn)
+	}
+
 	var redriveErr error
 	switch row.RedriveMode {
 	case "from_start":
@@ -565,7 +624,43 @@ func (s *DLQService) redriveRow(ctx context.Context, row *DLQRow, pipelineSvc Pi
 	if redriveErr != nil {
 		return redriveErr
 	}
-	return s.Resolve(ctx, row.ID)
+	if err := s.Resolve(ctx, row.ID); err != nil {
+		return err
+	}
+
+	s.publishRedrivenAudit(row)
+
+	return nil
+}
+
+// publishRedrivenAudit records one DLQ_MESSAGE_REDRIVEN audit_logs row after
+// a redrive's pipeline execution AND its Resolve() call have both succeeded.
+// Shared by the two independent redrive code paths in this file —
+// ExecuteRedrive (the manual "Redrive Now" API/UI action) and redriveRow
+// (the automatic background poller) — which duplicate the pipeline-execute-
+// then-resolve sequence but must not duplicate this audit call too.
+// Fire-and-forget, same non-blocking posture as every other audit write in
+// this codebase.
+func (s *DLQService) publishRedrivenAudit(row *DLQRow) {
+	if s.auditLogger == nil {
+		return
+	}
+	go func() {
+		if auditErr := s.auditLogger.Log(context.Background(), audit.AuditEvent{
+			Action:     "DLQ_MESSAGE_REDRIVEN",
+			EntityType: "message",
+			EntityID:   row.MessageID,
+			DLQRowID:   row.ID,
+			Metadata: map[string]interface{}{
+				"interface_id":   row.InterfaceID,
+				"connector_type": row.ConnectorType,
+				"redrive_mode":   row.RedriveMode,
+				"attempt_count":  row.AttemptCount,
+			},
+		}); auditErr != nil {
+			log.Printf("[dlq audit] failed to write DLQ_MESSAGE_REDRIVEN: %v", auditErr)
+		}
+	}()
 }
 
 // queryRows is a shared query helper used by Get and ListPending.

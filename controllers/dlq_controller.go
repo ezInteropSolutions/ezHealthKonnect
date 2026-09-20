@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"time"
 
+	"ezhealthkonnect/services/audit"
 	"ezhealthkonnect/services/connectors"
 
 	"github.com/gin-gonic/gin"
@@ -30,13 +31,14 @@ import (
 
 // DLQController manages delivery_dlq via DLQServicer.
 type DLQController struct {
-	dlqSvc connectors.DLQServicer
-	db     *sql.DB // for audit trail writes
+	dlqSvc      connectors.DLQServicer
+	db          *sql.DB // for audit trail writes
+	auditLogger audit.AuditLogger
 }
 
 // NewDLQController creates a DLQController backed by the given DLQServicer.
 func NewDLQController(db *sql.DB, dlqSvc connectors.DLQServicer) *DLQController {
-	return &DLQController{dlqSvc: dlqSvc, db: db}
+	return &DLQController{dlqSvc: dlqSvc, db: db, auditLogger: audit.NewPostgresAuditLogger(db)}
 }
 
 // RegisterRoutes wires all DLQ endpoints onto the given router group.
@@ -233,20 +235,26 @@ func (dc *DLQController) BulkAbandon(c *gin.Context) {
 
 // writeAudit inserts a row into audit_logs for DLQ actions.
 // Non-fatal — errors are logged but do not affect the response.
+//
+// userID is read from the X-User-ID header (the Node.js proxy's own
+// authenticated-user forwarding convention, matching
+// cda_dedupe_registry_controller.go) — c.Get("userId") was checked and found
+// to be dead code: nothing anywhere in the Go codebase ever calls
+// c.Set("userId", ...), so every DLQ audit row written before this fix had
+// user_id permanently NULL regardless of who actually triggered the action.
 func (dc *DLQController) writeAudit(c *gin.Context, dlqRowID, action, detail string) {
-	if dc.db == nil {
-		return
-	}
-	userID, _ := c.Get("userId")
-	meta := fmt.Sprintf(`{"dlq_row_id":"%s","detail":"%s"}`, dlqRowID, detail)
-	_, err := dc.db.ExecContext(c.Request.Context(), `
-		INSERT INTO audit_logs
-		    (user_id, action, entity_type, entity_id, metadata, dlq_row_id, created_at)
-		VALUES
-		    ($1, $2, 'dlq_row', $3, $4::jsonb, $5::uuid, NOW())`,
-		userID, action, dlqRowID, meta, dlqRowID,
-	)
-	if err != nil {
+	userID := c.GetHeader("X-User-ID")
+	if err := dc.auditLogger.Log(c.Request.Context(), audit.AuditEvent{
+		Action:     action,
+		UserID:     userID,
+		EntityType: "dlq_row",
+		EntityID:   dlqRowID,
+		DLQRowID:   dlqRowID,
+		Metadata: map[string]interface{}{
+			"dlq_row_id": dlqRowID,
+			"detail":     detail,
+		},
+	}); err != nil {
 		fmt.Printf("[dlq audit] write failed: %v\n", err)
 	}
 }

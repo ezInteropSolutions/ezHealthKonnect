@@ -1,0 +1,11 @@
+{
+  "code": "B2",
+  "name": "Claim Reversal (Response)",
+  "direction": "response",
+  "transmissionGroupSegments": [],
+  "transactionGroupSegments": ["ResponseStatus", "ResponseClaim"],
+  "sourceRefs": [
+    "State of North Dakota Medicaid NCPDP D.0 payer sheet, section 2.2 'Response Claim Reversal Payer Sheet Template' (Approved, Accepted/Rejected, and Rejected/Rejected variants all read directly) -- confirms the B2 RESPONSE carries exactly: Response Transaction Header (always) + Response Status (21, always -- carries 112-AN, 503-F3, and on rejection 510-FA/511-FB reject detail, all already modeled in segments/ResponseStatus.json) + Response Claim (22, always -- same minimal 455-EM/402-D2 echo already modeled in segments/ResponseClaim.json, both already required=false there). NO Response Message (20) and NO Response Pricing (23) segment appears anywhere in B2's own response template -- a reversal has nothing to price. Modeled with an empty transmissionGroupSegments list (both real segments here are per-claim/transaction-group in this engine's own existing convention, matching how B1_response.json already treats ResponseStatus/ResponseClaim) rather than guessing a different bucketing.",
+    "Zero new fields needed -- ResponseStatus.json and ResponseClaim.json are reused completely unchanged from B1's own already-built segments; both already have every field B2 needs modeled as required=false, so no widening was necessary on the response side (unlike the request-side Claim segment -- see B2_request.json's own sourceRefs)."
+  ]
+}

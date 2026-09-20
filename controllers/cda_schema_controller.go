@@ -27,6 +27,7 @@ import (
 	cdaSchema "ezhealthkonnect/cda"
 	cdaBuilder "ezhealthkonnect/cda/builder"
 	"ezhealthkonnect/fhir/r4"
+	"ezhealthkonnect/services/audit"
 	cdafhir "ezhealthkonnect/services/cda_fhir"
 	cdaTransform "ezhealthkonnect/services/executors/transform"
 	"ezhealthkonnect/uscdi"
@@ -58,6 +59,8 @@ type CDASchemaController struct {
 	// (every USCDIClasses field simply comes back nil) rather than failing
 	// the whole request, same as Coverage Audit's own worker_pool.go.
 	vocabulary *uscdi.USCDIVocabulary
+	// auditLogger backs cda_dedupe_registry_controller.go's VIEWED/PURGED events.
+	auditLogger audit.AuditLogger
 }
 
 // NewCDASchemaController constructs the controller.
@@ -77,6 +80,7 @@ func NewCDASchemaController(
 		transformReg:            cdafhir.NewCDATransformRegistry(),
 		declarativeTransformReg: cdafhir.NewDeclarativeTransformRegistry(),
 		vocabulary:              vocabulary,
+		auditLogger:             audit.NewPostgresAuditLogger(db),
 	}
 }
 

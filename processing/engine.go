@@ -17,6 +17,7 @@ import (
 
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/audit"
 	"ezhealthkonnect/services/backpressure"
 	cdacoverage "ezhealthkonnect/services/cda_coverage"
 	cdastorage "ezhealthkonnect/services/cda_storage"
@@ -69,6 +70,14 @@ type ProcessingEngine struct {
 	// injected, so OutboundConnectorExecutor's publishCoverageAudit is a
 	// pure no-op and the feature has zero effect anywhere.
 	coverageAuditPool *cdacoverage.WorkerPool
+
+	// auditLogger is the shared HIPAA/ATNA compliance-audit writer (see
+	// services/audit) — used directly here (ActivateInterface,
+	// DeactivateInterface, persistConflictHalt) and in
+	// engine_message_processor.go (storeMessage), since both files share
+	// this package. Always non-nil (constructed alongside db in
+	// NewProcessingEngine); nil-safe against a nil db internally.
+	auditLogger audit.AuditLogger
 }
 
 // InterfaceStatus tracks the status of an interface
@@ -110,6 +119,7 @@ func NewProcessingEngine(db *sql.DB, credStore *services.CredentialStore) *Proce
 		running:             false,
 		connectorFactory:    NewConnectorFactory(), // OOB: Initialize connector factory
 		validationConnectors: make(map[string]ValidationAwareConnector),
+		auditLogger:         audit.NewPostgresAuditLogger(db),
 	}
 
 	logger.Info("connector factory initialized", "connectors", 32)
@@ -334,6 +344,9 @@ func (pe *ProcessingEngine) SetDLQService(dlqSvc *DLQService) {
 	if pe.transformationService != nil {
 		pe.transformationService.GetExecutorRegistry().SetDLQService(dlqSvc)
 	}
+	// So a successful redrive updates the original message's delivery_status too —
+	// see redriveRow's own comment (dlq_service.go) for why this was missing.
+	dlqSvc.SetDeliveryStatusFn(pe.updateDeliveryStatus)
 }
 
 // SetCoverageAuditPool wires the CDA Coverage Audit background worker pool
@@ -379,9 +392,20 @@ func (pe *ProcessingEngine) IsRunning() bool {
 // ActivateInterface activates an interface for processing.
 // Primary path: reads connector.inbound steps from the pipeline (pipeline-driven, supports multiple listeners).
 // Fallback: reads source_connectivity from the interfaces table (backward compatibility).
-func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
+// actorUserID is optional (variadic so every existing caller — the startup
+// restore path, the AI agent tools, direct engine callers — keeps compiling
+// unchanged) — pass the acting user's id (from the HTTP handler's X-User-ID
+// header) when this activation is a real user's UI action, so the
+// INTERFACE_ACTIVATED audit row records who did it instead of leaving
+// user_id NULL.
+func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ...string) error {
 	pe.mutex.Lock()
 	defer pe.mutex.Unlock()
+
+	userID := ""
+	if len(actorUserID) > 0 {
+		userID = actorUserID[0]
+	}
 
 	// Already active — idempotent: succeed silently so the Node.js deployment
 	// service calling /activate after Go's own startup doesn't see a 500.
@@ -693,6 +717,20 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 	pe.stats.LastActivity = time.Now()
 	logger.Info("interface activated", "interface_id", interfaceID, "name", name)
 
+	if pe.auditLogger != nil {
+		go func() {
+			if err := pe.auditLogger.Log(context.Background(), audit.AuditEvent{
+				Action:     "INTERFACE_ACTIVATED",
+				UserID:     userID,
+				EntityType: "interface",
+				EntityID:   interfaceID,
+				Metadata:   map[string]interface{}{"interface_name": name},
+			}); err != nil {
+				log.Printf("⚠️  [audit] failed to write INTERFACE_ACTIVATED: %v", err)
+			}
+		}()
+	}
+
 	// Connection pre-warming (warm database connections AFTER interface activation)
 	if pe.connectionWarmer != nil && transformationMappingJSON.Valid {
 		var pipeline map[string]interface{}
@@ -713,10 +751,16 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string) error {
 	return nil
 }
 
-// DeactivateInterface deactivates an interface
-func (pe *ProcessingEngine) DeactivateInterface(interfaceID string) error {
+// DeactivateInterface deactivates an interface. actorUserID is optional —
+// see ActivateInterface's own doc comment for why it's variadic.
+func (pe *ProcessingEngine) DeactivateInterface(interfaceID string, actorUserID ...string) error {
 	pe.mutex.Lock()
 	defer pe.mutex.Unlock()
+
+	userID := ""
+	if len(actorUserID) > 0 {
+		userID = actorUserID[0]
+	}
 
 	// Update interface status in database (both columns so page-load initial state is correct)
 	_, err := pe.db.Exec("UPDATE interfaces SET status = 'inactive', interface_status = 'configured' WHERE id = $1", interfaceID)
@@ -746,6 +790,20 @@ func (pe *ProcessingEngine) DeactivateInterface(interfaceID string) error {
 	}
 
 	pe.stats.LastActivity = time.Now()
+
+	if pe.auditLogger != nil {
+		go func() {
+			if err := pe.auditLogger.Log(context.Background(), audit.AuditEvent{
+				Action:     "INTERFACE_DEACTIVATED",
+				UserID:     userID,
+				EntityType: "interface",
+				EntityID:   interfaceID,
+			}); err != nil {
+				log.Printf("⚠️  [audit] failed to write INTERFACE_DEACTIVATED: %v", err)
+			}
+		}()
+	}
+
 	return nil
 }
 
@@ -1050,36 +1108,30 @@ func (pe *ProcessingEngine) persistConflictHalt(interfaceIDs []string, reason st
 		for k, v := range extraDetails {
 			auditDetails[k] = v
 		}
-		detailsJSON, _ := json.Marshal(auditDetails)
 		complianceFlags := map[string]interface{}{
 			"hipaa_safety_halt":        true,
 			"phi_risk":                 phiRisk,
 			"requires_operator_review": true,
 		}
-		flagsJSON, _ := json.Marshal(complianceFlags)
 
-		if _, err := pe.db.Exec(`
-			INSERT INTO audit_logs (
-				id, action, entity_type, entity_id,
-				new_values, metadata, result, error_message,
-				risk_level, compliance_flags, created_at
-			) VALUES (
-				gen_random_uuid(), $1, $2, $3,
-				$4::jsonb, $5::jsonb, $6, $7,
-				$8, $9::jsonb, NOW()
-			)
-		`,
-			"PHI_SAFETY_HALT",
-			"interface",
-			id,
-			string(detailsJSON),
-			string(detailsJSON),
-			"blocked",
-			reason,
-			"critical",
-			string(flagsJSON),
-		); err != nil {
-			log.Printf("⚠️  [PHI SAFETY] Failed to write HIPAA audit log for interface %s: %v", id, err)
+		// "blocked" (the pre-migration literal here) is not part of this
+		// codebase's converged result vocabulary (success/failure/error) —
+		// a safety halt is a deliberate protective block, closest in meaning
+		// to "failure" (the activation did not complete), never "success".
+		if pe.auditLogger != nil {
+			if err := pe.auditLogger.Log(context.Background(), audit.AuditEvent{
+				Action:          "PHI_SAFETY_HALT",
+				EntityType:      "interface",
+				EntityID:        id,
+				NewValues:       auditDetails,
+				Metadata:        auditDetails,
+				Result:          "failure",
+				ErrorMessage:    reason,
+				RiskLevel:       "critical",
+				ComplianceFlags: complianceFlags,
+			}); err != nil {
+				log.Printf("⚠️  [PHI SAFETY] Failed to write HIPAA audit log for interface %s: %v", id, err)
+			}
 		}
 
 		log.Printf("🚨 [HIPAA AUDIT] Interface %s halted — %s. "+

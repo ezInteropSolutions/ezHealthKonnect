@@ -365,6 +365,22 @@
         }
         const gdprBtn = document.getElementById('dc-btn-gdpr');
         if (gdprBtn) gdprBtn.disabled = gdprRequested;
+
+        const exportBtn = document.getElementById('dc-btn-gdpr-export');
+        if (exportBtn) exportBtn.href = `/api/users/${u.id}/gdpr-export`;
+
+        // Erasure is only ever a deliberate SECOND step — requires the request
+        // to already be flagged, and is a one-way action once data_anonymized
+        // is set (re-running it is blocked server-side too, this is just the
+        // UI reflecting the same eligibility check).
+        const eraseBtn = document.getElementById('dc-btn-gdpr-erase');
+        if (eraseBtn) {
+            const anonymized = !!u.data_anonymized;
+            eraseBtn.disabled = !gdprRequested || anonymized;
+            eraseBtn.title = anonymized
+                ? 'This user has already been anonymized'
+                : (gdprRequested ? 'GDPR Article 17 — anonymize this user\'s PII (irreversible)' : 'Flag this user for GDPR deletion first');
+        }
     }
 
     async function loadActivity(userId) {
@@ -468,6 +484,23 @@
         if (!await AppDialogs.confirm('Flag this user for GDPR deletion? This will be logged and is irreversible.', { title: 'GDPR Deletion Request', type: 'danger', confirmText: 'Flag for Deletion' })) return;
         try {
             const r = await api('POST', `/api/users/${state.drawer.userId}/gdpr-request`);
+            showAlert(r.message);
+            await loadDrawerUser(state.drawer.userId);
+        } catch (e) { showAlert(e.message, 'error'); }
+    }
+
+    async function gdprErase() {
+        const reason = await AppDialogs.prompt(
+            'This permanently anonymizes this user\'s email, name, phone, and other PII. Their audit trail is kept, but who it was is erased. Enter a reason for the compliance record:',
+            { title: 'Execute GDPR Erasure', type: 'danger', okText: 'Anonymize', placeholder: 'e.g. Data subject request #1234' }
+        );
+        if (reason === null) return; // cancelled
+        if (!reason.trim()) { showAlert('A reason is required for a GDPR erasure action.', 'error'); return; }
+
+        if (!await AppDialogs.confirm('This cannot be undone. Anonymize this user now?', { title: 'Confirm Erasure', type: 'danger', confirmText: 'Anonymize Permanently' })) return;
+
+        try {
+            const r = await api('POST', `/api/users/${state.drawer.userId}/gdpr-erase`, { reason: reason.trim() });
             showAlert(r.message);
             await loadDrawerUser(state.drawer.userId);
         } catch (e) { showAlert(e.message, 'error'); }
@@ -693,6 +726,7 @@
         document.getElementById('ds-btn-unlock').addEventListener('click', unlockUser);
         document.getElementById('ds-btn-force-reset').addEventListener('click', forceReset);
         document.getElementById('dc-btn-gdpr').addEventListener('click', gdprRequest);
+        document.getElementById('dc-btn-gdpr-erase').addEventListener('click', gdprErase);
 
         // Audit log controls
         document.getElementById('audit-apply').addEventListener('click', () => loadAuditLogs(1));

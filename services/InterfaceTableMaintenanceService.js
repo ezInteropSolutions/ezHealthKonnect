@@ -1,6 +1,8 @@
 // services/InterfaceTableMaintenanceService.js
 // Interface-specific table maintenance service
 
+const auditService = require('./auditService');
+
 class InterfaceTableMaintenanceService {
     constructor() {
         this.database = require('../config/database');
@@ -282,26 +284,23 @@ class InterfaceTableMaintenanceService {
     }
 
     /**
-     * Log maintenance cycle completion
+     * Log maintenance cycle completion. Previously a raw INSERT into columns
+     * (resource_type, resource_id, details) that don't exist in the real
+     * audit_logs schema — every call silently failed. Routed through the
+     * shared auditService instead; all 3 methods below are system-triggered
+     * (a scheduled interval, never a request), so userId stays null.
      */
     async logMaintenanceCycle(tableCount) {
-        await this.database.sequelize.query(`
-            INSERT INTO audit_logs (
-                user_id, action, resource_type, resource_id,
-                details, created_at
-            ) VALUES (
-                NULL, 'maintenance_cycle', 'interface_tables', NULL,
-                :details, CURRENT_TIMESTAMP
-            )
-        `, {
-            replacements: {
-                details: JSON.stringify({
-                    tables_maintained: tableCount,
-                    cycle_completed_at: new Date().toISOString(),
-                    service_type: 'automated_maintenance'
-                })
+        await auditService.logEvent({
+            action: 'maintenance_cycle',
+            entityType: 'interface_tables',
+            metadata: {
+                tables_maintained: tableCount,
+                cycle_completed_at: new Date().toISOString(),
+                service_type: 'automated_maintenance'
             },
-            type: this.database.sequelize.QueryTypes.INSERT
+            result: 'success',
+            riskLevel: 'low'
         });
     }
 
@@ -309,23 +308,17 @@ class InterfaceTableMaintenanceService {
      * Log maintenance errors
      */
     async logMaintenanceError(error) {
-        await this.database.sequelize.query(`
-            INSERT INTO audit_logs (
-                user_id, action, resource_type, resource_id,
-                details, created_at
-            ) VALUES (
-                NULL, 'maintenance_error', 'interface_tables', NULL,
-                :details, CURRENT_TIMESTAMP
-            )
-        `, {
-            replacements: {
-                details: JSON.stringify({
-                    error_message: error.message,
-                    error_stack: error.stack,
-                    cycle_failed_at: new Date().toISOString()
-                })
+        await auditService.logEvent({
+            action: 'maintenance_error',
+            entityType: 'interface_tables',
+            metadata: {
+                error_message: error.message,
+                error_stack: error.stack,
+                cycle_failed_at: new Date().toISOString()
             },
-            type: this.database.sequelize.QueryTypes.INSERT
+            result: 'error',
+            riskLevel: 'medium',
+            errorMessage: error.message
         });
     }
 
@@ -333,23 +326,17 @@ class InterfaceTableMaintenanceService {
      * Log interface-specific maintenance errors
      */
     async logInterfaceMaintenanceError(interfaceId, error) {
-        await this.database.sequelize.query(`
-            INSERT INTO audit_logs (
-                user_id, action, resource_type, resource_id,
-                details, created_at
-            ) VALUES (
-                NULL, 'interface_maintenance_error', 'interface', :interfaceId,
-                :details, CURRENT_TIMESTAMP
-            )
-        `, {
-            replacements: {
-                interfaceId,
-                details: JSON.stringify({
-                    error_message: error.message,
-                    maintenance_failed_at: new Date().toISOString()
-                })
+        await auditService.logEvent({
+            action: 'interface_maintenance_error',
+            entityType: 'interface',
+            entityId: interfaceId,
+            metadata: {
+                error_message: error.message,
+                maintenance_failed_at: new Date().toISOString()
             },
-            type: this.database.sequelize.QueryTypes.INSERT
+            result: 'error',
+            riskLevel: 'medium',
+            errorMessage: error.message
         });
     }
 

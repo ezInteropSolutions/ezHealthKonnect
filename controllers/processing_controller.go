@@ -168,7 +168,7 @@ func (pc *ProcessingController) ActivateInterface(c *gin.Context) {
 
 	log.Printf("📞 [CONTROLLER] Calling engine.ActivateInterface(%s)", interfaceID)
 
-	if err := pc.engine.ActivateInterface(interfaceID); err != nil {
+	if err := pc.engine.ActivateInterface(interfaceID, c.GetHeader("X-User-ID")); err != nil {
 		log.Printf("❌ [CONTROLLER] Engine returned error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -205,7 +205,7 @@ func (pc *ProcessingController) DeactivateInterface(c *gin.Context) {
 		return
 	}
 
-	if err := pc.engine.DeactivateInterface(interfaceID); err != nil {
+	if err := pc.engine.DeactivateInterface(interfaceID, c.GetHeader("X-User-ID")); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   err.Error(),

@@ -268,6 +268,17 @@ func sign(f float64) float64 {
 	return 1
 }
 
+// asFloat accepts native Go numeric types AND a numeric-looking string — the
+// latter is a real, common case: ncpdptelecom.map_to_canonical's own
+// sourcePath/literalValue field resolution is entirely string-based (the
+// same convention edi.map_to_canonical/ncpdp.map_to_canonical already use),
+// so a caller mapping e.g. transactionCount from a literal "1" or a
+// FHIR-sourced quantity "30" is the NORMAL path here, not an edge case.
+// Found via a real Test Pipeline-equivalent Go test (the outbound direction
+// this engine never previously exercised) — every prior N/R/RO field this
+// codebase built canonical JSON for came from Go code constructing a real
+// float64 directly (parse->build round trips, hand-built test fixtures),
+// never from this string-based mapping layer.
 func asFloat(v interface{}) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
@@ -278,6 +289,12 @@ func asFloat(v interface{}) (float64, bool) {
 		return float64(n), true
 	case int64:
 		return float64(n), true
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(n), 64)
+		if err != nil {
+			return 0, false
+		}
+		return f, true
 	}
 	return 0, false
 }

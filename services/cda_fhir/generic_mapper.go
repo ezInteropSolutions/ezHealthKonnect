@@ -39,6 +39,7 @@ import (
 	"sync"
 
 	cdaSchema "ezhealthkonnect/cda"
+	"ezhealthkonnect/services/audit"
 	"ezhealthkonnect/services/cda_fhir/assembly"
 	mappinglog "ezhealthkonnect/services/cda_fhir/mapping_log"
 	cdaterminology "ezhealthkonnect/services/cda_terminology"
@@ -211,6 +212,7 @@ type GenericCDAFHIRMapper struct {
 	profileBuilder *USCoreProfileBuilder
 	narrativeGen   *fhirnarrative.FHIRNarrativeGenerator
 	terminologySvc *cdaterminology.TerminologyService // optional; nil = skip validation
+	auditLogger    audit.AuditLogger
 
 	// templateCache keys: "<docType>|<ccdaVersion>|<fhirVersion>"
 	templateCache map[string][]CDAFieldMapping
@@ -225,6 +227,7 @@ func NewGenericCDAFHIRMapper(db *sql.DB, loader *cdaSchema.CDASchemaLoader) *Gen
 		transformReg:   NewCDATransformRegistry(),
 		profileBuilder: NewUSCoreProfileBuilder(),
 		narrativeGen:   fhirnarrative.NewFHIRNarrativeGenerator(),
+		auditLogger:    audit.NewPostgresAuditLogger(db),
 		templateCache:  make(map[string][]CDAFieldMapping),
 	}
 }
@@ -642,31 +645,34 @@ func (m *GenericCDAFHIRMapper) writeTransformAuditLog(
 	pr ProcessingResult,
 	durationMs int64,
 ) {
-	meta := map[string]interface{}{
-		"interfaceId":       config.InterfaceID,
-		"documentType":      config.DocType,
-		"resourcesProduced": pr.ResourcesProduced,
-		"failedSections":    pr.FailedSections,
-		"durationMs":        durationMs,
-		"partialSuccess":    pr.PartialSuccess,
-	}
-	metaJSON, err := json.Marshal(meta)
-	if err != nil {
-		log.Printf("[cda.to_fhir] audit marshal error: %v", err)
-		return
-	}
-
 	entityID := config.InterfaceID
 	if entityID == "" {
 		entityID = "system"
 	}
 
-	_, err = m.db.ExecContext(ctx, `
-		INSERT INTO audit_logs
-		    (user_id, action, entity_type, entity_id, metadata, created_at)
-		VALUES
-		    (NULL, 'cda_fhir_transform', 'interface', $1, $2::jsonb, NOW())
-	`, entityID, string(metaJSON))
+	if m.auditLogger == nil {
+		return
+	}
+
+	result := "success"
+	if len(pr.FailedSections) > 0 {
+		result = "failure"
+	}
+
+	err := m.auditLogger.Log(ctx, audit.AuditEvent{
+		Action:     "cda_fhir_transform",
+		EntityType: "interface",
+		EntityID:   entityID,
+		Result:     result,
+		Metadata: map[string]interface{}{
+			"interfaceId":       config.InterfaceID,
+			"documentType":      config.DocType,
+			"resourcesProduced": pr.ResourcesProduced,
+			"failedSections":    pr.FailedSections,
+			"durationMs":        durationMs,
+			"partialSuccess":    pr.PartialSuccess,
+		},
+	})
 	if err != nil {
 		log.Printf("[cda.to_fhir] audit write error: %v", err)
 	}

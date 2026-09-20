@@ -4,6 +4,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const { GO_BACKEND_URL, goClient } = require('../services/goBackendClient');
+const auditService = require('../services/auditService');
 
 // ── Credential encryption for step configs ─────────────────────────────────
 // Uses the same APP_CREDENTIAL_KEY + AES-256-GCM algorithm as the Go
@@ -770,6 +771,23 @@ exports.savePipeline = async (req, res) => {
             goClient.post(`/api/ai/ingest/pipeline/${actualPipelineId}`)
                 .catch(err => console.warn('[AI] Pipeline KB ingestion failed (non-fatal):', err.message));
 
+            // PIPELINE_SAVED — every add/edit/delete/reorder of an interface's
+            // transformation steps goes through this single endpoint (there is
+            // no separate per-step CRUD route), so this is the one place that
+            // needs to cover "who changed this interface's transformation
+            // logic," not a per-step audit call.
+            auditService.logEvent({
+                userId: req.session?.user?.id,
+                action: 'PIPELINE_SAVED',
+                entityType: 'pipeline',
+                entityId: actualPipelineId,
+                metadata: { interfaceId, messageType, stepsSaved, mappingsEmbedded: !!embeddedMappings },
+                ipAddress: req.clientIP || req.ip,
+                userAgent: req.headers['user-agent'],
+                result: 'success',
+                riskLevel: 'medium'
+            }).catch(err => console.warn('⚠️ Failed to write PIPELINE_SAVED audit log:', err.message));
+
             res.json({
                 success: true,
                 pipeline: pipelineResult[0],
@@ -790,6 +808,22 @@ exports.savePipeline = async (req, res) => {
         if (error.original) console.error('PG original:', error.original.detail || error.original.message);
         if (error.parent) console.error('PG parent:', error.parent.detail || error.parent.message);
         if (error.errors) console.error('Validation items:', JSON.stringify(error.errors?.map(e => e.message)));
+
+        auditService.logEvent({
+            userId: req.session?.user?.id,
+            action: 'PIPELINE_SAVE_FAILED',
+            entityType: 'pipeline',
+            metadata: {
+                interfaceId: req.body?.interface_id || req.body?.interfaceId,
+                messageType: req.body?.message_type || req.body?.messageType
+            },
+            ipAddress: req.clientIP || req.ip,
+            userAgent: req.headers['user-agent'],
+            result: 'error',
+            riskLevel: 'medium',
+            errorMessage: error.message
+        }).catch(err => console.warn('⚠️ Failed to write PIPELINE_SAVE_FAILED audit log:', err.message));
+
         res.status(500).json({
             success: false,
             error: error.message
@@ -1014,15 +1048,50 @@ exports.listPipelines = async (req, res) => {
 exports.deletePipeline = async (req, res) => {
     try {
         const { sequelize } = require('../config/database');
+        const { QueryTypes } = require('sequelize');
         const { id } = req.params;
+
+        // Captured before delete so PIPELINE_DELETED's oldValues can name what
+        // was actually removed, not just the id.
+        const rows = await sequelize.query(
+            'SELECT interface_id, message_type, pipeline_name FROM transformation_pipelines WHERE id = $1',
+            { bind: [id], type: QueryTypes.SELECT }
+        );
+        const src = rows[0] || null;
+
         await sequelize.query(
             'DELETE FROM step_executions WHERE step_id IN (SELECT id FROM transformation_steps WHERE pipeline_id = $1)',
             { bind: [id] }
         );
         await sequelize.query('DELETE FROM transformation_steps WHERE pipeline_id = $1', { bind: [id] });
         await sequelize.query('DELETE FROM transformation_pipelines WHERE id = $1', { bind: [id] });
+
+        auditService.logEvent({
+            userId: req.session?.user?.id,
+            action: 'PIPELINE_DELETED',
+            entityType: 'pipeline',
+            entityId: id,
+            oldValues: src ? { interfaceId: src.interface_id, messageType: src.message_type, pipelineName: src.pipeline_name } : undefined,
+            ipAddress: req.clientIP || req.ip,
+            userAgent: req.headers['user-agent'],
+            result: 'success',
+            riskLevel: 'high'
+        }).catch(err => console.warn('⚠️ Failed to write PIPELINE_DELETED audit log:', err.message));
+
         res.json({ success: true, message: 'Pipeline deleted' });
     } catch (error) {
+        auditService.logEvent({
+            userId: req.session?.user?.id,
+            action: 'PIPELINE_DELETE_FAILED',
+            entityType: 'pipeline',
+            entityId: req.params?.id,
+            ipAddress: req.clientIP || req.ip,
+            userAgent: req.headers['user-agent'],
+            result: 'error',
+            riskLevel: 'high',
+            errorMessage: error.message
+        }).catch(err => console.warn('⚠️ Failed to write PIPELINE_DELETE_FAILED audit log:', err.message));
+
         res.status(500).json({ success: false, error: error.message });
     }
 };
@@ -1121,8 +1190,33 @@ exports.clonePipeline = async (req, res) => {
                          step.description] }
             );
         }
+        auditService.logEvent({
+            userId: req.session?.user?.id,
+            action: 'PIPELINE_CLONED',
+            entityType: 'pipeline',
+            entityId: newId,
+            newValues: { sourcePipelineId: id, interfaceId: targetInterfaceId, messageType: targetMessageType, pipelineName: newName || src.pipeline_name + ' (copy)' },
+            metadata: { stepsCloned: sortedSteps.length },
+            ipAddress: req.clientIP || req.ip,
+            userAgent: req.headers['user-agent'],
+            result: 'success',
+            riskLevel: 'medium'
+        }).catch(err => console.warn('⚠️ Failed to write PIPELINE_CLONED audit log:', err.message));
+
         res.json({ success: true, pipeline_id: newId, message: 'Pipeline cloned' });
     } catch (error) {
+        auditService.logEvent({
+            userId: req.session?.user?.id,
+            action: 'PIPELINE_CLONE_FAILED',
+            entityType: 'pipeline',
+            entityId: req.params?.id,
+            ipAddress: req.clientIP || req.ip,
+            userAgent: req.headers['user-agent'],
+            result: 'error',
+            riskLevel: 'medium',
+            errorMessage: error.message
+        }).catch(err => console.warn('⚠️ Failed to write PIPELINE_CLONE_FAILED audit log:', err.message));
+
         res.status(error.statusCode || 500).json({ success: false, error: error.message });
     }
 };

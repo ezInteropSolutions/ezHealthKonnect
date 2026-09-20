@@ -13,6 +13,7 @@ import (
 
 	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/audit"
 	"ezhealthkonnect/services/connectors"
 	cdastorage "ezhealthkonnect/services/cda_storage"
 	"ezhealthkonnect/services/executors/control"
@@ -43,9 +44,10 @@ type StepExecutor interface {
 
 // ExecutorRegistry manages all available step executors (Factory Pattern + OOB)
 type ExecutorRegistry struct {
-	executors map[string]StepExecutor
-	db        *sql.DB
-	credStore *CredentialStore // nil = passthrough (dev/test only)
+	executors   map[string]StepExecutor
+	db          *sql.DB
+	credStore   *CredentialStore // nil = passthrough (dev/test only)
+	auditLogger audit.AuditLogger
 }
 
 // NewExecutorRegistry creates a new executor registry with auto-registration (OOB).
@@ -53,9 +55,10 @@ type ExecutorRegistry struct {
 // when executors read credentials from the database.
 func NewExecutorRegistry(db *sql.DB, credStore *CredentialStore) *ExecutorRegistry {
 	registry := &ExecutorRegistry{
-		executors: make(map[string]StepExecutor),
-		db:        db,
-		credStore: credStore,
+		executors:   make(map[string]StepExecutor),
+		db:          db,
+		credStore:   credStore,
+		auditLogger: audit.NewPostgresAuditLogger(db),
 	}
 
 	// OOB: Auto-register all built-in executors
@@ -80,6 +83,7 @@ func (er *ExecutorRegistry) SetCodeTemplateService(svc *CodeTemplateService) {
 // Call this after NewExecutorRegistry once the DLQService is ready.
 func (er *ExecutorRegistry) SetDLQService(dlqSvc *connectors.DLQService) {
 	outbound := transform.NewOutboundConnectorExecutorWithDLQ(dlqSvc)
+	outbound.SetAuditLogger(er.auditLogger)
 	er.executors["connector.outbound"] = outbound
 	log.Printf("📥 [DLQ] Outbound connector executor upgraded with DLQ support")
 }
@@ -185,8 +189,10 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(transform.NewHL7BuildExecutor()) // hl7.build
 
 	// Connector bridge executors (DLQ service wired later via SetDLQService)
-	er.Register(transform.NewOutboundConnectorExecutor())    // connector.outbound
-	er.Register(transform.NewInboundConnectorExecutor())     // connector.inbound
+	outboundExec := transform.NewOutboundConnectorExecutor()
+	outboundExec.SetAuditLogger(er.auditLogger)
+	er.Register(outboundExec)                                 // connector.outbound
+	er.Register(transform.NewInboundConnectorExecutor())      // connector.inbound
 
 	// Payload builder executor
 	payloadBuilder := payloadexecutor.NewPayloadBuilderExecutor(er.db)

@@ -1,0 +1,10 @@
+{
+  "code": "B3",
+  "name": "Claim Rebill (Request)",
+  "direction": "request",
+  "transmissionGroupSegments": ["Patient", "PharmacyProvider", "Insurance", "Prescriber"],
+  "transactionGroupSegments": ["Claim", "Pricing"],
+  "sourceRefs": [
+    "State of North Dakota Medicaid NCPDP D.0 payer sheet, section 1 'NCPDP VERSION D CLAIM BILLING/CLAIM REBILL TEMPLATE' -- read directly, confirming B3 (Claim Rebill) uses the IDENTICAL segment/field shape as B1 (Claim Billing) end to end: the document's own field-level table for Transaction Code (104-A4) lists the value as literally 'B1, B3' in the SAME row, and every section heading through the whole request+response template is explicitly framed '(B1/B3)' throughout, never split into a separate B3-only section. This transaction definition is therefore an intentional structural duplicate of B1_request.json with only the code changed -- not a guess, a directly-sourced 'these two transaction codes share one template' fact."
+  ]
+}

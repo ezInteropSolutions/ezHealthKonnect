@@ -595,11 +595,163 @@ router.post('/:id/gdpr-request', requireAuth, requireAdmin, async (req, res) => 
     }
 });
 
+// GET /api/users/:id/gdpr-export - GDPR Article 15 (right of access) data export (admin only)
+// Returns a downloadable JSON file: the user's own profile fields (credentials/
+// tokens excluded — those were never "their data" to disclose) plus their full
+// audit trail, both as actor (user_id = this user) and as subject
+// (entity_type='User', entity_id = this user) — the complete picture of what
+// this system holds and has done involving them, per Article 15.
+router.get('/:id/gdpr-export', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const user = await userService.database.models.User.findByPk(req.params.id);
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const sequelize = userService.database.sequelize;
+        const auditTrail = await sequelize.query(
+            `SELECT id, user_id, action, entity_type, entity_id, old_values, new_values,
+                    metadata, ip_address, result, risk_level, compliance_flags, created_at
+             FROM audit_logs
+             WHERE user_id = :userId::uuid
+                OR (entity_type = 'User' AND entity_id = :userIdText)
+             ORDER BY created_at ASC`,
+            { replacements: { userId: req.params.id, userIdText: req.params.id }, type: sequelize.QueryTypes.SELECT }
+        );
+
+        const exportData = {
+            exportGeneratedAt: new Date().toISOString(),
+            exportGeneratedBy: req.session.user.email,
+            profile: {
+                id: user.id,
+                email: user.email,
+                first_name: user.first_name,
+                last_name: user.last_name,
+                role: user.role,
+                status: user.status,
+                phone: user.phone,
+                organization: user.organization,
+                job_title: user.job_title,
+                department: user.department,
+                timezone: user.timezone,
+                locale: user.locale,
+                preferences: user.preferences,
+                data_consent_given: user.data_consent_given,
+                data_consent_date: user.data_consent_date,
+                data_retention_until: user.data_retention_until,
+                last_login_at: user.last_login_at,
+                created_at: user.created_at,
+                updated_at: user.updated_at
+                // Deliberately excluded: password_hash, email_verification_token,
+                // password_reset_token — credentials/security tokens were never
+                // "the data subject's data" to disclose under Article 15.
+            },
+            auditTrail
+        };
+
+        await auditService.logEvent({
+            userId: req.session.user.id,
+            action: 'GDPR_DATA_EXPORTED',
+            entityType: 'User',
+            entityId: req.params.id,
+            metadata: { targetUser: user.email, exportedBy: req.session.user.email, auditRowCount: auditTrail.length },
+            ipAddress: req.clientIP,
+            result: 'success'
+        });
+
+        const filename = `gdpr-export-${req.params.id}-${Date.now()}.json`;
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(JSON.stringify(exportData, null, 2));
+    } catch (error) {
+        console.error('❌ GDPR export error:', error);
+        res.status(500).json({ message: 'Failed to generate GDPR export' });
+    }
+});
+
+// POST /api/users/:id/gdpr-erase - GDPR Article 17 (right to erasure) execution (admin only)
+// A DELIBERATE SECOND STEP, separate from POST /gdpr-request above (which only
+// flags a request) — requires gdpr_delete_requested to already be true and a
+// typed reason, matching the reason-required precedent already established by
+// the Go cda_dedupe_registry purge endpoint. ANONYMIZES rather than hard-
+// deletes: overwrites PII fields in place, keeps the row (id/role/timestamps)
+// and every audit_logs row referencing this user completely untouched — those
+// audit rows only ever store user_id (a UUID FK), never a denormalized copy of
+// name/email, so anonymizing this row automatically "anonymizes" every past
+// and future audit-log lookup for this person without touching audit_logs at
+// all. This satisfies GDPR Art. 17 (erase personal identifiers) while
+// satisfying HIPAA's own audit-trail retention requirement (Art. 17(3)(b)'s
+// legal-obligation exception) — the audit trail's evidentiary shape survives,
+// only who it was is erased.
+router.post('/:id/gdpr-erase', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const user = await userService.database.models.User.findByPk(req.params.id);
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        if (!user.gdpr_delete_requested) {
+            return res.status(400).json({ message: 'User has not been flagged for GDPR deletion — use POST /:id/gdpr-request first' });
+        }
+        if (user.data_anonymized) {
+            return res.status(400).json({ message: 'User data has already been anonymized' });
+        }
+        const reason = (req.body && req.body.reason || '').trim();
+        if (!reason) {
+            return res.status(400).json({ message: 'A reason is required for a GDPR erasure action' });
+        }
+
+        const fieldsAnonymized = ['email', 'first_name', 'last_name', 'phone', 'organization', 'job_title', 'department', 'preferences'];
+        await user.update({
+            // Per-user-unique placeholder (not a single shared value) — email
+            // has a UNIQUE constraint, a shared placeholder would violate it
+            // on the second erasure. ".invalid" is the IANA-reserved
+            // special-use TLD meant for exactly this (RFC 2606).
+            email: `deleted-${user.id}@anonymized.invalid`,
+            first_name: 'Deleted',
+            last_name: 'User',
+            phone: null,
+            organization: null,
+            job_title: null,
+            department: null,
+            preferences: null,
+            // password_hash is NOT NULL — replaced with an unusable random
+            // value (never nulled), matching the existing invite-flow
+            // precedent (a hash nothing can ever hash-compare true against).
+            password_hash: crypto.randomBytes(32).toString('hex'),
+            email_verification_token: null,
+            password_reset_token: null,
+            password_reset_expires: null,
+            status: 'inactive',
+            data_anonymized: true
+        });
+
+        // Deliberately NOT logging the original email/name/phone as oldValues
+        // — doing so would permanently retain exactly the PII this action is
+        // meant to erase, defeating the entire point. Only the fact that
+        // erasure happened, who did it, and why is recorded.
+        await auditService.logEvent({
+            userId: req.session.user.id,
+            action: 'GDPR_DATA_ERASED',
+            entityType: 'User',
+            entityId: req.params.id,
+            metadata: { anonymizedBy: req.session.user.email, reason, fieldsAnonymized },
+            ipAddress: req.clientIP,
+            result: 'success'
+        });
+
+        res.json({ message: 'User data anonymized per GDPR Article 17 erasure request' });
+    } catch (error) {
+        console.error('❌ GDPR erasure error:', error);
+        res.status(500).json({ message: 'Failed to execute GDPR erasure' });
+    }
+});
+
 // PUT /api/users/:id/profile - Update full user profile (admin only)
 router.put('/:id/profile', requireAuth, requireAdmin, async (req, res) => {
     try {
         const user = await userService.database.models.User.findByPk(req.params.id);
         if (!user) return res.status(404).json({ message: 'User not found' });
+
+        // Captured before update — the only way to know what a role change
+        // was FROM, and the input to the isRoleChange check below.
+        const oldRole = user.role;
 
         const allowed = ['first_name', 'last_name', 'phone', 'organization', 'job_title', 'department', 'timezone', 'locale'];
         const updates = {};
@@ -618,6 +770,44 @@ router.put('/:id/profile', requireAuth, requireAdmin, async (req, res) => {
         }
 
         await user.update(updates);
+
+        // Role and password changes get their own distinct, high-risk audit
+        // events — this endpoint can silently carry either alongside routine
+        // profile edits (name, phone, timezone, ...), and blending an access-
+        // control change (role) or a credential change (password) into the
+        // same flat 'medium' risk as a phone-number edit would hide exactly
+        // the kind of event HIPAA/GDPR audit review cares about most. Both
+        // fire ADDITIONALLY, not instead of, USER_PROFILE_UPDATED below —
+        // same "one general event + a distinct elevated-risk event for the
+        // sensitive subset" pattern used for INTERFACE_CREDENTIALS_UPDATED.
+        const isRoleChange = updates.role !== undefined && updates.role !== oldRole;
+        if (isRoleChange) {
+            auditService.logEvent({
+                userId: req.session.user.id,
+                action: 'USER_ROLE_CHANGED',
+                entityType: 'User',
+                entityId: req.params.id,
+                oldValues: { role: oldRole },
+                newValues: { role: updates.role },
+                metadata: { updatedBy: req.session.user.email },
+                ipAddress: req.clientIP,
+                result: 'success',
+                riskLevel: 'high'
+            }).catch(err => console.warn('⚠️ Failed to write USER_ROLE_CHANGED audit log:', err.message));
+        }
+        if (updates.password_hash !== undefined) {
+            // Never log the hash itself — presence of the change is the signal.
+            auditService.logEvent({
+                userId: req.session.user.id,
+                action: 'USER_PASSWORD_RESET_BY_ADMIN',
+                entityType: 'User',
+                entityId: req.params.id,
+                metadata: { updatedBy: req.session.user.email },
+                ipAddress: req.clientIP,
+                result: 'success',
+                riskLevel: 'high'
+            }).catch(err => console.warn('⚠️ Failed to write USER_PASSWORD_RESET_BY_ADMIN audit log:', err.message));
+        }
 
         await auditService.logEvent({
             userId: req.session.user.id,

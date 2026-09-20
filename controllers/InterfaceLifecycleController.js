@@ -2,16 +2,23 @@
 // Interface runtime lifecycle management - start, stop, monitor interfaces
 
 const ProcessingEngineService = require('../services/ProcessingEngineService');
+const auditService = require('../services/auditService');
 
 const GO_BACKEND_URL = process.env.GO_BACKEND_URL || `http://localhost:${process.env.API_PORT || 8080}`;
 
-async function goFetch(path, options = {}) {
+// goFetch forwards to the Go backend with the internal proxy secret plus,
+// when userId is supplied, an X-User-ID header — the Go-side
+// ActivateInterface/DeactivateInterface audit events (services/audit) read
+// this to attribute INTERFACE_ACTIVATED/DEACTIVATED to the real acting user
+// instead of leaving user_id NULL.
+async function goFetch(path, options = {}, userId = null) {
     let fetch;
     try { fetch = require('node-fetch'); } catch { fetch = global.fetch; }
     const secret = process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '';
     const headers = {
         ...(options.headers || {}),
         ...(secret ? { 'X-Internal-Proxy-Secret': secret } : {}),
+        ...(userId ? { 'X-User-ID': String(userId) } : {}),
     };
     return fetch(`${GO_BACKEND_URL}${path}`, { timeout: 10000, ...options, headers });
 }
@@ -99,28 +106,14 @@ class InterfaceLifecycleController {
             // Activate interface via Go backend processing engine
             console.log('🚀 Activating interface via Go processing engine...');
 
-            // Get fetch implementation
-            let fetch;
-            try {
-                fetch = require('node-fetch');
-            } catch {
-                fetch = global.fetch;
-            }
-
-            if (!fetch) {
-                throw new Error('No fetch implementation available');
-            }
-
-            // Call Go backend to activate interface
-            const goBackendUrl = process.env.GO_BACKEND_URL || 'http://localhost:8080';
-            const response = await fetch(`${goBackendUrl}/api/processing/interfaces/${interfaceId}/activate`, {
+            // Call Go backend to activate interface. X-User-ID (via goFetch)
+            // lets the Go-side INTERFACE_ACTIVATED audit event (services/audit)
+            // attribute this to the real acting user.
+            const response = await goFetch(`/api/processing/interfaces/${interfaceId}/activate`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Internal-Proxy-Secret': process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 timeout: 30000
-            });
+            }, userId);
 
             let result;
             if (!response.ok) {
@@ -149,11 +142,11 @@ class InterfaceLifecycleController {
                 }
             );
 
-            // Log activation event
-            await this.logAuditEvent(userId, 'INTERFACE_ACTIVATED', {
-                interfaceId: interfaceId,
-                timestamp: new Date()
-            });
+            // INTERFACE_ACTIVATED is recorded on the Go side (services/audit),
+            // now with this real user_id via the X-User-ID header above — no
+            // separate Node-side write here, to avoid two independently-shaped
+            // audit rows for the same action (see logAuditEvent's own doc
+            // comment for the general convention this follows).
 
             res.json({
                 success: true,
@@ -179,32 +172,18 @@ class InterfaceLifecycleController {
     async deactivateInterface(req, res) {
         try {
             const { interfaceId } = req.params;
-            const { reason } = req.body;
             const userId = req.user?.id || req.session?.user?.id;
 
             console.log(`⏹️ Deactivating interface: ${interfaceId}`);
 
-            // Call Go backend to deactivate the interface
-            let fetch;
-            try {
-                fetch = require('node-fetch');
-            } catch {
-                fetch = global.fetch;
-            }
-
-            if (!fetch) {
-                throw new Error('No fetch implementation available');
-            }
-
-            const goBackendUrl = process.env.GO_BACKEND_URL || 'http://localhost:8080';
-            const response = await fetch(`${goBackendUrl}/api/processing/interfaces/${interfaceId}/deactivate`, {
+            // Call Go backend to deactivate the interface. X-User-ID (via
+            // goFetch) lets the Go-side INTERFACE_DEACTIVATED audit event
+            // attribute this to the real acting user.
+            const response = await goFetch(`/api/processing/interfaces/${interfaceId}/deactivate`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Internal-Proxy-Secret': process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 timeout: 30000
-            });
+            }, userId);
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
@@ -224,12 +203,14 @@ class InterfaceLifecycleController {
                 }
             );
 
-            // Log deactivation event
-            await this.logAuditEvent(userId, 'INTERFACE_DEACTIVATED', {
-                interfaceId: interfaceId,
-                reason: reason || 'manual',
-                timestamp: new Date()
-            });
+            // INTERFACE_DEACTIVATED is recorded on the Go side (services/audit)
+            // with the real user_id — see the comment on the activate path
+            // above for why this doesn't ALSO write a Node-side row. The
+            // request body's optional `reason` field isn't threaded through
+            // to the Go event in this pass — a named, deliberate
+            // simplification, not a regression: the raw-SQL write this
+            // replaces used the wrong column names and had never actually
+            // persisted `reason` either.
 
             res.json({
                 success: true,
@@ -260,27 +241,17 @@ class InterfaceLifecycleController {
 
             console.log(`⏸️ Pausing interface: ${interfaceId} (graceful: ${graceful}, waitForQueue: ${waitForQueue})`);
 
-            // Call Go backend to deactivate the interface
-            let fetch;
-            try {
-                fetch = require('node-fetch');
-            } catch {
-                fetch = global.fetch;
-            }
-
-            if (!fetch) {
-                throw new Error('No fetch implementation available');
-            }
-
-            const goBackendUrl = process.env.GO_BACKEND_URL || 'http://localhost:8080';
-            const response = await fetch(`${goBackendUrl}/api/processing/interfaces/${interfaceId}/deactivate`, {
+            // Call Go backend to deactivate the interface. Go itself has no
+            // "paused" concept — pause and deactivate hit the identical
+            // ActivateInterface/DeactivateInterface pair; "paused" is purely
+            // a Node-layer interface_status label, which is why (unlike
+            // activate/deactivate above) this path keeps its own Node-side
+            // audit write below instead of relying solely on Go's event.
+            const response = await goFetch(`/api/processing/interfaces/${interfaceId}/deactivate`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Internal-Proxy-Secret': process.env.INTERNAL_PROXY_SECRET || process.env.JWT_SECRET || '',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 timeout: 30000
-            });
+            }, userId);
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
@@ -570,30 +541,26 @@ class InterfaceLifecycleController {
     }
 
     /**
-     * Log audit event
+     * Log audit event via the shared auditService (services/auditService.js).
+     * Previously a raw INSERT into columns (event_type, event_details) that
+     * don't exist in the real audit_logs schema (action, metadata) — every
+     * call silently failed, caught by the try/catch below and logged only to
+     * the console. Only pauseInterface calls this now; activate/deactivate
+     * rely on the Go-side INTERFACE_ACTIVATED/DEACTIVATED event instead (see
+     * their own comments) to avoid two independently-shaped audit rows for
+     * the same physical action.
      */
     async logAuditEvent(userId, eventType, eventDetails) {
         try {
-            const database = require('../config/database');
-            const sequelize = database.sequelize;
-
-            await sequelize.query(`
-                INSERT INTO audit_logs (
-                    id, user_id, event_type, event_details,
-                    ip_address, user_agent, created_at
-                ) VALUES (
-                    gen_random_uuid(), :user_id, :event_type, :event_details,
-                    '127.0.0.1', 'ProcessingEngine', CURRENT_TIMESTAMP
-                )
-            `, {
-                replacements: {
-                    user_id: userId,
-                    event_type: eventType,
-                    event_details: JSON.stringify(eventDetails)
-                },
-                type: sequelize.QueryTypes.INSERT
+            await auditService.logEvent({
+                userId,
+                action: eventType,
+                entityType: 'interface',
+                entityId: eventDetails?.interfaceId,
+                metadata: eventDetails,
+                result: 'success',
+                riskLevel: 'low'
             });
-
         } catch (error) {
             console.error('Failed to log audit event:', error);
             // Don't throw - audit logging shouldn't break main functionality

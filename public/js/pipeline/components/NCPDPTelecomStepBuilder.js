@@ -55,11 +55,15 @@ function ncpdpTelecomDirectionOptionsHTML(selected) {
     ).join('');
 }
 
-// Phase 1 scope — see CLAUDE.md's own "NCPDP Telecommunication D.0 Engine —
-// Phase 1 (B1 Claim Billing)" section for the full named-future-phases list
-// (B2 Reversal, B3, E1/E2 Eligibility, D0/D1 Prior Authorization, the batch
-// standard are later, named phases, not attempted yet).
-const NCPDP_TELECOM_TRANSACTION_CODES = ['B1'];
+// Phase 1 (B1 Claim Billing) + the documented sourcing pass that added B2
+// (Reversal), B3 (Rebill), and E1 (Eligibility Verification) — see
+// CLAUDE.md's own "NCPDP Telecommunication D.0 — B2/B3/E1" section. B2/E1
+// have no transaction-group/claim-line-item concept in their own response
+// (E1) or request (B2's own Claim segment is narrower) — the config UI
+// doesn't need to know this, since transactionCode alone selects the right
+// schema-driven segment set server-side. E2/D0/D1/the batch standard remain
+// out of scope (no real, byte-level-confirmed source found for those yet).
+const NCPDP_TELECOM_TRANSACTION_CODES = ['B1', 'B2', 'B3', 'E1'];
 
 function ncpdpTelecomTransactionCodeOptionsHTML(selected) {
     return NCPDP_TELECOM_TRANSACTION_CODES.map(t =>

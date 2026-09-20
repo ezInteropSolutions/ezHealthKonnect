@@ -517,6 +517,10 @@
                     <span class="nav-icon"><i class="fas fa-shield-halved"></i></span>
                     Security
                 </div>
+                <div class="settings-nav-item" data-section="atna" onclick="switchSection('atna')">
+                    <span class="nav-icon"><i class="fas fa-file-shield"></i></span>
+                    ATNA Audit Export
+                </div>
                 <div class="settings-nav-item" data-section="hl7fhir" onclick="switchSection('hl7fhir')">
                     <span class="nav-icon"><i class="fas fa-hospital"></i></span>
                     HL7 / FHIR
@@ -772,6 +776,124 @@
                                 <span class="status-msg" id="securityStatus"></span>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- ══════════════════════════════════════════════════════════
+                     ATNA AUDIT EXPORT
+                ══════════════════════════════════════════════════════════ -->
+                <div class="settings-section" id="section-atna">
+                    <div class="section-title-row">
+                        <i class="fas fa-file-shield" style="font-size:20px;color:#1e3a8a"></i>
+                        <h2>ATNA Audit Export</h2>
+                    </div>
+                    <p class="section-subtitle">Forwards every audit event (login, interface/user/pipeline changes, credential changes, message lifecycle) to an external IHE Audit Record Repository (ARR) over syslog. Disabled by default.</p>
+
+                    <div class="doc-callout">
+                        <div class="doc-callout-header" onclick="toggleDocCallout(this)">
+                            <span class="doc-callout-header-left"><i class="fas fa-book-open"></i> How ATNA Audit Export works</span>
+                            <i class="fas fa-chevron-down doc-callout-chevron"></i>
+                        </div>
+                        <div class="doc-callout-body">
+                            <p>ATNA (Audit Trail and Node Authentication) is the IHE profile most healthcare compliance frameworks expect for centralizing audit trails across systems. Every audit event this application already records in its own database (Admin &gt; Audit Logs) is additionally exported as an RFC 5424 syslog message carrying a DICOM PS3.15 / RFC 3881 AuditMessage XML record.</p>
+                            <ul>
+                                <li><strong>Host / Port / Protocol</strong> — where your Audit Record Repository listens. UDP is fire-and-forget (no delivery guarantee); TCP and TLS keep a persistent connection with automatic reconnect.</li>
+                                <li><strong>Facility</strong> — the RFC 5424 syslog facility number your ARR expects (10 = "security/authorization messages" is the common default).</li>
+                                <li><strong>Audit Source ID / Enterprise Site ID</strong> — how this deployment identifies itself in every exported record, so a shared ARR can distinguish multiple ezHealthKonnect instances.</li>
+                            </ul>
+                            <div class="doc-tip"><i class="fas fa-circle-info"></i> <span>Never requires a restart. Audit events raised by the Go backend (interface/message/DLQ lifecycle) pick up a change on the very next event. Audit events raised by the Node frontend (login, user/pipeline management) pick it up within about 5 minutes — the same settings-cache lag every other category on this page already has.</span></div>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <div class="settings-card-header">
+                            <i class="fas fa-toggle-on" style="color:#1e3a8a"></i>
+                            <div><h3>Master Toggle</h3><p>Disabling stops all export immediately — audit events keep recording to this application's own database either way.</p></div>
+                        </div>
+                        <div class="settings-card-body">
+                            <div class="toggle-row">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="atnaEnabled">
+                                    <span class="toggle-track"></span>
+                                </label>
+                                <span class="toggle-label">Enable ATNA Syslog Export</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <div class="settings-card-header">
+                            <i class="fas fa-server" style="color:#1e3a8a"></i>
+                            <div><h3>Audit Record Repository (ARR)</h3></div>
+                        </div>
+                        <div class="settings-card-body">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="atnaHost">Host *</label>
+                                    <input type="text" id="atnaHost" class="form-control" placeholder="arr.example.internal">
+                                    <span class="hint">Required when export is enabled.</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="atnaPort">Port</label>
+                                    <input type="number" id="atnaPort" class="form-control" value="514" min="1" max="65535">
+                                    <span class="hint">514 (UDP/TCP default) or 6514 (TLS default).</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="atnaProtocol">Protocol</label>
+                                    <select id="atnaProtocol" class="form-control" onchange="onATNAProtocolChange()">
+                                        <option value="udp" selected>UDP — fire and forget</option>
+                                        <option value="tcp">TCP — persistent connection</option>
+                                        <option value="tls">TLS — encrypted, persistent connection</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" id="atnaTLSSkipVerifyGroup" style="display:none">
+                                    <div class="toggle-row">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="atnaTLSInsecureSkipVerify">
+                                            <span class="toggle-track"></span>
+                                        </label>
+                                        <span class="toggle-label">Skip TLS certificate verification</span>
+                                    </div>
+                                    <span class="hint">Only for a self-signed ARR in a controlled test environment — never in production.</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="atnaFacility">Syslog Facility</label>
+                                    <input type="number" id="atnaFacility" class="form-control" value="10" min="0" max="23">
+                                    <span class="hint">RFC 5424 facility 0-23. 10 = security/authorization messages.</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <div class="settings-card-header">
+                            <i class="fas fa-id-badge" style="color:#1e3a8a"></i>
+                            <div><h3>Source Identity</h3><p>How this deployment identifies itself in every exported AuditMessage record.</p></div>
+                        </div>
+                        <div class="settings-card-body">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="atnaAppName">Application Name</label>
+                                    <input type="text" id="atnaAppName" class="form-control" value="ezHealthKonnect">
+                                    <span class="hint">RFC 5424 APP-NAME field.</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="atnaAuditSourceId">Audit Source ID</label>
+                                    <input type="text" id="atnaAuditSourceId" class="form-control" value="ezHealthKonnect">
+                                    <span class="hint">DICOM AuditSourceIdentification/AuditSourceID.</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="atnaEnterpriseSiteId">Enterprise Site ID</label>
+                                    <input type="text" id="atnaEnterpriseSiteId" class="form-control" placeholder="(optional)">
+                                    <span class="hint">Distinguishes this deployment when several share one ARR.</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-actions">
+                        <button class="btn btn-primary" id="atnaSaveBtn" onclick="saveATNA()"><i class="fas fa-floppy-disk"></i> Save Settings</button>
+                        <span class="status-msg" id="atnaStatus"></span>
                     </div>
                 </div>
 
@@ -2274,7 +2396,7 @@ function updateTime() {
 }
 
 // ─── Section switching ────────────────────────────────────────────────────────
-const SECTIONS = ['smtp','security','hl7fhir','queue','connectors','alerts','performance','storage','git','ezcompanion','ai','schemas','docker-ports'];
+const SECTIONS = ['smtp','security','atna','hl7fhir','queue','connectors','alerts','performance','storage','git','ezcompanion','ai','schemas','docker-ports'];
 
 function switchSection(name) {
     SECTIONS.forEach(s => {
@@ -2300,6 +2422,7 @@ async function loadSection(name) {
     switch (name) {
         case 'smtp':       return loadSMTP();
         case 'security':   return loadSecurity();
+        case 'atna':       return loadATNA();
         case 'hl7fhir':    return loadHL7FHIR();
         case 'queue':      return loadQueue();
         case 'connectors': return loadConnectors();
@@ -2586,6 +2709,55 @@ async function saveQueue() {
         setStatus('queueStatus', '✅ Queue settings saved', 'success');
     } catch (e) { setStatus('queueStatus', '❌ ' + e.message, 'error'); }
     finally { resetBtn('queueSaveBtn'); }
+}
+
+// ─── ATNA Audit Export ──────────────────────────────────────────────────────
+async function loadATNA() {
+    try {
+        const d = await apiGet('/api/system/settings/atna-syslog');
+        document.getElementById('atnaEnabled').checked               = !!d.enabled;
+        document.getElementById('atnaHost').value                    = d.host || '';
+        document.getElementById('atnaPort').value                    = d.port || 514;
+        document.getElementById('atnaProtocol').value                = d.protocol || 'udp';
+        document.getElementById('atnaFacility').value                = d.facility ?? 10;
+        document.getElementById('atnaAppName').value                 = d.app_name || 'ezHealthKonnect';
+        document.getElementById('atnaAuditSourceId').value           = d.audit_source_id || 'ezHealthKonnect';
+        document.getElementById('atnaEnterpriseSiteId').value        = d.enterprise_site_id || '';
+        document.getElementById('atnaTLSInsecureSkipVerify').checked = !!d.tls_insecure_skip_verify;
+        onATNAProtocolChange();
+    } catch (e) { showAlert('ATNA settings load failed: ' + e.message); }
+}
+
+function onATNAProtocolChange() {
+    const isTLS = document.getElementById('atnaProtocol').value === 'tls';
+    document.getElementById('atnaTLSSkipVerifyGroup').style.display = isTLS ? '' : 'none';
+}
+
+async function saveATNA() {
+    setBtnLoading('atnaSaveBtn', 'Saving…');
+    setStatus('atnaStatus', 'Saving…', 'info');
+    try {
+        const enabled = document.getElementById('atnaEnabled').checked;
+        const host = document.getElementById('atnaHost').value.trim();
+        if (enabled && !host) {
+            setStatus('atnaStatus', '❌ Host is required when export is enabled', 'error');
+            resetBtn('atnaSaveBtn');
+            return;
+        }
+        await apiPut('/api/system/settings/atna-syslog', {
+            enabled,
+            host,
+            port:                     parseInt(document.getElementById('atnaPort').value)     || 514,
+            protocol:                 document.getElementById('atnaProtocol').value,
+            facility:                 parseInt(document.getElementById('atnaFacility').value) ?? 10,
+            app_name:                 document.getElementById('atnaAppName').value || 'ezHealthKonnect',
+            audit_source_id:          document.getElementById('atnaAuditSourceId').value || 'ezHealthKonnect',
+            enterprise_site_id:       document.getElementById('atnaEnterpriseSiteId').value,
+            tls_insecure_skip_verify: document.getElementById('atnaTLSInsecureSkipVerify').checked,
+        });
+        setStatus('atnaStatus', '✅ ATNA settings saved — no restart needed (Go-raised events pick this up immediately; Node-raised events within ~5 min)', 'success');
+    } catch (e) { setStatus('atnaStatus', '❌ ' + e.message, 'error'); }
+    finally { resetBtn('atnaSaveBtn'); }
 }
 
 // ─── Connector Defaults ───────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import (
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/processing"
 	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/audit"
 	"ezhealthkonnect/services/backpressure"
 	cdaSchemaLoader "ezhealthkonnect/cda"
 	cdacoverage "ezhealthkonnect/services/cda_coverage"
@@ -79,7 +80,38 @@ var objectStorageService *storage.ObjectStorageService
 // Global CDA Document Store
 var cdaDocumentStore cdastorage.CDADocumentStore
 
+// Global application-lifecycle audit logger (APPLICATION_STARTED/STOPPED) —
+// constructed once db is confirmed non-nil; nil otherwise (no-DB dev mode),
+// guarded at both use sites below.
+var appAuditLogger audit.AuditLogger
+
 func main() {
+	// Register the shutdown-signal channel FIRST, before any other
+	// initialization work — deliberately ahead of even .env loading below.
+	//
+	// WHY THIS MATTERS: signal.Notify used to be called much later in this
+	// function (right before starting the HTTP server, after DB connection,
+	// schema loading, executor registration, etc.). Until that point, SIGTERM
+	// has its OS-DEFAULT disposition (immediate process termination) — Go
+	// never sees it, so nothing here (processingEngine.Stop(), the HTTP
+	// drain, the APPLICATION_STOPPED audit write) runs. A freshly-(re)started
+	// process is vulnerable to this for however long its own startup takes.
+	// This was confirmed as a REAL, reproducible bug, not a hypothetical:
+	// while fixing the container entrypoint's own SIGTERM-forwarding gap
+	// (docker-entrypoint.sh's own header comment — plain `sh -c "cmd & cmd"`
+	// never forwarded SIGTERM to its children at all), 2 of 3 real
+	// `docker-compose restart` attempts, spaced ~20-35s apart, still
+	// silently skipped this entire shutdown sequence — each one landed while
+	// the freshly-restarted go-api process was still in this function, well
+	// before reaching the old, late signal.Notify call (confirmed directly:
+	// the background HL7 OOB-template rebuild this app kicks off at every
+	// boot was still actively logging when each of those 2 signals arrived).
+	// Registering the channel here, before ANYTHING else can block main(),
+	// closes that window — <-quit (further down) still blocks on the same
+	// channel, unchanged.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+
 	// Load .env before anything reads os.Getenv — harmless if the file doesn't exist
 	// (production deployments pass variables via the shell/service manager instead).
 	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
@@ -177,6 +209,9 @@ func main() {
 			// log.Printf("✅ InterfaceMessageService initialized")
 			// outputMessageService = services.NewOutputMessageService(db, nil, "")
 			// log.Printf("✅ OutputMessageService initialized")
+
+			// Compliance-audit logger for APPLICATION_STARTED/STOPPED below.
+			appAuditLogger = audit.NewPostgresAuditLogger(db)
 
 			// Initialize PostgreSQL Transformation Service (standalone)
 			postgresTransformationService = services.NewPostgresTransformationService(db)
@@ -690,6 +725,33 @@ func main() {
 				// services.GetAppSettings().GetXxx() without needing explicit DI.
 				services.InitAppSettings(db)
 				log.Printf("✅ AppSettingsCache initialized")
+
+				// Wire the admin-UI-configurable ATNA syslog settings into
+				// services/audit's own SettingsProvider hook — that package can't
+				// import "services" directly (several services/*.go files already
+				// import services/audit for AuditLogger, so the reverse import would
+				// cycle), so main.go (which can import both) does the wiring once
+				// here. Returning enabled=false when the settings row itself is
+				// disabled/unconfigured lets resolveSyslogConfig() fall through to
+				// ATNA_SYSLOG_* env vars instead — see that function's own comment.
+				audit.SettingsProvider = func() (audit.SyslogConfig, bool) {
+					s := services.GetAppSettings().GetATNASyslogSettings()
+					if !s.Enabled || s.Host == "" {
+						return audit.SyslogConfig{}, false
+					}
+					return audit.SyslogConfig{
+						Host:                  s.Host,
+						Port:                  s.Port,
+						Protocol:              s.Protocol,
+						Facility:              s.Facility,
+						AppName:               s.AppName,
+						AuditSourceID:         s.AuditSourceID,
+						EnterpriseSiteID:      s.EnterpriseSiteID,
+						TLSInsecureSkipVerify: s.TLSInsecureSkipVerify,
+						DialTimeout:           5 * time.Second,
+						WriteTimeout:          5 * time.Second,
+					}, true
+				}
 
 				settingsCtrl := controllers.NewSettingsController(db, credStore)
 				// requireProxiedAdmin(): settings (SMTP credentials, security policy,
@@ -2213,8 +2275,8 @@ func main() {
 		Handler: router,
 	}
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+	// quit was registered at the very top of main() (see that comment for why)
+	// — still the same channel, awaited below once startup has completed.
 
 	go func() {
 		log.Printf("Starting ezHealthKonnect server on 0.0.0.0:%s", port)
@@ -2222,6 +2284,16 @@ func main() {
 			log.Fatal("Failed to start server:", err)
 		}
 	}()
+
+	if appAuditLogger != nil {
+		if err := appAuditLogger.Log(context.Background(), audit.AuditEvent{
+			Action:     "APPLICATION_STARTED",
+			EntityType: "application",
+			Metadata:   map[string]interface{}{"port": port},
+		}); err != nil {
+			log.Printf("⚠️  [audit] failed to write APPLICATION_STARTED: %v", err)
+		}
+	}
 
 	<-quit
 	log.Printf("Shutdown signal received — stopping connectors and shutting down...")
@@ -2239,6 +2311,18 @@ func main() {
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("⚠️  HTTP server forced shutdown: %v", err)
+	}
+
+	// Written last, before db.Close() runs (deferred at the top of main) —
+	// the audit write itself uses a detached background context (see
+	// PostgresAuditLogger.Log), so it isn't cut short by shutdownCtx above.
+	if appAuditLogger != nil {
+		if err := appAuditLogger.Log(context.Background(), audit.AuditEvent{
+			Action:     "APPLICATION_STOPPED",
+			EntityType: "application",
+		}); err != nil {
+			log.Printf("⚠️  [audit] failed to write APPLICATION_STOPPED: %v", err)
+		}
 	}
 }
 

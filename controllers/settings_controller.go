@@ -108,6 +108,10 @@ func (sc *SettingsController) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/docker-ports", sc.GetDockerPortSettings)
 	rg.PUT("/docker-ports", sc.UpdateDockerPortSettings)
 	rg.POST("/docker-ports/restart", sc.RestartWithNewPorts)
+
+	// ── ATNA Syslog Export ──────────────────────────────────────────────────
+	rg.GET("/atna-syslog", sc.GetATNASyslogSettings)
+	rg.PUT("/atna-syslog", sc.UpdateATNASyslogSettings)
 }
 
 // ─── GET /api/system/settings/storage ────────────────────────────────────────
@@ -1242,4 +1246,75 @@ func (sc *SettingsController) RestartWithNewPorts(c *gin.Context) {
 			log.Printf("❌ RestartWithNewPorts: %v", err)
 		}
 	}()
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ── ATNA Syslog Export Settings ───────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const settingsKeyATNASyslog = "atna_syslog"
+
+// ATNASyslogSettingsConfig is the shape stored in system_settings.value for
+// key "atna_syslog" — see services.ATNASyslogSettings (services/app_settings.go)
+// for the Go-side runtime consumer of this same data.
+type ATNASyslogSettingsConfig struct {
+	Enabled               bool   `json:"enabled"`
+	Host                  string `json:"host"`
+	Port                  int    `json:"port"`
+	Protocol              string `json:"protocol"`
+	Facility              int    `json:"facility"`
+	AppName               string `json:"app_name"`
+	AuditSourceID         string `json:"audit_source_id"`
+	EnterpriseSiteID      string `json:"enterprise_site_id"`
+	TLSInsecureSkipVerify bool   `json:"tls_insecure_skip_verify"`
+}
+
+func (sc *SettingsController) GetATNASyslogSettings(c *gin.Context) {
+	cfg := ATNASyslogSettingsConfig{
+		Enabled: false, Port: 514, Protocol: "udp", Facility: 10,
+		AppName: "ezHealthKonnect", AuditSourceID: "ezHealthKonnect",
+	}
+	raw, err := sc.loadRawSetting(settingsKeyATNASyslog)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	_ = json.Unmarshal(raw, &cfg)
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": cfg})
+}
+
+func (sc *SettingsController) UpdateATNASyslogSettings(c *gin.Context) {
+	var incoming ATNASyslogSettingsConfig
+	if err := c.ShouldBindJSON(&incoming); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	if incoming.Protocol != "udp" && incoming.Protocol != "tcp" && incoming.Protocol != "tls" {
+		incoming.Protocol = "udp"
+	}
+	if incoming.Port < 1 || incoming.Port > 65535 {
+		incoming.Port = 514
+	}
+	if incoming.Facility < 0 || incoming.Facility > 23 {
+		incoming.Facility = 10
+	}
+	if incoming.AppName == "" {
+		incoming.AppName = "ezHealthKonnect"
+	}
+	if incoming.AuditSourceID == "" {
+		incoming.AuditSourceID = incoming.AppName
+	}
+	// A host is meaningless without being reachable, but an admin should be
+	// able to save Enabled=false with a blank host while still configuring
+	// other fields in advance — only refuse Enabled=true with no host.
+	if incoming.Enabled && strings.TrimSpace(incoming.Host) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "host is required when ATNA syslog export is enabled"})
+		return
+	}
+	if err := sc.savePlainSetting(c.Request.Context(), settingsKeyATNASyslog, sc.updatedByFromContext(c), incoming); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	services.GetAppSettings().Invalidate(settingsKeyATNASyslog)
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "ATNA syslog export settings saved."})
 }

@@ -5,16 +5,16 @@
   "fields": [
     { "key": "prescriptionReferenceNumberQualifier", "fieldId": "EM", "name": "Prescription Reference Number Qualifier", "dataType": "AN", "required": false },
     { "key": "prescriptionReferenceNumber", "fieldId": "D2", "name": "Prescription Service Reference Number", "dataType": "AN", "required": true },
-    { "key": "productServiceIdQualifier", "fieldId": "E1", "name": "Product/Service ID Qualifier", "dataType": "AN", "required": true },
-    { "key": "productServiceId", "fieldId": "D7", "name": "Product/Service ID (NDC)", "dataType": "AN", "required": true },
+    { "key": "productServiceIdQualifier", "fieldId": "E1", "name": "Product/Service ID Qualifier", "dataType": "AN", "required": false },
+    { "key": "productServiceId", "fieldId": "D7", "name": "Product/Service ID (NDC)", "dataType": "AN", "required": false },
     { "key": "associatedPrescriptionReferenceNumber", "fieldId": "EN", "name": "Associated Prescription/Service Reference Number", "dataType": "AN", "required": false },
     { "key": "associatedPrescriptionDate", "fieldId": "EP", "name": "Associated Prescription/Service Date", "dataType": "DT", "required": false },
-    { "key": "quantityDispensed", "fieldId": "E7", "name": "Quantity Dispensed", "dataType": "R", "places": 3, "width": 10, "required": true },
-    { "key": "fillNumber", "fieldId": "D3", "name": "Fill Number", "dataType": "N", "width": 2, "required": true },
-    { "key": "daysSupply", "fieldId": "D5", "name": "Days Supply", "dataType": "N", "width": 3, "required": true },
+    { "key": "quantityDispensed", "fieldId": "E7", "name": "Quantity Dispensed", "dataType": "R", "places": 3, "width": 10, "required": false },
+    { "key": "fillNumber", "fieldId": "D3", "name": "Fill Number", "dataType": "N", "width": 2, "required": false },
+    { "key": "daysSupply", "fieldId": "D5", "name": "Days Supply", "dataType": "N", "width": 3, "required": false },
     { "key": "compoundCode", "fieldId": "D6", "name": "Compound Code", "dataType": "AN", "required": false },
     { "key": "dispenseAsWrittenProductSelectionCode", "fieldId": "D8", "name": "Dispense As Written/Product Selection Code", "dataType": "AN", "required": false },
-    { "key": "datePrescriptionWritten", "fieldId": "DE", "name": "Date Prescription Written", "dataType": "DT", "required": true },
+    { "key": "datePrescriptionWritten", "fieldId": "DE", "name": "Date Prescription Written", "dataType": "DT", "required": false },
     { "key": "numberOfRefillsAuthorized", "fieldId": "DF", "name": "Number of Refills Authorized", "dataType": "N", "required": false },
     { "key": "prescriptionOriginCode", "fieldId": "DJ", "name": "Prescription Origin Code", "dataType": "AN", "required": false },
     { "key": "submissionClarificationCode", "fieldId": "DK", "name": "Submission Clarification Code", "dataType": "AN", "required": false },
@@ -38,6 +38,7 @@
     "apiv/dzero lib/dzero/segments/07_claim.rb (field-id-to-symbol dictionary, read directly) cross-confirmed against eduardonunesp/ncpdp-telecom-fmt-book docs/segments.md's own worked Claim Segment (AM07) example.",
     "Deliberately NOT modeled this pass (core fields, not exhaustive, matching this codebase's own EDI 835/837 precedent): SE/ER (procedure modifier), EW/EX (intermediary authorization), HD/HF/HG (dispensing status), NV (delay reason code), N4 (Medicaid ICN), U7 (pharmacy service type), MT (patient assignment indicator) -- all present in dzero's own dictionary but genuinely niche for a first-phase B1 claim.",
     "quantityDispensed modeled with places=3 (NOT the places=2 an initial draft took directly from data-types.md's own PROSE claim of 'implied 2 decimal places') -- a real, deliberate correction found by checking the doc's own WORKED EXAMPLE arithmetic rather than trusting its prose: the raw value '0000030000' (10 digits, =30000 as a plain integer) does NOT reconcile with 2 places (30000/100=300.00, contradicting the doc's own stated '30.00' result) but DOES reconcile cleanly with 3 places (30000/1000=30.000, matching '30.00' modulo one insignificant trailing zero the prose likely rounded off when writing it up). 3 implied decimal places is also the long-established real-world NCPDP convention for quantity fields generally. width=10 is directly, byte-for-byte confirmed from the same example regardless of which precision is right. quantityPrescribed/originallyPrescribedQuantity reuse the same places=3 convention but have no independently confirmed width of their own -- left unset.",
-    "fillNumber (D3) width=2 and daysSupply (D5) width=3 are directly, byte-for-byte confirmed from the same worked Claim Segment example ('D301'->01, 'D5030'->030)."
+    "fillNumber (D3) width=2 and daysSupply (D5) width=3 are directly, byte-for-byte confirmed from the same worked Claim Segment example ('D301'->01, 'D5030'->030).",
+    "productServiceIdQualifier(E1)/productServiceId(D7)/quantityDispensed(E7)/fillNumber(D3)/daysSupply(D5)/datePrescriptionWritten(DE) widened from required=true to required=false (2026-09-20) to support B2 (Claim Reversal) reusing this SAME shared segment -- confirmed directly from a real, official payer sheet (State of North Dakota Medicaid NCPDP D.0 payer sheet, 'B1-B2-B3-E1 Payer Sheet Exclusion.pdf', section 2 'Claim Reversal Transaction'): B2's own Claim Segment table lists ONLY 455-EM (Prescription/Service Reference Number Qualifier) and 402-D2 (Prescription/Service Reference Number) as Mandatory -- every other Claim field is excluded from B2's own template entirely (the payer sheet's own legend: fields excluded from a transaction's template are Not Used for it). A PURELY PERMISSIVE widening matching this codebase's own established EDI X12 precedent (e.g. CLAUDE.md's 'CL1/SV1/SV2/TRN/UM usage widened globally, purely permissive, zero behavior change for every existing consumer') -- every real B1 fixture already supplies these fields in practice (a complete B1 claim naturally has them), so B1's own validation behavior is unaffected; only B2's genuinely narrower real-world claim segment now validates correctly."
   ]
 }

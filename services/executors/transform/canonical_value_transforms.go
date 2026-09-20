@@ -69,6 +69,10 @@ var canonicalValueTransforms = map[string]canonicalValueTransformEntry{
 		fn:          canonicalTimeToX12,
 		description: "Converts a time string (HH:MM or HH:MM:SS) to X12's HHMM format.",
 	},
+	"datetime_to_ncpdp_date": {
+		fn:          canonicalDateTimeToNCPDPDate,
+		description: "Extracts the date portion (YYYY-MM-DD) from an ISO 8601/RFC 3339 timestamp, or passes an already-date-only value through unchanged — for NCPDP SCRIPT's own DateWrapper date fields (e.g. WrittenDate), which need FHIR's authoredOn/effectiveDateTime reduced to a bare date.",
+	},
 }
 
 // canonicalTimeLayouts is tried in order for time_to_x12.
@@ -103,6 +107,26 @@ func canonicalDateToCDA(v string) (string, bool) {
 // two are formatted as-is, matching CDA TS's own "no zone" form when the
 // source data carried no zone info to convert from.
 var canonicalZonelessDateTimeLayouts = []string{"2006-01-02T15:04:05", "2006-01-02 15:04:05"}
+
+// canonicalDateTimeToNCPDPDate extracts just the date portion from an ISO
+// 8601/RFC 3339 timestamp (FHIR's own convention for authoredOn/
+// effectiveDateTime). A value that's already a bare "2006-01-02" date (no
+// time component) passes through unchanged rather than failing the layout
+// match -- a source system may populate either shape.
+func canonicalDateTimeToNCPDPDate(v string) (string, bool) {
+	if t, err := time.Parse(time.RFC3339, v); err == nil {
+		return t.Format("2006-01-02"), true
+	}
+	for _, layout := range canonicalZonelessDateTimeLayouts {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t.Format("2006-01-02"), true
+		}
+	}
+	if t, err := time.Parse("2006-01-02", v); err == nil {
+		return t.Format("2006-01-02"), true
+	}
+	return v, false
+}
 
 func canonicalDateTimeToCDA(v string) (string, bool) {
 	if t, err := time.Parse(time.RFC3339, v); err == nil {

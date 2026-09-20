@@ -1,0 +1,11 @@
+{
+  "code": "E1",
+  "name": "Eligibility Verification (Response)",
+  "direction": "response",
+  "transmissionGroupSegments": ["ResponseStatus"],
+  "transactionGroupSegments": [],
+  "sourceRefs": [
+    "State of North Dakota Medicaid NCPDP D.0 payer sheet, section 3.2 'Response Eligibility Verification Template' (Accepted/Approved, Accepted/Rejected, and Rejected/Rejected variants, all read directly) -- confirms this real payer's own E1 RESPONSE carries ONLY Response Transaction Header + Response Status (21) -- no Response Message, Response Insurance, Response Patient, Response Claim, or Response Pricing segment appears anywhere in any of the 3 response variants shown. Modeled as a transmissionGroupSegments-only transaction (no transaction-group concept at all, matching the request side's own no-repeating-cluster shape) -- ResponseStatus already has every field this template shows (112-AN, 510-FA/511-FB reject detail, 549-7F/550-8F help desk phone) modeled in segments/ResponseStatus.json.",
+    "DELIBERATE, SOURCED SIMPLIFICATION (not a guess): the base D.0 standard's own Response Insurance (25) and Response Patient (29) segments exist in this engine's segment library reference sources (apiv/dzero's own 25_response_insurance.rb/29_response_patient.rb) and could in principle carry richer coverage-detail content on an E1 response -- but this specific, real, sourced payer sheet's own E1 implementation does not use them at all, and this engine has not yet sourced their exact field dictionaries with the same rigor as every other segment in this schema. Left out entirely rather than fabricated; a genuinely richer E1 response (with real Response Insurance/Response Patient field detail) is a named, deferred future extension, not attempted this round."
+  ]
+}

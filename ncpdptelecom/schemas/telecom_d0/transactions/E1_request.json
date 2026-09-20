@@ -1,0 +1,11 @@
+{
+  "code": "E1",
+  "name": "Eligibility Verification (Request)",
+  "direction": "request",
+  "transmissionGroupSegments": ["Insurance", "Patient", "Prescriber"],
+  "transactionGroupSegments": [],
+  "sourceRefs": [
+    "State of North Dakota Medicaid NCPDP D.0 payer sheet, section 3.1 'Request Eligibility Verification (E1) Payer Sheet Template' -- read directly. E1's REQUEST lists exactly: Transaction Header (always), Insurance Segment (04, always -- including Patient Relationship Code 306-C6, already modeled in segments/Insurance.json's own patientRelationshipCode field), Patient Segment (01, always), Prescriber Segment (03, always). NO Claim, Pricing, or Pharmacy Provider segment -- E1 asks 'is this patient covered', it does not bill a drug, so there is no claim/pricing concept and no repeating transaction-group cluster at all (transactionGroupSegments is deliberately empty, a real structural fact this engine's own empty-list validator/parser path already handles correctly with zero code changes -- confirmed by reading validator.go/parser.go directly before writing this file, not assumed).",
+    "The source PDF's own raw text extraction (pdftotext -layout) showed a duplicated, ambiguously-headed block between the Insurance and Prescriber sections (one copy mislabeled 'Pharmacy Segment Questions' but containing IDENTICAL Prescriber-shaped field content -- Provider ID Qualifier/Provider ID/Prescriber Last Name/First Name -- to the immediately-following, correctly-labeled 'Prescriber Segment Questions' block). This is a known multi-column-PDF-to-text reconstruction artifact (a stray duplicated table), not a genuine second, distinct Pharmacy segment for E1 -- treated conservatively as ONE Prescriber segment, per this codebase's own 'no guesswork' discipline: when a source is ambiguous, do not fabricate a second segment from what is most plausibly a transcription duplicate."
+  ]
+}

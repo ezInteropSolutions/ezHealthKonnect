@@ -25,6 +25,12 @@
   },
   "transactions": {
     "B1_request": { "file": "transactions/B1_request.json" },
-    "B1_response": { "file": "transactions/B1_response.json" }
+    "B1_response": { "file": "transactions/B1_response.json" },
+    "B2_request": { "file": "transactions/B2_request.json" },
+    "B2_response": { "file": "transactions/B2_response.json" },
+    "B3_request": { "file": "transactions/B3_request.json" },
+    "B3_response": { "file": "transactions/B3_response.json" },
+    "E1_request": { "file": "transactions/E1_request.json" },
+    "E1_response": { "file": "transactions/E1_response.json" }
   }
 }

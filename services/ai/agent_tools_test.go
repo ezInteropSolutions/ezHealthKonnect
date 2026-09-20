@@ -29,12 +29,12 @@ type fakeActivator struct {
 	err         error
 }
 
-func (f *fakeActivator) ActivateInterface(id string) error {
+func (f *fakeActivator) ActivateInterface(id string, actorUserID ...string) error {
 	f.activated = append(f.activated, id)
 	return f.err
 }
 
-func (f *fakeActivator) DeactivateInterface(id string) error {
+func (f *fakeActivator) DeactivateInterface(id string, actorUserID ...string) error {
 	f.deactivated = append(f.deactivated, id)
 	return f.err
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/audit"
 	"ezhealthkonnect/services/connectors"
 	"ezhealthkonnect/services/executors"
 	"ezhealthkonnect/services/executors/format"
@@ -48,7 +49,18 @@ type DLQWriter interface {
 // If dlqSvc is non-nil, delivery failures are written to the dead-letter queue.
 type OutboundConnectorExecutor struct {
 	*executors.BaseExecutor
-	dlqSvc DLQWriter
+	dlqSvc      DLQWriter
+	auditLogger audit.AuditLogger // set via SetAuditLogger; nil-safe no-op until wired
+}
+
+// SetAuditLogger wires the shared compliance-audit logger into this
+// executor, mirroring the SetDLQService/SetCDADocumentStore post-construction
+// wiring convention already used elsewhere in this codebase (see
+// services/executor_registry.go). Every delivery attempt then records a
+// MESSAGE_DELIVERED or MESSAGE_DELIVERY_FAILED audit_logs row — see
+// publishAuditEvent below.
+func (e *OutboundConnectorExecutor) SetAuditLogger(al audit.AuditLogger) {
+	e.auditLogger = al
 }
 
 func NewOutboundConnectorExecutor() *OutboundConnectorExecutor {
@@ -204,6 +216,7 @@ func (e *OutboundConnectorExecutor) Execute(
 			fn(ifaceID, msgID, "failed", fmt.Sprintf("connector type '%s' not found", config.ConnectorType))
 		}
 		e.publishCoverageAudit(ctx, step, inputData, config.ConnectorType, destination, "failed")
+		e.publishAuditEvent(ctx, step, config.ConnectorType, destination, false, fmt.Sprintf("connector type '%s' not found", config.ConnectorType))
 		return nil, fmt.Errorf("failed to create outbound connector '%s': %w", config.ConnectorType, err)
 	}
 
@@ -216,6 +229,7 @@ func (e *OutboundConnectorExecutor) Execute(
 			fn(ifaceID, msgID, "failed", fmt.Sprintf("connector initialization failed: %v", err))
 		}
 		e.publishCoverageAudit(ctx, step, inputData, config.ConnectorType, destination, "failed")
+		e.publishAuditEvent(ctx, step, config.ConnectorType, destination, false, fmt.Sprintf("connector initialization failed: %v", err))
 		return nil, fmt.Errorf("failed to initialize connector '%s': %w", config.ConnectorType, err)
 	}
 	defer connector.Close()
@@ -267,6 +281,7 @@ func (e *OutboundConnectorExecutor) Execute(
 			fn(interfaceID, messageID, "failed", err.Error())
 		}
 		e.publishCoverageAudit(ctx, step, inputData, config.ConnectorType, destination, "failed")
+		e.publishAuditEvent(ctx, step, config.ConnectorType, destination, false, err.Error())
 
 		// DELIVER RESULT (failure) lifecycle log point.
 		if logFn := models.GetLogLifecycleEventFn(ctx); logFn != nil {
@@ -412,6 +427,11 @@ func (e *OutboundConnectorExecutor) Execute(
 		deliveryStatus = "failed"
 	}
 	e.publishCoverageAudit(ctx, step, inputData, config.ConnectorType, destination, deliveryStatus)
+	if deliveryStatus == "failed" {
+		e.publishAuditEvent(ctx, step, config.ConnectorType, destination, false, ack)
+	} else {
+		e.publishAuditEvent(ctx, step, config.ConnectorType, destination, true, "")
+	}
 
 	if fn := models.GetDeliveryStatusFn(ctx); fn != nil {
 		interfaceID, _ := ctx.Value("interface_id").(string)
@@ -474,6 +494,56 @@ func (e *OutboundConnectorExecutor) publishCoverageAudit(
 		Destination:   destinationString(destination),
 		Outcome:       outcome,
 	})
+}
+
+// publishAuditEvent records one MESSAGE_DELIVERED or MESSAGE_DELIVERY_FAILED
+// audit_logs row for this delivery attempt. Fire-and-forget (own goroutine)
+// so a slow or momentarily-unreachable audit_logs write never adds latency
+// to the critical delivery path — mirrors the non-blocking posture every
+// other audit write in this codebase already takes (e.g.
+// TransformationPipelineService.writeTransformationAudit). Nil-safe no-op
+// when no logger has been wired (SetAuditLogger never called — e.g. in unit
+// tests constructing this executor directly via NewOutboundConnectorExecutor).
+func (e *OutboundConnectorExecutor) publishAuditEvent(
+	ctx context.Context,
+	step *models.TransformationStep,
+	connectorType string,
+	destination interface{},
+	success bool,
+	errMsg string,
+) {
+	if e.auditLogger == nil {
+		return
+	}
+	interfaceID, _ := ctx.Value("interface_id").(string)
+	messageID, _ := ctx.Value("message_id").(string)
+
+	action := "MESSAGE_DELIVERED"
+	result := "success"
+	if !success {
+		action = "MESSAGE_DELIVERY_FAILED"
+		result = "failure"
+	}
+
+	event := audit.AuditEvent{
+		Action:       action,
+		EntityType:   "message",
+		EntityID:     messageID,
+		Result:       result,
+		ErrorMessage: errMsg,
+		Metadata: map[string]interface{}{
+			"interface_id":   interfaceID,
+			"connector_type": connectorType,
+			"destination":    destinationString(destination),
+			"step_id":        step.ID,
+			"step_name":      step.StepName,
+		},
+	}
+	go func() {
+		if err := e.auditLogger.Log(context.Background(), event); err != nil {
+			log.Printf("  ⚠️  [audit] failed to write %s: %v", action, err)
+		}
+	}()
 }
 
 // destinationString renders destination for display, avoiding the literal

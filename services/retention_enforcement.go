@@ -22,19 +22,20 @@ package services
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
+	"ezhealthkonnect/services/audit"
 	"ezhealthkonnect/services/storage"
 )
 
 // RetentionEnforcementService enforces per-table data retention policies.
 type RetentionEnforcementService struct {
-	db         *sql.DB
-	interval   time.Duration
-	objStorage *storage.ObjectStorageService // optional; nil = DB-only retention (no object storage cleanup)
+	db          *sql.DB
+	interval    time.Duration
+	objStorage  *storage.ObjectStorageService // optional; nil = DB-only retention (no object storage cleanup)
+	auditLogger audit.AuditLogger
 }
 
 // NewRetentionEnforcementService creates a service that runs every interval.
@@ -45,7 +46,7 @@ func NewRetentionEnforcementService(db *sql.DB, interval time.Duration, objStora
 	if interval <= 0 {
 		interval = time.Hour
 	}
-	return &RetentionEnforcementService{db: db, interval: interval, objStorage: objStorage}
+	return &RetentionEnforcementService{db: db, interval: interval, objStorage: objStorage, auditLogger: audit.NewPostgresAuditLogger(db)}
 }
 
 // Start launches the enforcement loop in a background goroutine. The loop
@@ -303,14 +304,17 @@ func (r *RetentionEnforcementService) enforceCDADedupeRegistry(ctx context.Conte
 	}
 	log.Printf("🗑️  [Retention] Purged %d cda_dedupe_registry rows (>%d days since last seen)", n, retentionDays)
 
-	metadata, _ := json.Marshal(map[string]interface{}{
-		"retention_days": retentionDays,
-		"rows_purged":    n,
-	})
-	if _, err := r.db.ExecContext(ctx, `
-		INSERT INTO audit_logs (id, action, entity_type, metadata, result, risk_level, created_at)
-		VALUES (gen_random_uuid(), 'CDA_DEDUPE_REGISTRY_RETENTION_PURGED', 'cda_dedupe_registry', $1::jsonb, 'success', 'low', NOW())
-	`, string(metadata)); err != nil {
+	if r.auditLogger == nil {
+		return
+	}
+	if err := r.auditLogger.Log(ctx, audit.AuditEvent{
+		Action:     "CDA_DEDUPE_REGISTRY_RETENTION_PURGED",
+		EntityType: "cda_dedupe_registry",
+		Metadata: map[string]interface{}{
+			"retention_days": retentionDays,
+			"rows_purged":    n,
+		},
+	}); err != nil {
 		log.Printf("⚠️  [Retention] Failed to write audit log for cda_dedupe_registry purge: %v", err)
 	}
 }

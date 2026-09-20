@@ -101,6 +101,18 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 	// fallback for.
 	ctx = context.WithValue(ctx, "interface_id", pipeline.InterfaceID)
 
+	// Also inject pipeline_id, mirroring ExecuteTransformation's own injection
+	// (transformation_pipeline_service.go). Without this, outbound_connector_executor.go's
+	// DLQ write (ctx.Value("pipeline_id")) always stores a NULL pipeline_id for any
+	// delivery failure that happens via THIS entry point — which is every real,
+	// production inbound message (engine_message_processor.go and message_queue.go both
+	// call ExecutePipeline, never the other, lowercase executePipeline that already had
+	// this). A NULL pipeline_id makes the row permanently unredrivable: redriveRow's own
+	// "from_failed_step" branch (the only redrive_mode ever used in production) requires
+	// a non-empty PipelineID before calling ExecuteFromStep, so every such row silently
+	// retries forever via Fail()'s backoff loop and can never actually succeed.
+	ctx = context.WithValue(ctx, "pipeline_id", pipeline.ID)
+
 	// Resolve the interface's debug flag once per run and inject it into every
 	// step's Config, mirroring ExecuteTransformation's own injection
 	// (transformation_pipeline_service.go) — ExecutePipeline is a SEPARATE entry

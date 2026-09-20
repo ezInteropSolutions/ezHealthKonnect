@@ -38,9 +38,13 @@ func (a dlqRedriverAdapter) RedriveMessage(ctx context.Context, dlqID, mode stri
 
 // InterfaceActivator starts/stops all connectors for an interface.
 // *processing.ProcessingEngine already satisfies this structurally.
+// actorUserID is variadic on both methods (optional, empty for this AI-agent
+// caller — there's no HTTP-request user to attribute it to) so this
+// interface stays structurally satisfied by ProcessingEngine's real
+// signature, which needs it to attribute UI-triggered activations.
 type InterfaceActivator interface {
-	ActivateInterface(interfaceID string) error
-	DeactivateInterface(interfaceID string) error
+	ActivateInterface(interfaceID string, actorUserID ...string) error
+	DeactivateInterface(interfaceID string, actorUserID ...string) error
 }
 
 // Tool is one action the model may propose.

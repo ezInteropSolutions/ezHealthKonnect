@@ -26,11 +26,12 @@
 package controllers
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
 	"time"
+
+	"ezhealthkonnect/services/audit"
 
 	"github.com/gin-gonic/gin"
 )
@@ -140,17 +141,21 @@ func (cc *CDASchemaController) GetDedupeRegistry(c *gin.Context) {
 	// Audit the view itself — actor from X-User-ID (forwarded by the Node
 	// proxy from the authenticated session), never blocking the response on
 	// a logging failure.
-	userID := c.GetHeader("X-User-ID")
-	metadata, _ := json.Marshal(map[string]interface{}{
-		"interface_id":        interfaceID,
-		"patient_key":         patientKey,
-		"row_count_returned":  len(results),
-	})
-	if _, err := cc.db.Exec(`
-		INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, metadata, result, risk_level, created_at)
-		VALUES (gen_random_uuid(), NULLIF($1, '')::uuid, 'CDA_DEDUPE_REGISTRY_VIEWED', 'cda_dedupe_registry', $2, $3::jsonb, 'success', 'medium', NOW())
-	`, userID, interfaceID, string(metadata)); err != nil {
-		log.Printf("⚠️  Failed to write audit log for dedupe registry view: %v", err)
+	if cc.auditLogger != nil {
+		userID := c.GetHeader("X-User-ID")
+		if err := cc.auditLogger.Log(c.Request.Context(), audit.AuditEvent{
+			Action:     "CDA_DEDUPE_REGISTRY_VIEWED",
+			UserID:     userID,
+			EntityType: "cda_dedupe_registry",
+			EntityID:   interfaceID,
+			Metadata: map[string]interface{}{
+				"interface_id":       interfaceID,
+				"patient_key":        patientKey,
+				"row_count_returned": len(results),
+			},
+		}); err != nil {
+			log.Printf("⚠️  Failed to write audit log for dedupe registry view: %v", err)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -202,17 +207,22 @@ func (cc *CDASchemaController) PurgeDedupeRegistry(c *gin.Context) {
 	}
 	rowsDeleted, _ := res.RowsAffected()
 
-	userID := c.GetHeader("X-User-ID")
-	metadata, _ := json.Marshal(map[string]interface{}{
-		"interface_id": req.InterfaceID,
-		"reason":       req.Reason,
-		"rows_deleted": rowsDeleted,
-	})
-	if _, err := cc.db.Exec(`
-		INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, metadata, result, risk_level, created_at)
-		VALUES (gen_random_uuid(), NULLIF($1, '')::uuid, 'CDA_DEDUPE_REGISTRY_PURGED', 'cda_dedupe_registry', $2, $3::jsonb, 'success', 'high', NOW())
-	`, userID, req.PatientKey, string(metadata)); err != nil {
-		log.Printf("⚠️  Failed to write audit log for dedupe registry purge: %v", err)
+	if cc.auditLogger != nil {
+		userID := c.GetHeader("X-User-ID")
+		if err := cc.auditLogger.Log(c.Request.Context(), audit.AuditEvent{
+			Action:     "CDA_DEDUPE_REGISTRY_PURGED",
+			UserID:     userID,
+			EntityType: "cda_dedupe_registry",
+			EntityID:   req.PatientKey,
+			Metadata: map[string]interface{}{
+				"interface_id": req.InterfaceID,
+				"patient_key":  req.PatientKey,
+				"reason":       req.Reason,
+				"rows_deleted": rowsDeleted,
+			},
+		}); err != nil {
+			log.Printf("⚠️  Failed to write audit log for dedupe registry purge: %v", err)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

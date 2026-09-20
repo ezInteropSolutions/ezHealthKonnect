@@ -412,6 +412,40 @@ func AIServerRequirementsForLoad(messagesPerHour int) AIServerRequirements {
 	}
 }
 
+// ─── ATNA Syslog Export Settings ──────────────────────────────────────────────
+
+// ATNASyslogSettings controls export of every audit event to an external IHE
+// ATNA Audit Record Repository over syslog (RFC 5424 + DICOM PS3.15/RFC 3881
+// AuditMessage XML — see services/audit/{atna_message.go,syslog_sender.go}).
+// Disabled by default; when Enabled is false, services/audit's own
+// resolveSyslogConfig() falls back to ATNA_SYSLOG_* environment variables
+// (the original, pre-admin-UI configuration mechanism) rather than treating
+// an unconfigured row as "export nowhere."
+type ATNASyslogSettings struct {
+	Enabled               bool   `json:"enabled"`
+	Host                  string `json:"host"`
+	Port                  int    `json:"port"`
+	Protocol              string `json:"protocol"` // "udp" | "tcp" | "tls"
+	Facility              int    `json:"facility"` // RFC 5424 facility 0-23
+	AppName               string `json:"app_name"`
+	AuditSourceID         string `json:"audit_source_id"`
+	EnterpriseSiteID      string `json:"enterprise_site_id"`
+	TLSInsecureSkipVerify bool   `json:"tls_insecure_skip_verify"`
+}
+
+func (c *AppSettingsCache) GetATNASyslogSettings() ATNASyslogSettings {
+	cfg := ATNASyslogSettings{
+		Enabled:       false,
+		Port:          514,
+		Protocol:      "udp",
+		Facility:      10,
+		AppName:       "ezHealthKonnect",
+		AuditSourceID: "ezHealthKonnect",
+	}
+	_ = json.Unmarshal(c.get("atna_syslog"), &cfg)
+	return cfg
+}
+
 // ─── Security Settings (for Go-side consumers) ────────────────────────────────
 
 // SecuritySettings holds auth and access-control policy values.

@@ -2,6 +2,7 @@
 // Enhanced message management controller for interface-specific functionality
 const { goClient: _goClient } = require('../services/goBackendClient');
 const { hasCoverageGapSql } = require('../services/coverageGapSql');
+const auditService = require('../services/auditService');
 
 class MessageController {
     constructor() {
@@ -251,6 +252,27 @@ class MessageController {
             }
 
             const message = messageResult[0];
+
+            // MESSAGE_VIEWED — a PHI-access event under HIPAA §164.312(b).
+            // Identifiers/coded metadata only, never message.raw_message or
+            // any other clinical content (see services/audit's own
+            // AuditEvent doc comment for this same rule on the Go side).
+            auditService.logEvent({
+                userId,
+                action: 'MESSAGE_VIEWED',
+                entityType: 'message',
+                entityId: message.message_id || messageId,
+                metadata: {
+                    interfaceId: interfaceId || null,
+                    interfaceName,
+                    messageType: message.message_type,
+                    status: message.status
+                },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                result: 'success',
+                riskLevel: 'medium'
+            }).catch(err => console.warn('⚠️ Failed to write MESSAGE_VIEWED audit log:', err.message));
 
             // Return message details in format expected by frontend
             res.json({
@@ -1129,6 +1151,26 @@ class MessageController {
                 }
             }
 
+            // MESSAGES_VIEWED — list/search view of PHI-bearing message
+            // metadata for one interface. Counts and filter parameters only,
+            // never per-row content.
+            auditService.logEvent({
+                userId,
+                action: 'MESSAGES_VIEWED',
+                entityType: 'interface',
+                entityId: interfaceId,
+                metadata: {
+                    interfaceName: interfaceInfo.name,
+                    resultCount: Array.isArray(result.messages) ? result.messages.length : null,
+                    totalCount: result.pagination?.totalCount ?? null,
+                    filters: { status, messageType, dateFrom, dateTo, page, limit, sortBy, sortOrder }
+                },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                result: 'success',
+                riskLevel: 'low'
+            }).catch(err => console.warn('⚠️ Failed to write MESSAGES_VIEWED audit log:', err.message));
+
             res.json({
                 success: true,
                 data: result
@@ -1568,29 +1610,32 @@ class MessageController {
             console.log(`   Status: ${validationStatus}`);
             console.log(`   Table: ${tableName}`);
 
-            // Audit logging
+            // Audit logging — previously a raw INSERT into columns
+            // (resource_type, resource_id, details) that don't exist in the
+            // real audit_logs schema (entity_type, entity_id, metadata), and
+            // userId: 'system' would have failed the user_id UUID cast even
+            // if the columns had been right — every call has always silently
+            // failed. Routed through the shared auditService instead; no
+            // userId (null, not the literal string 'system') since this is a
+            // system-triggered event with no authenticated actor.
             if (processingRules.auditLogging) {
                 try {
-                    await database.sequelize.query(`
-                        INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, ip_address, user_agent, created_at)
-                        VALUES (:userId, :action, :resourceType, :resourceId, :details, :ipAddress, :userAgent, CURRENT_TIMESTAMP)
-                    `, {
-                        replacements: {
-                            userId: 'system',
-                            action: 'fhir_message_received',
-                            resourceType: 'message',
-                            resourceId: messageId,
-                            details: JSON.stringify({
-                                interfaceId: interfaceConfig.id,
-                                interfaceName: interfaceConfig.name,
-                                fhirResourceType,
-                                fhirResourceId,
-                                validationStatus,
-                                correlationId
-                            }),
-                            ipAddress: req.ip || req.connection.remoteAddress,
-                            userAgent: req.headers['user-agent'] || 'Unknown'
-                        }
+                    await auditService.logEvent({
+                        action: 'fhir_message_received',
+                        entityType: 'message',
+                        entityId: messageId,
+                        metadata: {
+                            interfaceId: interfaceConfig.id,
+                            interfaceName: interfaceConfig.name,
+                            fhirResourceType,
+                            fhirResourceId,
+                            validationStatus,
+                            correlationId
+                        },
+                        ipAddress: req.ip || req.connection.remoteAddress,
+                        userAgent: req.headers['user-agent'] || 'Unknown',
+                        result: 'success',
+                        riskLevel: 'low'
                     });
                 } catch (auditError) {
                     console.warn('⚠️ Failed to create audit log:', auditError.message);
