@@ -148,12 +148,22 @@ class InterfaceLifecycleController {
             // audit rows for the same action (see logAuditEvent's own doc
             // comment for the general convention this follows).
 
-            res.json({
+            // warnings: a connector.inbound step that was silently skipped
+            // (e.g. a required field left empty) — forwarded as-is from the
+            // Go engine's own ActivateInterface response so the UI can show
+            // the user their device integration didn't actually start,
+            // instead of a plain "Activated!" with no further detail (found
+            // during a 360 QA pass, October 2026).
+            const activationResponse = {
                 success: true,
                 message: `Interface ${interfaceId} activated successfully`,
                 interfaceId: interfaceId,
                 status: 'active'
-            });
+            };
+            if (Array.isArray(result?.warnings) && result.warnings.length > 0) {
+                activationResponse.warnings = result.warnings;
+            }
+            res.json(activationResponse);
 
         } catch (error) {
             console.error(`❌ Failed to activate interface ${req.params.interfaceId}:`, error);

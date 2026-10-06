@@ -1,0 +1,9 @@
+{
+  "id": "generic_lab_result",
+  "name": "Generic ASTM Lab Result/Order Message",
+  "usesComments": true,
+  "usesQuery": true,
+  "sourceRefs": [
+    "ASTM doesn't version by transaction set the way X12 does — this is the one message profile phase 1 registers; H/P/O/R/C/Q/L record shapes themselves carry each record's own sourceRefs."
+  ]
+}

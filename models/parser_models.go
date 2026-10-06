@@ -19,6 +19,8 @@ const (
 	FormatCSV      MessageFormat = "csv"
 	FormatNCPDPScript MessageFormat = "ncpdpscript"
 	FormatNCPDPTelecom MessageFormat = "ncpdptelecom"
+	FormatASTM     MessageFormat = "astm"
+	FormatDICOM    MessageFormat = "dicom"
 	FormatUnknown  MessageFormat = "unknown"
 )
 

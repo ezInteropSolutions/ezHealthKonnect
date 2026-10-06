@@ -307,7 +307,17 @@ class InterfaceProcessor extends EventEmitter {
 
     async createInputConnector() {
         const ConnectorFactory = require('./connectors/ConnectorFactory');
-        const sourceConfig = JSON.parse(this.config.source_config || '{}');
+        // source_config is a JSONB column — sequelize.query's raw SELECT (see
+        // getInterfaceConfig above) already deserializes it into a real
+        // object, not a string; JSON.parse(anObject) coerces via
+        // Object.prototype.toString first, producing the literal string
+        // "[object Object]" and then failing to parse — a real, previously-
+        // undiscovered bug that broke activation for every interface with a
+        // non-null source_config, found by actually activating one instead
+        // of only exercising this path with dry-run/Test Pipeline calls.
+        const sourceConfig = typeof this.config.source_config === 'string'
+            ? JSON.parse(this.config.source_config || '{}')
+            : (this.config.source_config || {});
 
         // Add message handler to configuration
         sourceConfig.messageHandler = this.onMessageReceived.bind(this);
@@ -320,7 +330,10 @@ class InterfaceProcessor extends EventEmitter {
 
     async createOutputConnector() {
         const ConnectorFactory = require('./connectors/ConnectorFactory');
-        const targetConfig = JSON.parse(this.config.target_config || '{}');
+        // Same JSONB-already-an-object gotcha as createInputConnector above.
+        const targetConfig = typeof this.config.target_config === 'string'
+            ? JSON.parse(this.config.target_config || '{}')
+            : (this.config.target_config || {});
 
         return ConnectorFactory.createOutputConnector(
             this.config.target_connectivity,

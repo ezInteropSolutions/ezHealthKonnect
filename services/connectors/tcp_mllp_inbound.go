@@ -66,6 +66,37 @@ type ACKConfig struct {
 	Script          string // Optional JS: function buildACK(msg) { return {ackCode, textMessage} }
 }
 
+// HostQueryConfig configures synchronous host-query handling — e.g. Mindray
+// lab analyzers whose LIS Interface Manual documents them sending a live
+// QRY^Q02 asking "what's ordered for this sample" and expecting a real
+// DSR^Q03 reply on the SAME connection, not just an MSA ack. Disabled by
+// default: a connector with no "host_query" config behaves EXACTLY as
+// before (async enqueue + fixed ACK) — zero behavior change for every
+// existing deployment unless explicitly opted in.
+type HostQueryConfig struct {
+	Enabled bool
+	// MessageTypes are MSH.9.1 values (e.g. "QRY") treated as a live query
+	// this connector must answer synchronously, rather than enqueue.
+	MessageTypes []string
+	// PipelineKey is the message_type a matching query resolves its
+	// answering pipeline by (PipelineExecutor.GetPipeline's own 3rd arg) —
+	// configurable rather than hardcoded, since a future device's own query
+	// message type may differ from Mindray's "QRY".
+	PipelineKey string
+	// Timeout bounds how long this connection's goroutine blocks waiting for
+	// the live pipeline round trip (e.g. an outbound REST call into the
+	// HIS) before giving up and NACKing — see handleHostQuery's own doc
+	// comment for the same "genuinely hung work keeps running in its own
+	// goroutine" limitation controllers/sync_eligibility_controller.go
+	// already names for its own synchronous pipeline call.
+	Timeout time.Duration
+	// OnFailureNACK sends a NACK when the pipeline can't be resolved, times
+	// out, or fails — true by default, matching this connector's own
+	// standing "MLLP is request/response; never leave a sender without a
+	// response" rule.
+	OnFailureNACK bool
+}
+
 // TCPMLLPInboundConnector implements HL7 MLLP protocol listener
 type TCPMLLPInboundConnector struct {
 	*BaseInboundConnector
@@ -87,6 +118,17 @@ type TCPMLLPInboundConnector struct {
 	authPassword     string
 	validateChecksum bool
 	ackConfig        ACKConfig
+
+	// interfaceID is read from config's own "interface_id" key (injected by
+	// processing/engine.go before Initialize is called, the same key
+	// processing/connectors.go's extractInterfaceContext already reads for
+	// SetInterfaceContext) — kept here, not just handed to the logger, so
+	// handleHostQuery can resolve this connector's own pipeline by
+	// (interfaceID, messageType) without any new plumbing beyond a config read.
+	interfaceID      string
+	pipelineExecutor PipelineExecutor
+	messageParser    MessageParser
+	hostQueryConfig  HostQueryConfig
 
 	// Validation feedback support
 	messageConns      map[string]*ConnectionInfo // messageID -> connection info (for validation feedback)
@@ -132,6 +174,14 @@ func (c *TCPMLLPInboundConnector) Initialize(config []byte) error {
 	if c.port == 0 {
 		c.port = 2575 // Default MLLP port
 	}
+
+	// interface_id is injected into this same config blob by
+	// processing/engine.go before Initialize runs (see
+	// processing/connectors.go's extractInterfaceContext, which reads the
+	// identical key for SetInterfaceContext) — read directly rather than
+	// waiting on SetInterfaceContext, which only ever threads it into the
+	// logger, not a retrievable field.
+	c.interfaceID = cfg.GetString("interface_id")
 
 	// TLS defaults to disabled. Set enable_tls: true with certificate_file + key_file
 	// to enable TLS. A warning is printed when TLS is off to remind operators.
@@ -204,6 +254,19 @@ func (c *TCPMLLPInboundConnector) Initialize(config []byte) error {
 		TextSuccess:     getStringFromMap(ackMap, "text_success", "Message received successfully"),
 		TextError:       getStringFromMap(ackMap, "text_error", "Message processing error"),
 		Script:          getStringFromMap(ackMap, "script", ""),
+	}
+
+	// Host-query behaviour — read from nested "host_query" sub-object,
+	// mirroring "ack"'s own nested-object convention. Disabled unless
+	// explicitly turned on (see HostQueryConfig's own doc comment).
+	hostQueryMap := cfg.GetMap("host_query")
+	timeoutSeconds := getIntFromMap(hostQueryMap, "timeout_seconds", 10)
+	c.hostQueryConfig = HostQueryConfig{
+		Enabled:       getBoolFromMap(hostQueryMap, "enabled", false),
+		MessageTypes:  getStringSliceFromMap(hostQueryMap, "message_types", []string{"QRY"}),
+		PipelineKey:   getStringFromMap(hostQueryMap, "pipeline_message_type", "QRY"),
+		Timeout:       time.Duration(timeoutSeconds) * time.Second,
+		OnFailureNACK: getBoolFromMap(hostQueryMap, "on_failure_nack", true),
 	}
 
 	// Setup TLS if enabled
@@ -456,6 +519,16 @@ func (c *TCPMLLPInboundConnector) handleConnection(conn net.Conn, connID string,
 
 		log.Printf("📨 TCP/MLLP Inbound: Received %d bytes from %s", len(hl7Message), connID)
 
+		// A configured host-query message type (e.g. Mindray's QRY^Q02) is
+		// answered synchronously on THIS connection instead of the normal
+		// async enqueue+ACK path below — see handleHostQuery's own doc
+		// comment. Disabled by default, so every existing deployment's
+		// behavior is unchanged unless host_query.enabled is explicitly set.
+		if c.hostQueryConfig.Enabled && c.isHostQueryMessage(hl7Message) {
+			c.handleHostQuery(conn, hl7Message)
+			continue
+		}
+
 		// Create inbound message
 		inboundMsg := &models.InboundMessage{
 			MessageID:      fmt.Sprintf("tcp_%s_%d", connID, time.Now().UnixNano()),
@@ -703,19 +776,103 @@ func getStringFromMap(m map[string]interface{}, key string, defaultVal string) s
 	return defaultVal
 }
 
-// sendACK sends an ACK message
-func (c *TCPMLLPInboundConnector) sendACK(conn net.Conn, ack string) error {
+// getBoolFromMap safely reads a bool value from a map with a fallback default —
+// the nested-map counterpart to ConnectorConfig.GetBoolDefault, for sub-objects
+// (like "host_query") that aren't the connector's own top-level config map.
+func getBoolFromMap(m map[string]interface{}, key string, defaultVal bool) bool {
+	if m == nil {
+		return defaultVal
+	}
+	if v, ok := m[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return defaultVal
+}
+
+// getIntFromMap safely reads an int value from a map with a fallback default.
+// Handles JSON number (float64) and Go int forms, matching
+// ConnectorConfig.GetInt's own handling for its top-level config map.
+func getIntFromMap(m map[string]interface{}, key string, defaultVal int) int {
+	if m == nil {
+		return defaultVal
+	}
+	if v, ok := m[key]; ok {
+		switch n := v.(type) {
+		case float64:
+			return int(n)
+		case int:
+			return n
+		}
+	}
+	return defaultVal
+}
+
+// getStringSliceFromMap safely reads a []string value from a map with a
+// fallback default — the nested-map counterpart to
+// ConnectorConfig.GetStringSlice.
+func getStringSliceFromMap(m map[string]interface{}, key string, defaultVal []string) []string {
+	if m == nil {
+		return defaultVal
+	}
+	v, ok := m[key]
+	if !ok {
+		return defaultVal
+	}
+	slice, ok := v.([]interface{})
+	if !ok {
+		return defaultVal
+	}
+	result := make([]string, 0, len(slice))
+	for _, item := range slice {
+		if s, ok := item.(string); ok && s != "" {
+			result = append(result, s)
+		}
+	}
+	if len(result) == 0 {
+		return defaultVal
+	}
+	return result
+}
+
+// splitMessageType splits a raw MSH.9 value (e.g. "QRY^Q02") into its
+// message type and trigger event components. Deliberately separate from
+// extractMessageType, which returns the raw unsplit value used elsewhere
+// (InboundMessage.MessageType, the ACK script's msg.messageType) — changing
+// that shape would be a behavior change for existing consumers; this is a
+// new, narrowly-scoped helper for the host-query branch only.
+func splitMessageType(raw string) (messageType string, triggerEvent string) {
+	parts := strings.SplitN(raw, "^", 2)
+	messageType = parts[0]
+	if len(parts) > 1 {
+		triggerEvent = parts[1]
+	}
+	return messageType, triggerEvent
+}
+
+// writeMLLPFrame wraps message in MLLP framing (VT ... FS CR) and writes it
+// to conn. This is the single low-level write path every reply this
+// connector ever sends goes through — an ACK, a NACK, or a live host-query
+// reply (e.g. DSR^Q03) alike.
+func (c *TCPMLLPInboundConnector) writeMLLPFrame(conn net.Conn, message string) error {
 	conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 
-	// MLLP framing
-	frame := fmt.Sprintf("%c%s%c%c", MLLPStartByte, ack, MLLPEndByte1, MLLPEndByte2)
+	frame := fmt.Sprintf("%c%s%c%c", MLLPStartByte, message, MLLPEndByte1, MLLPEndByte2)
 
 	_, err := conn.Write([]byte(frame))
 	if err != nil {
-		log.Printf("❌ TCP/MLLP Inbound: Failed to send ACK: %v", err)
+		log.Printf("❌ TCP/MLLP Inbound: Failed to write MLLP frame: %v", err)
 		return err
 	}
+	return nil
+}
 
+// sendACK sends an ACK message
+func (c *TCPMLLPInboundConnector) sendACK(conn net.Conn, ack string) error {
+	if err := c.writeMLLPFrame(conn, ack); err != nil {
+		return err
+	}
 	log.Printf("✅ TCP/MLLP Inbound: ACK sent")
 	return nil
 }
@@ -729,6 +886,171 @@ func (c *TCPMLLPInboundConnector) sendNACK(conn net.Conn, reason string) error {
 	nack += fmt.Sprintf("MSA|AE|%s|%s\r\n", controlID, reason)
 
 	return c.sendACK(conn, nack)
+}
+
+// SetPipelineExecutor implements PipelineAwareConnector — injected by the
+// connector-management layer (processing/engine.go) after Start, mirroring
+// SetInterfaceContext's own "setter after construction" shape.
+func (c *TCPMLLPInboundConnector) SetPipelineExecutor(pe PipelineExecutor) {
+	c.pipelineExecutor = pe
+}
+
+// SetMessageParser implements MessageParserAwareConnector — same injection
+// shape as SetPipelineExecutor.
+func (c *TCPMLLPInboundConnector) SetMessageParser(mp MessageParser) {
+	c.messageParser = mp
+}
+
+// isHostQueryMessage reports whether hl7Message's MSH.9.1 matches one of the
+// configured host_query.message_types (case-insensitive — HL7 message type
+// codes are conventionally uppercase, but real-world senders vary).
+func (c *TCPMLLPInboundConnector) isHostQueryMessage(hl7Message string) bool {
+	messageType, _ := splitMessageType(c.extractMessageType(hl7Message))
+	for _, t := range c.hostQueryConfig.MessageTypes {
+		if strings.EqualFold(messageType, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// handleHostQuery answers a live host-query message (e.g. Mindray's
+// QRY^Q02) synchronously on the SAME connection it arrived on: it resolves
+// this connector's own interface pipeline keyed by host_query.pipeline_message_type,
+// runs it inline with the parsed message as input, and writes back whatever
+// that pipeline's own hl7.build step produced (e.g. a real DSR^Q03) — the
+// same "call ExecutePipeline synchronously and return its own real output"
+// pattern controllers/sync_eligibility_controller.go already uses from an
+// HTTP handler, applied here from this connection's own goroutine instead.
+//
+// Named limitation, not silently papered over (mirrors
+// sync_eligibility_controller.go's own documented caveat): ExecutePipeline
+// has no internal cancellation checks in its own step loop, so a genuinely
+// hung pipeline keeps running to completion in its own goroutine after this
+// method's timeout gives up and NACKs — the timeout bounds how long THIS
+// connection waits, not how long the pipeline itself runs.
+func (c *TCPMLLPInboundConnector) handleHostQuery(conn net.Conn, hl7Message string) {
+	if c.pipelineExecutor == nil {
+		log.Printf("⚠️ TCP/MLLP Inbound: host_query enabled but no pipeline executor is wired — sending NACK")
+		c.failHostQuery(conn, "Host query processing is not available")
+		return
+	}
+	if c.interfaceID == "" {
+		log.Printf("⚠️ TCP/MLLP Inbound: host_query enabled but interface_id is unknown — sending NACK")
+		c.failHostQuery(conn, "Host query processing is not available")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), c.hostQueryConfig.Timeout)
+	defer cancel()
+
+	pipeline, err := c.pipelineExecutor.GetPipeline(ctx, c.interfaceID, c.hostQueryConfig.PipelineKey)
+	if err != nil {
+		log.Printf("❌ TCP/MLLP Inbound: host_query pipeline lookup failed for interface %s (%s): %v",
+			c.interfaceID, c.hostQueryConfig.PipelineKey, err)
+		c.failHostQuery(conn, "No pipeline configured to answer this query")
+		return
+	}
+
+	// Parse to the SAME canonical JSON shape (enhancedSegments, etc.) the
+	// normal async ingestion path already hands ExecutePipeline — so the
+	// answering pipeline can use ordinary HL7-path field mapping (e.g.
+	// "QRD.8" for the queried sample ID) exactly like any other HL7
+	// pipeline in this codebase, not a bespoke raw-string parser. Falls back
+	// to a bare {"raw": ...} shape when no MessageParser is wired (e.g.
+	// tests) or parsing fails — a pipeline author who wants to hand-parse
+	// the raw text themselves in an enrichment.script step still can.
+	inputData := map[string]interface{}{"raw": hl7Message}
+	if c.messageParser != nil {
+		messageID := fmt.Sprintf("hostquery_%s_%d", c.interfaceID, time.Now().UnixNano())
+		if parseResult, parseErr := c.messageParser.ParseToJSON(ctx, messageID, c.interfaceID, hl7Message); parseErr != nil {
+			log.Printf("⚠️ TCP/MLLP Inbound: host_query message parse failed, falling back to raw input: %v", parseErr)
+		} else if parseResult != nil && parseResult.ParsedJSON != nil {
+			inputData = parseResult.ParsedJSON
+		}
+	}
+
+	type outcome struct {
+		result *models.TransformationExecutionResult
+		err    error
+	}
+	outcomeCh := make(chan outcome, 1)
+	go func() {
+		result, execErr := c.pipelineExecutor.ExecutePipeline(ctx, pipeline, inputData)
+		outcomeCh <- outcome{result, execErr}
+	}()
+
+	select {
+	case <-ctx.Done():
+		log.Printf("⏱️ TCP/MLLP Inbound: host_query pipeline timed out after %s", c.hostQueryConfig.Timeout)
+		c.failHostQuery(conn, "Query processing timed out")
+
+	case o := <-outcomeCh:
+		// ExecutePipeline returns its PARTIAL result alongside a non-nil
+		// error when a step fails (transformation_pipeline_helpers.go:
+		// "return result, fmt.Errorf(...)"), not nil — so a later,
+		// query-irrelevant step failing (e.g. a results-delivery step that
+		// only matters for a real ORU result, not for answering a live
+		// QRY) must not discard an hl7.build reply that ALREADY completed
+		// successfully earlier in the SAME run. Check for a usable reply
+		// first, regardless of o.err/o.result.Status, and only treat the
+		// query as unanswerable if nothing usable was actually produced.
+		var reply string
+		if o.result != nil {
+			reply = extractHL7BuildReply(o.result)
+		}
+		if reply == "" {
+			log.Printf("❌ TCP/MLLP Inbound: host_query pipeline execution failed: %v", o.err)
+			c.failHostQuery(conn, "Query processing failed")
+			return
+		}
+		if o.err != nil {
+			log.Printf("⚠️ TCP/MLLP Inbound: host_query pipeline reported a later error after already building a usable reply (answering anyway): %v", o.err)
+		}
+		if writeErr := c.writeMLLPFrame(conn, reply); writeErr != nil {
+			log.Printf("⚠️ TCP/MLLP Inbound: failed to send host_query reply: %v", writeErr)
+		} else {
+			log.Printf("✅ TCP/MLLP Inbound: host_query reply sent (%d bytes)", len(reply))
+		}
+	}
+}
+
+// failHostQuery sends a NACK when host_query.on_failure_nack is enabled
+// (the default) — a live query the pipeline can't honestly answer is still
+// bound by this connector's own "never leave an MLLP sender without a
+// response" rule.
+func (c *TCPMLLPInboundConnector) failHostQuery(conn net.Conn, reason string) {
+	if c.hostQueryConfig.OnFailureNACK {
+		c.sendNACK(conn, reason)
+	}
+}
+
+// extractHL7BuildReply pulls a completed pipeline's hl7.build step output
+// (field "hl7_message" — see controllers/transformation_test_controller.go's
+// own buildStepContentFields registry) so a host-query reply can be written
+// back on the connection it arrived on. That registry lives in package
+// controllers, which sits above services/connectors — importing it here
+// would create a cycle — so this is a small, narrowly-scoped extraction
+// specific to this connector's own single need, not a duplicate of that
+// registry's general multi-step-type machinery. Returns the LAST matching
+// step's output, matching that registry's own "final artifact wins"
+// convention.
+func extractHL7BuildReply(result *models.TransformationExecutionResult) string {
+	if result == nil {
+		return ""
+	}
+	normalizer := models.NewOutputNormalizer()
+	var reply string
+	for _, stepLog := range result.ExecutionLog {
+		if !stepLog.Success || stepLog.StepType != "hl7.build" || stepLog.StepOutput == nil {
+			continue
+		}
+		normalized := normalizer.NormalizeStepOutput(stepLog.StepOutput.OutputData)
+		if msg, ok := normalized["hl7_message"].(string); ok && msg != "" {
+			reply = msg
+		}
+	}
+	return reply
 }
 
 // Stop gracefully stops the listener

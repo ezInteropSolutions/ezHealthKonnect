@@ -368,25 +368,34 @@
                                     </div>
                                 </div>
 
-                                <!-- CDA Coverage Audit config — only meaningful for CCD-inbound
-                                     interfaces (message_type === 'CCD', the same convention
-                                     messages.js's isCDA check uses); hidden for everything else by
-                                     populateEditForm below, not just disclaimed in the copy. -->
-                                <div class="form-group" id="editCdaCoverageAuditSection" style="margin-top: 16px; display: none;">
+                                <!-- Coverage Audit config — element/field IDs and the backing
+                                     cda_coverage_audit_config column keep their historical "cda"
+                                     naming (additive reuse, not a rename — see CLAUDE.md's Coverage
+                                     Audit generalization section), but the feature itself now covers
+                                     CDA/CCD, HL7 v2, FHIR, EDI X12, and NCPDP SCRIPT/Telecom D.0.
+                                     Previously hidden except for message_type === 'CCD' interfaces —
+                                     that hard gate is gone: predicting "will this interface's actual
+                                     inbound content match a registered format" from static interface
+                                     config alone isn't reliable (generic connectors like
+                                     http_rest_inbound/file_listener auto-detect format at message
+                                     time, not interface-creation time), so this is always shown now;
+                                     the backend already correctly no-ops the feature for any format
+                                     with no registered adapter. -->
+                                <div class="form-group" id="editCdaCoverageAuditSection" style="margin-top: 16px;">
                                     <div style="background: linear-gradient(to right, #fefce8, #fff7ed); border-left: 3px solid #f59e0b; padding: 14px; border-radius: 6px;">
                                         <label style="display: flex; align-items: center; cursor: pointer; margin-bottom: 4px;">
                                             <input type="checkbox" id="editCdaCoverageAuditEnabled"
                                                    onchange="_toggleEditCoverageAuditNotify(this.checked)"
                                                    style="margin-right: 8px; width: 16px; height: 16px; cursor: pointer; accent-color: #d97706;">
-                                            <span style="font-weight: 600; color: #92400e; font-size: 0.95rem;">&#128203; CDA Coverage Audit</span>
+                                            <span style="font-weight: 600; color: #92400e; font-size: 0.95rem;">&#128203; Coverage Audit</span>
                                         </label>
                                         <p style="font-size: 0.82rem; color: #6b7280; margin: 0 0 10px;">
-                                            Flags CCD sections/entries never used by this pipeline. Off by default; only applies when this interface's input is CDA/CCD. A badge appears on affected messages; reports never contain clinical values, only which section/entry was never used.
+                                            Flags source fields/sections never used by this pipeline — supports CDA/CCD, HL7 v2, FHIR, EDI X12, and NCPDP SCRIPT/Telecom D.0 inbound content. Off by default; has no effect if this interface's actual content doesn't match one of these formats. A badge appears on affected messages; reports never contain clinical values, only which field/section was never used.
                                         </p>
                                         <label style="display: flex; align-items: center; cursor: pointer; margin-bottom: 10px;">
                                             <input type="checkbox" id="editCdaCoverageAuditElementLevel"
                                                    style="margin-right: 8px; width: 15px; height: 15px; cursor: pointer; accent-color: #d97706;">
-                                            <span style="font-size: 0.82rem; color: #92400e;">Element-level detail <span style="color:#b45309;font-weight:600;">(beta)</span> — also flags which specific fields within a used entry (e.g. its effective time) were never read, not just whole unused entries. Applies across every section.</span>
+                                            <span style="font-size: 0.82rem; color: #92400e;">Element-level detail <span style="color:#b45309;font-weight:600;">(beta)</span> — also flags which specific fields within a used entry/resource (e.g. a name's given vs. family parts) were never read, not just whole unused entries. Supported for CDA/CCD and FHIR content. EDI X12 and NCPDP content already report at this depth by default, so this has no additional effect there. Currently has no effect for HL7 v2 content, which still reports at whole-field granularity.</span>
                                         </label>
                                         <div id="editCdaCoverageAuditNotifyBlock" style="display:none;padding-top:10px;border-top:1px dashed #fbbf24;">
                                             <div style="font-size:12px;font-weight:600;color:#92400e;margin-bottom:6px;">Notify (optional)</div>
@@ -621,17 +630,12 @@
         const dlqExpires = document.getElementById('editDlqExpiresAfter');
         if (dlqExpires) dlqExpires.value = dlq.expires_after_hours != null ? dlq.expires_after_hours : '';
 
-        // CDA Coverage Audit config — NULL (or JSON null) = disabled (default, V207/V209).
-        // The whole section only applies to CCD-inbound interfaces (message_type
-        // === 'CCD', the same convention messages.js's own isCDA check uses) —
-        // shown/hidden here rather than left visible-with-a-disclaimer for every
-        // interface type, since the setting is meaningless (and was previously
-        // still save-able, writing a config that just never took effect) for a
-        // non-CDA source.
-        const coverageSection = document.getElementById('editCdaCoverageAuditSection');
-        const isCCDInterface = (interfaceData.message_type || interfaceData.messageType) === 'CCD';
-        if (coverageSection) coverageSection.style.display = isCCDInterface ? 'block' : 'none';
-
+        // Coverage Audit config — NULL (or JSON null) = disabled (default, V207/V209).
+        // Previously shown only for message_type === 'CCD' interfaces; now always
+        // shown (see this section's own HTML doc comment in the edit-modal markup
+        // for why a static message_type check can't reliably predict a generic
+        // connector's actual runtime format) — the backend's own registered-adapter
+        // check is what actually decides whether this setting has any effect.
         const coverageConfig = interfaceData.cda_coverage_audit_config;
         const coverageEnabledEl = document.getElementById('editCdaCoverageAuditEnabled');
         const isCoverageEnabled = !!(coverageConfig && typeof coverageConfig === 'object' && coverageConfig.enabled);

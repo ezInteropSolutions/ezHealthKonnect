@@ -52,6 +52,26 @@ class ApiHelper {
         return this._json(res, 'getInterface');
     }
 
+    // Coverage Audit config lives on the generic interface-update endpoint
+    // (interfacesController.js's updateInterface) — a tri-state JSONB field,
+    // see CLAUDE.md's Coverage Audit section. Passing a real object here
+    // writes it verbatim; there is no server-side allowlist on its shape.
+    async setCoverageAuditConfig(id, config) {
+        const res = await this.request.put(`${this.base}/api/interfaces/${id}`, {
+            data: { cda_coverage_audit_config: config },
+        });
+        return this._json(res, 'setCoverageAuditConfig');
+    }
+
+    // Reads the same endpoint the Journey tab's own Coverage Audit step
+    // calls (MessageController.js's getCoverageAudit) — ownership-scoped by
+    // the caller's session, returns { success, data: [...], count }.
+    async getCoverageAudit(messageId) {
+        const res = await this.request.get(`${this.base}/api/messages/${messageId}/coverage-audit`);
+        const body = await this._json(res, 'getCoverageAudit');
+        return body.data || [];
+    }
+
     // ── Pipelines ───────────────────────────────────────────────────────────────
     // savePipeline expects steps wrapped as execution_groups (one flat group is enough
     // for a simple sequential pipeline) — a bare top-level "steps" array is silently ignored.
@@ -69,9 +89,51 @@ class ApiHelper {
         return body;
     }
 
+    // Returns the merged interface_scaffold (incl. pipeline_config) a real
+    // "Use Template" click would produce — does NOT create anything itself
+    // (interfaceTemplateController.js's useTemplate is scaffold-only; the
+    // real create happens via createInterface/savePipelineRaw below). Used
+    // to copy an already-proven mapping-step chain verbatim instead of
+    // hand-retyping it.
+    async getTemplateScaffold(slugOrId) {
+        const res = await this.request.post(`${this.base}/api/interface-templates/${slugOrId}/use`, { data: {} });
+        const body = await this._json(res, 'getTemplateScaffold');
+        if (!body.success) throw new Error(`getTemplateScaffold: ${body.error}`);
+        return body.interface_scaffold;
+    }
+
+    // Like savePipeline, but takes a ready-made execution_groups array
+    // as-is (preserving each template's own one-step-per-group shape)
+    // instead of wrapping a flat `steps` array into a single group.
+    async savePipelineRaw({ interfaceId, messageType, executionGroups, connections = [] }) {
+        const res = await this.request.post(`${this.base}/api/pipelines`, {
+            data: {
+                interface_id: interfaceId,
+                message_type: messageType,
+                execution_groups: executionGroups,
+                connections,
+            },
+        });
+        const body = await this._json(res, 'savePipelineRaw');
+        if (!body.success) throw new Error(`savePipelineRaw: ${body.error}`);
+        return body;
+    }
+
     async testPipeline(payload) {
         const res = await this.request.post(`${this.base}/api/fhir/pipeline/test`, { data: payload });
         return res.json();
+    }
+
+    // Activates via the Go engine directly (the same endpoint the UI's own
+    // "Activate" button calls) — returns the full parsed response, including
+    // a `warnings` array when one or more connector.inbound steps failed to
+    // start (e.g. a required config field left empty): activation as a
+    // whole still succeeds by design, but this is the only way a caller
+    // learns a step was silently skipped (see processing/engine.go's
+    // activationWarnings doc comment).
+    async activateInterface(id) {
+        const res = await this.request.post(`${this.base}/api/runtime/interfaces/${id}/activate`);
+        return this._json(res, 'activateInterface');
     }
 
     async deactivateInterface(id) {

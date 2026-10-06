@@ -85,8 +85,18 @@ func (s *NCPDPTelecomParserService) Parse(raw string) *models.ParserResult {
 		ParsedAt:         time.Now(),
 	}
 
+	// "raw" mirrors the same convention fhir_parser_service.go/
+	// hl7_parser_service.go/cda_parser_service.go already use — the original
+	// message text, so a later mid-pipeline ncpdptelecom.parse step (default
+	// sourceField "raw") can find it. This format's own Parse() had never set
+	// it, which meant a genuinely live message (as opposed to a Test Pipeline
+	// run, whose own envelope construction supplies raw content a different
+	// way) could never actually resolve that default — found alongside the
+	// identical, confirmed NCPDP SCRIPT gap. See CLAUDE.md's Coverage Audit
+	// generalization section.
 	result.ParsedJSON = map[string]interface{}{
 		"_format":           "ncpdptelecom",
+		"raw":               raw,
 		"transactionCode":   parsed.TransactionCode,
 		"direction":         parsed.Direction,
 		"header":            parsed.Header,

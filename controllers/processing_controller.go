@@ -183,12 +183,26 @@ func (pc *ProcessingController) ActivateInterface(c *gin.Context) {
 	status := pc.engine.GetInterfaceStatus(interfaceID)
 	log.Printf("✅ [CONTROLLER] Status retrieved: %+v", status)
 
-	c.JSON(http.StatusOK, gin.H{
+	// warnings surfaces any connector.inbound step that was silently
+	// skipped (e.g. a required config field left empty) — activation as a
+	// whole still succeeds by design, but without this the caller/UI would
+	// have zero indication a step never actually started (found during a
+	// 360 QA pass, October 2026 — see ActivateInterface's own
+	// activationWarnings doc comment).
+	warnings := pc.engine.GetActivationWarnings(interfaceID)
+
+	response := gin.H{
 		"success": true,
 		"message": "Interface activated successfully",
 		"interface_id": interfaceID,
 		"status": status,
-	})
+	}
+	if len(warnings) > 0 {
+		response["warnings"] = warnings
+		log.Printf("⚠️  [CONTROLLER] Interface %s activated with %d step warning(s): %v", interfaceID, len(warnings), warnings)
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // DeactivateInterface deactivates a specific interface

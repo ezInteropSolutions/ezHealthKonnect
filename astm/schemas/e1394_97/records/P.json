@@ -1,0 +1,53 @@
+{
+  "id": "P",
+  "name": "Patient Record",
+  "fields": [
+    {"pos": 2, "key": "sequenceNumber", "name": "Sequence Number", "dataType": "NM", "required": true},
+    {"pos": 3, "key": "practicePatientID", "name": "Practice Assigned Patient ID", "dataType": "ST"},
+    {"pos": 4, "key": "labPatientID", "name": "Laboratory Assigned Patient ID", "dataType": "ST"},
+    {"pos": 5, "key": "patientID3", "name": "Patient ID (3rd ID)", "dataType": "ST"},
+    {"pos": 6, "key": "patientName", "name": "Patient Name", "component": {"subFields": [
+      {"pos": 1, "key": "lastName", "dataType": "ST"},
+      {"pos": 2, "key": "firstName", "dataType": "ST"},
+      {"pos": 3, "key": "middleName", "dataType": "ST"},
+      {"pos": 4, "key": "suffix", "dataType": "ST"},
+      {"pos": 5, "key": "title", "dataType": "ST"}
+    ]}},
+    {"pos": 7, "key": "mothersMaidenName", "name": "Mother's Maiden Name", "dataType": "ST"},
+    {"pos": 8, "key": "dateOfBirth", "name": "Date of Birth", "dataType": "DT"},
+    {"pos": 9, "key": "sex", "name": "Sex", "dataType": "ID"},
+    {"pos": 10, "key": "race", "name": "Race", "dataType": "ID"},
+    {"pos": 11, "key": "patientAddress", "name": "Patient Address", "dataType": "ST"},
+    {"pos": 12, "key": "reservedField1", "name": "Reserved Field", "dataType": "ST"},
+    {"pos": 13, "key": "patientTelephoneNumber", "name": "Patient Telephone Number", "dataType": "ST"},
+    {"pos": 14, "key": "attendingPhysicianID", "name": "Attending Physician ID", "dataType": "ST"},
+    {"pos": 15, "key": "specialField1", "name": "Special Field No. 1", "dataType": "ST"},
+    {"pos": 16, "key": "specialField2", "name": "Special Field No. 2", "dataType": "ST"},
+    {"pos": 17, "key": "patientHeight", "name": "Patient Height", "dataType": "NM"},
+    {"pos": 18, "key": "patientWeight", "name": "Patient Weight", "dataType": "NM"},
+    {"pos": 19, "key": "patientDiagnosis", "name": "Patient's (Suspected) Diagnosis", "dataType": "ST"},
+    {"pos": 20, "key": "patientActiveMedication", "name": "Patient's Active Medication", "dataType": "ST"},
+    {"pos": 21, "key": "patientDiet", "name": "Patient's Diet", "dataType": "ST"},
+    {"pos": 22, "key": "practiceField1", "name": "Practice Field No. 1", "dataType": "ST"},
+    {"pos": 23, "key": "practiceField2", "name": "Practice Field No. 2", "dataType": "ST"},
+    {"pos": 24, "key": "admissionDischargeDate", "name": "Admission/Discharge Date", "dataType": "DT"},
+    {"pos": 25, "key": "admissionStatus", "name": "Admission Status", "dataType": "ID"},
+    {"pos": 26, "key": "location", "name": "Location", "dataType": "ST"},
+    {"pos": 27, "key": "diagnosticCodeNature", "name": "Nature of Alternative Diagnostic Code & Classifiers", "dataType": "ST"},
+    {"pos": 28, "key": "diagnosticCode", "name": "Alternative Diagnostic Code & Classifiers", "dataType": "ST"},
+    {"pos": 29, "key": "patientReligion", "name": "Patient Religion", "dataType": "ST"},
+    {"pos": 30, "key": "maritalStatus", "name": "Marital Status", "dataType": "ID"},
+    {"pos": 31, "key": "isolationStatus", "name": "Isolation Status", "dataType": "ST"},
+    {"pos": 32, "key": "language", "name": "Language", "dataType": "ST"},
+    {"pos": 33, "key": "hospitalService", "name": "Hospital Service", "dataType": "ST"},
+    {"pos": 34, "key": "hospitalInstitution", "name": "Hospital Institution", "dataType": "ST"},
+    {"pos": 35, "key": "dosageCategory", "name": "Dosage Category", "dataType": "ID"}
+  ],
+  "sourceRefs": [
+    "kxepal/python-astm astm/records.py — read verbatim",
+    "blutspende/go-astm v2 standardlis2a2 package — explicit numeric field-position tags",
+    "mediff ASTM-Protokoll v1.9, citing ASTM E1394-97 clause 8",
+    "BD FACS LIS Interface Specification Guide 23-23076(02), citing CLSI LIS02-A2",
+    "Positions 2-9 and 17-18: very high confidence, all 4 sources agree. Positions 10-16 and 19-35: high confidence — corroborated field-for-field by the 2 independent open-source parsers (python-astm, go-astm); the 2 real vendor manuals (mediff, BD FACS) only tabulate the fields each instrument actually uses and don't independently confirm positions beyond ~18."
+  ]
+}

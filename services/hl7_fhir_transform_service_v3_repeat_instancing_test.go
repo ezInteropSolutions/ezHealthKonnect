@@ -16,6 +16,7 @@
 package services
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -84,7 +85,7 @@ func TestBuildResourcesForType_NK1AndGT1SpawnSeparateRelatedPersons(t *testing.T
 	// validator flags RelatedPerson.patient as missing, which is populated by
 	// wireSubjectReferences in Transform() (outside buildResourcesForType, the
 	// unit under test) — irrelevant to the segment-isolation being verified.
-	resources, _, _, _ := svc.buildResourcesForType("RelatedPerson", schema, mappings, map[string]interface{}{}, parsedHL7Data, nil)
+	resources, _, _, _ := svc.buildResourcesForType(context.Background(), "RelatedPerson", schema, mappings, map[string]interface{}{}, parsedHL7Data, nil)
 	if len(resources) != 3 {
 		t.Fatalf("expected 3 RelatedPerson resources (2 NK1 + 1 GT1, blank NK1 skipped), got %d: %+v", len(resources), resources)
 	}
@@ -128,7 +129,7 @@ func TestBuildResourcesForType_SingleOccurrence_NoRegression(t *testing.T) {
 	}
 
 	// Not asserting zero errs — see the same note in the NK1+GT1 test above.
-	resources, _, _, _ := svc.buildResourcesForType("RelatedPerson", schema, mappings, map[string]interface{}{}, parsedHL7Data, nil)
+	resources, _, _, _ := svc.buildResourcesForType(context.Background(), "RelatedPerson", schema, mappings, map[string]interface{}{}, parsedHL7Data, nil)
 	if len(resources) != 1 {
 		t.Fatalf("expected exactly 1 RelatedPerson for a single NK1 occurrence, got %d", len(resources))
 	}
@@ -158,7 +159,7 @@ func TestBuildResourcesForType_NonRepeatingSegmentsStayMerged(t *testing.T) {
 	// validator flags Encounter.status as missing, which is populated by a
 	// separate normalizer pass in Transform() (outside buildResourcesForType,
 	// the unit under test) — irrelevant to the merge behavior being verified.
-	resources, _, _, _ := svc.buildResourcesForType("Encounter", schema, mappings, enhancedSegments, map[string]interface{}{}, nil)
+	resources, _, _, _ := svc.buildResourcesForType(context.Background(), "Encounter", schema, mappings, enhancedSegments, map[string]interface{}{}, nil)
 	if len(resources) != 1 {
 		t.Fatalf("expected EVN+PV1 to merge into exactly 1 Encounter, got %d: %+v", len(resources), resources)
 	}
@@ -194,7 +195,7 @@ func TestBuildResourcesForType_PV1WinsOverEVNOnFieldCollision(t *testing.T) {
 				map[string]interface{}{"key": "PV1.44", "value": "20260709224300"},
 			}},
 		}
-		resources, warnings, _, _ := svc.buildResourcesForType("Encounter", schema, mappings, enhancedSegments, map[string]interface{}{}, nil)
+		resources, warnings, _, _ := svc.buildResourcesForType(context.Background(), "Encounter", schema, mappings, enhancedSegments, map[string]interface{}{}, nil)
 		if len(resources) != 1 {
 			t.Fatalf("expected exactly 1 merged Encounter, got %d", len(resources))
 		}
@@ -256,7 +257,7 @@ func TestBuildResourcesForType_AL1RepeatsIntoSeparateAllergyIntolerances(t *test
 	// validator flags AllergyIntolerance.patient as missing, which is populated
 	// by wireSubjectReferences in Transform() (outside buildResourcesForType,
 	// the unit under test) — irrelevant to the repeat-instancing being verified.
-	resources, _, _, _ := svc.buildResourcesForType("AllergyIntolerance", schema, mappings, map[string]interface{}{}, parsedHL7Data, nil)
+	resources, _, _, _ := svc.buildResourcesForType(context.Background(), "AllergyIntolerance", schema, mappings, map[string]interface{}{}, parsedHL7Data, nil)
 	if len(resources) != 2 {
 		t.Fatalf("expected 2 AllergyIntolerance resources for 2 AL1 occurrences, got %d: %+v", len(resources), resources)
 	}

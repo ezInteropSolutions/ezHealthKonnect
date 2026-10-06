@@ -10,6 +10,28 @@ const MessageTypeMappingService = require('../services/MessageTypeMappingService
 const { v4: uuidv4 } = require('uuid');
 const { GO_BACKEND_URL, goClient } = require('../services/goBackendClient');
 
+/**
+ * Decides whether handleOptimizedWizard should auto-activate the interface it
+ * just created in the Go backend.
+ *
+ * Deliberately does NOT consult interfaceData.status — a real bug, found and
+ * fixed 2026-09, was an extra `|| interfaceData.status === 'active'` clause
+ * here: `status` defaults to 'active' whenever the caller doesn't pass a
+ * different one (see the wizardData normalization above), so that clause
+ * silently auto-activated EVERY interface regardless of deployment_mode, even
+ * an explicit deployment_mode: 'manual'. `status` means "this interface's
+ * config is considered active/complete," not "start the connector now" —
+ * that's what auto_start/deployment_mode are for, matching
+ * InterfaceDeploymentService.js's own correct, deployment_mode-only gating
+ * for the exact same decision.
+ *
+ * Exported standalone (see module.exports below) so it can be unit-tested
+ * directly without exercising the rest of handleOptimizedWizard.
+ */
+function shouldAutoActivateOnWizardComplete(wizardData) {
+    return !!(wizardData && (wizardData.auto_start || wizardData.deployment_mode === 'auto'));
+}
+
 class WizardController {
     /**
      * Constructor - Bind methods to preserve 'this' context for Express route handlers
@@ -1247,9 +1269,11 @@ class WizardController {
                 console.error('⚠️ Failed to create pipeline (interface still created):', pipelineError.message);
             }
 
-            // Activate interface in Go backend if auto_start or auto deployment mode
+            // Activate interface in Go backend if auto_start or auto deployment mode.
+            // See shouldAutoActivateOnWizardComplete's own doc comment (top of file) for
+            // why interfaceData.status is deliberately not part of this decision.
             let finalStatus = interfaceData.status || 'configured';
-            if (wizardData.auto_start || wizardData.deployment_mode === 'auto' || interfaceData.status === 'active') {
+            if (shouldAutoActivateOnWizardComplete(wizardData)) {
                 try {
                     console.log('🚀 Auto-starting interface in Go backend...');
                     const activateResponse = await goClient.post(
@@ -1309,3 +1333,4 @@ class WizardController {
 }
 
 module.exports = new WizardController();
+module.exports.shouldAutoActivateOnWizardComplete = shouldAutoActivateOnWizardComplete;

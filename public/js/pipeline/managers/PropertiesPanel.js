@@ -7088,14 +7088,27 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             console.log('[PropertiesPanel] ✅ Saved FHIR Validation config:', step.config);
         }
 
-        // File Parser / Remove Duplicates / Data Masking / Normalizer / API & DB Enrichment / Payload Builder / CDA steps — delegated to active step builder
-        if (this.activeStepBuilder && (
-            VisualStep.isFileParser(step) || VisualStep.isRemoveDuplicates(step) ||
-            VisualStep.isDataMasking(step) || VisualStep.isNormalizer(step) ||
-            VisualStep.isAPIEnrichment(step) || VisualStep.isDatabaseEnrichment(step) ||
-            VisualStep.isDeidentify(step) || VisualStep.isPayloadBuilder(step) ||
-            VisualStep.isCdaStep(step)
-        )) {
+        // Any StepBuilderRegistry-registered step type delegates its own form
+        // collection to its own builder. Previously gated behind a hardcoded
+        // allowlist of VisualStep.isXxx() checks (File Parser / Remove
+        // Duplicates / Data Masking / Normalizer / API & DB Enrichment /
+        // Payload Builder / CDA) — a real, confirmed data-loss bug found
+        // during a full save->reload->reopen QA pass: every step type NOT on
+        // that list (edi.*, ncpdp.*, ncpdptelecom.*, astm.*, dicom.*, and any
+        // future registered type) had its collectConfig() silently never
+        // called at all, so a user's own typed-in config was discarded on
+        // save and reverted to the step's default on reload — confirmed live
+        // with dicom.parse's sourceField/outputField. this.activeStepBuilder
+        // is only ever non-null when the CURRENTLY open panel's step type is
+        // itself StepBuilderRegistry-registered (confirmed directly in this
+        // panel's own render dispatch, which sets it on a registry hit and
+        // nulls it on fallthrough to the legacy UI) — so checking it alone,
+        // with no per-type allowlist, is both correct and exactly the
+        // "no hardcoded one-check-per-type" standard this codebase holds
+        // everywhere else. Confirmed no other bespoke collection code exists
+        // anywhere in this file for edi.*/ncpdp.*/ncpdptelecom.*/astm.*/
+        // dicom.*/fhir.build/hl7.build fields before widening this check.
+        if (this.activeStepBuilder) {
             this.activeStepBuilder.collectConfig(step);
         }
 

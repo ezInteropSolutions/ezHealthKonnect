@@ -13,6 +13,10 @@ RUN apk upgrade --no-cache && apk add --no-cache git
 WORKDIR /app
 
 COPY go.mod go.sum ./
+# go.mod's local-path replace (github.com/amrshadid/go-dicom -> ./third_party/go-dicom-fork)
+# needs the fork's own files on disk before `go mod download` resolves it — copy it ahead of
+# the full `COPY . .` below, same as go.mod/go.sum, so the dependency layer stays cacheable.
+COPY third_party/ ./third_party/
 RUN go mod download && go mod verify
 
 COPY . .
@@ -137,6 +141,14 @@ COPY ncpdp/       ./ncpdp/
 # pre-empting the exact same "missing COPY line, only caught by a real
 # container smoke test" bug the edi/ line's own comment documents.
 COPY ncpdptelecom/ ./ncpdptelecom/
+
+# ASTM E1394-97 (lab instrument host-interface) schema files — read by Go
+# binary at runtime for H/P/O/R/C/Q/L record parsing/validation/building
+# (astm.parse/validate/build). Added proactively alongside cda/uscdi/edi/
+# ncpdp/ncpdptelecom above, pre-empting the exact same "missing COPY line,
+# only caught by a real container smoke test" bug the edi/ line's own
+# comment documents.
+COPY astm/        ./astm/
 
 # Runtime directories (overlaid by named volumes in production)
 RUN mkdir -p schemas logs uploads

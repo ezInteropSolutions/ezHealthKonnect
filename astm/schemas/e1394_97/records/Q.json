@@ -1,0 +1,37 @@
+{
+  "id": "Q",
+  "name": "Query / Request Information Record",
+  "fields": [
+    {"pos": 2, "key": "sequenceNumber", "name": "Sequence Number", "dataType": "NM", "required": true},
+    {"pos": 3, "key": "startingRangeID", "name": "Starting Range ID Number", "component": {"subFields": [
+      {"pos": 1, "key": "idType", "dataType": "ST"},
+      {"pos": 2, "key": "sampleID", "dataType": "ST"},
+      {"pos": 3, "key": "idType2", "dataType": "ST"}
+    ]}},
+    {"pos": 4, "key": "endingRangeID", "name": "Ending Range ID Number", "dataType": "ST"},
+    {"pos": 5, "key": "universalTestID", "name": "Universal Test ID", "component": {"subFields": [
+      {"pos": 1, "key": "testID", "dataType": "ST"},
+      {"pos": 2, "key": "testName", "dataType": "ST"},
+      {"pos": 3, "key": "testType", "dataType": "ST"},
+      {"pos": 4, "key": "manufacturerTestType", "dataType": "ST"},
+      {"pos": 5, "key": "manufacturerTestName", "dataType": "ST"},
+      {"pos": 6, "key": "manufacturerTestCode", "dataType": "ST"},
+      {"pos": 7, "key": "localTestCode", "dataType": "ST"}
+    ]}},
+    {"pos": 6, "key": "natureOfRequestTimeLimits", "name": "Nature of Request Time Limits", "dataType": "ST"},
+    {"pos": 7, "key": "beginningRequestDateTime", "name": "Beginning Request Results Date/Time", "dataType": "TM"},
+    {"pos": 8, "key": "endingRequestDateTime", "name": "Ending Request Results Date/Time", "dataType": "TM"},
+    {"pos": 9, "key": "requestingPhysicianName", "name": "Requesting Physician Name", "dataType": "ST"},
+    {"pos": 10, "key": "requestingPhysicianPhone", "name": "Requesting Physician Telephone Number", "dataType": "ST"},
+    {"pos": 11, "key": "userField1", "name": "User Field No. 1", "dataType": "ST"},
+    {"pos": 12, "key": "userField2", "name": "User Field No. 2", "dataType": "ST"},
+    {"pos": 13, "key": "requestInfoStatusCode", "name": "Request Information Status Code", "dataType": "ID"}
+  ],
+  "sourceRefs": [
+    "blutspende/go-astm v2 standardlis2a2 package (RequestInformation struct) — explicit numeric field-position tags",
+    "mediff ASTM-Protokoll v1.9, citing ASTM E1394-97 clause 12 — real worked QRY/DSR example with Q.3 component2=Sample ID",
+    "BD FACS LIS Interface Specification Guide 23-23076(02), citing CLSI LIS02-A2 — tabulates only 3 of the 13 positions it actually uses (Q.1/2/13)",
+    "kxepal/python-astm does NOT implement a Query record class at all — confirmed absent, not an omission on this schema's part",
+    "11 of 13 positions: high confidence, corroborated by 2 independent sources (go-astm + mediff) agreeing field-for-field; no 3rd/4th-source corroboration exists for most Q positions in what was readable. Q.13 status code values (O=outstanding, F=final) are each confirmed by only one of the two corroborating sources respectively — documentation only, not enforced."
+  ]
+}

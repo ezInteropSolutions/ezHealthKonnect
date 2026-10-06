@@ -1,0 +1,44 @@
+{
+  "id": "R",
+  "name": "Result Record",
+  "fields": [
+    {"pos": 2, "key": "sequenceNumber", "name": "Sequence Number", "dataType": "NM", "required": true},
+    {"pos": 3, "key": "universalTestID", "name": "Universal Test ID", "component": {"subFields": [
+      {"pos": 1, "key": "testID", "dataType": "ST"},
+      {"pos": 2, "key": "testName", "dataType": "ST"},
+      {"pos": 3, "key": "testType", "dataType": "ST"},
+      {"pos": 4, "key": "manufacturerTestType", "dataType": "ST"},
+      {"pos": 5, "key": "manufacturerTestName", "dataType": "ST"},
+      {"pos": 6, "key": "manufacturerTestCode", "dataType": "ST"},
+      {"pos": 7, "key": "localTestCode", "dataType": "ST"}
+    ]}},
+    {"pos": 4, "key": "dataValue", "name": "Data/Measurement Value", "required": true, "component": {"subFields": [
+      {"pos": 1, "key": "value", "dataType": "ST"},
+      {"pos": 2, "key": "interpretation", "dataType": "ST"},
+      {"pos": 3, "key": "flags", "dataType": "ST"}
+    ]}},
+    {"pos": 5, "key": "units", "name": "Units", "dataType": "ST"},
+    {"pos": 6, "key": "referenceRange", "name": "Reference Range(s)", "dataType": "ST"},
+    {"pos": 7, "key": "abnormalFlag", "name": "Result Abnormal Flag", "dataType": "ID"},
+    {"pos": 8, "key": "natureOfAbnormality", "name": "Nature of Abnormality Testing", "dataType": "ST"},
+    {"pos": 9, "key": "resultStatus", "name": "Result Status", "dataType": "ID", "required": true},
+    {"pos": 10, "key": "dateChangeNormativeValues", "name": "Date of Change in Instrument Normative Values", "dataType": "TM"},
+    {"pos": 11, "key": "operatorID", "name": "Operator ID(s)", "component": {"subFields": [
+      {"pos": 1, "key": "performedBy", "dataType": "ST"},
+      {"pos": 2, "key": "verifiedBy", "dataType": "ST"}
+    ]}},
+    {"pos": 12, "key": "dateTimeTestStarted", "name": "Date/Time Test Started", "dataType": "TM"},
+    {"pos": 13, "key": "dateTimeTestCompleted", "name": "Date/Time Test Completed", "dataType": "TM"},
+    {"pos": 14, "key": "instrumentIdentification", "name": "Instrument Identification", "component": {"subFields": [
+      {"pos": 1, "key": "name", "dataType": "ST"},
+      {"pos": 2, "key": "serialNumber", "dataType": "ST"}
+    ]}}
+  ],
+  "sourceRefs": [
+    "kxepal/python-astm astm/records.py — read verbatim",
+    "blutspende/go-astm v2 standardlis2a2 package — explicit numeric field-position tags, including the full 7-subcomponent Universal Test ID breakdown and the 3-subcomponent Data/Measurement Value breakdown",
+    "mediff ASTM-Protokoll v1.9, citing ASTM E1394-97 clause 10",
+    "BD FACS LIS Interface Specification Guide 23-23076(02), citing CLSI LIS02-A2 — confirms field 4 split (4.1=Result Value, 4.2=Interpretation) and the Result Status allowed-value list (C/P/F/X/I/S/M/R/N)",
+    "All 14 positions: very high confidence — agreement across all 4 sources, including the composite sub-structure of fields 3 and 4."
+  ]
+}

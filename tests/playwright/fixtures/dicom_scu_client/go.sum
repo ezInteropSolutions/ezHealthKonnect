@@ -1,0 +1,4 @@
+github.com/amrshadid/go-dicom v1.6.0 h1:/qc0Dh6ign4PT2q9fCE3CThkZUzJc3CN5UVOBRJgJ6I=
+github.com/amrshadid/go-dicom v1.6.0/go.mod h1:jQ9eb8sYn/0aPie33O9p07gSHGsNcMYq1MPP1H75/Vs=
+golang.org/x/text v0.39.0 h1:UbZz4pLOvn600D6Oh6GGEI6VAmndrEBLv8/6BEXzyus=
+golang.org/x/text v0.39.0/go.mod h1:3UwRclnC2g0TU9x8PZiyfOajCd1zaUNHF9cvqcQZ+ZM=

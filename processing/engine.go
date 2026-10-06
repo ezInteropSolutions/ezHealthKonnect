@@ -64,6 +64,24 @@ type ProcessingEngine struct {
 	familyFilter   map[string][]string
 	familyFilterMu sync.RWMutex
 
+	// activationWarnings holds the most recent ActivateInterface call's
+	// non-fatal connector-start problems (e.g. a connector.inbound step
+	// whose required config field was left empty) for each interface.
+	// ActivateInterface deliberately treats a single misconfigured
+	// connector step as skip-and-continue rather than failing the whole
+	// activation (useful when an interface has several inbound
+	// connectors) — but before this existed, that trade-off meant the
+	// problem was ONLY ever visible in the server's own log file: the
+	// HTTP response, and therefore the UI, reported a plain "activated
+	// successfully" with zero indication any step failed to start. Found
+	// during a 360 QA pass (October 2026) using a DICOM connector.inbound
+	// step with no ae_title/port configured as the reproducing case —
+	// not DICOM-specific, this affects every connector type. Read via
+	// GetActivationWarnings right after a successful ActivateInterface
+	// call.
+	activationWarnings   map[string][]string
+	activationWarningsMu sync.RWMutex
+
 	// coverageAuditPool runs CDA Coverage Audit report-building off the
 	// critical delivery path — nil (the default, until SetCoverageAuditPool
 	// is called) means the coverage_audit_fn context callback is never
@@ -111,6 +129,7 @@ func NewProcessingEngine(db *sql.DB, credStore *services.CredentialStore) *Proce
 		activeConnectors: make(map[string]InputConnector),
 		messageChan:      make(map[string]chan *models.InboundMessage),
 		familyFilter:     make(map[string][]string),
+		activationWarnings: make(map[string][]string),
 		stats: &EngineStats{
 			StartTime:             time.Now(),
 			LastActivity:          time.Now(),
@@ -471,6 +490,12 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 		rows.Close()
 	}
 
+	// Fresh activation attempt: reset this interface's warnings so a step
+	// that fails this time doesn't linger alongside (or replace) a warning
+	// from a step that's since been fixed, and so a now-clean activation
+	// correctly clears any stale warning from an earlier attempt.
+	var stepWarnings []string
+
 	if len(pipelineSteps) > 0 {
 		// Pipeline-driven: start one listener per connector.inbound step
 		for _, step := range pipelineSteps {
@@ -480,10 +505,12 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 			}
 			if jsonErr := json.Unmarshal([]byte(step.configJSON), &stepCfg); jsonErr != nil {
 				log.Printf("⚠️  Failed to parse connector.inbound config for step '%s': %v", step.stepName, jsonErr)
+				stepWarnings = append(stepWarnings, fmt.Sprintf("%s: invalid step config (%v)", step.stepName, jsonErr))
 				continue
 			}
 			if stepCfg.ConnectorType == "" {
 				log.Printf("⚠️  connector.inbound step '%s' has no connectorType — skipping", step.stepName)
+				stepWarnings = append(stepWarnings, fmt.Sprintf("%s: no connector type configured", step.stepName))
 				continue
 			}
 
@@ -511,6 +538,7 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 			connector, connErr := CreateInputConnector(oobType, innerConfig)
 			if connErr != nil {
 				log.Printf("⚠️  Failed to create '%s' connector for step '%s': %v", oobType, step.stepName, connErr)
+				stepWarnings = append(stepWarnings, fmt.Sprintf("%s: %v", step.stepName, connErr))
 				continue
 			}
 
@@ -544,10 +572,12 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 						return fmt.Errorf("port :%d conflict — both interfaces halted for PHI safety (see HIPAA audit log)", port)
 					}
 					log.Printf("⚠️  Bind-conflict-shaped error for step '%s' but connector has no configured port — treating as non-conflict: %v", step.stepName, startErr)
+					stepWarnings = append(stepWarnings, fmt.Sprintf("%s: %v", step.stepName, startErr))
 					continue
 				}
 				// Non-conflict start error: log and skip this step
 				log.Printf("⚠️  Non-conflict connector error for step '%s': %v", step.stepName, startErr)
+				stepWarnings = append(stepWarnings, fmt.Sprintf("%s: %v", step.stepName, startErr))
 				continue
 			case <-time.After(200 * time.Millisecond):
 				// No immediate error — connector is running normally
@@ -555,6 +585,20 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 
 			if vc, ok := connector.(ValidationAwareConnector); ok {
 				pe.RegisterValidationConnector(interfaceID, vc)
+			}
+
+			if pipelineAware, ok := connector.(PipelineAwareConnector); ok {
+				pipelineAware.SetPipelineExecutor(pe.transformationService)
+			}
+			// Guard against wrapping a nil *services.MessageParserService in
+			// the MessageParser interface (a non-nil interface holding a nil
+			// concrete pointer is itself non-nil — the exact
+			// nil-interface-singleton gotcha this project has been bitten by
+			// before): only inject when there's a real instance to inject.
+			if pe.parserService != nil {
+				if messageParserAware, ok := connector.(MessageParserAwareConnector); ok {
+					messageParserAware.SetMessageParser(pe.parserService)
+				}
 			}
 
 			// Composite key supports multiple connectors per interface
@@ -676,6 +720,15 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 			pe.RegisterValidationConnector(interfaceID, validationConnector)
 		}
 
+		if pipelineAware, ok := connector.(PipelineAwareConnector); ok {
+			pipelineAware.SetPipelineExecutor(pe.transformationService)
+		}
+		if pe.parserService != nil {
+			if messageParserAware, ok := connector.(MessageParserAwareConnector); ok {
+				messageParserAware.SetMessageParser(pe.parserService)
+			}
+		}
+
 		pe.activeConnectors[interfaceID] = connector
 		pe.messageChan[interfaceID] = messageChan
 		pe.inFlight.Add(1)
@@ -748,7 +801,31 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 		}
 	}
 
+	// Record this attempt's per-step warnings (nil/empty replaces any stale
+	// warning from an earlier attempt — see activationWarnings' own doc
+	// comment).
+	pe.activationWarningsMu.Lock()
+	if len(stepWarnings) > 0 {
+		pe.activationWarnings[interfaceID] = stepWarnings
+	} else {
+		delete(pe.activationWarnings, interfaceID)
+	}
+	pe.activationWarningsMu.Unlock()
+
 	return nil
+}
+
+// GetActivationWarnings returns the non-fatal connector-start problems from
+// the most recent ActivateInterface call for this interface (e.g. "DICOM
+// Storage SCP: ae_title is required") — empty when the last activation
+// attempt had none. See activationWarnings' own doc comment for why this
+// exists: a single misconfigured connector.inbound step deliberately
+// doesn't fail the whole activation, so this is the only way the caller
+// (and therefore the UI) can learn a step was silently skipped.
+func (pe *ProcessingEngine) GetActivationWarnings(interfaceID string) []string {
+	pe.activationWarningsMu.RLock()
+	defer pe.activationWarningsMu.RUnlock()
+	return pe.activationWarnings[interfaceID]
 }
 
 // DeactivateInterface deactivates an interface. actorUserID is optional —

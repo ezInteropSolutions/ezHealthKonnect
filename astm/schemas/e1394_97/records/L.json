@@ -1,0 +1,15 @@
+{
+  "id": "L",
+  "name": "Terminator Record",
+  "fields": [
+    {"pos": 2, "key": "sequenceNumber", "name": "Sequence Number", "dataType": "NM"},
+    {"pos": 3, "key": "terminationCode", "name": "Termination Code", "dataType": "ID"}
+  ],
+  "sourceRefs": [
+    "kxepal/python-astm astm/records.py — read verbatim",
+    "blutspende/go-astm v2 standardlis2a2 package — explicit numeric field-position tags",
+    "mediff ASTM-Protokoll v1.9, citing ASTM E1394-97 clause 13 — confirms termination code N=normal, I=no information available for last query",
+    "BD FACS LIS Interface Specification Guide 23-23076(02), citing CLSI LIS02-A2 — confirms sequence number 'should always be 1'",
+    "All 3 positions: very high confidence, agreement across all 4 sources."
+  ]
+}

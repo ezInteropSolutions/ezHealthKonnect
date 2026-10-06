@@ -480,8 +480,9 @@ func (e *OutboundConnectorExecutor) publishCoverageAudit(
 	}
 	tracker, _ := msg["_coverageTracker"].(*executors.CDACoverageTracker)
 	if tracker == nil {
-		return // audit disabled for this interface, or non-CDA input
+		return // audit disabled for this interface, or an unsupported source format
 	}
+	sourceFormat, _ := msg["_format"].(string)
 	interfaceID, _ := ctx.Value("interface_id").(string)
 	messageID, _ := ctx.Value("message_id").(string)
 	fn(models.CoverageAuditJob{
@@ -493,6 +494,7 @@ func (e *OutboundConnectorExecutor) publishCoverageAudit(
 		ConnectorType: connectorType,
 		Destination:   destinationString(destination),
 		Outcome:       outcome,
+		SourceFormat:  sourceFormat,
 	})
 }
 

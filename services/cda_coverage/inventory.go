@@ -80,11 +80,28 @@ type InventoryItem struct {
 // this item would be recorded under if touched — "" for unclassified
 // sections, which by construction can never be touched (nothing in the
 // pipeline can reference a section by a key it doesn't have).
+//
+// EntryIndex < 0 is a sentinel meaning "this format has no entry-level
+// disambiguation to add" — the key is then the bare SectionKey (optionally
+// "/elementPath"-suffixed), with no "#N" suffix at all. Used by FHIR's own
+// adapter (fhir_adapter.go): a live fhir.build/field_mapping/etc. sourcePath
+// reading an inbound FHIR resource's field records the literal
+// "ResourceType.field" string via resolveFHIRFieldValue → resolveJSONPathValue
+// (field_utils.go) with no index suffix, so the inventory's own key must
+// match that exactly — the single highest-risk failure mode this whole
+// feature has (see CLAUDE.md's Coverage Audit generalization section).
+// CDA and HL7 always use a real, non-negative EntryIndex, so this is a purely
+// additive branch — their own TrackingKey output is completely unchanged.
 func (i InventoryItem) TrackingKey() string {
 	if i.SectionKey == "" {
 		return ""
 	}
-	key := executors.CDAEntryKey(i.SectionKey, i.EntryIndex)
+	var key string
+	if i.EntryIndex < 0 {
+		key = i.SectionKey
+	} else {
+		key = executors.CDAEntryKey(i.SectionKey, i.EntryIndex)
+	}
 	if i.ElementPath == "" {
 		return key
 	}

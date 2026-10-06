@@ -86,6 +86,9 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 <button class="connector-tab" data-tab="acknowledgment" id="ackTabBtn" style="display:none">
                     <i class="fas fa-reply"></i> Acknowledgment
                 </button>
+                <button class="connector-tab" data-tab="hostquery" id="hostQueryTabBtn" style="display:none">
+                    <i class="fas fa-exchange-alt"></i> Host Query
+                </button>
             `;
         } else {
             tabBar.innerHTML = `
@@ -171,6 +174,16 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             });
             ackPanel.appendChild(this._buildACKPanel());
             panels.appendChild(ackPanel);
+
+            // ── Host Query panel (inbound only, rendered but hidden until MLLP selected) ──
+            const hostQueryPanel = this.createElement('div', {
+                class: 'connector-tab-panel',
+                id: 'connPanel-hostquery',
+                'data-panel': 'hostquery',
+                style: 'display:none'
+            });
+            hostQueryPanel.appendChild(this._buildHostQueryPanel());
+            panels.appendChild(hostQueryPanel);
         }
 
         // ── Payload panel (outbound only) ──
@@ -443,6 +456,177 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         });
 
         return panel;
+    }
+
+    _buildHostQueryPanel() {
+        const hq = (this.config.config && this.config.config.host_query) || {};
+        const enabled = hq.enabled === true || hq.enabled === 'true';
+        const messageTypes = Array.isArray(hq.message_types) ? hq.message_types.join(', ') : (hq.message_types || 'QRY');
+        const pipelineMessageType = hq.pipeline_message_type || 'QRY';
+        const timeoutSeconds = hq.timeout_seconds != null ? hq.timeout_seconds : 10;
+        const onFailureNack = hq.on_failure_nack !== false && hq.on_failure_nack !== 'false';
+
+        const panel = this.createElement('div', { class: 'hostquery-config-panel' });
+        panel.innerHTML = `
+            <p class="text-muted" style="font-size:12px; margin-bottom:12px;">
+                For devices that ask this connector a live question on the same connection
+                (e.g. a lab analyzer's HL7 host query for pending orders) and expect a real
+                reply message back — not just an acknowledgment. Disabled by default; every
+                message keeps flowing through the normal pipeline unless enabled here.
+            </p>
+
+            <div class="connector-config-group">
+                <div class="connector-config-group-header">
+                    <span class="connector-config-group-title"><i class="fas fa-cog"></i> Basic</span>
+                    <i class="fas fa-chevron-down connector-config-group-toggle"></i>
+                </div>
+                <div class="connector-config-group-body">
+                    <div class="form-group form-check">
+                        <input type="checkbox" class="form-check-input hostquery-field" data-hostquery-field="enabled"
+                               data-hostquery-type="boolean" id="hostQueryEnabled" ${enabled ? 'checked' : ''}>
+                        <label class="form-check-label" for="hostQueryEnabled">Enable synchronous host-query replies</label>
+                    </div>
+                    <div class="form-group">
+                        <label>Query Message Type(s) (MSH.9.1)</label>
+                        <input type="text" class="form-control form-control-sm hostquery-field" data-hostquery-field="message_types"
+                               data-hostquery-type="array" value="${this.escapeHtml(messageTypes)}" placeholder="QRY">
+                        <small class="form-text text-muted">Comma-separated MSH.9.1 values treated as a live query (e.g. <code>QRY</code>)</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Answering Pipeline's Message Type</label>
+                        <div class="hostquery-pipeline-type-wrap">
+                            <select class="form-control form-control-sm hostquery-field hostquery-pipeline-type-select" data-hostquery-field="pipeline_message_type">
+                                <option value="${this.escapeHtml(pipelineMessageType)}" selected>${this.escapeHtml(pipelineMessageType)}</option>
+                                <option value="__custom__">+ Custom / not yet created…</option>
+                            </select>
+                            <div class="hostquery-pipeline-type-custom-wrap" style="display:none;">
+                                <input type="text" class="form-control form-control-sm hostquery-field hostquery-pipeline-type-custom-input"
+                                       value="${this.escapeHtml(pipelineMessageType)}" placeholder="QRY">
+                                <button type="button" class="btn btn-sm btn-outline-secondary hostquery-pipeline-type-back">↩ Back to list</button>
+                            </div>
+                        </div>
+                        <small class="form-text text-muted">Picked from this interface's own configured pipelines (authored like any other) — its final <code>hl7.build</code> step's output becomes the reply. Use "Custom" if the pipeline doesn't exist yet.</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="connector-config-group collapsed">
+                <div class="connector-config-group-header">
+                    <span class="connector-config-group-title"><i class="fas fa-stopwatch"></i> Timeout &amp; Failure Handling</span>
+                    <i class="fas fa-chevron-down connector-config-group-toggle"></i>
+                </div>
+                <div class="connector-config-group-body">
+                    <div class="form-group">
+                        <label>Timeout (seconds)</label>
+                        <input type="number" class="form-control form-control-sm hostquery-field" data-hostquery-field="timeout_seconds"
+                               data-hostquery-type="number" value="${timeoutSeconds}" min="1" max="120" step="1">
+                        <small class="form-text text-muted">How long to wait for the answering pipeline before giving up (default 10s)</small>
+                    </div>
+                    <div class="form-group form-check">
+                        <input type="checkbox" class="form-check-input hostquery-field" data-hostquery-field="on_failure_nack"
+                               data-hostquery-type="boolean" id="hostQueryOnFailureNack" ${onFailureNack ? 'checked' : ''}>
+                        <label class="form-check-label" for="hostQueryOnFailureNack">Send NACK if the query can't be answered</label>
+                        <small class="form-text text-muted d-block">Recommended — an MLLP sender should never be left waiting indefinitely for a response</small>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Wire collapse toggles
+        panel.querySelectorAll('.connector-config-group-header').forEach(h => {
+            h.addEventListener('click', () => h.closest('.connector-config-group').classList.toggle('collapsed'));
+        });
+
+        // Wire change events
+        panel.querySelectorAll('.hostquery-field').forEach(el => {
+            el.addEventListener('input', () => this.onChange());
+            el.addEventListener('change', () => this.onChange());
+        });
+
+        this._wirePipelineMessageTypeField(panel, pipelineMessageType);
+
+        return panel;
+    }
+
+    // Upgrades the pipeline_message_type field from a single-option placeholder
+    // into a guided picker (real message_types already configured for THIS
+    // interface's own pipelines) with a "+ Custom / not yet created…" escape
+    // hatch — the same "safe default now, upgrade once the real list loads,
+    // never a dead end" shape HL7SegmentPicker.js already establishes for
+    // hl7.build's own segment picker. A free-typed value keeps working even
+    // if the pipeline doesn't exist yet (a real, common ordering: configuring
+    // the connector before authoring its answering pipeline).
+    _wirePipelineMessageTypeField(panel, currentValue) {
+        const select = panel.querySelector('.hostquery-pipeline-type-select');
+        const customWrap = panel.querySelector('.hostquery-pipeline-type-custom-wrap');
+        const customInput = customWrap?.querySelector('.hostquery-pipeline-type-custom-input');
+        const backBtn = customWrap?.querySelector('.hostquery-pipeline-type-back');
+        if (!select || !customWrap || !customInput) return;
+
+        // Exactly one control carries data-hostquery-field at any time, so
+        // getConfig()'s generic .hostquery-field collection never double-counts.
+        const enterCustomMode = () => {
+            select.removeAttribute('data-hostquery-field');
+            select.style.display = 'none';
+            customWrap.style.display = '';
+            customInput.setAttribute('data-hostquery-field', 'pipeline_message_type');
+            customInput.value = currentValue || '';
+        };
+        const enterSelectMode = () => {
+            customInput.removeAttribute('data-hostquery-field');
+            customWrap.style.display = 'none';
+            select.style.display = '';
+            select.setAttribute('data-hostquery-field', 'pipeline_message_type');
+        };
+
+        select.addEventListener('change', () => {
+            if (select.value === '__custom__') {
+                enterCustomMode();
+                this.onChange();
+            }
+        });
+        backBtn?.addEventListener('click', () => {
+            enterSelectMode();
+            this.onChange();
+        });
+
+        const ifaceId = this._getInterfaceId();
+        if (!ifaceId) {
+            // No interface yet (brand-new, unsaved step) — nothing to guide
+            // with, go straight to free text rather than a single dead option.
+            enterCustomMode();
+            return;
+        }
+
+        const token = localStorage.getItem('accessToken');
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+
+        fetch(`/api/pipelines/interface/${ifaceId}`, { credentials: 'include', headers })
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                const pipelines = (data && data.pipelines) || [];
+                const messageTypes = [...new Set(pipelines.map(p => p.message_type).filter(Boolean))];
+                if (messageTypes.length === 0) {
+                    enterCustomMode();
+                    return;
+                }
+                const optionHTML = mt => `<option value="${this.escapeHtml(mt)}" ${mt === currentValue ? 'selected' : ''}>${this.escapeHtml(mt)}</option>`;
+                const inList = messageTypes.includes(currentValue);
+                const extra = (currentValue && !inList) ? optionHTML(currentValue) : '';
+                select.innerHTML = `
+                    <option value="">— select a pipeline's message type —</option>
+                    ${extra}
+                    ${messageTypes.map(optionHTML).join('')}
+                    <option value="__custom__">+ Custom / not yet created…</option>
+                `;
+                if (currentValue && inList) select.value = currentValue;
+                // The 'change' listener attached above (before this fetch
+                // resolved) reads select.value dynamically on every fire, so
+                // it already handles the repopulated option list correctly —
+                // no second listener needed here.
+            })
+            .catch(() => { /* non-fatal — the placeholder single-option select still works */ });
     }
 
     _buildPayloadPanel() {
@@ -1285,10 +1469,14 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
     onConnectorTypeChange(typeName) {
         this.config.connectorType = typeName;
 
-        // Update ACK tab visibility immediately — isMLLPInbound is pure (no API dependency)
+        // Update ACK / Host Query tab visibility immediately — isMLLPInbound is pure (no API dependency)
         const ackTabBtn = this.container.querySelector('#ackTabBtn');
         if (ackTabBtn) {
             ackTabBtn.style.display = this.isMLLPInbound ? '' : 'none';
+        }
+        const hostQueryTabBtn = this.container.querySelector('#hostQueryTabBtn');
+        if (hostQueryTabBtn) {
+            hostQueryTabBtn.style.display = this.isMLLPInbound ? '' : 'none';
         }
 
         const configContainer = this.container.querySelector('#connectorDynamicConfig');
@@ -1967,6 +2155,32 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             const hasACKConfig = Object.values(ackConfig).some(v => v !== '');
             if (hasACKConfig) {
                 config.ack = ackConfig;
+            }
+        }
+
+        // Collect Host Query config from its own tab (inbound MLLP only)
+        const hostQueryFields = this.container.querySelectorAll('.hostquery-field');
+        if (hostQueryFields.length > 0) {
+            const hostQueryConfig = {};
+            hostQueryFields.forEach(el => {
+                const key = el.dataset.hostqueryField;
+                if (!key) return;
+                const type = el.dataset.hostqueryType;
+                if (type === 'boolean') {
+                    hostQueryConfig[key] = el.checked;
+                } else if (type === 'number') {
+                    hostQueryConfig[key] = el.value ? Number(el.value) : undefined;
+                } else if (type === 'array') {
+                    hostQueryConfig[key] = el.value ? el.value.split(',').map(v => v.trim()).filter(v => v) : [];
+                } else {
+                    hostQueryConfig[key] = el.value.trim();
+                }
+            });
+            // Only attach when the feature is actually enabled — an untouched,
+            // disabled panel shouldn't add a host_query block to every MLLP
+            // inbound step's config.
+            if (hostQueryConfig.enabled) {
+                config.host_query = hostQueryConfig;
             }
         }
 

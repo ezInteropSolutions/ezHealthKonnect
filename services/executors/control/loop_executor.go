@@ -897,6 +897,19 @@ func (e *LoopExecutor) evaluateCondition(data map[string]interface{}, condition 
 
 // getFieldValue retrieves a field value from data using dot notation
 func (e *LoopExecutor) getFieldValue(data map[string]interface{}, path string) interface{} {
+	// Coverage Audit: record this path as touched — backs control.loop's
+	// own "while" condition check, a 5th, minimal, separate resolver (no
+	// HL7/bracket support at all) from every other one in this codebase.
+	// Checked on data directly and on data["message"] (unwrapped), matching
+	// every other resolver's two-shape lookup convention.
+	if tracker, ok := data["_coverageTracker"].(*executors.CDACoverageTracker); ok {
+		tracker.Record(path)
+	} else if msg, ok := data["message"].(map[string]interface{}); ok {
+		if tracker, ok := msg["_coverageTracker"].(*executors.CDACoverageTracker); ok {
+			tracker.Record(path)
+		}
+	}
+
 	parts := strings.Split(path, ".")
 
 	var current interface{} = data

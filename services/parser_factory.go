@@ -9,7 +9,9 @@ import (
 
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/parsers"
+	astmparser "ezhealthkonnect/services/parsers/astm"
 	cdaparser "ezhealthkonnect/services/parsers/cda"
+	dicomparser "ezhealthkonnect/services/parsers/dicom"
 	edix12parser "ezhealthkonnect/services/parsers/edix12"
 	ncpdpscriptparser "ezhealthkonnect/services/parsers/ncpdpscript"
 	ncpdptelecomparser "ezhealthkonnect/services/parsers/ncpdptelecom"
@@ -61,6 +63,16 @@ func (pf *ParserFactory) registerParsers() {
 	// skipped if schema dir is missing, same convention as CDA/EDI/NCPDP
 	// SCRIPT above.
 	pf.RegisterNCPDPTelecomParser("./ncpdptelecom/schemas/telecom_d0")
+
+	// Register ASTM E1394-97 (lab instrument host-interface) parser —
+	// gracefully skipped if schema dir is missing, same convention as
+	// CDA/EDI/NCPDP above.
+	pf.RegisterASTMParser("./astm/schemas/e1394_97")
+
+	// Register DICOM Storage SCP parser — no schema directory to gracefully
+	// skip on, unlike every parser above (go-dicom's own data dictionary is
+	// compiled into the library).
+	pf.RegisterDICOMParser()
 
 	// Raw passthrough for every format without a dedicated structured parser.
 	// FHIR is deliberately NOT included here — it's handled entirely by
@@ -144,6 +156,31 @@ func (pf *ParserFactory) RegisterNCPDPTelecomParser(schemaDir string) error {
 	pf.parsers[models.FormatNCPDPTelecom] = svc
 	log.Printf("✅ NCPDP Telecommunication D.0 parser registered (schema: %s)", schemaDir)
 	return nil
+}
+
+// RegisterASTMParser initialises and registers the ASTM E1394-97 (lab
+// instrument host-interface) parser using schema files from schemaDir (e.g.
+// "./astm/schemas/e1394_97"). Returns nil and logs a warning if the schema
+// directory is missing or invalid — existing HL7/CDA/EDI/NCPDP/FHIR
+// processing is unaffected. Mirrors RegisterNCPDPTelecomParser exactly.
+func (pf *ParserFactory) RegisterASTMParser(schemaDir string) error {
+	svc, err := astmparser.NewFromSchemaDir(schemaDir)
+	if err != nil {
+		log.Printf("⚠️  ASTM parser not registered: %v", err)
+		return err
+	}
+	pf.parsers[models.FormatASTM] = svc
+	log.Printf("✅ ASTM parser registered (schema: %s)", schemaDir)
+	return nil
+}
+
+// RegisterDICOMParser initialises and registers the DICOM Storage SCP
+// parser. Unlike every other RegisterXXXParser above, this needs no schema
+// directory and so cannot "gracefully skip" — go-dicom's own data
+// dictionary is compiled into the library.
+func (pf *ParserFactory) RegisterDICOMParser() {
+	pf.parsers[models.FormatDICOM] = dicomparser.NewDICOMParserService()
+	log.Printf("✅ DICOM parser registered")
 }
 
 // GetParser returns appropriate parser for format (OOB selection)

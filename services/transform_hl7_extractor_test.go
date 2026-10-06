@@ -8,10 +8,12 @@
 package services
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
 	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/services/executors"
 )
 
 // ── helpers: build the map[string]interface{} shape these functions expect ──
@@ -45,7 +47,7 @@ func subfieldObj(key, value string) map[string]interface{} {
 func TestExtractHL7ValueAtomic_SegmentNotFound_ReturnsFalse(t *testing.T) {
 	s := &HL7FHIRTransformServiceV3{}
 	enhancedSegments := map[string]interface{}{}
-	val, found := s.extractHL7ValueAtomic(enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "5"})
+	val, found := s.extractHL7ValueAtomic(context.Background(), enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "5"})
 	if found || val != "" {
 		t.Errorf("got (%q, %v), want (\"\", false) for missing segment", val, found)
 	}
@@ -54,7 +56,7 @@ func TestExtractHL7ValueAtomic_SegmentNotFound_ReturnsFalse(t *testing.T) {
 func TestExtractHL7ValueAtomic_FieldsKeyMissing_ReturnsFalse(t *testing.T) {
 	s := &HL7FHIRTransformServiceV3{}
 	enhancedSegments := map[string]interface{}{"PID": map[string]interface{}{}}
-	val, found := s.extractHL7ValueAtomic(enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "5"})
+	val, found := s.extractHL7ValueAtomic(context.Background(), enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "5"})
 	if found || val != "" {
 		t.Errorf("got (%q, %v), want (\"\", false) when fields key is absent", val, found)
 	}
@@ -65,7 +67,7 @@ func TestExtractHL7ValueAtomic_SimpleFieldMatch_ReturnsValue(t *testing.T) {
 	enhancedSegments := map[string]interface{}{
 		"PID": segMap(fieldObj("PID.7", "19800101"), fieldObj("PID.8", "M")),
 	}
-	val, found := s.extractHL7ValueAtomic(enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "8"})
+	val, found := s.extractHL7ValueAtomic(context.Background(), enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "8"})
 	if !found || val != "M" {
 		t.Errorf("got (%q, %v), want (\"M\", true)", val, found)
 	}
@@ -74,7 +76,7 @@ func TestExtractHL7ValueAtomic_SimpleFieldMatch_ReturnsValue(t *testing.T) {
 func TestExtractHL7ValueAtomic_FieldNotFound_ReturnsFalse(t *testing.T) {
 	s := &HL7FHIRTransformServiceV3{}
 	enhancedSegments := map[string]interface{}{"PID": segMap(fieldObj("PID.7", "19800101"))}
-	val, found := s.extractHL7ValueAtomic(enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "99"})
+	val, found := s.extractHL7ValueAtomic(context.Background(), enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "99"})
 	if found || val != "" {
 		t.Errorf("got (%q, %v), want (\"\", false) for a field key that isn't present", val, found)
 	}
@@ -85,7 +87,7 @@ func TestExtractHL7ValueAtomic_ComponentMapping_DelegatesToSubfields(t *testing.
 	enhancedSegments := map[string]interface{}{
 		"PID": segMap(fieldObjWithSubfields("PID.5", "Doe^John", subfieldObj("PID.5.1", "Doe"), subfieldObj("PID.5.2", "John"))),
 	}
-	val, found := s.extractHL7ValueAtomic(enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "5", HL7Component: "2"})
+	val, found := s.extractHL7ValueAtomic(context.Background(), enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "5", HL7Component: "2"})
 	if !found || val != "John" {
 		t.Errorf("got (%q, %v), want (\"John\", true) for PID.5.2", val, found)
 	}
@@ -100,9 +102,95 @@ func TestExtractHL7ValueAtomic_ReflectSlicePath_TypedSliceStillWorks(t *testing.
 	enhancedSegments := map[string]interface{}{
 		"OBX": map[string]interface{}{"fields": typedFields},
 	}
-	val, found := s.extractHL7ValueAtomic(enhancedSegments, FieldMapping{SegmentName: "OBX", HL7Field: "11"})
+	val, found := s.extractHL7ValueAtomic(context.Background(), enhancedSegments, FieldMapping{SegmentName: "OBX", HL7Field: "11"})
 	if !found || val != "F" {
 		t.Errorf("got (%q, %v), want (\"F\", true) via reflect-based slice conversion", val, found)
+	}
+}
+
+// ── extractHL7ValueAtomic: Coverage Audit live tracking (2026-10) ───────────
+//
+// Mandatory exact-key proof (this project's own standing discipline, see
+// CLAUDE.md's Coverage Audit generalization section): the key this function
+// records must be byte-identical to the key services/cda_coverage/
+// hl7_adapter.go's inventory produces for the same field (hl7.FieldInfo.Key /
+// hl7.SubfieldInfo.Key, both already "SEGMENT.FIELD[.COMPONENT]") — never a
+// substring/shape check.
+
+func TestExtractHL7ValueAtomic_NoTrackerInContext_NoPanicNoRecord(t *testing.T) {
+	s := &HL7FHIRTransformServiceV3{}
+	enhancedSegments := map[string]interface{}{"PID": segMap(fieldObj("PID.8", "M"))}
+	// context.Background() carries no tracker at all -- the overwhelming
+	// majority of real traffic (coverage audit disabled). Must behave
+	// identically to before this feature existed: no panic, same return value.
+	val, found := s.extractHL7ValueAtomic(context.Background(), enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "8"})
+	if !found || val != "M" {
+		t.Errorf("got (%q, %v), want (\"M\", true) -- tracking must never change extraction behavior", val, found)
+	}
+}
+
+func TestExtractHL7ValueAtomic_FieldLevelMapping_RecordsExactKey(t *testing.T) {
+	s := &HL7FHIRTransformServiceV3{}
+	tracker := executors.NewCDACoverageTracker()
+	ctx := context.WithValue(context.Background(), hl7CoverageTrackerContextKey, tracker)
+	enhancedSegments := map[string]interface{}{"PID": segMap(fieldObj("PID.8", "M"))}
+
+	s.extractHL7ValueAtomic(ctx, enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "8"})
+
+	// This is the EXACT string hl7.FieldInfo.Key uses for this field (see
+	// hl7/types.go: "Field key format: SEGMENT.POSITION") -- the same value
+	// hl7_adapter.go's BuildFieldPresenceWithGranularity sets as
+	// InventoryItem.SectionKey/p.FieldPath for a non-decomposed field.
+	if !tracker.Touched("PID.8") {
+		t.Errorf("expected \"PID.8\" to be recorded, tracker snapshot=%v", tracker.Snapshot())
+	}
+}
+
+func TestExtractHL7ValueAtomic_ComponentMapping_RecordsExactKey(t *testing.T) {
+	s := &HL7FHIRTransformServiceV3{}
+	tracker := executors.NewCDACoverageTracker()
+	ctx := context.WithValue(context.Background(), hl7CoverageTrackerContextKey, tracker)
+	enhancedSegments := map[string]interface{}{
+		"PID": segMap(fieldObjWithSubfields("PID.5", "Doe^John", subfieldObj("PID.5.1", "Doe"), subfieldObj("PID.5.2", "John"))),
+	}
+
+	s.extractHL7ValueAtomic(ctx, enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "5", HL7Component: "2"})
+
+	// This is the EXACT string hl7.SubfieldInfo.Key uses ("SEGMENT.FIELD.
+	// COMPONENT", hl7/types.go) -- the same value
+	// BuildFieldPresenceWithGranularity's elementLevel=true path sets as
+	// p.FieldPath for a genuinely-decomposed component.
+	if !tracker.Touched("PID.5.2") {
+		t.Errorf("expected \"PID.5.2\" to be recorded, tracker snapshot=%v", tracker.Snapshot())
+	}
+	// The SIBLING component (not read by this mapping) must NOT show as
+	// touched -- proves the key is precise, not a blanket "PID.5 touched"
+	// that would silently paper over a genuine per-component gap.
+	if tracker.Touched("PID.5.1") {
+		t.Errorf("expected \"PID.5.1\" to NOT be recorded (a different component was read), but it was")
+	}
+}
+
+func TestExtractHL7ValueAtomic_RecordsEvenWhenFieldAbsentFromMessage(t *testing.T) {
+	// A configured mapping rule "using" a field is true the moment it's
+	// referenced -- independent of whether THIS message happens to have
+	// that segment/field populated (mirrors resolveJSONPathValue's own
+	// "record unconditionally" convention). Whether this matters in practice
+	// is moot (hl7_adapter.go's own inventory never creates an item for a
+	// field that isn't genuinely present, so there's nothing to match this
+	// key against either way) -- this test exists to document and pin that
+	// behavior precisely, not to claim it changes any visible outcome.
+	s := &HL7FHIRTransformServiceV3{}
+	tracker := executors.NewCDACoverageTracker()
+	ctx := context.WithValue(context.Background(), hl7CoverageTrackerContextKey, tracker)
+	enhancedSegments := map[string]interface{}{} // PID segment entirely absent
+
+	val, found := s.extractHL7ValueAtomic(ctx, enhancedSegments, FieldMapping{SegmentName: "PID", HL7Field: "8"})
+	if found || val != "" {
+		t.Errorf("got (%q, %v), want (\"\", false) -- extraction result must be unaffected by tracking", val, found)
+	}
+	if !tracker.Touched("PID.8") {
+		t.Errorf("expected \"PID.8\" to still be recorded even though the segment was absent")
 	}
 }
 

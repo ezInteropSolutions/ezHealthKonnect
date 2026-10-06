@@ -16,6 +16,7 @@ import (
 	"ezhealthkonnect/services/audit"
 	"ezhealthkonnect/services/connectors"
 	cdastorage "ezhealthkonnect/services/cda_storage"
+	"ezhealthkonnect/services/executors"
 	"ezhealthkonnect/services/executors/control"
 	"ezhealthkonnect/services/executors/enrichment"
 	"ezhealthkonnect/services/metrics"
@@ -25,6 +26,17 @@ import (
 	"ezhealthkonnect/services/hl7assembly"
 	"ezhealthkonnect/services/storage"
 )
+
+// hl7CoverageTrackerContextKey is the context.Context key
+// HL7FHIRMappingExecutor.Execute uses to thread a Coverage Audit tracker
+// (pulled from its own inputData, via executors.ResolveCoverageTracker) into
+// HL7FHIRTransformServiceV3.Transform's call chain, all the way down to
+// extractHL7ValueAtomic (transform_hl7_extractor.go) — see that file's own
+// doc comment for why this engine needed its OWN injection point rather than
+// reusing the message-envelope-based lookup every other format's tracking
+// uses directly. A bare string literal, matching this codebase's own existing
+// ctx-key convention (models.GetCoverageAuditFn's "coverage_audit_fn").
+const hl7CoverageTrackerContextKey = "_coverageTracker"
 
 // StepExecutor interface - all executors must implement this
 type StepExecutor interface {
@@ -181,6 +193,15 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(transform.NewNCPDPTelecomValidateExecutor())       // ncpdptelecom.validate
 	er.Register(transform.NewNCPDPTelecomMapToCanonicalExecutor()) // ncpdptelecom.map_to_canonical
 	er.Register(transform.NewNCPDPTelecomBuildExecutor())          // ncpdptelecom.build
+
+	// ASTM E1394-97 transform executors (lab instrument host-interface)
+	er.Register(transform.NewASTMParseExecutor())    // astm.parse
+	er.Register(transform.NewASTMValidateExecutor()) // astm.validate
+	er.Register(transform.NewASTMBuildExecutor())    // astm.build
+
+	// DICOM Storage SCP transform executor (image passthrough metadata —
+	// no validate/build this phase, C-STORE is receive-only)
+	er.Register(transform.NewDICOMParseExecutor()) // dicom.parse
 
 	// FHIR transform executors
 	er.Register(transform.NewFHIRBuildExecutor()) // fhir.build
@@ -497,6 +518,19 @@ func (hme *HL7FHIRMappingExecutor) Execute(
 		SkipAssembly:     !assembleInline,
 		AssemblyRules:    assemblyRules,
 		EmbeddedMappings: embeddedMappings,
+	}
+
+	// Coverage Audit (2026-10): thread the tracker (if this message's
+	// interface has the feature enabled) into Transform's own ctx so
+	// extractHL7ValueAtomic can record real, live field/component reads —
+	// closing the gap where hl7_fhir_transform-routed messages previously
+	// only ever got a static "does a mapping rule exist" check (see
+	// hl7_adapter.go's own doc comment). Purely additive: when no tracker is
+	// present (the overwhelming majority of real traffic, coverage audit
+	// disabled), ctx is returned completely unchanged and nothing below this
+	// line behaves any differently than before.
+	if tracker := executors.ResolveCoverageTracker(inputData); tracker != nil {
+		ctx = context.WithValue(ctx, hl7CoverageTrackerContextKey, tracker)
 	}
 
 	log.Printf("  🔍 [DEBUG] Calling Transform service...")

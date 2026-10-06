@@ -6,6 +6,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.9.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.0.0
 	github.com/IBM/sarama v1.45.1
+	github.com/amrshadid/go-dicom v1.6.0
 	github.com/aws/aws-sdk-go-v2 v1.43.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.9
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.9
@@ -20,6 +21,7 @@ require (
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.10.9
 	github.com/linkedin/goavro/v2 v2.15.0
@@ -37,6 +39,7 @@ require (
 	github.com/wk8/go-ordered-map/v2 v2.1.8
 	github.com/xdg-go/scram v1.1.2
 	github.com/xuri/excelize/v2 v2.11.0
+	go.bug.st/serial v1.8.0
 	go.mongodb.org/mongo-driver v1.17.9
 	golang.org/x/crypto v0.54.0
 	golang.org/x/time v0.15.0
@@ -113,7 +116,6 @@ require (
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
@@ -191,3 +193,10 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/gotestsum v1.8.2 // indirect
 )
+
+// Local fork of go-dicom v1.6.0 with a real, confirmed PDV-reassembly bug
+// fixed (every C-STORE hung indefinitely against a real, independent
+// DICOM toolkit — dcm4che's own storescu — despite C-ECHO working fine).
+// See third_party/go-dicom-fork/PATCHES.md for the full root cause and fix.
+// Remove this replace directive if/when upstream ships an equivalent fix.
+replace github.com/amrshadid/go-dicom => ./third_party/go-dicom-fork

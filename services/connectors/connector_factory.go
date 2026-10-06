@@ -113,6 +113,27 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	f.RegisterInbound("websocket_inbound", NewWebSocketInboundConnector)
 	f.RegisterOutbound("websocket_outbound", NewWebSocketOutboundConnector)
 
+	// RS232 Serial (ASTM E1394-97) — opens a physical/virtual COM port once
+	// (requires the "co-located process" deployment topology — see
+	// serial_inbound.go's own file header) and plays ASTM's receiver/
+	// initiator role via the shared astm_framing.go handshake.
+	f.RegisterInbound("serial_inbound", NewSerialInboundConnector)
+	f.RegisterOutbound("serial_outbound", NewSerialOutboundConnector)
+
+	// ASTM E1394-97 over TCP/IP — Phase B of the same feature, reusing
+	// astm_framing.go's handshake unchanged over a real net.Conn. A new
+	// connector type (not a protocol-mode switch on tcp_mllp_inbound),
+	// mirroring the AS2 Phase 4 precedent.
+	f.RegisterInbound("astm_tcp_inbound", NewASTMTCPInboundConnector)
+	f.RegisterOutbound("astm_tcp_outbound", NewASTMTCPOutboundConnector)
+
+	// DICOM Storage SCP — Phase 2 of the device-connectivity effort
+	// (imaging, not lab instruments). A thin adapter over the dicom/
+	// package, which wraps github.com/amrshadid/go-dicom's own real DIMSE
+	// networking — no connection/handshake code hand-rolled here, unlike
+	// the ASTM connectors above.
+	f.RegisterInbound("dicom_storage_inbound", NewDICOMStorageInboundConnector)
+
 	// File System Connectors
 	f.RegisterInbound("file_listener", NewFileListenerConnector)
 	f.RegisterOutbound("file_writer", NewFileWriterConnector)

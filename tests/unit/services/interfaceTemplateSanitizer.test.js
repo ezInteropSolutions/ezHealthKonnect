@@ -12,6 +12,7 @@ const {
     sanitizePipelineConfig,
     sanitizeInterfaceForTemplate,
     mergeTemplateWithUserValues,
+    mergeValuesIntoPipelineConnectorSteps,
     SENSITIVE_PATTERNS,
 } = require('../../../services/interfaceTemplateSanitizer');
 
@@ -222,5 +223,105 @@ describe('mergeTemplateWithUserValues', () => {
         const merged = mergeTemplateWithUserValues(template, null);
         expect(merged).toEqual(template);
         expect(merged).not.toBe(template); // copy, not the same reference
+    });
+
+    // Added for the device-connect wizard (ezHealthKonnect's own guided
+    // "Connect a Device" feature) — a device's required_connection_fields
+    // can target a NESTED connector config value (e.g. "host_query.enabled",
+    // for a TCP/MLLP bidirectional-mode toggle) directly as a dot-path, not
+    // just a bare top-level key.
+    it('sets a dot-path value into a nested object', () => {
+        const merged = mergeTemplateWithUserValues(
+            { host_query: { enabled: false, message_types: ['QRY'] } },
+            { 'host_query.enabled': true }
+        );
+        expect(merged.host_query.enabled).toBe(true);
+    });
+
+    it('preserves sibling keys in the nested object a dot-path only partially targets', () => {
+        const merged = mergeTemplateWithUserValues(
+            { host_query: { enabled: false, message_types: ['QRY'], pipeline_message_type: 'QRY' } },
+            { 'host_query.enabled': true }
+        );
+        expect(merged.host_query.message_types).toEqual(['QRY']);
+        expect(merged.host_query.pipeline_message_type).toBe('QRY');
+    });
+
+    it('creates intermediate objects for a dot-path that does not exist yet', () => {
+        const merged = mergeTemplateWithUserValues({}, { 'a.b.c': 'deep' });
+        expect(merged).toEqual({ a: { b: { c: 'deep' } } });
+    });
+
+    it('treats false as a real, meaningful value — not empty/skippable', () => {
+        const merged = mergeTemplateWithUserValues({ flag: true }, { flag: false });
+        expect(merged.flag).toBe(false);
+    });
+
+    it('treats 0 as a real, meaningful value — not empty/skippable', () => {
+        const merged = mergeTemplateWithUserValues({ count: 5 }, { count: 0 });
+        expect(merged.count).toBe(0);
+    });
+});
+
+describe('mergeValuesIntoPipelineConnectorSteps', () => {
+    // Added for the device-connect wizard: interface_templates' own
+    // source_connector_type/source_config_template columns are display-only
+    // — processing/engine.go's ActivateInterface actually starts the
+    // connector defined inside pipeline_config's own connector.inbound/
+    // connector.outbound steps. This function is what makes a user-entered
+    // port/toggle/endpoint value reach the connector that actually runs.
+    function samplePipeline() {
+        return {
+            execution_groups: [
+                { sequence: 5, steps: [{
+                    step_name: 'In', step_type: 'connector.inbound',
+                    config: { connectorType: 'tcp_mllp_inbound', config: {
+                        host: '0.0.0.0', port: 6612,
+                        host_query: { enabled: false, message_types: ['QRY'], pipeline_message_type: 'QRY' },
+                    } },
+                }] },
+                { sequence: 295, steps: [{
+                    step_name: 'Out', step_type: 'connector.outbound',
+                    config: { connectorType: 'http_outbound', config: { method: 'POST' } },
+                }] },
+            ],
+        };
+    }
+
+    it('merges sourceValues into the connector.inbound step only', () => {
+        const merged = mergeValuesIntoPipelineConnectorSteps(samplePipeline(), { port: 7001, 'host_query.enabled': true }, {});
+        const inbound = merged.execution_groups[0].steps[0].config.config;
+        const outbound = merged.execution_groups[1].steps[0].config.config;
+        expect(inbound.port).toBe(7001);
+        expect(inbound.host_query.enabled).toBe(true);
+        expect(inbound.host).toBe('0.0.0.0'); // sibling untouched
+        expect(outbound).toEqual({ method: 'POST' }); // outbound untouched
+    });
+
+    it('merges targetValues into the connector.outbound step only', () => {
+        const merged = mergeValuesIntoPipelineConnectorSteps(samplePipeline(), {}, { endpoint: 'https://his.example.org', bearer_token: 'TOK' });
+        const inbound = merged.execution_groups[0].steps[0].config.config;
+        const outbound = merged.execution_groups[1].steps[0].config.config;
+        expect(outbound.endpoint).toBe('https://his.example.org');
+        expect(outbound.bearer_token).toBe('TOK');
+        expect(outbound.method).toBe('POST'); // preserved
+        expect(inbound.port).toBe(6612); // inbound untouched
+    });
+
+    it('does not mutate the original pipelineConfig object', () => {
+        const original = samplePipeline();
+        mergeValuesIntoPipelineConnectorSteps(original, { port: 9999 }, {});
+        expect(original.execution_groups[0].steps[0].config.config.port).toBe(6612);
+    });
+
+    it('returns the input unchanged when both sourceValues and targetValues are empty', () => {
+        const original = samplePipeline();
+        const merged = mergeValuesIntoPipelineConnectorSteps(original, {}, {});
+        expect(merged).toBe(original); // same reference — a real short-circuit, not just equal content
+    });
+
+    it('is a no-op on a malformed/missing pipelineConfig rather than throwing', () => {
+        expect(mergeValuesIntoPipelineConnectorSteps(null, { port: 1 }, {})).toBeNull();
+        expect(mergeValuesIntoPipelineConnectorSteps({}, { port: 1 }, {})).toEqual({});
     });
 });

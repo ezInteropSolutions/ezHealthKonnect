@@ -574,12 +574,24 @@ exports.useTemplate = async (req, res) => {
 
         const tmpl = rows[0];
 
-        // Merge user-provided values into sanitized configs
+        // Merge user-provided values into sanitized configs (display-only —
+        // see below for the merge that actually reaches the running connector).
         const sourceConfig = sanitizer.mergeTemplateWithUserValues(
             tmpl.source_config_template || {}, source_values
         );
         const targetConfig = sanitizer.mergeTemplateWithUserValues(
             tmpl.target_config_template || {}, target_values
+        );
+
+        // source_connector_type/source_config_template are display-only —
+        // processing/engine.go's ActivateInterface starts the connector
+        // defined inside pipeline_config's own connector.inbound/outbound
+        // steps, not from these columns. Merge the SAME user-provided
+        // values into those steps too, so a value a user actually typed
+        // (e.g. a device template's port/host_query.enabled) reaches the
+        // connector that actually runs, not just the scaffold's display copy.
+        const mergedPipelineConfig = sanitizer.mergeValuesIntoPipelineConnectorSteps(
+            tmpl.pipeline_config || {}, source_values, target_values
         );
 
         // Increment usage count (fire-and-forget)
@@ -597,7 +609,7 @@ exports.useTemplate = async (req, res) => {
                 source_config: sourceConfig,
                 target_connector_type: tmpl.target_connector_type,
                 target_config: targetConfig,
-                pipeline_config: tmpl.pipeline_config,
+                pipeline_config: mergedPipelineConfig,
                 template_id: tmpl.id,
                 template_name: tmpl.name,
             },

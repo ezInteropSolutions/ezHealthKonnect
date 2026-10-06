@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"ezhealthkonnect/models"
+	"ezhealthkonnect/services/coverage"
 	"ezhealthkonnect/services/executors"
 	"ezhealthkonnect/services/executors/control"
 	"ezhealthkonnect/services/logger"
@@ -130,8 +131,11 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 		}
 	}
 
-	// CDA Coverage Audit: attach a per-message tracker to the envelope, once,
-	// before any step runs — every step for the rest of this pipeline run
+	// Coverage Audit: attach a per-message tracker to the envelope, once,
+	// before any step runs, for any source format with a registered
+	// services/coverage.FormatAdapter (originally CDA-only; see
+	// services/cda_coverage/registry.go and CLAUDE.md's Coverage Audit
+	// generalization section) — every step for the rest of this pipeline run
 	// mutates this SAME shared message object (see cda_document_resolution.go's
 	// doc comment on that invariant), so writing it here makes it visible
 	// everywhere via inputData["message"]["_coverageTracker"]. Deliberately
@@ -141,11 +145,15 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 	// Test Pipeline dry-runs are excluded, since those never reach the real
 	// delivery hook that would consume the tracker anyway. Best-effort: a
 	// lookup failure just leaves coverage tracking off, same posture as the
-	// debug-level resolution right above.
+	// debug-level resolution right above. The tracker type itself
+	// (executors.CDACoverageTracker) stays format-agnostic — a plain
+	// touched-key set — regardless of which format populated it.
 	if !models.IsTestMode(ctx) {
-		if format, _ := execCtx.Message["_format"].(string); format == "ccda" {
-			if enabled, _ := ResolveCDACoverageAuditEnabled(tps.db, pipeline.InterfaceID); enabled {
-				execCtx.Message["_coverageTracker"] = executors.NewCDACoverageTracker()
+		if format, _ := execCtx.Message["_format"].(string); format != "" {
+			if _, ok := coverage.AdapterFor(format); ok {
+				if enabled, _ := ResolveCDACoverageAuditEnabled(tps.db, pipeline.InterfaceID); enabled {
+					execCtx.Message["_coverageTracker"] = executors.NewCDACoverageTracker()
+				}
 			}
 		}
 	}

@@ -1984,6 +1984,12 @@ func main() {
 
 				// Ad-hoc connector test (pipeline step context — no interface_id needed)
 				connectivityGroup.POST("/test", connectivityCtrl.TestConnectorAdHoc)
+
+				// Live COM-port enumeration (serial_inbound/serial_outbound's
+				// own port_name field) — only meaningful under the "co-located
+				// process" deployment topology, see serial_port_controller.go.
+				serialPortCtrl := controllers.NewSerialPortController()
+				connectivityGroup.GET("/serial-ports", serialPortCtrl.ListSerialPorts)
 			}
 			log.Printf("✅ Connectivity Controller initialized (Multi-Connectivity Support)")
 		}

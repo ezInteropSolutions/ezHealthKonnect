@@ -2977,3 +2977,152 @@ Full-stack + browser: both migrations re-applied live (`flyway repair` + direct 
 - B1 mapping completeness fix: same 2 files (`Patient`/`PharmacyProvider` segment mappings added to `b1OutboundMapToCanonicalConfig`)
 - Migrations updated in place (same-session re-apply): `database/migrations/V268__NCPDP_NewRx_FHIR_To_SCRIPT_Outbound_Template.sql`, `V269__NCPDP_B1_FHIR_To_Telecom_Outbound_Template.sql` (added `ncpdp(telecom).validate` step + synced derive scripts + Patient/PharmacyProvider mapping)
 - Browser verification: `tests/playwright/ncpdp-outbound-e2e.spec.js`
+
+## DICOM Storage SCP — Production Hardening, No Real Device Available (October 2026)
+
+### Why this round exists
+Direct follow-up to the DICOM/ASTM device-connectivity QA pass above: the user asked what's
+pending for market/production readiness, then — on being told no real imaging device exists to
+test against — said to do the best possible hardening anyway. This round covers everything
+achievable without hardware: closing a real UI gap in the just-shipped activation-warnings
+mechanism, bounding a confirmed unbounded-memory-growth risk, building real mutual TLS the
+original design had declared impossible, and — the headline result — finding and fixing a real,
+confirmed cross-vendor DICOM interop bug using an independent, industry-standard toolkit as a
+stand-in for a real device.
+
+### 1. Activation-warnings UI wiring (platform-wide fix, not DICOM-specific)
+The backend half of the earlier QA round's biggest finding (`engine.go`'s `activationWarnings`,
+surfaced through the API) was never wired into either frontend path. Fixed both:
+- `public/js/interfaces.js`: new `showActivationWarning()` toast (amber, lists each warning,
+  9s) used by `activateInterfaceProcessing()` instead of the plain "Activated successfully" toast
+  whenever `data.warnings` is non-empty.
+- `public/js/dashboard.js` (the "Connect a Device" guided wizard — the actual primary UX for
+  device templates): new `_showDeviceActivationWarning(interfaceId, warnings)` modal, shown
+  instead of `_showDeviceVerificationStep`'s "Waiting for your device's first message…" screen
+  whenever activation succeeded but carried warnings — polling for a message that could
+  structurally never arrive would otherwise hang the wizard's own UI forever. Each warning string
+  is HTML-escaped via the existing `_escHtml` helper before interpolation (a step name is
+  user-editable and flows verbatim into the warning text via `fmt.Sprintf` on the Go side).
+- Found and fixed a real variable-name collision (`const response` declared twice in the same
+  function) introduced while making this exact change in `InterfaceLifecycleController.js` — caught
+  only because the route failed to load at all (`❌ Failed to load interfaceLifecycle routes:
+  Identifier 'response' has already been declared`) and `/api/runtime/*` silently stopped
+  existing; a real lesson that a Node syntax error in one route file can silently take down an
+  entire route group with no caller-visible 500, only a route-not-found.
+- New permanent regression test (added to the existing `dicom-wizard-e2e.spec.js`, not a new file):
+  drives the real wizard with AE Title filled correctly but **Port Number = "0"** — a value that
+  passes the wizard's own client-side "is this field empty" check (it's non-empty, non-NaN) but
+  still fails the Go connector's own `Validate()` (`port is required`) — proving the real
+  activation-warning modal appears instead of the misleading "waiting" screen.
+
+### 2. `max_instance_size_mb` — bounding a confirmed unbounded-memory-growth risk
+The original build's own design notes named this gap explicitly ("no configurable cap was found on
+one C-STORE's total reassembled dataset size") but left it unaddressed. Added end to end:
+`dicom.ReceiverConfig.MaxInstanceSizeBytes` (checked in `HandleCStore` right after
+`SerializeToPart10`, rejecting via the existing `OnRejected` hook — can't prevent the one transfer's
+own peak memory use, since go-dicom has already reassembled the dataset by the time this runs, but
+does stop an oversized object from being stored/forwarded) → `dicom_storage_inbound.go`'s
+`max_instance_size_mb` config field (default 100MB — real CR/DX images are commonly 8-25MB, so this
+is headroom, not a normal-traffic constraint — hard-capped at 1024MB regardless of a larger
+configured value) → V278 migration exposing it in the UI's config schema. 4 new Go tests (reject
+over limit + fire `OnRejected`, allow under limit, zero means default-not-unlimited, config
+parsing/clamping) plus a live full-stack proof (a real interface configured with a 2MB limit, a
+real 2MB-plus-metadata C-STORE through the real running connector).
+
+### 3. Real mutual TLS — the earlier "impossible" conclusion was wrong
+The original build's own doc comment stated flatly that mutual TLS couldn't be built: go-dicom
+v1.6.0's `TLSConfig.CAFile` field is declared but never read by its own `buildTLSConfig` (confirmed
+true, by reading that function directly). What the same reading missed the first time: that same
+function has a real, documented escape hatch one field over — `TLSConfig.Config *tls.Config`,
+"allows providing a custom *tls.Config directly. If set, CertFile/KeyFile/CAFile are ignored." New
+`dicom.ReceiverConfig.TLSCAFile` + `buildMutualTLSConfig()` (`dicom/receiver.go`) hand-builds a real
+`*tls.Config` with `ClientAuth: RequireAndVerifyClientCert` + a `CertPool` loaded from the configured
+CA file, bypassing the library's own broken convenience fields entirely — a config/wiring fix, not
+a new library capability. Wired through `dicom_storage_inbound.go`'s new `tls_ca_file` field and
+V278's config schema.
+
+4 new Go tests, including a real, non-obvious TLS wrinkle found while writing them: a client with
+no acceptable certificate can still complete `tls.Dial` with a nil error (TLS allows responding to
+`CertificateRequest` with an empty certificate list rather than failing locally) — the server-side
+rejection only surfaces on a SUBSEQUENT `Read`, so the test asserts via `assertHandshakeRejected`
+(dial, then read) rather than trusting `Dial`'s own return value alone.
+
+### 4. The headline finding — a real go-dicom v1.6.0 bug that breaks EVERY real C-STORE from a
+### non-go-dicom sender, found and fixed using an independent toolkit as a device stand-in
+Every prior Go test in this codebase's whole DICOM build used `network.NewSCU` — the SAME library
+on both client and server — which can only ever prove "go-dicom agrees with itself," never real
+interop. With no actual Fujifilm/imaging device available, the strongest available substitute is a
+**different, independent, industry-standard implementation**: `dcm4che/dcm4che-tools` (Java,
+widely used by real PACS/modality vendors), via its real `storescu` CLI, run as a throwaway Docker
+container against the real, running connector.
+
+**Result**: C-ECHO worked perfectly (full association, correct status, clean release). **Every
+single C-STORE hung indefinitely** — reproduced identically with and without `PixelData` present,
+ruling out anything content-specific. Root-caused by reading go-dicom's own source directly (not
+guessed): `Association.ReceivePData`'s PDV-reassembly loop treats every PDV in one `PDataTF` PDU's
+`PDVItems` slice as belonging to ONE message, and returns as soon as it sees ANY `IsLast` PDV. But
+DICOM PS3.8 allows a single PDU to carry PDVs from **more than one logical message** — dcm4che's
+real encoder packs a small Command message's own final PDV immediately followed, in the SAME PDU,
+by the Data message's own PDV(s). The original code returns on the Command PDV's `IsLast` and never
+looks at the remaining PDV(s) in the same already-parsed `dataTF.PDVItems` slice — those bytes are
+gone the instant the function returns (the whole PDU was already consumed off the wire). The
+caller's NEXT `ReceivePData` call (reading the dataset) then blocks forever on a fresh `ReadPDU`,
+waiting for bytes that were already silently discarded — until the peer's own timeout gives up and
+disconnects, surfacing as `"failed to receive C-STORE data: ... EOF"` server-side.
+
+**Fix, as a local fork** (`third_party/go-dicom-fork/`, wired via a `replace` directive in `go.mod`
+— the module is the latest available release, confirmed via `go list -m -versions`, so this isn't a
+stale-version problem): `ReceivePData` now checks, after returning on an `IsLast` PDV, whether more
+PDVs remain in the same `dataTF.PDVItems` slice; a new `queueRemainingPDVItems` helper reassembles
+them (there can be more than one trailing message) and queues each one via the library's own
+PRE-EXISTING `a.pending` mechanism — previously used only by its public `PushBack` method, for a
+C-CANCEL watcher's own read-ahead, never for this function's own same-PDU lookahead. `pendingMessage`
+gained a `complete bool` field so a still-incomplete trailing message (its remaining fragments still
+in flight) can be queued too and correctly resumed by a later call, not just the common
+both-complete-in-one-PDU case. Full root cause, fix, and scope boundary documented in
+`third_party/go-dicom-fork/PATCHES.md`.
+
+**Verification, in increasing order of realism**:
+- `dicom/pdv_interop_test.go` — two new tests hand-crafting the exact dcm4che wire shape (a
+  `PDataTF` with a Command PDV followed by a Data PDV, built directly at the `network.Transport`/
+  `Association` layer via `net.Pipe()`, mirroring the library's own existing test pattern) — proves
+  two sequential `ReceivePData` calls correctly return both messages instead of the second one
+  hanging, plus a 3-messages-in-one-PDU variant proving the fix generalizes beyond exactly two.
+- Full `dicom` package suite (every pre-existing test plus everything added this round) re-run
+  clean under `-race` — zero regressions from the patch.
+- Full `go build ./...` clean with the `replace` directive active; `docker-compose build app`
+  clean (the Dockerfile's `gobuilder` stage already `COPY . .`s the whole repo context, so
+  `third_party/` needed zero Dockerfile changes — only the compiled binary crosses into the
+  runtime stage).
+- **The real proof**: rebuilt container, real interface, real `dcm4che storescu` C-STORE against
+  the live connector — `C-STORE-RSP[status=0H]` (success), clean `A-RELEASE`, and the message
+  actually landed in the database as `status: "processed"`, correct `message_size`, with real
+  `raw_content_uri`/`parsed_content_uri` in object storage. Re-ran the full existing Playwright
+  regression suite (including the real go-dicom-based SCU client fixture from the earlier wizard
+  round, which correctly still downloads genuine, UNPATCHED upstream go-dicom for its own
+  independent `go.mod` — confirming the fork is correctly scoped to only the main app's build, not
+  leaked into the test fixture that's supposed to play the "other, independent device" role).
+
+### What remains genuinely gated on hardware/network access (named, not attempted)
+Real-device quirks beyond this one confirmed protocol-level bug (vendor-specific AE title padding,
+non-standard transfer syntax usage, timing assumptions a real modality's own retry logic makes) —
+no further substitute exists without the actual device or a vendor-provided simulator. Network
+reachability to the device LAN (VPN/on-prem forwarder) is an infrastructure decision for the
+client's own IT, not something buildable from here. Modality Worklist/MPPS/Storage Commitment
+remain deliberately unbuilt (named scope boundary, not a hardening gap on what already exists). A
+platform-wide connector health/liveness watchdog (a connector dying silently after a successful
+start) is a real, separate, cross-cutting gap affecting all 50+ connector types, not scoped to
+DICOM/device connectors specifically — named but not attempted this round.
+
+### Key Files
+- UI: `public/js/interfaces.js` (`showActivationWarning`), `public/js/dashboard.js`
+  (`_showDeviceActivationWarning`), `controllers/InterfaceLifecycleController.js` (the collision fix)
+- Size cap: `dicom/receiver.go` (`MaxInstanceSizeBytes`), `services/connectors/dicom_storage_inbound.go`
+  (`max_instance_size_mb`), `dicom/max_instance_size_test.go`
+- Mutual TLS: `dicom/receiver.go` (`TLSCAFile`, `buildMutualTLSConfig`), `services/connectors/
+  dicom_storage_inbound.go` (`tls_ca_file`), `dicom/mtls_test_helpers_test.go`, `dicom/mtls_test.go`
+- **The PDV fix**: `third_party/go-dicom-fork/network/association.go` (`ReceivePData`,
+  `queueRemainingPDVItems`, `pendingMessage.complete`), `third_party/go-dicom-fork/PATCHES.md`,
+  `go.mod` (`replace` directive), `dicom/pdv_interop_test.go`
+- Migration: `database/migrations/V278__DICOM_Add_MaxInstanceSize_And_MutualTLS.sql`
+- Regression test: `tests/playwright/dicom-wizard-e2e.spec.js` (new case 5)

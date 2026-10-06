@@ -83,9 +83,20 @@ func (s *NCPDPScriptParserService) Parse(raw string) *models.ParserResult {
 	// _format/transactionType/messageAttrs mirror the same sentinel-key
 	// convention cda_parser_service.go's assembleJSON and
 	// edi_x12_parser_service.go's own ParsedJSON already use — header/body
-	// carry ncpdp.ParseResult's own field names directly, no renaming.
+	// carry ncpdp.ParseResult's own field names directly, no renaming. "raw"
+	// mirrors the same convention fhir_parser_service.go/hl7_parser_service.go/
+	// cda_parser_service.go already use — the original message text, so a
+	// later mid-pipeline ncpdp.parse step (default sourceField "raw") can
+	// find it. This format's own Parse() had never set it, which meant a
+	// genuinely live message (as opposed to a Test Pipeline run, whose own
+	// envelope construction supplies raw content a different way) could
+	// never actually resolve that default — confirmed by a real file dropped
+	// on a real file_listener connector failing with "source field raw is
+	// empty or not a string" against the unmodified shipped V258 template.
+	// See CLAUDE.md's Coverage Audit generalization section.
 	result.ParsedJSON = map[string]interface{}{
 		"_format":         "ncpdpscript",
+		"raw":             raw,
 		"transactionType": parsed.TransactionType,
 		"messageAttrs":    parsed.MessageAttrs,
 		"header":          parsed.Header,

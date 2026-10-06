@@ -1,0 +1,51 @@
+{
+  "id": "O",
+  "name": "Order/Test Request Record",
+  "fields": [
+    {"pos": 2, "key": "sequenceNumber", "name": "Sequence Number", "dataType": "NM", "required": true},
+    {"pos": 3, "key": "specimenID", "name": "Specimen ID (Sample ID)", "dataType": "ST", "required": true},
+    {"pos": 4, "key": "instrumentSpecimenID", "name": "Instrument Specimen ID (Tube ID)", "repeat": {"itemKey": "instrumentSpecimenID", "item": {"pos": 0, "key": "instrumentSpecimenID", "dataType": "ST"}}},
+    {"pos": 5, "key": "universalTestID", "name": "Universal Test ID", "component": {"subFields": [
+      {"pos": 1, "key": "testID", "dataType": "ST"},
+      {"pos": 2, "key": "testName", "dataType": "ST"},
+      {"pos": 3, "key": "testType", "dataType": "ST"},
+      {"pos": 4, "key": "manufacturerTestType", "dataType": "ST"},
+      {"pos": 5, "key": "manufacturerTestName", "dataType": "ST"},
+      {"pos": 6, "key": "manufacturerTestCode", "dataType": "ST"},
+      {"pos": 7, "key": "localTestCode", "dataType": "ST"}
+    ]}},
+    {"pos": 6, "key": "priority", "name": "Priority", "dataType": "ID"},
+    {"pos": 7, "key": "requestedDateTime", "name": "Requested/Ordered Date & Time", "dataType": "TM"},
+    {"pos": 8, "key": "specimenCollectionDateTime", "name": "Specimen Collection Date/Time", "dataType": "TM"},
+    {"pos": 9, "key": "collectionEndTime", "name": "Collection End Time", "dataType": "TM"},
+    {"pos": 10, "key": "collectionVolume", "name": "Collection Volume", "dataType": "NM"},
+    {"pos": 11, "key": "collectorID", "name": "Collector ID", "dataType": "ST"},
+    {"pos": 12, "key": "actionCode", "name": "Action Code", "dataType": "ID"},
+    {"pos": 13, "key": "dangerCode", "name": "Danger Code", "dataType": "ST"},
+    {"pos": 14, "key": "relevantClinicalInfo", "name": "Relevant Clinical Information", "dataType": "ST"},
+    {"pos": 15, "key": "dateTimeSpecimenReceived", "name": "Date/Time Specimen Received", "dataType": "TM"},
+    {"pos": 16, "key": "specimenDescriptor", "name": "Specimen Descriptor / Type", "dataType": "ST"},
+    {"pos": 17, "key": "orderingPhysician", "name": "Ordering Physician", "dataType": "ST"},
+    {"pos": 18, "key": "physicianTelephoneNumber", "name": "Physician's Telephone Number", "dataType": "ST"},
+    {"pos": 19, "key": "userField1", "name": "User Field No. 1", "dataType": "ST"},
+    {"pos": 20, "key": "userField2", "name": "User Field No. 2", "dataType": "ST"},
+    {"pos": 21, "key": "labField1", "name": "Laboratory Field No. 1", "dataType": "ST"},
+    {"pos": 22, "key": "labField2", "name": "Laboratory Field No. 2", "dataType": "ST"},
+    {"pos": 23, "key": "dateTimeResultsReported", "name": "Date/Time Results Reported", "dataType": "TM"},
+    {"pos": 24, "key": "instrumentCharge", "name": "Instrument Charge", "dataType": "ST"},
+    {"pos": 25, "key": "instrumentSectionID", "name": "Instrument Section ID", "dataType": "ST"},
+    {"pos": 26, "key": "reportType", "name": "Report Type", "dataType": "ID"},
+    {"pos": 27, "key": "reservedField1", "name": "Reserved Field", "dataType": "ST"},
+    {"pos": 28, "key": "specimenCollectionLocation", "name": "Location of Specimen Collection", "dataType": "ST"},
+    {"pos": 29, "key": "nosocomialInfectionFlag", "name": "Nosocomial Infection Flag", "dataType": "ID"},
+    {"pos": 30, "key": "specimenService", "name": "Specimen Service", "dataType": "ST"},
+    {"pos": 31, "key": "specimenInstitution", "name": "Specimen Institution (Laboratory)", "dataType": "ST"}
+  ],
+  "sourceRefs": [
+    "kxepal/python-astm astm/records.py — read verbatim",
+    "blutspende/go-astm v2 standardlis2a2 package — explicit numeric field-position tags",
+    "mediff ASTM-Protokoll v1.9, citing ASTM E1394-97 clause 9.4",
+    "BD FACS LIS Interface Specification Guide 23-23076(02), citing CLSI LIS02-A2",
+    "All 31 positions: very high confidence — python-astm and go-astm agree field-for-field on every position; BD FACS independently confirms 12 of those exact positions. The O.6 Priority code values (S=stat, R=routine) are a commonly-cited convention but were NOT independently confirmed by any of the 4 primary sources read for this schema — flagged as lower confidence, documentation only, not enforced."
+  ]
+}

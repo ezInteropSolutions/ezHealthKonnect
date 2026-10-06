@@ -79,6 +79,11 @@ type CoverageAuditJob struct {
 	ConnectorType string
 	Destination   string
 	Outcome       string // "delivered" | "failed"
+	// SourceFormat is the message envelope's own "_format" value (e.g.
+	// "ccda", "hl7v2") at the moment delivery completed — read by the worker
+	// pool to resolve which services/coverage.FormatAdapter built this
+	// tracker's key space, and persisted onto cda_coverage_audits.source_format.
+	SourceFormat string
 }
 
 // CoverageAuditFn is injected into the pipeline context by the processing

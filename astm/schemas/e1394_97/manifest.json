@@ -1,0 +1,9 @@
+{
+  "specVersion": "E1394-97",
+  "messages": {
+    "generic_lab_result": {
+      "file": "generic_lab_result.json",
+      "name": "Generic ASTM Lab Result/Order Message"
+    }
+  }
+}

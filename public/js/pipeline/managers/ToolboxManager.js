@@ -653,6 +653,54 @@ class ToolboxManager {
             }),
 
             // ============================================
+            // ASTM E1394-97 (lab instrument host-interface)
+            // ============================================
+            new StepTemplate({
+                id: 'astm-parse',
+                name: 'ASTM Parse',
+                type: 'astm.parse',
+                description: 'Parse raw ASTM E1394-97 content (H/P/O/R/C/Q/L records) into structured JSON',
+                layer: 'core',
+                icon: this.getIconForType('astm.parse'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'raw', outputField: 'parsedASTM' }
+            }),
+            new StepTemplate({
+                id: 'astm-validate',
+                name: 'ASTM Validate',
+                type: 'astm.validate',
+                description: 'Check a parsed ASTM message\'s component fields against the schema',
+                layer: 'core',
+                icon: this.getIconForType('astm.validate'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'parsedASTM', outputField: 'astmValidation' }
+            }),
+            new StepTemplate({
+                id: 'astm-build',
+                name: 'ASTM Build',
+                type: 'astm.build',
+                description: 'Build a complete ASTM record stream (H/P/O/R/C/Q/L) from canonical JSON',
+                layer: 'core',
+                icon: this.getIconForType('astm.build'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'parsedASTM', outputField: 'astmMessage' }
+            }),
+
+            // ============================================
+            // DICOM Storage SCP (imaging)
+            // ============================================
+            new StepTemplate({
+                id: 'dicom-parse',
+                name: 'DICOM Parse',
+                type: 'dicom.parse',
+                description: 'Extract metadata (patient/study/series/instance identifiers) from a DICOM Part 10 file',
+                layer: 'core',
+                icon: this.getIconForType('dicom.parse'),
+                isSystem: true,
+                defaultConfig: { sourceField: 'raw', outputField: 'parsedDICOM' }
+            }),
+
+            // ============================================
             // CDA/CCD STEPS
             // ============================================
             new StepTemplate({
@@ -1099,6 +1147,14 @@ class ToolboxManager {
             'ncpdptelecom.validate': 'fas fa-stamp',
             'ncpdptelecom.map_to_canonical': 'fas fa-random',
             'ncpdptelecom.build': 'fas fa-file-export',
+
+            // ASTM E1394-97 (lab instrument host-interface)
+            'astm.parse': 'fas fa-vial',
+            'astm.validate': 'fas fa-stamp',
+            'astm.build': 'fas fa-file-export',
+
+            // DICOM Storage SCP (imaging)
+            'dicom.parse': 'fas fa-x-ray',
 
             // ============================================
             // CDA/CCD

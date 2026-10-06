@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,14 +10,58 @@ import (
 	"strings"
 
 	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/services/executors"
 )
 
+// extractHL7ValueAtomic reads one HL7 field (or component, when
+// mapping.HL7Component is set) from enhancedSegments for a single
+// FieldMapping rule — the actual, per-value extraction work underneath
+// HL7FHIRTransformServiceV3.Transform's own hl7_fhir_transform step (as
+// opposed to fhir.build, which reads the identical "SEGMENT.FIELD[.COMPONENT]"
+// shape via resolveHL7FieldValue/field_utils.go's own, already-live-tracked
+// path). Until 2026-10, this specific function was the one remaining HL7
+// read path Coverage Audit could never see live — hl7_adapter.go's own doc
+// comment names the reason: this whole service is a single, shared,
+// concurrently-used instance, and threading per-message state through its
+// deep internal call chain was judged too risky to attempt casually.
+//
+// Closed via ctx (context.Context), not a struct field on s — ctx values are
+// immutable and genuinely per-call, so two concurrently-processed messages
+// can never cross-contaminate each other's tracker here, unlike a shared
+// mutable field would. The tracker itself is attached by
+// HL7FHIRMappingExecutor.Execute (executor_registry.go) only when that
+// message's own interface has Coverage Audit enabled; for every other real
+// message (the overwhelming majority of traffic) ctx.Value below simply
+// returns nil and this whole block is a single no-op type-assertion check —
+// zero behavior change, zero added cost, to the actual field EXTRACTION this
+// function was already doing.
 func (s *HL7FHIRTransformServiceV3) extractHL7ValueAtomic(
+	ctx context.Context,
 	enhancedSegments map[string]interface{},
 	mapping FieldMapping,
 ) (string, bool) {
 	log.Printf("🔍 extractHL7ValueAtomic called: segment=%s, field=%s, component=%s",
 		mapping.SegmentName, mapping.HL7Field, mapping.HL7Component)
+
+	// Coverage Audit: record this field/component as read by a real,
+	// configured mapping rule — BEFORE any early return below, since a rule
+	// "using" a field is true the moment it's referenced, independent of
+	// whether THIS particular message happens to have that segment/field
+	// populated (mirrors resolveJSONPathValue's own "record unconditionally,
+	// at the very top" convention in field_utils.go). Key format
+	// ("SEGMENT.FIELD" or "SEGMENT.FIELD.COMPONENT") deliberately duplicates
+	// (rather than reuses) the expectedFieldKey construction further down,
+	// which is computed too late for this early, unconditional record and
+	// exists for this function's own, separate lookup purpose — kept as two
+	// small, independently-obvious fmt.Sprintf calls rather than restructuring
+	// this function's existing control flow to share one.
+	if tracker, ok := ctx.Value(hl7CoverageTrackerContextKey).(*executors.CDACoverageTracker); ok && tracker != nil {
+		trackingKey := mapping.SegmentName + "." + mapping.HL7Field
+		if mapping.HL7Component != "" {
+			trackingKey = trackingKey + "." + mapping.HL7Component
+		}
+		tracker.Record(trackingKey)
+	}
 
 	// Get the segment
 	segment, segmentExists := enhancedSegments[mapping.SegmentName].(map[string]interface{})

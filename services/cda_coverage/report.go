@@ -185,13 +185,28 @@ type entryGroup struct {
 	uscdiClasses []string
 }
 
-// BuildReport groups inventory by category (and, within a category, by
-// entry — see entryGroup) and marks each item found/missed against touched
-// (a CDACoverageTracker.Snapshot() result — see cda_coverage_tracker.go).
+// BuildReport is BuildReportWithClassifier using CDA's own administrative/
+// structural classifier (element_classifier.go) — unchanged signature and
+// behavior for every existing caller/test, so generalizing this package to
+// other formats (see registry.go) never touched CDA's own reports.
+func BuildReport(inventory []InventoryItem, touched map[string]struct{}) *Report {
+	return BuildReportWithClassifier(inventory, touched, isAdministrativeElementPath)
+}
+
+// BuildReportWithClassifier is BuildReport, with the administrative/
+// structural classifier supplied by the caller instead of hardcoded to CDA's
+// own element_classifier.go table — every non-CDA Coverage Audit adapter
+// (registry.go) uses this directly with its own format's classifier. Groups
+// inventory by category (and, within a category, by entry — see entryGroup)
+// and marks each item found/missed against touched (a
+// CDACoverageTracker.Snapshot() result — see cda_coverage_tracker.go).
 // Deterministic order: category and entry order both follow inventory's own
 // first-seen order, so the report reads the same way run to run for the
 // same document shape.
-func BuildReport(inventory []InventoryItem, touched map[string]struct{}) *Report {
+func BuildReportWithClassifier(inventory []InventoryItem, touched map[string]struct{}, isAdmin func(path string) bool) *Report {
+	if isAdmin == nil {
+		isAdmin = func(string) bool { return false }
+	}
 	var categoryOrder []string
 	groupsByCategory := make(map[string][]*entryGroup)
 	groupIndex := make(map[entryGroupKey]*entryGroup)
@@ -225,12 +240,12 @@ func BuildReport(inventory []InventoryItem, touched map[string]struct{}) *Report
 			continue
 		}
 
-		isAdmin := isAdministrativeElementPath(item.ElementPath)
+		admin := isAdmin(item.ElementPath)
 		g.elementTotalAll++
 		if isTouched {
 			g.elementFoundAll++
 		}
-		if !isAdmin {
+		if !admin {
 			g.elementTotal++
 			if isTouched {
 				g.elementFound++
@@ -240,7 +255,7 @@ func BuildReport(inventory []InventoryItem, touched map[string]struct{}) *Report
 			g.missedElements = append(g.missedElements, ElementGap{
 				Path:           item.ElementPath,
 				Label:          elementLabel(item.ElementPath),
-				Administrative: isAdmin,
+				Administrative: admin,
 			})
 		}
 	}
@@ -384,15 +399,26 @@ func SaveReport(ctx context.Context, db *sql.DB, job models.CoverageAuditJob, re
 		return fmt.Errorf("cda_coverage: marshal category_stats: %w", err)
 	}
 
+	// SourceFormat is populated from the message envelope's own "_format" key
+	// (see outbound_connector_executor.go's publishCoverageAudit) — every job
+	// that reaches here already passed the coverage.AdapterFor(format) gate
+	// in ExecutePipeline, so it should never be empty, but default to "ccda"
+	// (this table's original, only-ever format) rather than persist an empty
+	// string if some future caller ever forgets to set it.
+	sourceFormat := job.SourceFormat
+	if sourceFormat == "" {
+		sourceFormat = "ccda"
+	}
+
 	const q = `
 		INSERT INTO cda_coverage_audits
 			(interface_id, message_id, step_id, step_name, connector_type,
-			 destination, delivery_outcome, overall_coverage_pct, category_stats)
-		VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, $6, $7, $8, $9)
+			 destination, delivery_outcome, overall_coverage_pct, category_stats, source_format)
+		VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, $6, $7, $8, $9, $10)
 	`
 	_, err = db.ExecContext(ctx, q,
 		job.InterfaceID, job.MessageID, job.StepID, job.StepName, job.ConnectorType,
-		job.Destination, job.Outcome, report.OverallCoveragePct, categoryStatsJSON,
+		job.Destination, job.Outcome, report.OverallCoveragePct, categoryStatsJSON, sourceFormat,
 	)
 	if err != nil {
 		return fmt.Errorf("cda_coverage: insert cda_coverage_audits: %w", err)

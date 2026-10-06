@@ -224,8 +224,39 @@ func (e *ScriptEnrichmentExecutor) executeScript(
 			log.Printf("   ⚠️  'enriched' key not found or not a map in inputData!")
 		}
 
-		// Set input data in VM (read-only view of the pipeline message)
-		if err := vm.Set("input", inputData); err != nil {
+		// Set input data in VM (read-only view of the pipeline message).
+		//
+		// Coverage Audit: when a tracker is attached to the message envelope
+		// (inputData["message"]["_coverageTracker"] — see
+		// transformation_pipeline_helpers.go), swap in a tracking-wrapped
+		// view of JUST the "message" sub-object before exposing it to the
+		// script, so every property/array read the script does against
+		// input.message.* is recorded onto the same tracker
+		// resolveJSONPathValue/resolveHL7FieldValue already record direct
+		// fhir.build sourcePath reads into (services/executors/
+		// coverage_script_tracking.go) — this is what makes EDI 837P claims,
+		// NCPDP renewal/dispense responses, and NCPDP Telecom B1 claim rows
+		// (all flattened by a script like this one before fhir.build ever
+		// sees them) visible to Coverage Audit at all. A shallow copy, not a
+		// mutation of inputData itself — "enriched"/"$vars"/"_variableContext"
+		// etc. are pipeline-computed, not source data, and stay completely
+		// untouched/untracked. Opt-in and zero-cost when no tracker is
+		// present (the overwhelming majority of pipeline runs): inputForVM is
+		// then just inputData itself, unchanged from before this feature.
+		inputForVM := inputData
+		if msg, ok := inputData["message"].(map[string]interface{}); ok {
+			if tracker, ok := msg["_coverageTracker"].(*executors.CDACoverageTracker); ok && tracker != nil {
+				if wrapped := executors.NewCoverageTrackingObject(vm, msg, tracker); wrapped != nil {
+					shallowCopy := make(map[string]interface{}, len(inputData))
+					for k, v := range inputData {
+						shallowCopy[k] = v
+					}
+					shallowCopy["message"] = wrapped
+					inputForVM = shallowCopy
+				}
+			}
+		}
+		if err := vm.Set("input", inputForVM); err != nil {
 			errorChan <- fmt.Errorf("failed to set input data: %w", err)
 			return
 		}

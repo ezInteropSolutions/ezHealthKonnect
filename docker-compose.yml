@@ -24,20 +24,36 @@ services:
 
   # MinIO — S3-compatible object storage for raw messages, parsed content, and logs
   minio:
-    # Docker Hub's minio/minio now requires authentication to pull (MinIO restricted
-    # anonymous access in 2025) — quay.io/minio/minio is the same official image, still public.
-    image: quay.io/minio/minio:latest
+    # As of Sept 2026, MinIO's official image requires authentication to pull on BOTH Docker
+    # Hub and quay.io (an escalation past the Docker-Hub-only restriction from two weeks
+    # earlier) — no anonymous pull path remains for minio/minio anywhere. bitnamilegacy/minio
+    # is Bitnami's own frozen "legacy" tier (no further security updates — a real, accepted
+    # trade-off for local dev, user-confirmed 2026-09-26): still freely pullable, and a
+    # functionally faithful minio server once past first boot.
+    # `user: root` + no command override is deliberate, not a shortcut: this image runs
+    # non-root (UID 1001) by default, but its own entrypoint (setup.sh/run.sh) only fixes
+    # data-dir ownership and drops privileges internally to its own "minio" daemon user when
+    # the container itself starts as root — confirmed by reading those scripts directly.
+    # Running as non-root here would fail on both the pre-existing volume (owned by the old
+    # official image's UID) and any future fresh volume. MINIO_DATA_DIR points Bitnami's own
+    # default path (/bitnami/minio/data) at our existing mount; MINIO_BROWSER=on restores the
+    # console UI Bitnami disables by default. The existing `mc ready local` healthcheck needed
+    # no changes — this image bundles `mc` too, and setup.sh pre-configures the same "local"
+    # alias the official image's own healthcheck already assumed.
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+    user: root
     container_name: ezhealthkonnect-minio
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ezhealth_user
       MINIO_ROOT_PASSWORD: secure_password_change_me
+      MINIO_DATA_DIR: /data
+      MINIO_BROWSER: "on"
     ports:
       - "9000:9000"   # S3 API
       - "9001:9001"   # MinIO Console (browser UI)
     volumes:
       - minio_data:/data
-    command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
@@ -202,7 +218,9 @@ services:
       - "6610-6670:6610-6670"    # TCP MLLP port range for HL7 interfaces
       # Interface ports - HTTP range (FHIR/REST receivers)
       - "8081-8099:8081-8099"    # HTTP port range for FHIR/REST interfaces
-    
+      # Interface ports - DICOM range (Storage SCP imaging interfaces)
+      - "11112-11120:11112-11120"    # DICOM port range for imaging interfaces
+
     # ✅ FIXED: Complete volume mounting (was missing critical mounts)
     volumes:
       - ./public:/app/public

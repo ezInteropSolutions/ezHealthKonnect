@@ -268,6 +268,20 @@ func GetNestedValue(data map[string]interface{}, path string) interface{} {
 		unwrapped = true
 	}
 
+	// Coverage Audit: record this path as touched. GetNestedValue backs far
+	// more executors than field_utils.go's GetFieldValue does — field_mapping,
+	// enrichment.database, enrichment.api, file_parser, field_validation,
+	// fhir_validation, if_then_else/switch_case's condition checks, hl7.build's
+	// own Condition checks, and part of control.loop's collection resolution
+	// all read through this one function. Hooked once here, at the single
+	// funnel every caller goes through, rather than per internal branch
+	// (direct-key / HL7 / walkDottedPath all end up here regardless). Checked
+	// on actualData (post message-unwrap) so this works whether the caller
+	// passed the wrapped pipeline envelope or the unwrapped message directly.
+	if tracker, ok := actualData["_coverageTracker"].(*CDACoverageTracker); ok {
+		tracker.Record(path)
+	}
+
 	// Try direct key first (for simple paths)
 	if val, ok := actualData[path]; ok {
 		return val
@@ -452,6 +466,16 @@ func isHL7FieldKey(path string) bool {
 //   - "PID.5.1" -> searches enhancedSegments["PID"].Fields for Key="PID.5", then Subfields for Key="PID.5.1"
 //   - "MSH.9" -> searches enhancedSegments["MSH"].Fields for Key="MSH.9" and returns Value
 func getHL7FieldValue(data map[string]interface{}, fieldKey string) interface{} {
+	// Coverage Audit: record this HL7 field path as touched. A separate,
+	// distinct resolver from field_utils.go's resolveHL7FieldValue (this one
+	// backs GetNestedValue, that one backs GetFieldValue) — both need their
+	// own hook, since neither delegates to the other; see CLAUDE.md's
+	// Coverage Audit generalization section on why every genuinely distinct
+	// field-read call path must be instrumented, not just the first one found.
+	if tracker, ok := data["_coverageTracker"].(*CDACoverageTracker); ok {
+		tracker.Record(fieldKey)
+	}
+
 	// 1. Type-assert enhancedSegments as map[string]hl7.EnhancedSegment
 	enhancedSegsRaw, ok := data["enhancedSegments"]
 	if !ok {

@@ -120,6 +120,7 @@ const TEMPLATE_CATEGORY_META = {
     payer:      { label: 'Payers',       icon: '💰' },
     regulatory: { label: 'Regulatory',   icon: '⚖️' },
     specialty:  { label: 'Specialty',    icon: '🔬' },
+    device:     { label: 'Devices',      icon: '🔌' },
     custom:     { label: 'Mine',         icon: '⭐' },
 };
 
@@ -292,7 +293,7 @@ function _renderCategoryTabs(categories) {
     const totals = { all: _templatesState.all.length };
     for (const c of categories) totals[c.category] = c.count;
 
-    const order = ['all', 'emr', 'hl7v2', 'fhir', 'payer', 'regulatory', 'specialty', 'custom'];
+    const order = ['all', 'emr', 'hl7v2', 'fhir', 'payer', 'regulatory', 'specialty', 'device', 'custom'];
     const present = new Set(['all', ...(categories.map(c => c.category))]);
 
     tabs.innerHTML = order
@@ -384,74 +385,12 @@ function _renderTemplateCard(t) {
         </div>`;
 }
 
-// Sensitive field keys that must be blanked when instantiating from a template.
-// Must stay in sync with services/interfaceTemplateSanitizer.js SENSITIVE_PATTERNS.
-const _SENSITIVE_KEYS = new Set([
-    'password','secret','token','api_key','access_key','client_secret','private_key',
-    'cert_content','certificate_content','bearer',
-    'host','hostname','ip_address','server','endpoint','url','base_url','fhir_base_url',
-    'server_url','connection_string','dsn','port',
-    'username','client_id','tenant',
-    'database','db_name','table_name','collection','schema_name','index_name',
-    'account','warehouse','workspace_id','cluster','project_id',
-    'bucket','container_name','region','queue_name','topic','namespace',
-    'directory','folder','file_path',
-]);
-const _SAFE_KEYS = new Set([
-    'method','content_type','auth_type','auth_method','mode','enable_tls','tls',
-    'ssl_mode','encoding','max_connections','polling_interval','batch_size',
-    'timeout','retry','version','scope','sending_app','sending_facility',
-    'ack','on_error','text_success','text_error',
-]);
-
-function _sensitiveKey(key) {
-    const k = key.toLowerCase();
-    for (const s of _SAFE_KEYS) { if (k === s || k.startsWith(s + '_') || k.endsWith('_' + s)) return false; }
-    for (const p of _SENSITIVE_KEYS) { if (k.includes(p)) return true; }
-    return false;
-}
-
-function _sanitizeStepConfig(cfg) {
-    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return cfg;
-    const out = {};
-    for (const [k, v] of Object.entries(cfg)) {
-        if (_sensitiveKey(k)) {
-            out[k] = '';
-        } else if (v && typeof v === 'object' && !Array.isArray(v)) {
-            out[k] = _sanitizeStepConfig(v);
-        } else {
-            out[k] = v;
-        }
-    }
-    return out;
-}
-
 function _escHtml(str) {
     return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function _formatConnType(type) {
     return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).replace(' Inbound','').replace(' Outbound','');
-}
-
-// ── Inject user-provided connector values into sanitized pipeline steps ────────
-function _injectConnectorValues(groups, srcVals, tgtVals) {
-    const hasSrc = Object.keys(srcVals).length > 0;
-    const hasTgt = Object.keys(tgtVals).length > 0;
-    if (!hasSrc && !hasTgt) return groups;
-    return groups.map(g => ({
-        ...g,
-        steps: (g.steps || []).map(step => {
-            const sType = step.step_type || step.type || '';
-            if (sType === 'connector.inbound' && hasSrc) {
-                return { ...step, config: { ...step.config, config: { ...(step.config?.config || {}), ...srcVals } } };
-            }
-            if (sType === 'connector.outbound' && hasTgt) {
-                return { ...step, config: { ...step.config, config: { ...(step.config?.config || {}), ...tgtVals } } };
-            }
-            return step;
-        }),
-    }));
 }
 
 // ── Tab switcher for preview modal ────────────────────────────────────────────
@@ -653,10 +592,108 @@ async function deleteTemplate(id, name) {
     }
 }
 
+// Renders required_connection_fields (shape: {section, field, label, type,
+// hint, required} — field may be a dot-path like "host_query.enabled") as
+// real input controls, grouped by section. Previously this manifest was only
+// ever shown read-only in previewTemplate()'s checklist; useTemplate() below
+// now actually collects these values and sends them through the existing
+// (previously unused) source_values/target_values merge path.
+// Resolves any required_connection_fields entries of type "select" that
+// declare a dynamic `optionsEndpoint` (e.g. serial_inbound's own port_name
+// field, backed by GET /api/connectivity/serial-ports) into a plain
+// `options` array, fetched once before the modal renders — keeping
+// _renderRequiredFieldsSection itself synchronous rather than needing a
+// Loading-placeholder + async re-render cycle for this one field type. A
+// static `options` array (no `optionsEndpoint`) is left untouched. A fetch
+// failure degrades to an empty options list (never throws) — the select
+// still renders, just with nothing pre-filled, same as a serial port
+// genuinely not being detected right now.
+async function _resolveDynamicFieldOptions(fields) {
+    if (!fields || !fields.length) return;
+    const dynamic = fields.filter(f => f.type === 'select' && f.optionsEndpoint && !f.options);
+    await Promise.all(dynamic.map(async (f) => {
+        try {
+            const res = await fetch(f.optionsEndpoint, { credentials: 'include' });
+            const data = await res.json();
+            f.options = data.ports || data.options || [];
+        } catch (err) {
+            f.options = [];
+        }
+    }));
+}
+
+function _renderRequiredFieldsSection(fields) {
+    if (!fields || !fields.length) return '';
+    const bySection = {};
+    fields.forEach(f => { (bySection[f.section] || (bySection[f.section] = [])).push(f); });
+
+    const renderField = (f) => {
+        const idAttr = `tcf_field_${f.section}_${String(f.field).replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const reqMark = f.required ? ' <span style="color:#e65100">*</span>' : '';
+        const hint = f.hint ? `<div style="font-size:0.72rem;color:#999;margin-top:3px">${_escHtml(f.hint)}</div>` : '';
+        const common = `data-tcf-section="${_escHtml(f.section)}" data-tcf-field="${_escHtml(f.field)}" data-tcf-required="${f.required ? '1' : '0'}"`;
+
+        if (f.type === 'boolean') {
+            return `<div style="margin-bottom:14px">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:#1a1a2e">
+                    <input type="checkbox" id="${idAttr}" ${common} data-tcf-type="boolean">
+                    ${_escHtml(f.label)}${reqMark}
+                </label>${hint}
+            </div>`;
+        }
+        if (f.type === 'select') {
+            const opts = (f.options || []).map(o => {
+                const val = (o && typeof o === 'object') ? o.value : o;
+                const label = (o && typeof o === 'object') ? (o.label || o.value) : o;
+                return `<option value="${_escHtml(String(val))}">${_escHtml(String(label))}</option>`;
+            }).join('');
+            const emptyOption = (!f.options || !f.options.length)
+                ? `<option value="" disabled>${f.optionsEndpoint ? 'No ports detected — enter the value manually in Pipeline Builder later' : 'No options available'}</option>`
+                : '';
+            return `<div style="margin-bottom:14px">
+                <label style="display:block;font-size:0.78rem;font-weight:600;color:#444;margin-bottom:5px">${_escHtml(f.label)}${reqMark}</label>
+                <select id="${idAttr}" ${common} data-tcf-type="select"
+                    style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #dde1e7;border-radius:7px;font-size:0.9rem;color:#1a1a2e;background:#fafbfc">
+                    <option value="">— Select —</option>
+                    ${opts}
+                    ${emptyOption}
+                </select>${hint}
+            </div>`;
+        }
+        if (f.type === 'textarea') {
+            return `<div style="margin-bottom:14px">
+                <label style="display:block;font-size:0.78rem;font-weight:600;color:#444;margin-bottom:5px">${_escHtml(f.label)}${reqMark}</label>
+                <textarea id="${idAttr}" ${common} data-tcf-type="textarea" rows="3"
+                    style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #dde1e7;border-radius:7px;font-size:0.9rem;color:#1a1a2e;background:#fafbfc;font-family:inherit"></textarea>${hint}
+            </div>`;
+        }
+        const inputType = f.type === 'password' ? 'password' : (f.type === 'number' ? 'number' : (f.type === 'url' ? 'url' : 'text'));
+        return `<div style="margin-bottom:14px">
+            <label style="display:block;font-size:0.78rem;font-weight:600;color:#444;margin-bottom:5px">${_escHtml(f.label)}${reqMark}</label>
+            <input type="${inputType}" id="${idAttr}" ${common} data-tcf-type="${_escHtml(f.type || 'string')}" autocomplete="off"
+                style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #dde1e7;border-radius:7px;font-size:0.9rem;color:#1a1a2e;background:#fafbfc">${hint}
+        </div>`;
+    };
+
+    const sectionBlock = (label, items) => (items && items.length) ? `
+        <div style="margin-bottom:16px">
+            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#aaa;margin-bottom:8px">${label}</div>
+            ${items.map(renderField).join('')}
+        </div>` : '';
+
+    return `
+        <div style="margin-bottom:18px;padding:14px;background:#fff;border:1px solid #e8ecf0;border-radius:8px">
+            <div style="font-size:0.85rem;font-weight:700;color:#1a1a2e;margin-bottom:10px">Connection Details</div>
+            ${sectionBlock('Source Connection', bySection.source)}
+            ${sectionBlock('Destination Connection', bySection.target)}
+        </div>`;
+}
+
 async function useTemplate(id) {
     document.getElementById('tgConfigureModal')?.remove();
 
-    // Only need the template — no connector config fields shown here
+    // Needs the full template now — required_connection_fields drives the
+    // real input form below, not just the read-only preview checklist.
     let t;
     try {
         const res = await fetch(`/api/interface-templates/${id}`, { credentials: 'include' });
@@ -667,6 +704,10 @@ async function useTemplate(id) {
         AppDialogs.toast('Could not load template: ' + err.message, 'error');
         return;
     }
+
+    // Resolve any dynamic select-field options (e.g. live COM-port list)
+    // before building the modal, so rendering itself stays synchronous.
+    await _resolveDynamicFieldOptions(t.required_connection_fields);
 
     // Pipeline step preview
     const steps = t.preview_steps || [];
@@ -711,8 +752,12 @@ async function useTemplate(id) {
                 <div style="padding:10px 14px;background:#f0f4ff;border-radius:8px;border:1px solid #c5cff9;margin-bottom:12px;font-size:0.79rem;color:#3b4a9e;line-height:1.55">
                     <strong>📥 ${_escHtml(_formatConnType(t.source_connector_type || ''))}
                     ${t.target_connector_type ? '→ 📤 ' + _escHtml(_formatConnType(t.target_connector_type)) : ''}</strong><br>
-                    After creation you'll be guided to configure these connectors using the full connector editor in Pipeline Builder.
+                    ${(t.required_connection_fields || []).length
+                        ? 'Fill in the fields below and this pipeline is ready to use. Anything else can be fine-tuned later in Pipeline Builder.'
+                        : "After creation you'll be guided to configure these connectors using the full connector editor in Pipeline Builder."}
                 </div>` : ''}
+
+                ${_renderRequiredFieldsSection(t.required_connection_fields)}
 
                 <div id="tcf_error" style="display:none;color:#c0392b;font-size:0.82rem;padding:8px 12px;background:#fef2f2;border-radius:6px;margin-bottom:4px"></div>
             </div>
@@ -732,6 +777,64 @@ async function useTemplate(id) {
     document.getElementById('tcf_name')?.select();
 }
 
+// Collects values out of the real input controls _renderRequiredFieldsSection
+// rendered (one per required_connection_fields entry), grouped into
+// source_values/target_values for the /use call's merge path.
+//
+// Deliberately does NOT block submission on a missing "required" field —
+// the `required` flag is shown to the user as guidance (an asterisk) only.
+// Every existing OOB template (EDI/NCPDP/CDA/Da Vinci PAS/etc.) already has
+// `required: true` entries for fields like SFTP host/username that a user
+// legitimately may not have on hand yet when first creating the interface;
+// the established, already-tested workflow for all of them is "name it,
+// create it, fill in real connectivity later in Pipeline Builder." A hard
+// block here would silently break that existing flow for every one of
+// those templates. Values the user DID provide are still collected and
+// merged normally — this only changes behavior for fields left blank.
+function _collectTemplateConnectionValues() {
+    const sourceValues = {};
+    const targetValues = {};
+    // Tracked separately from sourceValues/targetValues (which deliberately
+    // omit blank fields so they don't overwrite a template default) — used
+    // only to decide whether it's honest to attempt activation at all. See
+    // _submitConfigureTemplate's own use of this: activating an inbound
+    // connector that's missing a REQUIRED field (e.g. serial_inbound with no
+    // port_name) can return {success:true} at the HTTP layer even though the
+    // connector itself never actually started (processing/engine.go logs a
+    // warning and continues rather than failing the whole activation — a
+    // real, pre-existing platform behavior for tolerating partial failure
+    // across multiple connector.inbound steps) — which would otherwise show
+    // a misleading "waiting for your device" screen for a connector that
+    // was never really listening.
+    let missingRequiredSourceField = false;
+
+    document.querySelectorAll('#tgConfigureModal [data-tcf-field]').forEach(el => {
+        const section = el.dataset.tcfSection;
+        const field = el.dataset.tcfField;
+        const type = el.dataset.tcfType;
+        const required = el.dataset.tcfRequired === '1';
+
+        let value;
+        if (type === 'boolean') {
+            value = el.checked;
+        } else if (type === 'number') {
+            value = el.value.trim() === '' ? '' : Number(el.value);
+        } else {
+            value = el.value.trim();
+        }
+
+        const isEmpty = type !== 'boolean' && (value === '' || Number.isNaN(value));
+        if (isEmpty) {
+            if (required && section === 'source') missingRequiredSourceField = true;
+            return;
+        }
+
+        (section === 'target' ? targetValues : sourceValues)[field] = value;
+    });
+
+    return { sourceValues, targetValues, missingRequiredSourceField };
+}
+
 async function _submitConfigureTemplate(templateId) {
     const btn = document.getElementById('tcf_submit');
     const errEl = document.getElementById('tcf_error');
@@ -744,22 +847,33 @@ async function _submitConfigureTemplate(templateId) {
         return;
     }
 
+    const { sourceValues, targetValues, missingRequiredSourceField } = _collectTemplateConnectionValues();
+
     btn.textContent = 'Creating…';
     btn.disabled = true;
 
     try {
-        // 1. Get the template scaffold (pipeline_config + message_type)
+        // 1. Get the template scaffold. Sending source_values/target_values
+        // here does two merges server-side: into the (display-only)
+        // source_config_template/target_config_template columns, AND into
+        // pipeline_config's own connector.inbound/connector.outbound steps
+        // — the latter is what processing/engine.go's ActivateInterface
+        // actually reads to start the real connector, so this is the part
+        // that makes a collected port/toggle value actually take effect.
         const scaffoldRes = await fetch(`/api/interface-templates/${templateId}/use`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ interface_name: name }),
+            body: JSON.stringify({ interface_name: name, source_values: sourceValues, target_values: targetValues }),
         });
         const scaffoldData = await scaffoldRes.json();
         if (!scaffoldData.success) throw new Error(scaffoldData.error || 'Failed to load template');
         const s = scaffoldData.interface_scaffold;
 
-        // 2. Create the interface — no connector type locked in; user configures connectivity in the editor
+        // 2. Create the interface. Deliberately still leaves sourceType/
+        // targetType/sourceConfig/targetConfig blank here — those columns
+        // are display-only (see comment above); the real connector config
+        // lives inside the pipeline saved in step 3 below.
         const ifaceRes = await fetch('/api/interfaces', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -778,35 +892,32 @@ async function _submitConfigureTemplate(templateId) {
         if (!ifaceData.success) throw new Error(ifaceData.error || ifaceData.debug || 'Failed to create interface');
         const interfaceId = ifaceData.interface?.id || ifaceData.id;
 
-        // 3. Save the transformation pipeline steps (connector-agnostic — no connector.inbound/outbound)
-        //    User will add their own source/destination connectors via the pipeline builder
+        // 3. Save the transformation pipeline steps — pipeline_config here
+        // is the scaffold's ALREADY-MERGED copy from step 1 (real
+        // port/host_query/endpoint/bearer_token values already inside the
+        // connector.inbound/connector.outbound steps where applicable).
         const pipelineCfg = s.pipeline_config || {};
 
-        // Diagnose: log embedded_mappings presence in template pipeline
         const _allSteps = (pipelineCfg.execution_groups || []).flatMap(g => g.steps || []);
         console.log(`[UseTemplate] Template has ${_allSteps.length} steps`);
-        _allSteps.forEach(st => {
-            const hasEmb = !!(st.config && st.config.embedded_mappings);
-            const embCount = hasEmb && st.config.embedded_mappings.atomicMappings
-                ? st.config.embedded_mappings.atomicMappings.length : 'n/a';
-            console.log(`[UseTemplate] Step "${st.step_name}" type="${st.step_type}" has_embedded_mappings=${hasEmb} atomic_count=${embCount}`);
-        });
-        // Strip step IDs so the controller generates fresh UUIDs — avoids duplicate key
-        // errors when the template was saved from an existing interface's pipeline.
-        // Also strip sensitive fields from step configs as a defence-in-depth measure
-        // (template may have been saved before sanitization was in place).
-        const CONNECTOR_TYPES = new Set(['connector.inbound', 'connector.outbound']);
+
+        // Strip step IDs so the controller generates fresh UUIDs — avoids
+        // duplicate key errors when the template was saved from an existing
+        // interface's pipeline. Deliberately does NOT re-sanitize connector
+        // step configs here anymore — that used to blank out 'host'/'port'
+        // unconditionally (services/interfaceTemplateSanitizer.js's own
+        // SENSITIVE_PATTERNS include a bare 'port'), which would have
+        // silently wiped the real values a user just typed into this very
+        // form. Sanitization belongs at template-AUTHORING time
+        // (interfaceTemplateSanitizer.sanitizeInterfaceForTemplate, already
+        // applied when a real interface is saved AS a template), not here.
         const groups = (pipelineCfg.execution_groups || []).map(g => ({
             ...g,
-            steps: (g.steps || []).map(({ id, ...step }) => ({
-                ...step,
-                // Only sanitize connector steps; preserve all other step configs intact
-                config: CONNECTOR_TYPES.has(step.step_type || step.type || '')
-                    ? _sanitizeStepConfig(step.config)
-                    : step.config,
-            })),
+            steps: (g.steps || []).map(({ id, ...step }) => step),
         }));
+        let hasInboundConnector = false;
         if (groups.length > 0 && interfaceId) {
+            hasInboundConnector = groups.some(g => (g.steps || []).some(st => (st.step_type || st.type) === 'connector.inbound'));
             const pipelineRes = await fetch('/api/pipelines', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -827,6 +938,56 @@ async function _submitConfigureTemplate(templateId) {
         }
 
         document.getElementById('tgConfigureModal')?.remove();
+
+        // 4. Activate, then show a real "is it working" check — only
+        // meaningful once real connector values exist, so only attempted
+        // when the user actually filled in connection details for an
+        // inbound connector. A failed activation is non-fatal here (same
+        // "interface still created" treatment wizardController.js's own
+        // handleOptimizedWizard already uses) — the user can still activate
+        // manually from the interface page.
+        //
+        // Deliberately skipped entirely when a required source field is
+        // still blank (missingRequiredSourceField) — found via a real
+        // Playwright run against the ASTM/Serial template: activating with
+        // no port_name returned {success:true} at the HTTP layer (a
+        // pre-existing processing/engine.go behavior that logs the
+        // connector's own validation failure and continues, rather than
+        // failing the whole activation — tolerating partial failure across
+        // multiple connector.inbound steps), which would otherwise show the
+        // "waiting for your device" screen for a connector that was never
+        // actually listening.
+        if (hasInboundConnector && !missingRequiredSourceField && (Object.keys(sourceValues).length > 0)) {
+            let activated = false;
+            let activationWarnings = null;
+            try {
+                const actRes = await fetch(`/api/runtime/interfaces/${encodeURIComponent(interfaceId)}/activate`, {
+                    method: 'POST', credentials: 'include',
+                });
+                const actData = await actRes.json().catch(() => ({}));
+                activated = !!actData.success;
+                if (Array.isArray(actData.warnings) && actData.warnings.length > 0) {
+                    activationWarnings = actData.warnings;
+                }
+            } catch (_) { /* non-fatal */ }
+
+            // activationWarnings means the HTTP call reported success but the
+            // engine itself logged that this step's connector never actually
+            // started (see processing/engine.go's activationWarnings doc
+            // comment) — exactly the gap this comment block already named as
+            // a risk before that mechanism existed. Showing the "waiting for
+            // your device" screen here would poll forever for a message that
+            // can structurally never arrive, so show the real reason instead.
+            if (activated && activationWarnings) {
+                _showDeviceActivationWarning(interfaceId, activationWarnings);
+                return;
+            }
+            if (activated) {
+                _showDeviceVerificationStep(interfaceId);
+                return;
+            }
+        }
+
         window.location.href = `pipeline-builder.html?interfaceId=${encodeURIComponent(interfaceId)}`;
     } catch (err) {
         errEl.textContent = err.message;
@@ -834,6 +995,104 @@ async function _submitConfigureTemplate(templateId) {
         btn.textContent = '▶ Create Interface';
         btn.disabled = false;
     }
+}
+
+// Shown after a successful create + activate when the user actually
+// configured a real inbound connector (e.g. a device template's port).
+// Polls the SAME per-interface recent-messages endpoint the interface
+// detail page already uses — deliberately NOT the generic connector
+// TestConnection check (POST /api/connectivity/test), which for a
+// listener-style connector like tcp_mllp_inbound only proves the port was
+// free to bind a moment ago, nothing about whether a real device has ever
+// reached it (confirmed by reading tcp_mllp_inbound.go's own
+// TestConnection() directly).
+function _showDeviceVerificationStep(interfaceId) {
+    const overlay = document.createElement('div');
+    overlay.id = 'tgVerifyModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,20,40,0.45);z-index:1150;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = `
+        <div style="background:#fff;border-radius:14px;width:420px;max-width:92vw;padding:30px 26px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,0.22)">
+            <div id="tgVerifySpinner" style="font-size:2.1rem;margin-bottom:14px">⏳</div>
+            <div id="tgVerifyTitle" style="font-size:1rem;font-weight:700;color:#1a1a2e;margin-bottom:8px">Waiting for your device's first message…</div>
+            <div id="tgVerifySubtitle" style="font-size:0.82rem;color:#777;margin-bottom:22px;line-height:1.5">Your interface is active and listening. Send a test message from the device now — or skip this and check back later.</div>
+            <div style="display:flex;gap:10px;justify-content:center">
+                <button onclick="_skipDeviceVerification('${interfaceId}')"
+                    style="padding:9px 18px;border-radius:8px;font-size:0.85rem;font-weight:600;cursor:pointer;border:none;background:#f0f2f5;color:#555">Skip / I'll check later</button>
+                <a id="tgVerifyGoBtn" href="interface-detail.html?interfaceId=${encodeURIComponent(interfaceId)}"
+                    style="display:none;padding:9px 18px;border-radius:8px;font-size:0.85rem;font-weight:600;text-decoration:none;background:#2fa86a;color:#fff">View Interface</a>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+
+    let attempts = 0;
+    const maxAttempts = 60; // ~4 minutes at 4s each — generous, not infinite
+    const poll = async () => {
+        attempts++;
+        try {
+            const res = await fetch(`/api/messages/interface/${encodeURIComponent(interfaceId)}?limit=1`, { credentials: 'include' });
+            const data = await res.json();
+            const inner = data.data || data;
+            const messages = Array.isArray(inner) ? inner : (inner.messages || inner.data || []);
+            if (messages.length > 0) {
+                const spinner = document.getElementById('tgVerifySpinner');
+                const title = document.getElementById('tgVerifyTitle');
+                const sub = document.getElementById('tgVerifySubtitle');
+                const goBtn = document.getElementById('tgVerifyGoBtn');
+                if (spinner) spinner.textContent = '✅';
+                if (title) title.textContent = "Received a message from your device!";
+                if (sub) sub.textContent = 'Your connection is working.';
+                if (goBtn) goBtn.style.display = '';
+                return;
+            }
+        } catch (_) { /* keep polling */ }
+
+        if (!document.getElementById('tgVerifyModal')) return; // user skipped/closed
+        if (attempts < maxAttempts) {
+            setTimeout(poll, 4000);
+        } else {
+            const title = document.getElementById('tgVerifyTitle');
+            const sub = document.getElementById('tgVerifySubtitle');
+            const goBtn = document.getElementById('tgVerifyGoBtn');
+            if (title) title.textContent = "Still waiting — that's OK.";
+            if (sub) sub.textContent = 'Your interface stays active. Check back any time from the interface page once your device sends something.';
+            if (goBtn) goBtn.style.display = '';
+        }
+    };
+    poll();
+}
+
+function _skipDeviceVerification(interfaceId) {
+    document.getElementById('tgVerifyModal')?.remove();
+    window.location.href = `pipeline-builder.html?interfaceId=${encodeURIComponent(interfaceId)}`;
+}
+
+// Shown instead of _showDeviceVerificationStep when the engine itself
+// reported that this interface's connector.inbound step never actually
+// started (processing/engine.go's activationWarnings — e.g. a required
+// config field left empty). Polling for a message here would wait forever
+// for something that can structurally never arrive, so this tells the user
+// exactly what to fix instead. warnings are server-sourced step
+// name/error strings (a step name is user-editable), so each is HTML-
+// escaped via the existing _escHtml helper before interpolation.
+function _showDeviceActivationWarning(interfaceId, warnings) {
+    const overlay = document.createElement('div');
+    overlay.id = 'tgVerifyModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,20,40,0.45);z-index:1150;display:flex;align-items:center;justify-content:center';
+    const warningItems = (warnings || []).map(w => `<li style="margin-bottom:4px">${_escHtml(w)}</li>`).join('');
+    overlay.innerHTML = `
+        <div style="background:#fff;border-radius:14px;width:460px;max-width:92vw;padding:30px 26px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,0.22)">
+            <div style="font-size:2.1rem;margin-bottom:14px">⚠️</div>
+            <div style="font-size:1rem;font-weight:700;color:#1a1a2e;margin-bottom:8px">Your interface was created, but didn't fully start</div>
+            <div style="font-size:0.82rem;color:#777;margin-bottom:12px;line-height:1.5">One or more connection steps couldn't start with the values you entered:</div>
+            <ul style="text-align:left;font-size:0.82rem;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 16px 12px 32px;margin:0 0 20px 0">${warningItems}</ul>
+            <div style="display:flex;gap:10px;justify-content:center">
+                <a href="pipeline-builder.html?interfaceId=${encodeURIComponent(interfaceId)}"
+                    style="padding:9px 18px;border-radius:8px;font-size:0.85rem;font-weight:600;text-decoration:none;background:#2fa86a;color:#fff">Fix Configuration</a>
+                <a href="interface-detail.html?interfaceId=${encodeURIComponent(interfaceId)}"
+                    style="padding:9px 18px;border-radius:8px;font-size:0.85rem;font-weight:600;text-decoration:none;background:#f0f2f5;color:#555">View Interface</a>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
 }
 
 function showMonitoringContent() {

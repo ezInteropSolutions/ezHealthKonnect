@@ -336,6 +336,20 @@ func resolveHL7FieldValue(data map[string]interface{}, path string) interface{} 
 		return nil
 	}
 
+	// Coverage Audit: record this HL7 field path as touched — see
+	// resolveJSONPathValue's own doc comment on this pattern; recorded once
+	// here (not also inside resolveHL7FieldFromMap below, which is only ever
+	// reached through this function, never called independently) since HL7
+	// paths (PID.3, PID.5.1) never reach resolveJSONPathValue themselves.
+	// resolveCoverageTracker (not a bare direct check) is required for the
+	// same reason resolveJSONPathValue needs it: a short "PID.3"-style
+	// sourcePath resolved via fhir.build against inputData is checked against
+	// the RAW, wrapped envelope, while the tracker itself lives inside
+	// inputData["message"] — see resolveCoverageTracker's own doc comment.
+	if tracker := resolveCoverageTracker(data); tracker != nil {
+		tracker.Record(path)
+	}
+
 	segmentKey := parts[0]
 	fieldPosition := 0
 	fmt.Sscanf(parts[1], "%d", &fieldPosition)
@@ -453,6 +467,50 @@ func resolveFHIRFieldValue(data map[string]interface{}, path string) interface{}
 	return resolveJSONPathValue(fhirData, path)
 }
 
+// resolveCoverageTracker returns the *CDACoverageTracker attached to data, if
+// any — checked both directly on data (the shape a first-pipeline-step's flat
+// envelope has, e.g. an http_fhir_inbound resource, or any already-unwrapped
+// message map) and one level down inside a "message" wrapper (the shape a
+// LATER pipeline step's own raw inputData has — executeStepWithContext always
+// builds inputData as {"message": execCtx.Message, "steps": ..., ...}, with
+// "steps" a SIBLING of "message", not nested under it). Without the second
+// check, any sourcePath resolved against that raw, still-wrapped inputData —
+// including every "steps.<alias>.step_output...." address — would never see
+// a tracker that in fact exists, just one level deeper than a bare check
+// looks. Mirrors GetNestedValue's (base_executor.go) already-proven-safe
+// dual-check for the exact same reason. Both callers below are pure,
+// stateless functions with no per-call state of their own, so this is a
+// strictly additive check: it only adds a NEW case where tracking now fires
+// correctly; every previously-working case (tracker found directly, or truly
+// absent) is completely unchanged.
+func resolveCoverageTracker(data map[string]interface{}) *CDACoverageTracker {
+	if tracker, ok := data["_coverageTracker"].(*CDACoverageTracker); ok {
+		return tracker
+	}
+	if msg, ok := data["message"].(map[string]interface{}); ok {
+		if tracker, ok := msg["_coverageTracker"].(*CDACoverageTracker); ok {
+			return tracker
+		}
+	}
+	return nil
+}
+
+// ResolveCoverageTracker is the exported form of resolveCoverageTracker, for
+// callers outside this package that need the identical "data directly, or one
+// level down inside a message wrapper" lookup — specifically
+// HL7FHIRMappingExecutor.Execute (services/executor_registry.go), which needs
+// to pull a tracker out of its own inputData and thread it into the
+// HL7FHIRTransformServiceV3.Transform call chain via context.Context, since
+// that engine's own field-extraction code has no access to the pipeline
+// envelope at all (see transform_hl7_extractor.go's own doc comment on this
+// 2026-10 addition). A new, additive wrapper rather than exporting the
+// existing private function directly, so every current internal call site
+// (and this function's own extensive "why both checks" doc comment above)
+// stays completely untouched.
+func ResolveCoverageTracker(data map[string]interface{}) *CDACoverageTracker {
+	return resolveCoverageTracker(data)
+}
+
 // resolveJSONPathValue retrieves value using dot notation with array support.
 // The returned value is normalised via normaliseResolvedValue so a caller
 // asserting ".([]interface{})" (every existing caller does — GetFieldValue's
@@ -470,6 +528,37 @@ func resolveFHIRFieldValue(data map[string]interface{}, path string) interface{}
 func resolveJSONPathValue(data map[string]interface{}, path string) interface{} {
 	if path == "" {
 		return nil
+	}
+
+	// Coverage Audit: record this path as touched. This one hook generalizes
+	// the CDA-only pattern in resolveCDADocumentFieldValue/resolveCDAFieldValue
+	// above to every format whose fhir.build/map_to_canonical sourcePath reads
+	// fall through to this generic resolver — confirmed FHIR (via
+	// resolveFHIRFieldValue's own delegation below), EDI X12, NCPDP SCRIPT,
+	// and NCPDP Telecom D.0 all have no dedicated resolver of their own today
+	// and land here. Nil-safe no-op when tracking is disabled — see
+	// CLAUDE.md's Coverage Audit generalization section.
+	//
+	// resolveCoverageTracker (not a bare data["_coverageTracker"] check) is
+	// required here: fhir.build/map_to_canonical/etc. call this resolver with
+	// `source` == the RAW, still-wrapped inputData executeStepWithContext
+	// builds ({"message": execCtx.Message, "steps": ..., ...}) whenever the
+	// sourcePath itself is a top-level key of THAT map (every "steps.<alias>.
+	// step_output...." address — the dominant shape real EDI/NCPDP OOB
+	// fhir.build configs use, since they read a prior enrichment.script
+	// derive step's own output). _coverageTracker itself, though, lives one
+	// level down at execCtx.Message["_coverageTracker"] (== inputData
+	// ["message"]["_coverageTracker"]), never at inputData's own top level. A
+	// bare direct check here would silently never fire for any such path —
+	// found while building NCPDP's own Coverage Audit adapter (whose tracked
+	// paths are ALWAYS "steps.X.step_output...."-shaped), and, once found,
+	// confirmed to be a real, pre-existing, format-agnostic gap affecting
+	// FHIR and any HL7 fhir.build sourcePath the same way, not something
+	// unique to NCPDP. Purely additive relative to the original bare check
+	// (see resolveCoverageTracker's own doc comment) — mirrors the identical
+	// dual-check GetNestedValue (base_executor.go) already established.
+	if tracker := resolveCoverageTracker(data); tracker != nil {
+		tracker.Record(path)
 	}
 
 	// Try direct key first

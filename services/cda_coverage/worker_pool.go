@@ -63,6 +63,23 @@ type WorkerPool struct {
 // same way; nothing here shares that one, and that's fine — uscdi_v3.json is
 // small and read-only after load).
 func NewWorkerPool(db *sql.DB, objStorage *storage.ObjectStorageService, schemaLoader *cdaSchema.CDASchemaLoader, vocabulary *uscdi.USCDIVocabulary) *WorkerPool {
+	// Register CDA's own coverage adapter under format key "ccda" — see
+	// registry.go's RegisterCDAAdapter doc comment for why this can't be a
+	// bare init() the way a package-level-singleton-backed format can.
+	RegisterCDAAdapter(schemaLoader, vocabulary)
+	// Register HL7 v2's own coverage adapter under format key "hl7v2" — see
+	// hl7_adapter.go's RegisterHL7Adapter doc comment.
+	RegisterHL7Adapter(db)
+	// Register NCPDP SCRIPT's and NCPDP Telecom D.0's own coverage adapters —
+	// same "needs a per-interface DB lookup, can't be a bare init()" reasoning
+	// as HL7's, see ncpdp_adapter.go's own doc comment.
+	RegisterNCPDPScriptAdapter(db)
+	RegisterNCPDPTelecomAdapter(db)
+	// Register EDI X12's own coverage adapter — same reasoning as above, see
+	// edi_adapter.go's own doc comment for why this one needed 3 reconciled
+	// addressing conventions instead of NCPDP's single one.
+	RegisterEDIAdapter(db)
+
 	p := &WorkerPool{
 		db:           db,
 		objStorage:   objStorage,
@@ -116,6 +133,15 @@ func (p *WorkerPool) process(job models.CoverageAuditJob) {
 		return
 	}
 
+	adapter, ok := adapterFor(job.SourceFormat)
+	if !ok {
+		// Shouldn't happen — ExecutePipeline only ever attaches a tracker for
+		// a format with a registered adapter (see registry.go) — but fail
+		// closed rather than assume "ccda" for an unrecognized format.
+		log.Printf("⚠️  [cda_coverage] no registered adapter for source_format=%q, message=%s", job.SourceFormat, job.MessageID)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), jobTimeout)
 	defer cancel()
 
@@ -124,14 +150,17 @@ func (p *WorkerPool) process(job models.CoverageAuditJob) {
 		log.Printf("⚠️  [cda_coverage] could not load parsed content for message=%s: %v", job.MessageID, err)
 		return
 	}
-	xmlMirror, _ := parsed["xml"].(map[string]interface{})
-	if xmlMirror == nil {
-		return // not a CDA message, or parse didn't reach the fidelity mirror — nothing to audit
-	}
 
 	elementLevel := p.resolveElementGranularity(ctx, job.InterfaceID)
-	inventory := BuildInventoryWithGranularity(xmlMirror, p.schemaLoader, p.vocabulary, elementLevel)
-	report := BuildReport(inventory, tracker.Snapshot())
+	inventory, err := adapter.BuildInventory(ctx, job.InterfaceID, parsed, elementLevel, tracker)
+	if err != nil {
+		log.Printf("⚠️  [cda_coverage] adapter %q failed building inventory for message=%s: %v", job.SourceFormat, job.MessageID, err)
+		return
+	}
+	if inventory == nil {
+		return // adapter had nothing to audit for this message (see its own BuildInventory doc comment)
+	}
+	report := BuildReportWithClassifier(inventory, tracker.Snapshot(), adapter.Classify)
 
 	if err := SaveReport(ctx, p.db, job, report); err != nil {
 		log.Printf("⚠️  [cda_coverage] failed to save report for message=%s: %v", job.MessageID, err)

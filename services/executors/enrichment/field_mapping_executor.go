@@ -176,6 +176,22 @@ func (e *FieldMappingExecutor) Execute(
 // field/subfield values) are unaffected -- those return a Go string either
 // way, now just without the redundant fmt.Sprintf wrapping.
 func (e *FieldMappingExecutor) resolveSourceValue(rhs string, inputData map[string]interface{}) (interface{}, error) {
+	// Coverage Audit: record this path as touched. Every branch below except
+	// the loop-item one already resolves through executors.GetNestedValue
+	// (which has its own hook) — but resolveFieldFromLoopItem operates on a
+	// single loop row (inputData["item"]), a sub-object with no tracker of
+	// its own, so it's recorded here instead, at the one call site with
+	// access to the full envelope. Not disambiguated by loop iteration (same
+	// instance-blind limitation this codebase's HL7 field addressing already
+	// has everywhere else) — a named simplification, not an oversight.
+	if tracker, ok := inputData["_coverageTracker"].(*executors.CDACoverageTracker); ok {
+		tracker.Record(rhs)
+	} else if msg, ok := inputData["message"].(map[string]interface{}); ok {
+		if tracker, ok := msg["_coverageTracker"].(*executors.CDACoverageTracker); ok {
+			tracker.Record(rhs)
+		}
+	}
+
 	// Handle system variables
 	if strings.HasPrefix(rhs, "${") && strings.HasSuffix(rhs, "}") {
 		varName := strings.TrimSuffix(strings.TrimPrefix(rhs, "${"), "}")

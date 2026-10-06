@@ -1082,7 +1082,7 @@ class MessageManager {
                         <div ${adminOnlyEntry ? 'data-cov-admin="1" style="display:none;"' : ''} style="border:1px solid #fde68a;border-radius:6px;margin-bottom:0.35rem;overflow:hidden;">
                             <button ${hasElementData ? `onclick="messageManager._toggleCoverageRow('${rowId}')"` : ''}
                                     style="width:100%;display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.6rem;background:#fffbeb;border:none;text-align:left;${hasElementData ? 'cursor:pointer;' : 'cursor:default;'}">
-                                <span style="flex:1;font-size:0.8rem;color:#1e293b;">${this.escapeHtml(m.sectionTitle || m.sectionKey || 'Unclassified')} <span style="color:#94a3b8;">#${m.entryIndex}</span></span>
+                                <span style="flex:1;font-size:0.8rem;color:#1e293b;">${this.escapeHtml(m.sectionTitle || m.sectionKey || 'Unclassified')}${m.entryIndex >= 0 ? ` <span style="color:#94a3b8;">#${m.entryIndex}</span>` : ''}</span>
                                 <span style="font-size:0.72rem;color:#94a3b8;">${summaryLabel}</span>
                                 ${hasElementData ? `<svg id="${rowId}-chevron" style="width:14px;height:14px;color:#94a3b8;flex-shrink:0;transition:transform 0.15s;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>` : ''}
                             </button>

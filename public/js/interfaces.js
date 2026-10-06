@@ -2281,14 +2281,48 @@ function showError(message) {
     const notification = document.createElement('div');
     notification.style.cssText = `
         position: fixed; top: 15px; right: 15px; z-index: 2000;
-        background: white; color: #dc2626; padding: 8px 12px; border-radius: 4px; 
-        border: 2px solid #fecaca; font-weight: 600; 
+        background: white; color: #dc2626; padding: 8px 12px; border-radius: 4px;
+        border: 2px solid #fecaca; font-weight: 600;
         box-shadow: 0 3px 10px rgba(0,0,0,0.1); font-size: 11px;
     `;
     notification.textContent = message;
     document.body.appendChild(notification);
-    
+
     setTimeout(() => notification.remove(), 4000);
+}
+
+// Used when an interface activates overall (HTTP 200) but one or more
+// connector.inbound steps were silently skipped — e.g. a required field
+// left empty — per processing/engine.go's own activationWarnings doc
+// comment. Without this, a user saw a plain "Activated successfully" with
+// zero indication their device integration never actually started (found
+// during a 360 QA pass, October 2026). Longer-lived than showSuccess/
+// showError since the message is multi-line and the user needs time to
+// read which step(s) failed.
+function showActivationWarning(message, warnings) {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed; top: 15px; right: 15px; z-index: 2000;
+        background: white; color: #92400e; padding: 10px 14px; border-radius: 4px;
+        border: 2px solid #fde68a; font-weight: 600;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.1); font-size: 11px; max-width: 420px;
+    `;
+    const title = document.createElement('div');
+    title.textContent = message;
+    title.style.marginBottom = '4px';
+    notification.appendChild(title);
+
+    const list = document.createElement('ul');
+    list.style.cssText = 'margin: 0; padding-left: 16px; font-weight: 400;';
+    (warnings || []).forEach(w => {
+        const li = document.createElement('li');
+        li.textContent = w; // textContent, not innerHTML — w is server-sourced step/error text
+        list.appendChild(li);
+    });
+    notification.appendChild(list);
+
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 9000);
 }
 
 /**
@@ -2582,20 +2616,19 @@ async function handleEditInterface(event) {
         interfaceData.dlq_config = dlqConfig;
     }
 
-    // Collect CDA Coverage Audit config (not managed by config manager) —
-    // only when the section is actually visible (populateEditForm in
-    // modal-components.js shows it solely for message_type === 'CCD'
-    // interfaces). A hidden, non-CCD interface's save leaves this field
-    // completely untouched rather than sending an explicit null for a
-    // setting that was never applicable to it in the first place.
+    // Collect Coverage Audit config (not managed by config manager) — the
+    // section is always visible now (no longer gated to message_type ===
+    // 'CCD', see modal-components.js's own doc comment on why a static
+    // message_type check can't reliably predict a generic connector's actual
+    // runtime format), so this only guards against the element genuinely not
+    // existing in the DOM (e.g. a stripped-down test harness).
     // "notify" is only included when at least one channel is checked — the
     // badge (always-on when enabled) doesn't need it, external notification
     // is opt-in on top. Sending an explicit `null` here (not omitting the
     // key) is what lets the backend tell "user unchecked this" apart from
     // "this editor doesn't know about the field" — see interfacesController.js.
-    const coverageSectionVisible = document.getElementById('editCdaCoverageAuditSection')?.style.display !== 'none';
     const coverageEnabledEl = document.getElementById('editCdaCoverageAuditEnabled');
-    if (coverageEnabledEl && coverageSectionVisible) {
+    if (coverageEnabledEl) {
         if (coverageEnabledEl.checked) {
             const coverageConfig = { enabled: true };
             // "entry" (the original, default granularity) is left as the
@@ -3441,7 +3474,12 @@ async function activateInterfaceProcessing(interfaceId) {
 
         if (response.ok) {
             console.log('✅ Interface activated:', data.message);
-            showSuccess(`Interface activated successfully`);
+            if (Array.isArray(data.warnings) && data.warnings.length > 0) {
+                console.warn('⚠️ Interface activated with step warnings:', data.warnings);
+                showActivationWarning('Activated, but one or more steps did not start:', data.warnings);
+            } else {
+                showSuccess(`Interface activated successfully`);
+            }
 
             // Update the interface status in memory
             const iface = interfaces.find(i => i.id === interfaceId);

@@ -392,23 +392,106 @@ function sanitizeInterfaceForTemplate(iface, connectivity, pipeline) {
     };
 }
 
+function isPlainObject(v) {
+    return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * Deep-merge two plain objects (source wins on conflicting leaves; nested
+ * plain objects are merged recursively rather than replaced wholesale, so
+ * setting one nested leaf never silently drops its siblings' defaults).
+ */
+function deepMerge(target, source) {
+    if (!isPlainObject(target)) return source;
+    if (!isPlainObject(source)) return source;
+    const out = { ...target };
+    for (const [k, v] of Object.entries(source)) {
+        out[k] = (isPlainObject(v) && isPlainObject(target[k])) ? deepMerge(target[k], v) : v;
+    }
+    return out;
+}
+
+/**
+ * Set a value into obj at a dot-path (e.g. "host_query.enabled"), creating
+ * intermediate plain objects as needed. A bare key (no dot) is just a
+ * path of length 1 — equivalent to a plain `obj[key] = value` assignment.
+ * If both the existing leaf and the incoming value are plain objects, they
+ * are deep-merged instead of one replacing the other outright.
+ */
+function setDeepValue(obj, path, value) {
+    const parts = String(path).split('.');
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+        const p = parts[i];
+        if (!isPlainObject(cur[p])) cur[p] = {};
+        cur = cur[p];
+    }
+    const leaf = parts[parts.length - 1];
+    cur[leaf] = (isPlainObject(value) && isPlainObject(cur[leaf])) ? deepMerge(cur[leaf], value) : value;
+}
+
 /**
  * Merge a template's scaffold config with user-provided connection details
  * to produce a ready-to-use interface connectivity config.
  *
+ * `userValues` keys may be dot-paths (e.g. "host_query.enabled") to target a
+ * nested value directly — used by device templates whose connector config
+ * nests feature toggles under a sub-object (ack/host_query), not just flat
+ * top-level fields like host/port.
+ *
  * @param {object} templateConfig - sanitized config from template
- * @param {object} userValues - user-provided {field: value} pairs
+ * @param {object} userValues - user-provided {field: value} pairs (field may be a dot-path)
  * @returns {object} - merged config
  */
 function mergeTemplateWithUserValues(templateConfig, userValues) {
-    if (!userValues || typeof userValues !== 'object') return { ...templateConfig };
-    const merged = { ...templateConfig };
+    const merged = isPlainObject(templateConfig) ? { ...templateConfig } : {};
+    if (!userValues || typeof userValues !== 'object') return merged;
     for (const [key, value] of Object.entries(userValues)) {
-        if (value !== undefined && value !== null && value !== '') {
-            merged[key] = value;
-        }
+        if (value === undefined || value === null || value === '') continue;
+        setDeepValue(merged, key, value);
     }
     return merged;
+}
+
+/**
+ * Merge user-provided source/target values into a pipeline's own
+ * connector.inbound/connector.outbound step configs (step.config.config —
+ * the shape TransformationPipelineService.js's addConnectorStep produces).
+ *
+ * This is the piece that makes a device wizard's collected port/toggle
+ * values reach the connector processing/engine.go actually starts —
+ * interface_templates' own source_config_template/target_config_template
+ * columns are display-only and are never read by the activation path.
+ *
+ * @param {object} pipelineConfig - {execution_groups: [...]}
+ * @param {object} sourceValues - merged into every connector.inbound step
+ * @param {object} targetValues - merged into every connector.outbound step
+ * @returns {object} - a new pipeline_config with merged connector steps
+ */
+function mergeValuesIntoPipelineConnectorSteps(pipelineConfig, sourceValues, targetValues) {
+    if (!pipelineConfig || !Array.isArray(pipelineConfig.execution_groups)) return pipelineConfig;
+
+    const hasSource = sourceValues && typeof sourceValues === 'object' && Object.keys(sourceValues).length > 0;
+    const hasTarget = targetValues && typeof targetValues === 'object' && Object.keys(targetValues).length > 0;
+    if (!hasSource && !hasTarget) return pipelineConfig;
+
+    const mergeIntoStep = (step, values) => {
+        if (!step.config || typeof step.config !== 'object') return step;
+        const innerConfig = isPlainObject(step.config.config) ? step.config.config : {};
+        return { ...step, config: { ...step.config, config: mergeTemplateWithUserValues(innerConfig, values) } };
+    };
+
+    const groups = pipelineConfig.execution_groups.map(group => ({
+        ...group,
+        steps: (group.steps || []).map(step => {
+            const stepType = step.step_type || step.type || '';
+            if (stepType === 'connector.inbound' && hasSource) return mergeIntoStep(step, sourceValues);
+            if (stepType === 'connector.outbound' && hasTarget) return mergeIntoStep(step, targetValues);
+            return step;
+        }),
+    }));
+
+    return { ...pipelineConfig, execution_groups: groups };
 }
 
 module.exports = {
@@ -418,6 +501,7 @@ module.exports = {
     buildPreviewSteps,
     sanitizeInterfaceForTemplate,
     mergeTemplateWithUserValues,
+    mergeValuesIntoPipelineConnectorSteps,
     // Expose patterns for testing / extension
     SENSITIVE_PATTERNS,
     SAFE_OVERRIDES,

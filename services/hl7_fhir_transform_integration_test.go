@@ -17,12 +17,14 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
 
 	"ezhealthkonnect/fhir/r4"
 	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/services/executors"
 
 	_ "github.com/lib/pq"
 )
@@ -197,6 +199,120 @@ func TestTransformIntegration_RealADTA01_ProducesExpectedResources(t *testing.T)
 	if !resp.Success {
 		t.Errorf("resp.Success = false, want true (real resources were produced): errors=%v", resp.Errors)
 	}
+}
+
+// TestTransformIntegration_CoverageTracker_RecordsRealFieldReads is the
+// highest-fidelity proof available short of a live running app: the FULL,
+// real chain (Transform -> buildResourcesForType -> createResourceFrom
+// AtomicMappings -> extractHL7ValueAtomic), against a real parsed ADT^A01
+// message and a real Postgres connection — confirming a Coverage Audit
+// tracker attached via ctx ends up with the real field/component keys the
+// LIVE, ACTUAL template in effect maps, byte-identical, not a substring/shape
+// check (this project's own standing "mandatory exact-key" discipline — see
+// CLAUDE.md's Coverage Audit generalization section).
+//
+// Deliberately does NOT hardcode expected keys from minimalADTA01TemplateConfig
+// above: ensureADTA01Template only inserts that fixture when NO real default
+// ADT^A01/2.5/R4 template already exists, and on this project's own dev DB (and
+// likely CI once seeded) a real one always already does — so the fixture is
+// silently never used, and a test hardcoding its field names would be
+// asserting against a template that never actually ran. (This was caught
+// live, the first time this test was run against the real DB — the exact
+// kind of "test reality diverges from assumption" finding this project's own
+// history already explains the value of real verification by.) Instead, this
+// test queries ListConfiguredMappings itself FIRST — the SAME call
+// hl7_adapter.go's own resolveConfiguredFields makes — to learn what the real,
+// live template actually maps, then asserts the tracker agrees with it
+// exactly: every mapped field that's genuinely populated in sampleADTA01 must
+// be touched, and nothing else. This is robust to whichever template happens
+// to be live in any environment, and is also the regression guard for the
+// whole 2026-10 ctx-threading change: if any of the 3 intermediate functions
+// ever stopped forwarding ctx correctly, every expected key below would
+// silently vanish and this test would fail immediately.
+func TestTransformIntegration_CoverageTracker_RecordsRealFieldReads(t *testing.T) {
+	db := openIntegrationDB(t)
+	defer db.Close()
+
+	cleanupTemplate := ensureADTA01Template(t, db)
+	defer cleanupTemplate()
+
+	if err := r4.InitRegistry("../schemas/fhir"); err != nil {
+		t.Fatalf("r4.InitRegistry: %v", err)
+	}
+	hl7.InitRealSchemaLoader("../schemas/hl7")
+
+	enhanced := hl7.ParseWithRealSchema(sampleADTA01)
+	if !enhanced.Success {
+		t.Fatalf("hl7.ParseWithRealSchema failed: %s", enhanced.Error)
+	}
+
+	svc := NewHL7FHIRTransformServiceV3(db)
+	req := &TransformRequest{
+		ParsedHL7Data: buildParsedHL7Data(enhanced),
+		MessageType:   "ADT^A01",
+		FHIRVersion:   "R4",
+		CreateBundle:  true,
+		RequestID:     "integration-test-coverage-tracker",
+	}
+
+	// Learn what the REAL, LIVE template actually maps -- same call
+	// hl7_adapter.go's own resolveConfiguredFields makes.
+	mappings, err := svc.ListConfiguredMappings(t.Context(), "ADT^A01", "", req)
+	if err != nil {
+		t.Fatalf("ListConfiguredMappings: %v", err)
+	}
+	if len(mappings) == 0 {
+		t.Fatal("no configured mappings found for ADT^A01 -- cannot prove anything about the tracker without a real template in effect")
+	}
+
+	// Which of those mapped fields are genuinely populated in sampleADTA01 --
+	// build the set directly from the real parsed message, not a guess.
+	wantTouched := map[string]bool{}
+	for _, m := range mappings {
+		if m.SegmentName == "" || m.HL7Field == "" {
+			continue
+		}
+		seg, ok := enhanced.EnhancedSegments[m.SegmentName]
+		if !ok {
+			continue
+		}
+		fieldKey := m.SegmentName + "." + m.HL7Field
+		for _, f := range seg.Fields {
+			if f.Key != fieldKey || !f.HasValue {
+				continue
+			}
+			if m.HL7Component == "" {
+				wantTouched[fieldKey] = true
+				continue
+			}
+			for _, sf := range f.Subfields {
+				if sf.Key == fieldKey+"."+m.HL7Component && sf.HasValue {
+					wantTouched[fieldKey+"."+m.HL7Component] = true
+				}
+			}
+		}
+	}
+	if len(wantTouched) == 0 {
+		t.Fatal("no mapped field is actually populated in sampleADTA01 -- cannot prove anything about the tracker")
+	}
+
+	tracker := executors.NewCDACoverageTracker()
+	ctx := context.WithValue(t.Context(), hl7CoverageTrackerContextKey, tracker)
+
+	resp, err := svc.Transform(ctx, req)
+	if err != nil {
+		t.Fatalf("Transform returned an error: %v", err)
+	}
+	if resp == nil || len(resp.FHIRResources) == 0 {
+		t.Fatalf("Transform produced zero FHIR resources; warnings=%v errors=%v", resp.Warnings, resp.Errors)
+	}
+
+	for key := range wantTouched {
+		if !tracker.Touched(key) {
+			t.Errorf("expected %q to be recorded as touched (a real, live-configured mapping, populated in the real message), tracker snapshot=%v", key, tracker.Snapshot())
+		}
+	}
+	t.Logf("confirmed %d real field/component keys touched via live ctx-threaded tracking: %v", len(wantTouched), wantTouched)
 }
 
 func TestTransformIntegration_MissingFHIRSchemaRegistry_ReturnsError(t *testing.T) {

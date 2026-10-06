@@ -1,0 +1,17 @@
+{
+  "id": "C",
+  "name": "Comment Record",
+  "fields": [
+    {"pos": 2, "key": "sequenceNumber", "name": "Sequence Number", "dataType": "NM", "required": true},
+    {"pos": 3, "key": "commentSource", "name": "Comment Source", "dataType": "ID"},
+    {"pos": 4, "key": "commentText", "name": "Comment Text", "dataType": "ST", "required": true},
+    {"pos": 5, "key": "commentType", "name": "Comment Type", "dataType": "ID"}
+  ],
+  "sourceRefs": [
+    "kxepal/python-astm astm/records.py — read verbatim",
+    "blutspende/go-astm v2 standardlis2a2 package — explicit numeric field-position tags",
+    "mediff ASTM-Protokoll v1.9, citing ASTM E1394-97 clause 11 — also confirms comment-type vendor extensions T (test name) and P (positive test) on top of the base G (generic/free text) code",
+    "BD FACS LIS Interface Specification Guide 23-23076(02), citing CLSI LIS02-A2",
+    "All 5 positions: very high confidence, agreement across all 4 sources."
+  ]
+}

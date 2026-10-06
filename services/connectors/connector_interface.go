@@ -92,6 +92,66 @@ type ValidationAwareConnector interface {
 	SupportsValidationFeedback() bool
 }
 
+// PipelineExecutor is the minimal pipeline-resolution/execution capability a
+// connector needs to synchronously answer a live request on the SAME
+// connection/association it arrived on — e.g. TCP/MLLP answering an HL7
+// host-query (QRY^Q02) with a live DSR^Q03 reply, rather than only enqueuing
+// the message for later async processing.
+//
+// Declared here as a narrow, two-method interface — instead of importing
+// *services.TransformationPipelineService directly — because that type's own
+// step execution already invokes connectors; a services -> connectors ->
+// services import cycle is avoided since *services.TransformationPipelineService
+// already satisfies this interface structurally (confirmed against its real
+// GetPipeline/ExecutePipeline signatures, the same two methods
+// controllers/sync_eligibility_controller.go already calls synchronously from
+// an HTTP handler — this interface lets a connector do the same thing from
+// its own goroutine).
+type PipelineExecutor interface {
+	GetPipeline(ctx context.Context, interfaceID, messageType string) (*models.TransformationPipeline, error)
+	ExecutePipeline(ctx context.Context, pipeline *models.TransformationPipeline, inputData map[string]interface{}) (*models.TransformationExecutionResult, error)
+}
+
+// PipelineAwareConnector interface for connectors that need a PipelineExecutor
+// injected after construction — mirrors ValidationAwareConnector's own
+// optional-capability shape: the connector-management layer
+// (processing/engine.go, right next to its existing
+// `if vc, ok := connector.(ValidationAwareConnector); ok` check) type-asserts
+// for this interface and calls SetPipelineExecutor once, only for connectors
+// that opt in by implementing it.
+type PipelineAwareConnector interface {
+	// SetPipelineExecutor injects the shared pipeline-execution capability.
+	// Mirrors SetInterfaceContext's own "setter injection after Initialize"
+	// shape, for the same reason: most concrete connectors override
+	// Initialize entirely, so a base-class implementation placed there would
+	// be shadowed rather than inherited.
+	SetPipelineExecutor(pe PipelineExecutor)
+}
+
+// MessageParser is the minimal parse capability a connector needs to convert
+// a raw inbound message into the SAME canonical JSON shape (ParsedJSON, with
+// enhancedSegments etc.) the normal async ingestion path already produces via
+// MessageParserService.ParseToJSON (processing/engine_message_processor.go's
+// own call, whose result is handed to ExecutePipeline unchanged) — so a
+// synchronous host-query's answering pipeline can be authored with the exact
+// same HL7-path field mapping (e.g. "QRD.8") every other HL7 pipeline in this
+// codebase already uses, instead of only ever seeing a bare raw string.
+//
+// Declared here as a one-method interface, not by importing
+// *services.MessageParserService directly, for the same import-cycle reason
+// PipelineExecutor is declared narrowly above; *services.MessageParserService
+// already satisfies this interface structurally.
+type MessageParser interface {
+	ParseToJSON(ctx context.Context, messageID, interfaceID, rawContent string) (*models.ParserResult, error)
+}
+
+// MessageParserAwareConnector interface for connectors that need a
+// MessageParser injected after construction — same optional-capability shape
+// as PipelineAwareConnector/ValidationAwareConnector.
+type MessageParserAwareConnector interface {
+	SetMessageParser(mp MessageParser)
+}
+
 // ConnectorMetadata contains static information about a connector
 type ConnectorMetadata struct {
 	TypeName           string            `json:"type_name"`

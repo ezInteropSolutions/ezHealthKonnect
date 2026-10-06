@@ -19,7 +19,13 @@ router.get('/categories', ctrl.listCategories);
 router.get('/:id', ctrl.getTemplate);
 
 // ── Use a template (increment usage_count, return scaffold) ──────────────────
-router.post('/:id/use', ctrl.useTemplate);
+// Session auth required — found unauthenticated during a security-validation
+// pass on the device-connectivity feature: this sat between the public "Read"
+// block above and the authenticated "Write" block below with no auth of its
+// own, despite being a POST with a real side effect (usage_count increment).
+// The real UI only ever calls this from an already-authenticated dashboard
+// session, so this closes a gap without changing real behavior.
+router.post('/:id/use', isAuthenticated, ctrl.useTemplate);
 
 // ── Write (requires authentication + operator role) ──────────────────────────
 router.post('/', isAuthenticated, canWrite, ctrl.createTemplate);

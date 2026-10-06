@@ -425,7 +425,13 @@ app.use('/api/hl7', forwardToGo);
 app.use('/api/system', forwardToGo);
 app.use('/api/processing', forwardToGo);  // NEW: Processing engine routes
 app.use('/api/mllp', forwardToGo);        // NEW: MLLP connectivity routes
-app.use('/api/connectivity', forwardToGo); // Connector types + interface connectivity
+// Session auth required — found unauthenticated during the device-connectivity
+// test-planning pass (GET /api/connectivity/serial-ports, and every other
+// route in this group including interface connectivity CRUD and ad-hoc
+// connector testing, returned 200 with zero session cookie). _verifyToken is
+// already required above (line ~356); reused here rather than a second
+// require of the same module under a different alias.
+app.use('/api/connectivity', _verifyToken, forwardToGo); // Connector types + interface connectivity
 app.use('/api/zsegments',   forwardToGo); // Enterprise Z-segment mapping configuration
 app.use('/api/cda', forwardToGo);          // CDA schema browser + mapping delta APIs
 app.use('/api/edi', forwardToGo);          // EDI X12 schema browser API

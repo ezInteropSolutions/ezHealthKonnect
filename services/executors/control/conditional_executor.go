@@ -981,6 +981,21 @@ func getBoolValue(m map[string]interface{}, key string, defaultValue bool) bool 
 // getNestedValue retrieves a nested value using dot notation
 // Supports HL7 field notation (e.g., "MSH.9" resolves to enhancedSegments.MSH.fields[position=9].value)
 func getNestedValue(data map[string]interface{}, path string) interface{} {
+	// Coverage Audit: record this path as touched — a genuinely separate,
+	// third resolver from executors.GetNestedValue/GetFieldValue (same
+	// function name "getNestedValue", different package), backing
+	// if_then_else's copy_field action and switch_case's field/copy_field/
+	// transform-action reads. Checked on data directly and on data["message"]
+	// (unwrapped) since callers pass either shape — matching resolveHL7Field's
+	// own two-shape lookup a few lines below.
+	if tracker, ok := data["_coverageTracker"].(*executors.CDACoverageTracker); ok {
+		tracker.Record(path)
+	} else if msg, ok := data["message"].(map[string]interface{}); ok {
+		if tracker, ok := msg["_coverageTracker"].(*executors.CDACoverageTracker); ok {
+			tracker.Record(path)
+		}
+	}
+
 	// Check for HL7 field notation (SEGMENT.FIELD_NUMBER format)
 	// Examples: MSH.9, PID.5, PV1.3
 	if isHL7FieldPath(path) {

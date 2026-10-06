@@ -1,0 +1,30 @@
+{
+  "id": "H",
+  "name": "Header Record",
+  "fields": [
+    {"pos": 2, "key": "delimiterDefinition", "name": "Delimiter Definition", "dataType": "ST"},
+    {"pos": 3, "key": "messageControlID", "name": "Message Control ID", "dataType": "ST"},
+    {"pos": 4, "key": "accessPassword", "name": "Access Password", "dataType": "ST"},
+    {"pos": 5, "key": "senderNameID", "name": "Sender Name/ID", "component": {"subFields": [
+      {"pos": 1, "key": "manufacturer", "dataType": "ST"},
+      {"pos": 2, "key": "softwareVersion", "dataType": "ST"},
+      {"pos": 3, "key": "instrumentID", "dataType": "ST"}
+    ]}},
+    {"pos": 6, "key": "senderStreetAddress", "name": "Sender Street Address", "dataType": "ST"},
+    {"pos": 7, "key": "reservedField1", "name": "Reserved Field", "dataType": "ST"},
+    {"pos": 8, "key": "senderTelephoneNumber", "name": "Sender Telephone Number", "dataType": "ST"},
+    {"pos": 9, "key": "senderCharacteristics", "name": "Characteristics of Sender", "dataType": "ST"},
+    {"pos": 10, "key": "receiverID", "name": "Receiver ID", "dataType": "ST"},
+    {"pos": 11, "key": "comment", "name": "Comment / Special Instructions", "dataType": "ST"},
+    {"pos": 12, "key": "processingID", "name": "Processing ID", "dataType": "ID"},
+    {"pos": 13, "key": "versionNumber", "name": "ASTM/CLSI Version Number", "dataType": "ST"},
+    {"pos": 14, "key": "dateTimeOfMessage", "name": "Date/Time of Message", "dataType": "TM"}
+  ],
+  "sourceRefs": [
+    "kxepal/python-astm astm/records.py (Header record field order) — read verbatim",
+    "blutspende/go-astm v2 standardlis2a2 package (explicit numeric field-position tags for Header)",
+    "mediff (baumann medical ag) ASTM-Protokoll v1.9 (2011-07-12), citing ASTM E1394-97 clause 7 — vendor manual with worked examples",
+    "BD FACS Workflow Manager Software LIS Interface Specification Guide 23-23076(02) (2023-05), citing CLSI LIS02-A2",
+    "All 4 sources agree on every one of the 13 non-constant field positions (very high confidence) — see this feature's own Pre-Phase research report for the full cross-validation table."
+  ]
+}

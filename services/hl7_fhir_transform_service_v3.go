@@ -182,7 +182,7 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 		log.Printf("📊 Processing %d mappings for %s", len(resourceMappings), resourceType)
 
 		resources, warnings, errors, mappedCount := s.buildResourcesForType(
-			resourceType, schema, resourceMappings, enhancedSegments, request.ParsedHL7Data, narrativeFieldConfig,
+			ctx, resourceType, schema, resourceMappings, enhancedSegments, request.ParsedHL7Data, narrativeFieldConfig,
 		)
 		allResources = append(allResources, resources...)
 		allWarnings = append(allWarnings, warnings...)
@@ -1607,6 +1607,7 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 // postProcessORU_PLACEHOLDER — intentionally removed; kept as a marker for git history.
 // See services/hl7assembly/assembly.go → AssembleORUObservations
 func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
+	ctx context.Context,
 	resourceType string,
 	schema *fhir.FHIRSchema,
 	enhancedSegments map[string]interface{},
@@ -1655,7 +1656,7 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 			if len(condParts) == 2 {
 				condSeg, condF, condC := s.parseHL7Path(condParts[0])
 				condMapping := FieldMapping{SegmentName: condSeg, HL7Field: condF, HL7Component: condC}
-				condVal, condFound := s.extractHL7ValueAtomic(enhancedSegments, condMapping)
+				condVal, condFound := s.extractHL7ValueAtomic(ctx, enhancedSegments, condMapping)
 				var isCondMet bool
 				switch condParts[1] {
 				case "empty":
@@ -1684,7 +1685,7 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 		} else {
 			// Extract HL7 value using atomic extraction
 			var found bool
-			hl7Value, found = s.extractHL7ValueAtomic(enhancedSegments, mapping)
+			hl7Value, found = s.extractHL7ValueAtomic(ctx, enhancedSegments, mapping)
 			if !found {
 				if mapping.IsRequired {
 					warnings = append(warnings, fmt.Sprintf("Required mapping %s.%s → %s.%s has no HL7 data",
@@ -1849,6 +1850,7 @@ func (s *HL7FHIRTransformServiceV3) createResourceFromAtomicMappings(
 // shape createResourceFromAtomicMappings already returns, aggregated across
 // however many resource instances were built.
 func (s *HL7FHIRTransformServiceV3) buildResourcesForType(
+	ctx context.Context,
 	resourceType string,
 	schema *fhir.FHIRSchema,
 	resourceMappings []FieldMapping,
@@ -1868,7 +1870,7 @@ func (s *HL7FHIRTransformServiceV3) buildResourcesForType(
 
 	buildOne := func(segMap map[string]interface{}, segMappings []FieldMapping, idSuffix string) {
 		resource, warnings, errors, mappedCount := s.createResourceFromAtomicMappings(
-			resourceType, schema, segMap, segMappings, narrativeFieldConfig,
+			ctx, resourceType, schema, segMap, segMappings, narrativeFieldConfig,
 		)
 		if resource != nil {
 			if idSuffix != "" {
@@ -1912,6 +1914,22 @@ func (s *HL7FHIRTransformServiceV3) buildResourcesForType(
 	}
 
 	return resources, allWarnings, allErrors, totalMapped
+}
+
+// ListConfiguredMappings exposes getFieldMappings' own field-mapping
+// resolution (embedded_mappings → interface_message_mappings → delta mappings
+// → legacy interfaces.transformation_mapping → hl7_fhir_templates OOB, in that
+// priority order — see getFieldMappings' own doc comments) as a read-only,
+// exported accessor. Added for Coverage Audit's HL7 adapter
+// (services/cda_coverage/hl7_adapter.go), which needs to know which fields a
+// given interface/message-type actually maps WITHOUT touching this service's
+// own live extraction path (transform_hl7_extractor.go) at all — see
+// CLAUDE.md's Coverage Audit generalization section on why that path is
+// deliberately never modified. A pure passthrough: calls nothing new, and
+// since nothing else calls this method, it changes no existing behavior.
+func (s *HL7FHIRTransformServiceV3) ListConfiguredMappings(ctx context.Context, messageType, profile string, request ...*TransformRequest) ([]FieldMapping, error) {
+	mappings, _, err := s.getFieldMappings(ctx, messageType, profile, request...)
+	return mappings, err
 }
 
 func (s *HL7FHIRTransformServiceV3) getFieldMappings(ctx context.Context, messageType, profile string, request ...*TransformRequest) ([]FieldMapping, *ContextLinks, error) {
