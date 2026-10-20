@@ -16,7 +16,8 @@
     "test:pas": "node tests/pas_template_test.js",
     "test:pas:db": "PAS_TEST_DB=1 node tests/pas_template_test.js",
     "start:all": "concurrently \"npm run dictionary\" \"go run main.go\"",
-    "dev:all": "concurrently \"npm run dictionary:dev\" \"go run main.go\""
+    "dev:all": "concurrently \"npm run dictionary:dev\" \"go run main.go\"",
+    "lint:xss": "eslint public"
   },
   "keywords": [
     "hl7",
@@ -59,6 +60,9 @@
     "@playwright/test": "^1.58.2",
     "cheerio": "^1.1.0",
     "concurrently": "^9.0.0",
+    "eslint": "10.11.0",
+    "eslint-plugin-html": "8.2.1",
+    "eslint-plugin-no-unsanitized": "4.1.5",
     "jest": "^30.4.2",
     "nodemon": "^3.0.1"
   },
