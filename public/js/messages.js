@@ -126,7 +126,7 @@ class MessageManager {
     addInterfaceSelector() {
         const pageHeader = document.querySelector('.page-header .d-flex');
         if (pageHeader && !document.getElementById('interfaceSelector')) {
-            const selectorHTML = `
+            const selectorHTML = HtmlSafe.html`
                 <div id="interfaceSelector" class="me-3">
                     <label class="form-label text-muted">
                         <i class="fas fa-filter me-1"></i>Current Interface:
@@ -136,7 +136,7 @@ class MessageManager {
                     </select>
                 </div>
             `;
-            pageHeader.insertAdjacentHTML('afterbegin', selectorHTML);
+            pageHeader.insertAdjacentHTML('afterbegin', HtmlSafe.html`${selectorHTML}`);
         }
     }
 
@@ -368,14 +368,17 @@ class MessageManager {
             return;
         }
 
-        tbody.innerHTML = messages.map(message => {
+        // Message ids can come from outside (an AS2 Message-ID header, an S3
+        // object key), so they travel in data- attributes, never inside onclick
+        // JavaScript, where HTML escaping is undone before the script runs.
+        tbody.innerHTML = HtmlSafe.html`${messages.map(message => {
             const ds = (message.delivery_status || '').toLowerCase();
             const st = (message.status || '').toLowerCase();
             const hasDLQ = ds === 'failed'
                 || st === 'failed' || st === 'error';
             const dlqBadge = hasDLQ
-                ? `<span class="dlq-badge" title="Pipeline or delivery failure — click for details"
-                      onclick="event.stopPropagation(); showMessageDetail('${message.message_id}')"
+                ? HtmlSafe.html`<span class="dlq-badge" title="Pipeline or delivery failure — click for details"
+                      data-message-id="${message.message_id}" onclick="event.stopPropagation(); showMessageDetail(this.dataset.messageId)"
                       style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;
                              background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;
                              padding:1px 7px;font-size:11px;font-weight:600;color:#92400e;margin-left:6px;">
@@ -388,8 +391,8 @@ class MessageManager {
             // step; only rendered for interfaces that opted in (has_coverage_gap
             // is computed server-side only when cda_coverage_audit_config is set).
             const coverageGapBadge = message.has_coverage_gap
-                ? `<span class="coverage-gap-badge" title="This message has unmapped source data — click for details"
-                      onclick="event.stopPropagation(); showMessageDetail('${message.message_id}')"
+                ? HtmlSafe.html`<span class="coverage-gap-badge" title="This message has unmapped source data — click for details"
+                      data-message-id="${message.message_id}" onclick="event.stopPropagation(); showMessageDetail(this.dataset.messageId)"
                       style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;
                              background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;
                              padding:1px 7px;font-size:11px;font-weight:600;color:#92400e;margin-left:6px;">
@@ -397,15 +400,15 @@ class MessageManager {
                    </span>`
                 : '';
             const checked = this.bulkSelectedIds.has(message.message_id) ? 'checked' : '';
-            return `
-            <tr class="message-row" onclick="showMessageDetail('${message.message_id}')">
+            return HtmlSafe.html`
+            <tr class="message-row" data-message-id="${message.message_id}" onclick="showMessageDetail(this.dataset.messageId)">
                 <td onclick="event.stopPropagation()">
                     <input type="checkbox" class="bulk-row-checkbox" ${checked}
-                           onchange="toggleRowSelect('${message.message_id}', this.checked)">
+                           data-message-id="${message.message_id}" onchange="toggleRowSelect(this.dataset.messageId, this.checked)">
                 </td>
                 <td>
                     <div class="fw-bold">${message.message_id}</div>
-                    ${message.correlation_id ? `<small class="text-muted">Corr: ${message.correlation_id}</small>` : ''}
+                    ${message.correlation_id ? HtmlSafe.html`<small class="text-muted">Corr: ${message.correlation_id}</small>` : ''}
                 </td>
                 <td>${message.interface_name}</td>
                 <td>${message.message_type || 'Unknown'}</td>
@@ -417,27 +420,27 @@ class MessageManager {
                 </td>
                 <td>
                     ${this.renderProcessingTime(message)}
-                    ${message.error_count > 0 ? `<br><small class="text-danger">${message.error_count} errors</small>` : ''}
+                    ${message.error_count > 0 ? HtmlSafe.html`<br><small class="text-danger">${message.error_count} errors</small>` : ''}
                 </td>
                 <td>
                     <div class="btn-group btn-group-sm">
-                        <button class="btn btn-outline-primary btn-sm" onclick="event.stopPropagation(); showMessageDetail('${message.message_id}')">
+                        <button class="btn btn-outline-primary btn-sm" data-message-id="${message.message_id}" onclick="event.stopPropagation(); showMessageDetail(this.dataset.messageId)">
                             <i class="fas fa-eye"></i>
                         </button>
-                        ${hasDLQ ? `
+                        ${hasDLQ ? HtmlSafe.html`
                             <button class="btn btn-sm" title="Pipeline or delivery failure — click for details"
                                 style="background:#fef3c7;border:1px solid #fcd34d;color:#92400e;"
-                                onclick="event.stopPropagation(); showMessageDetail('${message.message_id}')">
+                                data-message-id="${message.message_id}" onclick="event.stopPropagation(); showMessageDetail(this.dataset.messageId)">
                                 <i class="fas fa-exclamation-triangle"></i>
                             </button>
                         ` : ''}
-                        <button class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation(); confirmDeleteMessage('${message.id}')">
+                        <button class="btn btn-outline-danger btn-sm" data-row-id="${message.id}" onclick="event.stopPropagation(); confirmDeleteMessage(this.dataset.rowId)">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
                 </td>
             </tr>`;
-        }).join('');
+        })}`;
     }
 
     // Resolve the single display status from the two DB columns (status + delivery_status).
@@ -479,7 +482,7 @@ class MessageManager {
         };
 
         const config = statusConfig[display] || { cls: 'status-unknown', text: display };
-        return `<span class="badge status-badge ${config.cls}">${config.text}</span>`;
+        return HtmlSafe.html`<span class="badge status-badge ${config.cls}">${config.text}</span>`;
     }
 
     renderProcessingTime(message) {
@@ -506,21 +509,21 @@ class MessageManager {
         // 3. If still processing or queued, show status indicator
         const inProgressStatuses = ['processing', 'queued', 'reprocessing'];
         if (inProgressStatuses.includes(message.status)) {
-            return '<span class="text-muted"><i class="fas fa-spinner fa-pulse"></i> Processing...</span>';
+            return HtmlSafe.html`<span class="text-muted"><i class="fas fa-spinner fa-pulse"></i> Processing...</span>`;
         }
 
         // 4. If just received, show pending
         if (message.status === 'received') {
-            return '<span class="text-muted">Pending</span>';
+            return HtmlSafe.html`<span class="text-muted">Pending</span>`;
         }
 
         // 5. If parsed but no processing time, it was instant
         if (message.status === 'parsed' || message.status === 'transformed') {
-            return '<span class="text-success">< 1ms</span>';
+            return HtmlSafe.html`<span class="text-success">&lt; 1ms</span>`;
         }
 
         // 6. Default: no time available
-        return '<span class="text-muted">-</span>';
+        return HtmlSafe.html`<span class="text-muted">-</span>`;
     }
 
     calculateProcessingTimeForDetail(message) {
@@ -628,7 +631,8 @@ class MessageManager {
             </li>
         `;
 
-        nav.innerHTML = html;
+        // Page numbers and constant markup only — no data reaches this string.
+        nav.innerHTML = HtmlSafe.raw(html);
     }
 
     async loadStats() {
@@ -666,7 +670,7 @@ class MessageManager {
         const successRate = stats.total_messages > 0 ?
             ((stats.successful_messages / stats.total_messages) * 100).toFixed(1) : 0;
 
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
             <div class="row g-2 text-center">
                 <div class="col-6">
                     <div class="h6 mb-0 text-primary">${stats.total_messages || 0}</div>
@@ -690,7 +694,7 @@ class MessageManager {
                 <div class="small text-muted">Success Rate</div>
                 <div class="h6 mb-0">${successRate}%</div>
             </div>
-            ${stats.avg_processing_time ? `
+            ${stats.avg_processing_time ? HtmlSafe.html`
                 <hr class="my-2">
                 <div class="text-center">
                     <div class="small text-muted">Avg Processing</div>
@@ -737,7 +741,7 @@ class MessageManager {
 
         try {
             const ifaceParam = this.currentInterfaceId ? `?interfaceId=${this.currentInterfaceId}` : '';
-            const response = await fetch(`/api/messages/${messageId}${ifaceParam}`);
+            const response = await fetch(`/api/messages/${encodeURIComponent(messageId)}${ifaceParam}`);
             if (response.ok) {
                 const data = await response.json();
                 this.renderMessageDetail(data.data);
@@ -783,9 +787,9 @@ class MessageManager {
             // case: most interfaces have no cda.dedupe step, or haven't opted
             // into coverage tracking) must never block the main lineage view.
             const [lineageResponse, dedupeResponse, coverageResponse] = await Promise.all([
-                fetch(`/api/messages/${messageId}/lineage`),
-                fetch(`/api/messages/${messageId}/dedupe-suppressions`).catch(() => null),
-                fetch(`/api/messages/${messageId}/coverage-audit`).catch(() => null),
+                fetch(`/api/messages/${encodeURIComponent(messageId)}/lineage`),
+                fetch(`/api/messages/${encodeURIComponent(messageId)}/dedupe-suppressions`).catch(() => null),
+                fetch(`/api/messages/${encodeURIComponent(messageId)}/coverage-audit`).catch(() => null),
             ]);
 
             if (!lineageResponse.ok) {
@@ -814,7 +818,7 @@ class MessageManager {
         } catch (error) {
             console.error('Failed to load data lineage:', error);
             document.getElementById('messageLineageView').innerHTML =
-                `<div class="alert alert-warning">
+                HtmlSafe.html`<div class="alert alert-warning">
                     <h6>⚠️ Unable to load data lineage</h6>
                     <p>${error.message}</p>
                 </div>`;
@@ -827,7 +831,7 @@ class MessageManager {
 
         try {
             // Search for related messages across all interfaces
-            const searchResponse = await fetch(`/api/messages/search?correlation_id=${correlationId}`);
+            const searchResponse = await fetch(`/api/messages/search?correlation_id=${encodeURIComponent(correlationId)}`);
             const relatedMessages = searchResponse.ok ? await searchResponse.json() : { data: [] };
 
             // Get interface configurations
@@ -873,7 +877,7 @@ class MessageManager {
             status: input.status || 'completed',
             statusOk: true,
             time: this.formatDateTime(input.receivedAt),
-            detail: `
+            detail: HtmlSafe.html`
                 <table class="table table-sm table-borderless mb-0" style="font-size:0.83rem;">
                     <tr><th style="width:38%;color:#64748b;font-weight:500;">Interface</th><td style="color:#1e293b;"><strong>${input.interfaceName}</strong></td></tr>
                     <tr><th style="color:#64748b;font-weight:500;">Message type</th><td><span style="background:#dbeafe;color:#1e40af;padding:0.1rem 0.5rem;border-radius:3px;font-size:0.78rem;">${input.messageType || '—'}</span></td></tr>
@@ -896,7 +900,7 @@ class MessageManager {
                 status: transformLabel,
                 statusOk: true,
                 time: transformation.parsedAt ? this.formatDateTime(transformation.parsedAt) : '—',
-                detail: `
+                detail: HtmlSafe.html`
                     <table class="table table-sm table-borderless mb-0" style="font-size:0.83rem;">
                         <tr><th style="width:38%;color:#64748b;font-weight:500;">Format</th><td style="color:#1e293b;">${transformLabel}</td></tr>
                         <tr><th style="color:#64748b;font-weight:500;">Parse time</th><td style="color:#1e293b;"><strong>${transformation.parsingTimeMs || 0}ms</strong></td></tr>
@@ -911,15 +915,15 @@ class MessageManager {
         // common case has nothing here, since crossMessage suppression
         // requires a prior message to have already delivered the same fact).
         if (Array.isArray(dedupeSuppressions) && dedupeSuppressions.length > 0) {
-            const rows = dedupeSuppressions.map(s => `
+            const rows = dedupeSuppressions.map(s => HtmlSafe.html`
                 <tr>
-                    <td style="color:#1e293b;">${this.escapeHtml(s.sectionKey)}</td>
-                    <td style="font-family:monospace;font-size:0.76rem;color:#475569;word-break:break-all;">${this.escapeHtml(s.identityKey)}</td>
+                    <td style="color:#1e293b;">${s.sectionKey}</td>
+                    <td style="font-family:monospace;font-size:0.76rem;color:#475569;word-break:break-all;">${s.identityKey}</td>
                     <td style="color:#1e293b;">${s.firstSeenAt ? this.formatDateTime(s.firstSeenAt) : '—'}</td>
                     <td>${s.firstSeenMessageId
-                        ? `<a href="#" onclick="messageManager.showMessageDetail('${this.escapeHtml(s.firstSeenMessageId)}');return false;" style="color:#2563eb;font-family:monospace;font-size:0.76rem;">${this.escapeHtml(s.firstSeenMessageId)}</a>`
+                        ? HtmlSafe.html`<a href="#" data-message-id="${s.firstSeenMessageId}" onclick="messageManager.showMessageDetail(this.dataset.messageId);return false;" style="color:#2563eb;font-family:monospace;font-size:0.76rem;">${s.firstSeenMessageId}</a>`
                         : '—'}</td>
-                </tr>`).join('');
+                </tr>`);
             steps.push({
                 id: 'lj-dedupe',
                 color: '#f472b6',
@@ -928,7 +932,7 @@ class MessageManager {
                 status: `${dedupeSuppressions.length} suppressed`,
                 statusOk: true,
                 time: '',
-                detail: `
+                detail: HtmlSafe.html`
                     <div style="font-size:0.78rem;color:#64748b;margin-bottom:0.6rem;">
                         These facts were dropped from this message because an earlier message already delivered them (cda.dedupe crossMessage). Click a message ID to jump to where it was first seen.
                     </div>
@@ -956,7 +960,7 @@ class MessageManager {
             const respBody = output.deliveryResponse;
             const reqBody = output.requestBody; // populated by executor after fix
 
-            let httpDetail = `
+            let httpDetail = HtmlSafe.html`
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
                     <div>
                         <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:0.4rem;">Request</div>
@@ -965,7 +969,7 @@ class MessageManager {
                             <tr><th style="color:#64748b;font-weight:500;">Endpoint</th><td style="color:#1e293b;word-break:break-all;font-size:0.78rem;">${reqEndpoint}</td></tr>
                             <tr><th style="color:#64748b;font-weight:500;">Size</th><td style="color:#1e293b;">${output.payloadSizeBytes ? this.formatBytes(output.payloadSizeBytes) : '—'}</td></tr>
                         </table>
-                        ${reqBody ? `<details style="margin-top:0.5rem;"><summary style="font-size:0.78rem;color:#64748b;cursor:pointer;">Request body</summary><pre style="margin-top:0.35rem;background:#0f172a;color:#e2e8f0;padding:0.5rem;border-radius:4px;font-size:0.72rem;overflow:auto;max-height:120px;white-space:pre-wrap;">${this.escapeHtml(typeof reqBody==='string'?reqBody:JSON.stringify(reqBody,null,2))}</pre></details>` : ''}
+                        ${reqBody ? HtmlSafe.html`<details style="margin-top:0.5rem;"><summary style="font-size:0.78rem;color:#64748b;cursor:pointer;">Request body</summary><pre style="margin-top:0.35rem;background:#0f172a;color:#e2e8f0;padding:0.5rem;border-radius:4px;font-size:0.72rem;overflow:auto;max-height:120px;white-space:pre-wrap;">${typeof reqBody==='string'?reqBody:JSON.stringify(reqBody,null,2)}</pre></details>` : ''}
                     </div>
                     <div>
                         <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:0.4rem;">Response</div>
@@ -974,11 +978,11 @@ class MessageManager {
                             <tr><th style="color:#64748b;font-weight:500;">Latency</th><td style="color:#1e293b;"><strong>${output.deliveryTimeMs || 0}ms</strong></td></tr>
                             <tr><th style="color:#64748b;font-weight:500;">Retries</th><td style="color:#1e293b;">${output.retryCount || 0}</td></tr>
                         </table>
-                        ${respBody ? `<details style="margin-top:0.5rem;"><summary style="font-size:0.78rem;color:#64748b;cursor:pointer;">Response body</summary><pre style="margin-top:0.35rem;background:#0f172a;color:#e2e8f0;padding:0.5rem;border-radius:4px;font-size:0.72rem;overflow:auto;max-height:120px;white-space:pre-wrap;">${this.escapeHtml(typeof respBody==='string'?respBody:JSON.stringify(respBody,null,2))}</pre></details>` : ''}
+                        ${respBody ? HtmlSafe.html`<details style="margin-top:0.5rem;"><summary style="font-size:0.78rem;color:#64748b;cursor:pointer;">Response body</summary><pre style="margin-top:0.35rem;background:#0f172a;color:#e2e8f0;padding:0.5rem;border-radius:4px;font-size:0.72rem;overflow:auto;max-height:120px;white-space:pre-wrap;">${typeof respBody==='string'?respBody:JSON.stringify(respBody,null,2)}</pre></details>` : ''}
                     </div>
                 </div>
                 ${output.transformedMessage && typeof output.transformedMessage === 'object' && output.transformedMessage.mongo_reference ?
-                    `<div style="margin-top:0.75rem;background:#eff6ff;border-radius:5px;padding:0.5rem 0.75rem;font-family:monospace;font-size:0.72rem;color:#1e40af;word-break:break-all;">📦 ${output.transformedMessage.mongo_reference}</div>` : ''}`;
+                    HtmlSafe.html`<div style="margin-top:0.75rem;background:#eff6ff;border-radius:5px;padding:0.5rem 0.75rem;font-family:monospace;font-size:0.72rem;color:#1e40af;word-break:break-all;">📦 ${output.transformedMessage.mongo_reference}</div>` : ''}`;
 
             steps.push({
                 id: 'lj-delivery',
@@ -992,7 +996,7 @@ class MessageManager {
                     ? this.formatDateTime(output.deliveryCompletedAt)
                     : isNotRequired ? 'No outbound connector' : 'In progress',
                 detail: isNotRequired
-                    ? `<div style="padding:0.75rem;background:#f8fafc;border-radius:6px;color:#64748b;font-size:0.83rem;">
+                    ? HtmlSafe.html`<div style="padding:0.75rem;background:#f8fafc;border-radius:6px;color:#64748b;font-size:0.83rem;">
                          No outbound connector is configured for this interface. The pipeline ran successfully —
                          add a <strong>Connector (Outbound)</strong> step to the pipeline to deliver messages to a destination.
                        </div>`
@@ -1011,7 +1015,7 @@ class MessageManager {
             const multiDestination = coverageAudits.length > 1;
             const reportHtml = coverageGaps.map((report, ri) => {
                 const destHeader = multiDestination
-                    ? `<div style="font-size:0.78rem;font-weight:600;color:#1e293b;margin:0.75rem 0 0.35rem;">${this.escapeHtml(report.connectorType || 'destination')} — ${this.escapeHtml(report.destination || '—')} (${report.deliveryOutcome})</div>`
+                    ? HtmlSafe.html`<div style="font-size:0.78rem;font-weight:600;color:#1e293b;margin:0.75rem 0 0.35rem;">${report.connectorType || 'destination'} — ${report.destination || '—'} (${report.deliveryOutcome})</div>`
                     : '';
                 const catHtml = (report.categories || []).filter(c => (c.missed || []).length > 0).map((cat, ci) => {
                     const rows = cat.missed.map((m, mi) => {
@@ -1061,7 +1065,7 @@ class MessageManager {
                         // entirely instead of wrapping. word-break:break-all
                         // on the XPath cell lets it wrap within its fixed
                         // share of the width instead.
-                        const elementsBody = hasElementData ? `
+                        const elementsBody = hasElementData ? HtmlSafe.html`
                             <table class="table table-sm mb-0" style="font-size:0.75rem;table-layout:fixed;width:100%;">
                                 <colgroup><col style="width:65%;"><col style="width:35%;"></colgroup>
                                 <thead>
@@ -1071,24 +1075,24 @@ class MessageManager {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${allElements.map(g => `
-                                        <tr ${g.administrative ? 'data-cov-admin="1" style="display:none;"' : ''}>
-                                            <td style="padding:0.2rem 0.5rem;color:#92400e;font-family:monospace;word-break:break-all;">${this.escapeHtml(g.path)}</td>
-                                            <td style="padding:0.2rem 0.5rem;color:#78716c;word-break:break-word;">${this.escapeHtml(g.label || '—')}</td>
-                                        </tr>`).join('')}
+                                    ${allElements.map(g => HtmlSafe.html`
+                                        <tr ${g.administrative ? HtmlSafe.html`data-cov-admin="1" style="display:none;"` : ''}>
+                                            <td style="padding:0.2rem 0.5rem;color:#92400e;font-family:monospace;word-break:break-all;">${g.path}</td>
+                                            <td style="padding:0.2rem 0.5rem;color:#78716c;word-break:break-word;">${g.label || '—'}</td>
+                                        </tr>`)}
                                 </tbody>
                             </table>` : '';
-                        return `
-                        <div ${adminOnlyEntry ? 'data-cov-admin="1" style="display:none;"' : ''} style="border:1px solid #fde68a;border-radius:6px;margin-bottom:0.35rem;overflow:hidden;">
-                            <button ${hasElementData ? `onclick="messageManager._toggleCoverageRow('${rowId}')"` : ''}
+                        return HtmlSafe.html`
+                        <div ${adminOnlyEntry ? HtmlSafe.html`data-cov-admin="1" style="display:none;"` : ''} style="border:1px solid #fde68a;border-radius:6px;margin-bottom:0.35rem;overflow:hidden;">
+                            <button ${hasElementData ? HtmlSafe.html`onclick="messageManager._toggleCoverageRow('${rowId}')"` : ''}
                                     style="width:100%;display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.6rem;background:#fffbeb;border:none;text-align:left;${hasElementData ? 'cursor:pointer;' : 'cursor:default;'}">
-                                <span style="flex:1;font-size:0.8rem;color:#1e293b;">${this.escapeHtml(m.sectionTitle || m.sectionKey || 'Unclassified')}${m.entryIndex >= 0 ? ` <span style="color:#94a3b8;">#${m.entryIndex}</span>` : ''}</span>
+                                <span style="flex:1;font-size:0.8rem;color:#1e293b;">${m.sectionTitle || m.sectionKey || 'Unclassified'}${m.entryIndex >= 0 ? HtmlSafe.html` <span style="color:#94a3b8;">#${m.entryIndex}</span>` : ''}</span>
                                 <span style="font-size:0.72rem;color:#94a3b8;">${summaryLabel}</span>
-                                ${hasElementData ? `<svg id="${rowId}-chevron" style="width:14px;height:14px;color:#94a3b8;flex-shrink:0;transition:transform 0.15s;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>` : ''}
+                                ${hasElementData ? HtmlSafe.html`<svg id="${rowId}-chevron" style="width:14px;height:14px;color:#94a3b8;flex-shrink:0;transition:transform 0.15s;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>` : ''}
                             </button>
-                            ${hasElementData ? `<div id="${rowId}-body" style="display:none;background:white;border-top:1px solid #fde68a;overflow-x:auto;">${elementsBody}</div>` : ''}
+                            ${hasElementData ? HtmlSafe.html`<div id="${rowId}-body" style="display:none;background:white;border-top:1px solid #fde68a;overflow-x:auto;">${elementsBody}</div>` : ''}
                         </div>`;
-                    }).join('');
+                    });
                     // Prefer the category's summed CLINICAL element counts
                     // (report.go v4+) over entry-level found/total whenever
                     // present -- entry-level alone can read a misleading
@@ -1113,20 +1117,20 @@ class MessageManager {
                     // partial, honest subset — absence here is correct, not a
                     // bug, and must never be shown as "0% USCDI coverage."
                     const uscdiBadge = (cat.uscdiClasses && cat.uscdiClasses.length > 0)
-                        ? `<span style="display:inline-block;margin-left:0.5rem;font-size:0.68rem;font-weight:600;color:#1e40af;background:#dbeafe;padding:0.05rem 0.45rem;border-radius:10px;white-space:nowrap;" title="Real USCDI v3 data class(es) this category maps to">USCDI v3: ${cat.uscdiClasses.map(c => this.escapeHtml(c)).join(', ')}</span>`
+                        ? HtmlSafe.html`<span style="display:inline-block;margin-left:0.5rem;font-size:0.68rem;font-weight:600;color:#1e40af;background:#dbeafe;padding:0.05rem 0.45rem;border-radius:10px;white-space:nowrap;" title="Real USCDI v3 data class(es) this category maps to">USCDI v3: ${cat.uscdiClasses.map(c => this.escapeHtml(c)).join(', ')}</span>`
                         : '';
-                    return `
+                    return HtmlSafe.html`
                         <div style="margin-bottom:0.5rem;">
                             <button onclick="messageManager._toggleCoverageRow('${catId}')"
                                     style="width:100%;display:flex;align-items:center;gap:0.5rem;padding:0.2rem 0;background:none;border:none;text-align:left;cursor:pointer;margin-bottom:0.25rem;">
-                                <span style="flex:1;font-size:0.78rem;color:#475569;"><strong>${this.escapeHtml(cat.category)}</strong> — ${catLabel}${uscdiBadge}</span>
+                                <span style="flex:1;font-size:0.78rem;color:#475569;"><strong>${cat.category}</strong> — ${catLabel}${uscdiBadge}</span>
                                 <svg id="${catId}-chevron" style="width:14px;height:14px;color:#94a3b8;flex-shrink:0;transition:transform 0.15s;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                             </button>
                             <div id="${catId}-body" style="display:none;">${rows}</div>
                         </div>`;
-                }).join('');
-                return destHeader + catHtml;
-            }).join('');
+                });
+                return HtmlSafe.html`${destHeader}${catHtml}`;
+            });
 
             // Prefer elementCoveragePct (report.go v4+, document-wide
             // CLINICAL element completeness) over overallCoveragePct
@@ -1144,7 +1148,7 @@ class MessageManager {
                 status: multiDestination ? `${coverageGaps.length} destination(s) with gaps` : `${Math.round(worstPct)}% coverage`,
                 statusOk: false,
                 time: '',
-                detail: `
+                detail: HtmlSafe.html`
                     <div style="font-size:0.78rem;color:#64748b;margin-bottom:0.35rem;">
                         These items were present in the source document but never used by any step in this pipeline. Location only — no clinical values are stored here.
                     </div>
@@ -1165,7 +1169,7 @@ class MessageManager {
                 status: 'acknowledged',
                 statusOk: true,
                 time: this.formatDateTime(target.receivedAt),
-                detail: `
+                detail: HtmlSafe.html`
                     <table class="table table-sm table-borderless mb-0" style="font-size:0.83rem;">
                         <tr><th style="width:38%;color:#64748b;font-weight:500;">Target</th><td style="color:#1e293b;"><strong>${target.interfaceName}</strong></td></tr>
                         <tr><th style="color:#64748b;font-weight:500;">Status</th><td>${this.renderStatusBadge(target.status, target.delivery_status)}</td></tr>
@@ -1175,7 +1179,7 @@ class MessageManager {
         }
 
         // Render accordion
-        const stepsHtml = steps.map((step, i) => `
+        const stepsHtml = steps.map((step, i) => HtmlSafe.html`
             <div style="border:1px solid #e2e8f0;border-radius:7px;margin-bottom:0.5rem;overflow:hidden;">
                 <button onclick="messageManager._toggleJourneyStep('${step.id}')"
                         style="width:100%;display:flex;align-items:center;gap:0.75rem;padding:0.75rem 1rem;background:white;border:none;cursor:pointer;text-align:left;">
@@ -1193,19 +1197,19 @@ class MessageManager {
                 <div id="${step.id}-body" style="display:none;padding:1rem;background:#f8fafc;border-top:1px solid #e2e8f0;">
                     ${step.detail}
                 </div>
-            </div>`).join('');
+            </div>`);
 
         const statusDot = (active, label) =>
-            `<span style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.78rem;color:${active?'#1e40af':'#94a3b8'};">
+            HtmlSafe.html`<span style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.78rem;color:${active?'#1e40af':'#94a3b8'};">
                 <span style="width:6px;height:6px;border-radius:50%;background:${active?'#2563eb':'#cbd5e1'};display:inline-block;"></span>${label}</span>`;
 
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
             <div>
                 <div style="display:flex;gap:1rem;margin-bottom:0.85rem;align-items:center;flex-wrap:wrap;">
                     ${statusDot(flowStatus.inputReceived, 'Received')}
                     ${statusDot(flowStatus.transformed, 'Transformed')}
                     ${statusDot(flowStatus.delivered, 'Delivered')}
-                    ${lineage.correlationId ? `<code style="margin-left:auto;font-size:0.72rem;color:#64748b;background:#f1f5f9;padding:0.15rem 0.5rem;border-radius:3px;">${lineage.correlationId}</code>` : ''}
+                    ${lineage.correlationId ? HtmlSafe.html`<code style="margin-left:auto;font-size:0.72rem;color:#64748b;background:#f1f5f9;padding:0.15rem 0.5rem;border-radius:3px;">${lineage.correlationId}</code>` : ''}
                 </div>
                 ${stepsHtml}
             </div>`;
@@ -1277,18 +1281,18 @@ class MessageManager {
         const rows = steps.map(s => {
             const ok = s.success !== false && !s.error;
             const badge = ok
-                ? `<span style="background:#dcfce7;color:#166534;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;">ok</span>`
-                : `<span style="background:#fee2e2;color:#991b1b;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;">failed</span>`;
+                ? HtmlSafe.html`<span style="background:#dcfce7;color:#166534;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;">ok</span>`
+                : HtmlSafe.html`<span style="background:#fee2e2;color:#991b1b;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;">failed</span>`;
             const dur = s.duration_ms != null ? `${s.duration_ms}ms` : '—';
-            const errNote = s.error ? `<div style="color:#dc2626;font-size:0.75rem;margin-top:0.2rem;">${this.escapeHtml(s.error)}</div>` : '';
-            return `<tr>
-                <td style="padding:0.25rem 0.5rem;color:#374151;font-size:0.8rem;">${this.escapeHtml(s.step_name || s.step_type || '—')}</td>
-                <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;font-family:monospace;">${this.escapeHtml(s.step_type || '—')}</td>
+            const errNote = s.error ? HtmlSafe.html`<div style="color:#dc2626;font-size:0.75rem;margin-top:0.2rem;">${s.error}</div>` : '';
+            return HtmlSafe.html`<tr>
+                <td style="padding:0.25rem 0.5rem;color:#374151;font-size:0.8rem;">${s.step_name || s.step_type || '—'}</td>
+                <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;font-family:monospace;">${s.step_type || '—'}</td>
                 <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;">${dur}</td>
                 <td style="padding:0.25rem 0.5rem;">${badge}${errNote}</td>
             </tr>`;
-        }).join('');
-        return `
+        });
+        return HtmlSafe.html`
             <div style="margin-top:0.75rem;">
                 <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:0.4rem;">Pipeline Steps</div>
                 <table style="width:100%;border-collapse:collapse;">
@@ -1311,7 +1315,7 @@ class MessageManager {
             container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading transformation pipeline...</div>';
 
             // Get lineage data from backend which includes transformation steps
-            const lineageResponse = await fetch(`/api/messages/${messageId}/lineage`);
+            const lineageResponse = await fetch(`/api/messages/${encodeURIComponent(messageId)}/lineage`);
 
             if (!lineageResponse.ok) {
                 throw new Error('Failed to fetch lineage data');
@@ -1326,7 +1330,7 @@ class MessageManager {
             const transformationSteps = lineageData.data?.output?.transformation_steps || [];
 
             if (transformationSteps.length === 0) {
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <div style="max-width: 1400px; margin: 0 auto;">
                         <div style="background: linear-gradient(135deg, #eff6ff 0%, #fdf2f8 100%); padding: 2rem; border-radius: 8px; text-align: center; border: 2px dashed #e2e8f0;">
                             <svg style="width: 48px; height: 48px; color: #94a3b8; margin-bottom: 1rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1351,7 +1355,7 @@ class MessageManager {
                 const success = step.success;
                 const duration = step.durationms?.low || 0;
 
-                return `
+                return HtmlSafe.html`
                 <div style="background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 1.5rem; border-left: 4px solid ${typeStyle.color};">
                     <div style="display: flex; align-items: start; gap: 1rem; margin-bottom: 1.5rem;">
                         <div style="width: 40px; height: 40px; background: ${typeStyle.bg}; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
@@ -1366,17 +1370,17 @@ class MessageManager {
                                     <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
                                         <span style="background: ${typeStyle.bg}; color: ${typeStyle.color}; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.8rem; font-weight: 500;">${step.steptype}</span>
                                         ${success ?
-                                            '<span style="background: #dcfce7; color: #16a34a; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.8rem;">✓ Success</span>' :
-                                            '<span style="background: #fee2e2; color: #dc2626; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.8rem;">✗ Failed</span>'
+                                            HtmlSafe.html`<span style="background: #dcfce7; color: #16a34a; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.8rem;">✓ Success</span>` :
+                                            HtmlSafe.html`<span style="background: #fee2e2; color: #dc2626; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.8rem;">✗ Failed</span>`
                                         }
                                         <span style="background: #f1f5f9; color: #64748b; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.8rem;">⏱ ${duration}ms</span>
                                     </div>
                                 </div>
                             </div>
-                            ${step.error ? `
+                            ${step.error ? HtmlSafe.html`
                             <div style="margin-top: 1rem; padding: 0.75rem; background: #fee2e2; border-left: 3px solid #dc2626; border-radius: 4px;">
                                 <div style="color: #dc2626; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;">Error:</div>
-                                <div style="color: #991b1b; font-size: 0.85rem;">${this.escapeHtml(step.error)}</div>
+                                <div style="color: #991b1b; font-size: 0.85rem;">${step.error}</div>
                             </div>
                             ` : ''}
                         </div>
@@ -1410,9 +1414,9 @@ class MessageManager {
                     </div>
                 </div>
                 `;
-            }).join('');
+            });
 
-            container.innerHTML = `
+            container.innerHTML = HtmlSafe.html`
                 <div style="max-width: 1400px; margin: 0 auto;">
                     <div style="background: linear-gradient(to right, white 0%, #fdf2f8 100%); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #ec4899; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                         <h5 style="color: #1e3a8a; margin: 0; font-weight: 600;">Message Transformations</h5>
@@ -1436,7 +1440,7 @@ class MessageManager {
             container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading errors...</div>';
 
             // Fetch errors from API
-            const response = await fetch(`/api/messages/${messageId}/errors?interfaceId=${message.interface_id}`);
+            const response = await fetch(`/api/messages/${encodeURIComponent(messageId)}/errors?interfaceId=${message.interface_id}`);
 
             if (!response.ok) {
                 throw new Error('Failed to fetch errors');
@@ -1452,7 +1456,7 @@ class MessageManager {
 
             // If no errors, show a success message
             if (!errors || errors.length === 0) {
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <div style="max-width: 1400px; margin: 0 auto;">
                         <div style="background: linear-gradient(135deg, #dcfce7 0%, #f0fdf4 100%); padding: 3rem; border-radius: 8px; text-align: center; border: 2px dashed #86efac;">
                             <svg style="width: 64px; height: 64px; color: #16a34a; margin-bottom: 1rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1469,7 +1473,7 @@ class MessageManager {
             }
 
             // Render errors
-            container.innerHTML = this.renderErrorStack(errors, summary);
+            container.innerHTML = HtmlSafe.html`${this.renderErrorStack(errors, summary)}`;
 
         } catch (error) {
             console.error('Failed to load errors:', error);
@@ -1518,7 +1522,7 @@ class MessageManager {
                     const timestamp = new Date(err.error_timestamp).toLocaleString();
                     const hasStackTrace = err.stack_trace && err.stack_trace.length > 0;
 
-                    return `
+                    return HtmlSafe.html`
                         <div style="background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 1.5rem; border-left: 4px solid ${config.color};">
                             <div style="display: flex; align-items: start; gap: 1rem; margin-bottom: 1rem;">
                                 <div style="width: 48px; height: 48px; background: ${config.bg}; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 24px;">
@@ -1532,24 +1536,24 @@ class MessageManager {
                                         </div>
                                         <span style="background: #f1f5f9; color: #64748b; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.75rem;">${err.stage || 'unknown'}</span>
                                     </div>
-                                    <h6 style="color: #1e3a8a; margin: 0 0 0.5rem 0; font-weight: 600; font-size: 1rem;">${this.escapeHtml(err.message)}</h6>
+                                    <h6 style="color: #1e3a8a; margin: 0 0 0.5rem 0; font-weight: 600; font-size: 1rem;">${err.message}</h6>
                                     <div style="color: #64748b; font-size: 0.9rem; margin-bottom: 0.75rem;">
                                         <strong>Type:</strong> ${err.error_type || 'Unknown'}
-                                        ${err.recovery_action ? `<span style="margin-left: 1rem;"><strong>Recovery:</strong> ${err.recovery_action}</span>` : ''}
+                                        ${err.recovery_action ? HtmlSafe.html`<span style="margin-left: 1rem;"><strong>Recovery:</strong> ${err.recovery_action}</span>` : ''}
                                     </div>
-                                    ${err.details ? `
+                                    ${err.details ? HtmlSafe.html`
                                         <div style="background: #f8fafc; padding: 0.75rem; border-radius: 4px; border-left: 3px solid ${config.color}; margin-bottom: 0.75rem;">
                                             <div style="color: ${config.color}; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;">Details:</div>
-                                            <div style="color: #1e293b; font-size: 0.85rem; white-space: pre-wrap;">${this.escapeHtml(err.details)}</div>
+                                            <div style="color: #1e293b; font-size: 0.85rem; white-space: pre-wrap;">${err.details}</div>
                                         </div>
                                     ` : ''}
-                                    ${hasStackTrace ? `
+                                    ${hasStackTrace ? HtmlSafe.html`
                                         <details style="margin-top: 0.75rem;">
                                             <summary style="cursor: pointer; color: #64748b; font-size: 0.85rem; padding: 0.5rem; background: #f8fafc; border-radius: 4px;">
                                                 <i class="fas fa-code"></i> View Stack Trace
                                             </summary>
                                             <div style="margin-top: 0.75rem; background: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 4px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.75rem; max-height: 300px; overflow-y: auto;">
-                                                <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${this.escapeHtml(err.stack_trace)}</pre>
+                                                <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${err.stack_trace}</pre>
                                             </div>
                                         </details>
                                     ` : ''}
@@ -1557,17 +1561,17 @@ class MessageManager {
                             </div>
                         </div>
                     `;
-                }).join('');
-            }).join('');
+                });
+            });
 
-        return `
+        return HtmlSafe.html`
             <div style="max-width: 1400px; margin: 0 auto;">
                 <div style="background: linear-gradient(to right, white 0%, #fef2f2 100%); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #dc2626; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <h5 style="color: #1e3a8a; margin: 0 0 0.5rem 0; font-weight: 600;">Errors & Warnings (${errors.length})</h5>
                     <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 1rem;">
-                        ${errorsByType.critical ? `<div><span style="font-weight: 600; color: #dc2626;">Critical:</span> ${errorsByType.critical.length}</div>` : ''}
-                        ${errorsByType.error ? `<div><span style="font-weight: 600; color: #ea580c;">Errors:</span> ${errorsByType.error.length}</div>` : ''}
-                        ${errorsByType.warning ? `<div><span style="font-weight: 600; color: #d97706;">Warnings:</span> ${errorsByType.warning.length}</div>` : ''}
+                        ${errorsByType.critical ? HtmlSafe.html`<div><span style="font-weight: 600; color: #dc2626;">Critical:</span> ${errorsByType.critical.length}</div>` : ''}
+                        ${errorsByType.error ? HtmlSafe.html`<div><span style="font-weight: 600; color: #ea580c;">Errors:</span> ${errorsByType.error.length}</div>` : ''}
+                        ${errorsByType.warning ? HtmlSafe.html`<div><span style="font-weight: 600; color: #d97706;">Warnings:</span> ${errorsByType.warning.length}</div>` : ''}
                     </div>
                 </div>
                 ${errorHtml}
@@ -1585,11 +1589,11 @@ class MessageManager {
 
             // Resolve interfaceId — from URL param, stored message data, or omit (Go auto-resolves)
             const ifaceId = this.currentInterfaceId || this.messageData?.message?.interface_id || '';
-            const logsResponse = await fetch(`/api/messages/${messageId}/logs${ifaceId ? '?interfaceId=' + encodeURIComponent(ifaceId) : ''}`);
+            const logsResponse = await fetch(`/api/messages/${encodeURIComponent(messageId)}/logs${ifaceId ? '?interfaceId=' + encodeURIComponent(ifaceId) : ''}`);
 
             // Object storage unavailable
             if (logsResponse.status === 503) {
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <div style="background:#f8fafc;border-radius:8px;padding:1.5rem;text-align:center;border:1px dashed #cbd5e1;">
                         <i class="fas fa-cloud" style="font-size:1.75rem;color:#94a3b8;display:block;margin-bottom:0.5rem;"></i>
                         <div style="font-weight:600;color:#475569;margin-bottom:0.35rem;">Object storage not configured</div>
@@ -1628,12 +1632,12 @@ class MessageManager {
 
             if (logs.length === 0) {
                 const logUri = this.messageData?.message?.log_uri;
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <div style="background: #f8fafc; padding: 2rem; border-radius: 8px; text-align: center; border: 2px dashed #e2e8f0;">
                         <i class="fas fa-clipboard-list" style="font-size:1.75rem;color:#94a3b8;display:block;margin-bottom:0.5rem;"></i>
                         <div style="font-weight: 600; color: #64748b; margin-bottom: 0.35rem;">No logs for this message</div>
                         <div style="color: #94a3b8; font-size: 0.82rem;">Processing logs are written to object storage during pipeline execution.<br>Logs appear here when the interface has debug logging enabled.</div>
-                        ${logUri ? `<div style="margin-top:0.75rem;font-family:monospace;font-size:0.72rem;color:#1e40af;background:#eff6ff;padding:0.3rem 0.6rem;border-radius:4px;display:inline-block;">📦 ${logUri}</div>` : ''}
+                        ${logUri ? HtmlSafe.html`<div style="margin-top:0.75rem;font-family:monospace;font-size:0.72rem;color:#1e40af;background:#eff6ff;padding:0.3rem 0.6rem;border-radius:4px;display:inline-block;">📦 ${logUri}</div>` : ''}
                     </div>
                 `;
                 return;
@@ -1658,7 +1662,7 @@ class MessageManager {
                 // Add stack trace display
                 let stackTraceHTML = '';
                 if (log.stack_trace) {
-                    stackTraceHTML = `
+                    stackTraceHTML = HtmlSafe.html`
                         <details style="margin-top: 0.75rem; background: rgba(0,0,0,0.05); padding: 0.5rem; border-radius: 4px;">
                             <summary style="cursor: pointer; font-weight: 600; color: ${style.text}; user-select: none;">
                                 <i class="fas fa-layer-group"></i> Stack Trace
@@ -1669,9 +1673,9 @@ class MessageManager {
                 }
 
                 // Add error code if present
-                const errorCodeBadge = log.error_code ? `<span style="background: ${style.border}; color: white; padding: 0.125rem 0.5rem; border-radius: 3px; font-size: 0.7rem; margin-left: 0.5rem;">${log.error_code}</span>` : '';
+                const errorCodeBadge = log.error_code ? HtmlSafe.html`<span style="background: ${style.border}; color: white; padding: 0.125rem 0.5rem; border-radius: 3px; font-size: 0.7rem; margin-left: 0.5rem;">${log.error_code}</span>` : '';
 
-                return `
+                return HtmlSafe.html`
                     <div style="background: ${style.bg}; border-left: 3px solid ${style.border}; padding: 0.75rem 1rem; margin-bottom: 0.5rem; border-radius: 4px;">
                         <div style="display: flex; justify-content: space-between;">
                             <div style="flex: 1;">
@@ -1690,9 +1694,9 @@ class MessageManager {
                         </div>
                     </div>
                 `;
-            }).join('');
+            });
 
-            container.innerHTML = `
+            container.innerHTML = HtmlSafe.html`
                 <div>
                     <div style="margin-bottom: 1rem;">
                         <strong>Total:</strong> ${summary.total} |
@@ -1724,10 +1728,10 @@ class MessageManager {
             container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading mapping log...</div>';
 
             const ifaceId = this.currentInterfaceId || this.messageData?.message?.interface_id || '';
-            const response = await fetch(`/api/messages/${messageId}/mapping-log${ifaceId ? '?interfaceId=' + encodeURIComponent(ifaceId) : ''}`);
+            const response = await fetch(`/api/messages/${encodeURIComponent(messageId)}/mapping-log${ifaceId ? '?interfaceId=' + encodeURIComponent(ifaceId) : ''}`);
 
             if (response.status === 503) {
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <div style="background:#f8fafc;border-radius:8px;padding:1.5rem;text-align:center;border:1px dashed #cbd5e1;">
                         <i class="fas fa-cloud" style="font-size:1.75rem;color:#94a3b8;display:block;margin-bottom:0.5rem;"></i>
                         <div style="font-weight:600;color:#475569;margin-bottom:0.35rem;">Object storage not configured</div>
@@ -1738,11 +1742,11 @@ class MessageManager {
 
             if (response.status === 404) {
                 const data = await response.json().catch(() => ({}));
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <div style="background: #f8fafc; padding: 2rem; border-radius: 8px; text-align: center; border: 2px dashed #e2e8f0;">
                         <i class="fas fa-sitemap" style="font-size:1.75rem;color:#94a3b8;display:block;margin-bottom:0.5rem;"></i>
                         <div style="font-weight: 600; color: #64748b; margin-bottom: 0.35rem;">No mapping log for this message</div>
-                        <div style="color: #94a3b8; font-size: 0.82rem;">${this.escapeHtml(data.error || 'This message was not processed through a CDA→FHIR pipeline step, or the message is older than today.')}</div>
+                        <div style="color: #94a3b8; font-size: 0.82rem;">${data.error || 'This message was not processed through a CDA→FHIR pipeline step, or the message is older than today.'}</div>
                     </div>`;
                 return;
             }
@@ -1756,7 +1760,7 @@ class MessageManager {
                 throw new Error(data.error || 'Failed to load mapping log');
             }
 
-            container.innerHTML = this._renderMappingLog(data.mappingLog || {});
+            container.innerHTML = HtmlSafe.html`${this._renderMappingLog(data.mappingLog || {})}`;
         } catch (error) {
             console.error('Failed to load mapping log:', error);
             document.getElementById('messageMappingLogView').innerHTML = '<div class="alert alert-warning">Unable to load mapping log.</div>';
@@ -1772,13 +1776,13 @@ class MessageManager {
         const sections = log.sections || [];
         const assembly = log.assembly || [];
 
-        const statCard = (label, value, color) => `
+        const statCard = (label, value, color) => HtmlSafe.html`
             <div style="background:#f8fafc;border-radius:6px;padding:0.6rem 0.9rem;text-align:center;min-width:90px;">
                 <div style="font-size:1.05rem;font-weight:700;color:${color || '#1e3a8a'};">${value}</div>
                 <div style="font-size:0.68rem;color:#94a3b8;text-transform:uppercase;font-weight:600;margin-top:0.15rem;">${label}</div>
             </div>`;
 
-        const summaryHTML = `
+        const summaryHTML = HtmlSafe.html`
             <div style="display:flex;gap:0.6rem;flex-wrap:wrap;margin-bottom:1rem;">
                 ${statCard('Resources', summary.totalResources ?? 0)}
                 ${statCard('Total Time', `${summary.totalTimeMs ?? 0}ms`)}
@@ -1794,9 +1798,9 @@ class MessageManager {
 
         const entryRow = (e) => {
             const refsHTML = (e.resourceRefs && e.resourceRefs.length > 0)
-                ? e.resourceRefs.map(ref => `<span style="background:#eff6ff;color:#1e40af;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.72rem;font-family:monospace;margin-right:0.3rem;display:inline-block;margin-bottom:0.2rem;">${this.escapeHtml(ref)}</span>`).join('')
-                : `<span style="color:#94a3b8;font-size:0.75rem;">not mapped</span>`;
-            const codeText = e.code ? `${this.escapeHtml(e.code)}${e.codeSystem ? ' (' + this.escapeHtml(e.codeSystem) + ')' : ''}` : '—';
+                ? e.resourceRefs.map(ref => HtmlSafe.html`<span style="background:#eff6ff;color:#1e40af;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.72rem;font-family:monospace;margin-right:0.3rem;display:inline-block;margin-bottom:0.2rem;">${ref}</span>`)
+                : HtmlSafe.html`<span style="color:#94a3b8;font-size:0.75rem;">not mapped</span>`;
+            const codeText = e.code ? `${e.code}${e.codeSystem ? ' (' + e.codeSystem + ')' : ''}` : '—';
             // Entry-level warnings (e.g. "value: entry has more than one <value>;
             // only the first was mapped ... -- not mapped: ..."), populated by
             // EntryTrace.Warnings (mapping_log/section_log.go). Rendered as an
@@ -1806,30 +1810,30 @@ class MessageManager {
             // what was actually dropped.
             const hasEntryWarnings = e.warnings && e.warnings.length > 0;
             const warningIcon = hasEntryWarnings
-                ? `<i class="fas fa-exclamation-triangle" style="color:#d97706;font-size:0.68rem;margin-left:0.4rem;" title="${e.warnings.length} warning${e.warnings.length > 1 ? 's' : ''} on this entry"></i>`
+                ? HtmlSafe.html`<i class="fas fa-exclamation-triangle" style="color:#d97706;font-size:0.68rem;margin-left:0.4rem;" title="${e.warnings.length} warning${e.warnings.length > 1 ? 's' : ''} on this entry"></i>`
                 : '';
-            const mainTr = `<tr style="border-bottom:${hasEntryWarnings ? 'none' : '1px solid #f1f5f9'};">
+            const mainTr = HtmlSafe.html`<tr style="border-bottom:${hasEntryWarnings ? 'none' : '1px solid #f1f5f9'};">
                 <td style="padding:0.3rem 0.5rem;color:#94a3b8;font-size:0.75rem;">${e.entryIndex}</td>
-                <td style="padding:0.3rem 0.5rem;color:#6b7280;font-size:0.75rem;">${this.escapeHtml(e.entryType || '—')}</td>
+                <td style="padding:0.3rem 0.5rem;color:#6b7280;font-size:0.75rem;">${e.entryType || '—'}</td>
                 <td style="padding:0.3rem 0.5rem;color:#6b7280;font-size:0.75rem;font-family:monospace;">${codeText}</td>
-                <td style="padding:0.3rem 0.5rem;color:#374151;font-size:0.78rem;">${this.escapeHtml(e.displayName || '—')}${warningIcon}</td>
+                <td style="padding:0.3rem 0.5rem;color:#374151;font-size:0.78rem;">${e.displayName || '—'}${warningIcon}</td>
                 <td style="padding:0.3rem 0.5rem;">${refsHTML}</td>
             </tr>`;
             const warningTr = hasEntryWarnings
-                ? `<tr style="border-bottom:1px solid #f1f5f9;background:#fffbeb;">
+                ? HtmlSafe.html`<tr style="border-bottom:1px solid #f1f5f9;background:#fffbeb;">
                     <td colspan="5" style="padding:0.3rem 0.5rem 0.45rem 1.6rem;">
-                        ${e.warnings.map(w => `
+                        ${e.warnings.map(w => HtmlSafe.html`
                             <div style="display:flex;gap:0.4rem;align-items:flex-start;font-size:0.74rem;color:#92400e;">
                                 <i class="fas fa-exclamation-triangle" style="margin-top:0.15rem;flex-shrink:0;"></i>
-                                <span>${this.escapeHtml(w)}</span>
-                            </div>`).join('')}
+                                <span>${w}</span>
+                            </div>`)}
                     </td>
                 </tr>`
                 : '';
             return mainTr + warningTr;
         };
 
-        const entriesDetailTable = (entries) => `
+        const entriesDetailTable = (entries) => HtmlSafe.html`
             <table style="width:100%;border-collapse:collapse;background:#fafbfc;">
                 <thead><tr style="border-bottom:1px solid #e5e7eb;">
                     <th style="padding:0.2rem 0.5rem;text-align:left;font-size:0.68rem;color:#9ca3af;font-weight:500;">#</th>
@@ -1838,14 +1842,14 @@ class MessageManager {
                     <th style="padding:0.2rem 0.5rem;text-align:left;font-size:0.68rem;color:#9ca3af;font-weight:500;">Description</th>
                     <th style="padding:0.2rem 0.5rem;text-align:left;font-size:0.68rem;color:#9ca3af;font-weight:500;">→ FHIR Resource(s)</th>
                 </tr></thead>
-                <tbody>${entries.map(entryRow).join('')}</tbody>
+                <tbody>${entries.map(entryRow)}</tbody>
             </table>`;
 
         const sectionRows = sections.map(s => {
             const hasErrors = s.errors && s.errors.length > 0;
             const errorBadge = hasErrors
-                ? `<span style="background:#fee2e2;color:#991b1b;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;">${s.errors.length} error${s.errors.length > 1 ? 's' : ''}</span>`
-                : `<span style="color:#94a3b8;font-size:0.78rem;">—</span>`;
+                ? HtmlSafe.html`<span style="background:#fee2e2;color:#991b1b;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;">${s.errors.length} error${s.errors.length > 1 ? 's' : ''}</span>`
+                : HtmlSafe.html`<span style="color:#94a3b8;font-size:0.78rem;">—</span>`;
             // Warnings are informational, non-blocking notices (e.g. a CDA
             // entry with more than one <value> -- only the first was
             // mapped) -- distinct from errors, never implies the section
@@ -1853,14 +1857,14 @@ class MessageManager {
             // section_log.go) for what populates this.
             const hasWarnings = s.warnings && s.warnings.length > 0;
             const warningBadge = hasWarnings
-                ? `<span title="${this.escapeHtml(s.warnings.join('\n'))}" style="background:#fef3c7;color:#92400e;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;cursor:help;">${s.warnings.length} warning${s.warnings.length > 1 ? 's' : ''}</span>`
-                : `<span style="color:#94a3b8;font-size:0.78rem;">—</span>`;
+                ? HtmlSafe.html`<span title="${s.warnings.join('\n')}" style="background:#fef3c7;color:#92400e;padding:0.1rem 0.45rem;border-radius:3px;font-size:0.72rem;font-weight:600;cursor:help;">${s.warnings.length} warning${s.warnings.length > 1 ? 's' : ''}</span>`
+                : HtmlSafe.html`<span style="color:#94a3b8;font-size:0.78rem;">—</span>`;
             const hasEntries = s.entries && s.entries.length > 0;
             const chevron = hasEntries
-                ? `<i class="fas fa-chevron-right mlog-chevron" style="font-size:0.65rem;color:#94a3b8;margin-right:0.4rem;display:inline-block;transition:transform 0.15s;"></i>`
-                : `<span style="display:inline-block;width:1rem;"></span>`;
-            const mainRow = `<tr ${hasEntries ? `style="cursor:pointer;" onclick="${toggleJs}"` : ''}>
-                <td style="padding:0.25rem 0.5rem;color:#374151;font-size:0.8rem;">${chevron}${this.escapeHtml(s.title || s.sectionKey || '—')}</td>
+                ? HtmlSafe.html`<i class="fas fa-chevron-right mlog-chevron" style="font-size:0.65rem;color:#94a3b8;margin-right:0.4rem;display:inline-block;transition:transform 0.15s;"></i>`
+                : HtmlSafe.html`<span style="display:inline-block;width:1rem;"></span>`;
+            const mainRow = HtmlSafe.html`<tr ${hasEntries ? HtmlSafe.html`style="cursor:pointer;" onclick="${toggleJs}"` : ''}>
+                <td style="padding:0.25rem 0.5rem;color:#374151;font-size:0.8rem;">${chevron}${s.title || s.sectionKey || '—'}</td>
                 <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;text-align:right;">${s.entriesIn ?? 0}</td>
                 <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;text-align:right;">${s.resourcesOut ?? 0}</td>
                 <td style="padding:0.25rem 0.5rem;color:#6b7280;font-size:0.78rem;text-align:right;">${s.processingTimeMs ?? 0}ms</td>
@@ -1868,12 +1872,12 @@ class MessageManager {
                 <td style="padding:0.25rem 0.5rem;">${warningBadge}</td>
             </tr>`;
             const detailRow = hasEntries
-                ? `<tr style="display:none;"><td colspan="6" style="padding:0.4rem 0.5rem 0.6rem 1.5rem;">${entriesDetailTable(s.entries)}</td></tr>`
+                ? HtmlSafe.html`<tr style="display:none;"><td colspan="6" style="padding:0.4rem 0.5rem 0.6rem 1.5rem;">${entriesDetailTable(s.entries)}</td></tr>`
                 : '';
             return mainRow + detailRow;
-        }).join('');
+        });
 
-        const sectionsHTML = sections.length > 0 ? `
+        const sectionsHTML = sections.length > 0 ? HtmlSafe.html`
             <div style="margin-top:0.75rem;">
                 <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:0.4rem;">Sections (${sections.length}) — click a row to see entry→resource detail</div>
                 <table style="width:100%;border-collapse:collapse;">
@@ -1894,7 +1898,7 @@ class MessageManager {
         // event actually has it, so messages without deep lineage don't show a
         // help line that doesn't apply to anything on screen.
         const hasAnyLineage = assembly.some(e => e.lineage && Object.keys(e.lineage).length > 0);
-        const assemblyHelpHTML = hasAnyLineage ? `
+        const assemblyHelpHTML = hasAnyLineage ? HtmlSafe.html`
             <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.4rem;margin-top:-0.1rem;">
                 "Source" shows which CDA section + entry (and matching identifier) produced each resource.
                 <code style="background:#f1f5f9;padding:0 0.2rem;border-radius:2px;">section[entryIndex]</code>
@@ -1902,7 +1906,7 @@ class MessageManager {
                 nested participants/components, you may still need to open that one entry to find the specific match.
             </div>` : '';
 
-        const assemblyHTML = assembly.length > 0 ? `
+        const assemblyHTML = assembly.length > 0 ? HtmlSafe.html`
             <div style="margin-top:1rem;">
                 <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:0.4rem;">Assembly Events (${assembly.length})</div>
                 ${assemblyHelpHTML}
@@ -1912,42 +1916,40 @@ class MessageManager {
                     // for every other mapping log, so this block renders nothing
                     // extra in that case.
                     const lineageEntries = e.lineage ? Object.entries(e.lineage) : [];
-                    const sourceHTML = lineageEntries.length > 0 ? `
+                    const sourceHTML = lineageEntries.length > 0 ? HtmlSafe.html`
                         <div style="margin-top:0.35rem;padding-top:0.35rem;border-top:1px solid #ede9fe;font-size:0.74rem;color:#6d28d9;">
                             <div style="font-weight:600;color:#5b21b6;margin-bottom:0.15rem;">Source</div>
-                            ${lineageEntries.map(([resId, l]) => `
+                            ${lineageEntries.map(([resId, l]) => HtmlSafe.html`
                                 <div style="color:#475569;">
-                                    <span style="font-family:monospace;">${this.escapeHtml(resId)}</span>
-                                    ← ${this.escapeHtml(l.sectionKey || 'unknown section')}[${l.entryIndex ?? '?'}]
-                                    ${l.cdaIds && l.cdaIds.length > 0 ? `(${this.escapeHtml(l.cdaIds.join(', '))})` : ''}
+                                    <span style="font-family:monospace;">${resId}</span>
+                                    ← ${l.sectionKey || 'unknown section'}[${l.entryIndex ?? '?'}]
+                                    ${l.cdaIds && l.cdaIds.length > 0 ? `(${l.cdaIds.join(', ')})` : ''}
                                 </div>
-                            `).join('')}
+                            `)}
                         </div>` : '';
-                    return `
+                    return HtmlSafe.html`
                     <div style="background:#faf5ff;border-left:3px solid #a78bfa;padding:0.5rem 0.75rem;margin-bottom:0.4rem;border-radius:4px;font-size:0.8rem;">
-                        <strong style="color:#5b21b6;">${this.escapeHtml(e.action || '')}</strong>
-                        <span style="color:#64748b;"> · ${this.escapeHtml(e.rule || '')} · ${this.escapeHtml(e.resourceType || '')}</span>
-                        <div style="color:#475569;margin-top:0.2rem;">${this.escapeHtml(e.detail || '')}</div>
+                        <strong style="color:#5b21b6;">${e.action || ''}</strong>
+                        <span style="color:#64748b;"> · ${e.rule || ''} · ${e.resourceType || ''}</span>
+                        <div style="color:#475569;margin-top:0.2rem;">${e.detail || ''}</div>
                         ${sourceHTML}
                     </div>
                 `;
-                }).join('')}
+                })}
             </div>` : '';
 
         if (sections.length === 0 && assembly.length === 0) {
-            return `
+            return HtmlSafe.html`
                 <div style="background: #f8fafc; padding: 2rem; border-radius: 8px; text-align: center; border: 2px dashed #e2e8f0;">
                     <div style="font-weight: 600; color: #64748b;">Mapping log is empty</div>
                 </div>`;
         }
 
-        return `<div>${summaryHTML}${sectionsHTML}${assemblyHTML}</div>`;
+        return HtmlSafe.html`<div>${summaryHTML}${sectionsHTML}${assemblyHTML}</div>`;
     }
 
     escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return HtmlSafe.escapeHtml(text);
     }
 
     getDeliveryStatusClass(status) {
@@ -1967,21 +1969,21 @@ class MessageManager {
             // Try to parse as JSON and format it
             const parsed = JSON.parse(content);
             const formatted = JSON.stringify(parsed, null, 2);
-            return `<pre class="bg-light p-3" style="max-height: 600px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;"><code>${this.escapeHtml(formatted)}</code></pre>`;
+            return HtmlSafe.html`<pre class="bg-light p-3" style="max-height: 600px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;"><code>${formatted}</code></pre>`;
         } catch (e) {
             // Not JSON, check if it's XML
             if (content.trim().startsWith('<')) {
                 // Try to pretty-print XML
                 try {
                     const formatted = this.formatXml(content);
-                    return `<pre class="bg-light p-3" style="max-height: 600px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;"><code>${this.escapeHtml(formatted)}</code></pre>`;
+                    return HtmlSafe.html`<pre class="bg-light p-3" style="max-height: 600px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;"><code>${formatted}</code></pre>`;
                 } catch (xmlError) {
                     // XML formatting failed, show as-is
                 }
             }
 
             // Show as plain text
-            return `<pre class="bg-light p-3" style="max-height: 600px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;"><code>${this.escapeHtml(content)}</code></pre>`;
+            return HtmlSafe.html`<pre class="bg-light p-3" style="max-height: 600px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;"><code>${content}</code></pre>`;
         }
     }
 
@@ -1993,7 +1995,7 @@ class MessageManager {
         const bundleStr = JSON.stringify(bundleToShow, null, 2);
         const bundleId = 'fhir-bundle-' + Date.now();
 
-        return `
+        return HtmlSafe.html`
             <div>
                 <div style="display: flex; justify-content: flex-end; margin-bottom: 0.5rem;">
                     <button onclick="messageManager.copyToClipboard('${bundleId}')"
@@ -2005,7 +2007,7 @@ class MessageManager {
                         Copy
                     </button>
                 </div>
-                <pre id="${bundleId}" style="background: #f8fafc; padding: 1rem; border-radius: 6px; border: 1px solid #e2e8f0; max-height: 500px; overflow: auto; margin: 0;"><code style="color: #1e293b; font-size: 0.85rem;">${this.escapeHtml(bundleStr)}</code></pre>
+                <pre id="${bundleId}" style="background: #f8fafc; padding: 1rem; border-radius: 6px; border: 1px solid #e2e8f0; max-height: 500px; overflow: auto; margin: 0;"><code style="color: #1e293b; font-size: 0.85rem;">${bundleStr}</code></pre>
             </div>
         `;
     }
@@ -2019,14 +2021,14 @@ class MessageManager {
             // Show success message
             const btn = event.target.closest('button');
             const originalHTML = btn.innerHTML;
-            btn.innerHTML = `
+            btn.innerHTML = HtmlSafe.html`
                 <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                 </svg>
                 Copied!
             `;
             setTimeout(() => {
-                btn.innerHTML = originalHTML;
+                btn.innerHTML = HtmlSafe.raw(originalHTML); // the button's own markup
             }, 2000);
         });
     }
@@ -2041,11 +2043,11 @@ class MessageManager {
             // Find the copy button and update it
             const btn = event.target.closest('button');
             const originalHTML = btn.innerHTML;
-            btn.innerHTML = `<svg style="width: 13px; height: 13px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            btn.innerHTML = HtmlSafe.html`<svg style="width: 13px; height: 13px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                         </svg> Copied!`;
             setTimeout(() => {
-                btn.innerHTML = originalHTML;
+                btn.innerHTML = HtmlSafe.raw(originalHTML); // the button's own markup
             }, 2000);
         }).catch(err => {
             console.error('Failed to copy:', err);
@@ -2090,14 +2092,14 @@ class MessageManager {
         const _dsBg  = _ds === 'delivered' ? '#dcfce7' : (_ds === 'not_required' || _ds === 'not_configured') ? '#f1f5f9' : (_ds === 'failed' ? '#fee2e2' : '#fef3c7');
         const _dsFg  = _ds === 'delivered' ? '#166534' : (_ds === 'not_required' || _ds === 'not_configured') ? '#64748b' : (_ds === 'failed' ? '#991b1b' : '#92400e');
         const _dsLabel = _ds === 'not_required' ? 'no outbound' : (_ds || 'pending');
-        const deliveryBadge = `<span style="background:${_dsBg};color:${_dsFg};padding:0.35rem 0.75rem;border-radius:6px;font-size:0.8rem;font-weight:500;">${_dsLabel}</span>`;
+        const deliveryBadge = HtmlSafe.html`<span style="background:${_dsBg};color:${_dsFg};padding:0.35rem 0.75rem;border-radius:6px;font-size:0.8rem;font-weight:500;">${_dsLabel}</span>`;
 
         // Storage URIs — show as chip links if populated
         const uriChip = (label, uri) => uri
-            ? `<span style="display:inline-flex;align-items:center;gap:0.3rem;background:#eff6ff;color:#1e40af;border-radius:4px;padding:0.2rem 0.55rem;font-size:0.75rem;font-family:monospace;margin:0.15rem 0.15rem 0 0;">${label}</span>`
+            ? HtmlSafe.html`<span style="display:inline-flex;align-items:center;gap:0.3rem;background:#eff6ff;color:#1e40af;border-radius:4px;padding:0.2rem 0.55rem;font-size:0.75rem;font-family:monospace;margin:0.15rem 0.15rem 0 0;">${label}</span>`
             : '';
         const storageRow = (message.raw_content_uri || message.parsed_content_uri || message.transformed_content_uri)
-            ? `<tr><th style="color:#64748b;font-weight:500;padding:0.3rem 0;vertical-align:top;">Storage</th><td style="padding:0.3rem 0;">
+            ? HtmlSafe.html`<tr><th style="color:#64748b;font-weight:500;padding:0.3rem 0;vertical-align:top;">Storage</th><td style="padding:0.3rem 0;">
                 ${uriChip('raw', message.raw_content_uri)}
                 ${uriChip('parsed', message.parsed_content_uri)}
                 ${uriChip('transformed', message.transformed_content_uri)}
@@ -2106,7 +2108,7 @@ class MessageManager {
 
         // Parsing row
         const parsingRow = message.parsed_at
-            ? `<tr><th style="color:#64748b;font-weight:500;padding:0.3rem 0;">Parsed</th><td style="color:#1e293b;padding:0.3rem 0;">${this.formatDateTime(message.parsed_at)}${message.parsing_time_ms ? ` <span style="color:#94a3b8;font-size:0.78rem;">(${message.parsing_time_ms}ms)</span>` : ''}</td></tr>`
+            ? HtmlSafe.html`<tr><th style="color:#64748b;font-weight:500;padding:0.3rem 0;">Parsed</th><td style="color:#1e293b;padding:0.3rem 0;">${this.formatDateTime(message.parsed_at)}${message.parsing_time_ms ? HtmlSafe.html` <span style="color:#94a3b8;font-size:0.78rem;">(${message.parsing_time_ms}ms)</span>` : ''}</td></tr>`
             : '';
 
         const _ds2 = (message.delivery_status || '').toLowerCase();
@@ -2114,7 +2116,7 @@ class MessageManager {
         const hasDLQSection = _ds2 === 'failed'
             || _st2 === 'failed' || _st2 === 'error';
 
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
             <div>
                 <!-- Status bar -->
                 <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1.25rem; background: #f8fafc; border-radius: 8px; margin-bottom: 1.25rem; border: 1px solid #e2e8f0; flex-wrap: wrap;">
@@ -2141,19 +2143,19 @@ class MessageManager {
                         <div style="background: white; border-radius: 8px; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06); height: 100%;">
                             <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; margin-bottom: 0.85rem;">Processing</div>
                             <table class="table table-sm table-borderless mb-0" style="font-size: 0.875rem;">
-                                <tr><th style="width: 48%; color: #64748b; font-weight: 500; padding: 0.3rem 0;">Source</th><td style="color: #1e293b; padding: 0.3rem 0;">${message.source_type || '—'}${message.source_endpoint ? ' · <span style="font-family:monospace;font-size:0.78rem;">' + this.escapeHtml(message.source_endpoint) + '</span>' : ''}</td></tr>
-                                ${message.source_ip ? `<tr><th style="color: #64748b; font-weight: 500; padding: 0.3rem 0;">Source IP</th><td style="color: #1e293b; padding: 0.3rem 0;">${message.source_ip}</td></tr>` : ''}
+                                <tr><th style="width: 48%; color: #64748b; font-weight: 500; padding: 0.3rem 0;">Source</th><td style="color: #1e293b; padding: 0.3rem 0;">${message.source_type || '—'}${message.source_endpoint ? HtmlSafe.html` · <span style="font-family:monospace;font-size:0.78rem;">${message.source_endpoint}</span>` : ''}</td></tr>
+                                ${message.source_ip ? HtmlSafe.html`<tr><th style="color: #64748b; font-weight: 500; padding: 0.3rem 0;">Source IP</th><td style="color: #1e293b; padding: 0.3rem 0;">${message.source_ip}</td></tr>` : ''}
                                 <tr><th style="color: #64748b; font-weight: 500; padding: 0.3rem 0;">Duration</th><td style="color: #1e293b; padding: 0.3rem 0;"><strong>${this.calculateProcessingTimeForDetail(message)}</strong></td></tr>
                                 ${parsingRow}
                                 <tr><th style="color: #64748b; font-weight: 500; padding: 0.3rem 0;">Delivery tries</th><td style="color: #1e293b; padding: 0.3rem 0;">${message.delivery_attempts || 0}</td></tr>
-                                ${message.error_count > 0 ? `<tr><th style="color: #64748b; font-weight: 500; padding: 0.3rem 0;">Errors</th><td style="padding: 0.3rem 0;"><span style="color: #ef4444; font-weight: 600;">${message.error_count}</span></td></tr>` : ''}
-                                ${message.last_error_message ? `<tr><th style="color: #64748b; font-weight: 500; padding: 0.3rem 0;">Last error</th><td style="color: #ef4444; font-size: 0.82rem; padding: 0.3rem 0;">${this.escapeHtml(message.last_error_message)}</td></tr>` : ''}
+                                ${message.error_count > 0 ? HtmlSafe.html`<tr><th style="color: #64748b; font-weight: 500; padding: 0.3rem 0;">Errors</th><td style="padding: 0.3rem 0;"><span style="color: #ef4444; font-weight: 600;">${message.error_count}</span></td></tr>` : ''}
+                                ${message.last_error_message ? HtmlSafe.html`<tr><th style="color: #64748b; font-weight: 500; padding: 0.3rem 0;">Last error</th><td style="color: #ef4444; font-size: 0.82rem; padding: 0.3rem 0;">${message.last_error_message}</td></tr>` : ''}
                             </table>
                         </div>
                     </div>
                 </div>
 
-                ${hasDLQSection ? `
+                ${hasDLQSection ? HtmlSafe.html`
                 <!-- Delivery Failures (DLQ) section -->
                 <div id="dlqSection" style="margin-top:1.25rem;">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
@@ -2187,13 +2189,13 @@ class MessageManager {
             const data = await res.json();
             if (spinner) spinner.style.display = 'none';
             if (!data.success || !data.data || !data.data.length) {
-                container.innerHTML = `<div style="font-size:12px;color:#9ca3af;padding:8px 0;">No active DLQ rows for this message.</div>`;
+                container.innerHTML = HtmlSafe.html`<div style="font-size:12px;color:#9ca3af;padding:8px 0;">No active DLQ rows for this message.</div>`;
                 return;
             }
-            container.innerHTML = data.data.map(row => this.renderDLQRow(row)).join('');
+            container.innerHTML = HtmlSafe.html`${data.data.map(row => this.renderDLQRow(row))}`;
         } catch (err) {
             if (spinner) spinner.style.display = 'none';
-            if (container) container.innerHTML = `<div style="font-size:12px;color:#dc2626;">Failed to load DLQ data.</div>`;
+            if (container) container.innerHTML = HtmlSafe.html`<div style="font-size:12px;color:#dc2626;">Failed to load DLQ data.</div>`;
         }
     }
 
@@ -2204,28 +2206,28 @@ class MessageManager {
         const isAbandoned = st === 'abandoned';
         const fmtDate = iso => iso ? new Date(iso).toLocaleString(undefined, { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
 
-        return `
+        return HtmlSafe.html`
         <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:8px;font-size:12px;">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
-                <span style="background:${statusBg[st]};color:${statusColour[st]};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:uppercase;">${this.escapeHtml(st)}</span>
-                <span style="color:#6b7280;">Connector: <strong>${this.escapeHtml(row.ConnectorType || '—')}</strong></span>
+                <span style="background:${statusBg[st]};color:${statusColour[st]};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:uppercase;">${st}</span>
+                <span style="color:#6b7280;">Connector: <strong>${row.ConnectorType || '—'}</strong></span>
                 <span style="color:#6b7280;">Attempts: <strong>${row.AttemptCount}</strong></span>
-                ${row.NextRetryAt && st === 'pending' ? `<span style="color:#6b7280;">Next retry: <strong>${fmtDate(row.NextRetryAt)}</strong></span>` : ''}
+                ${row.NextRetryAt && st === 'pending' ? HtmlSafe.html`<span style="color:#6b7280;">Next retry: <strong>${fmtDate(row.NextRetryAt)}</strong></span>` : ''}
                 <span style="margin-left:auto;color:#9ca3af;">Created ${fmtDate(row.CreatedAt)}</span>
             </div>
-            ${row.ErrorMessage ? `<div style="color:#dc2626;font-size:11px;margin-bottom:8px;word-break:break-word;">${this.escapeHtml(row.ErrorMessage)}</div>` : ''}
+            ${row.ErrorMessage ? HtmlSafe.html`<div style="color:#dc2626;font-size:11px;margin-bottom:8px;word-break:break-word;">${row.ErrorMessage}</div>` : ''}
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
                 <button class="btn btn-sm" style="background:#2563eb;color:#fff;border:none;font-size:11px;padding:3px 10px;border-radius:4px;"
-                    onclick="event.stopPropagation(); messageManager.dlqRedriveFromModal('${this.escapeHtml(row.ID)}', this)">
+                    onclick="event.stopPropagation(); messageManager.dlqRedriveFromModal('${row.ID}', this)">
                     <i class="fas fa-${isAbandoned ? 'rotate-right' : 'redo'}"></i> ${isAbandoned ? 'Reactivate' : 'Redrive Now'}
                 </button>
                 <button class="btn btn-sm" style="background:#fff;color:#2563eb;border:1px solid #93c5fd;font-size:11px;padding:3px 10px;border-radius:4px;"
-                    onclick="event.stopPropagation(); messageManager.dlqScheduleFromModal('${this.escapeHtml(row.ID)}', this)">
+                    onclick="event.stopPropagation(); messageManager.dlqScheduleFromModal('${row.ID}', this)">
                     <i class="fas fa-calendar-alt"></i> Schedule
                 </button>
-                ${isAbandoned ? '' : `
+                ${isAbandoned ? '' : HtmlSafe.html`
                 <button class="btn btn-sm" style="background:#fff;color:#dc2626;border:1px solid #fca5a5;font-size:11px;padding:3px 10px;border-radius:4px;"
-                    onclick="event.stopPropagation(); messageManager.dlqAbandonFromModal('${this.escapeHtml(row.ID)}', this)">
+                    onclick="event.stopPropagation(); messageManager.dlqAbandonFromModal('${row.ID}', this)">
                     <i class="fas fa-ban"></i> Abandon
                 </button>`}
                 <a href="admin-dlq.html?message_id=${encodeURIComponent(row.MessageID || '')}" target="_blank"
@@ -2244,7 +2246,7 @@ class MessageManager {
             const token = localStorage.getItem('accessToken');
             const headers = { 'Content-Type': 'application/json' };
             if (token) headers['Authorization'] = 'Bearer ' + token;
-            const res = await fetch(`/api/fhir/dlq/${dlqId}/redrive`, {
+            const res = await fetch(`/api/fhir/dlq/${encodeURIComponent(dlqId)}/redrive`, {
                 method: 'POST', credentials: 'include', headers,
                 body: JSON.stringify({ mode: 'from_failed_step' }),
             });
@@ -2275,7 +2277,7 @@ class MessageManager {
             const token = localStorage.getItem('accessToken');
             const headers = { 'Content-Type': 'application/json' };
             if (token) headers['Authorization'] = 'Bearer ' + token;
-            const res = await fetch(`/api/fhir/dlq/${dlqId}/schedule`, {
+            const res = await fetch(`/api/fhir/dlq/${encodeURIComponent(dlqId)}/schedule`, {
                 method: 'POST', credentials: 'include', headers,
                 body: JSON.stringify({ mode: 'from_failed_step', at }),
             });
@@ -2300,7 +2302,7 @@ class MessageManager {
             const token = localStorage.getItem('accessToken');
             const headers = { 'Content-Type': 'application/json' };
             if (token) headers['Authorization'] = 'Bearer ' + token;
-            const res = await fetch(`/api/fhir/dlq/${dlqId}/abandon`, {
+            const res = await fetch(`/api/fhir/dlq/${encodeURIComponent(dlqId)}/abandon`, {
                 method: 'POST', credentials: 'include', headers,
             });
             const data = await res.json();
@@ -2331,8 +2333,8 @@ class MessageManager {
 
         // Fetch inbound and outbound content in parallel
         const [rawResult, transformedResult] = await Promise.allSettled([
-            fetch(`/api/messages/${messageId}/raw`).then(r => r.ok ? r.json() : null),
-            fetch(`/api/messages/${messageId}/transformed`).then(r => r.ok ? r.json() : null),
+            fetch(`/api/messages/${encodeURIComponent(messageId)}/raw`).then(r => r.ok ? r.json() : null),
+            fetch(`/api/messages/${encodeURIComponent(messageId)}/transformed`).then(r => r.ok ? r.json() : null),
         ]);
 
         const rawData         = rawResult.status === 'fulfilled' ? rawResult.value : null;
@@ -2361,7 +2363,7 @@ class MessageManager {
         }
 
         if (!rawContent && !outboundContent) {
-            container.innerHTML = `<div style="padding:2.5rem;text-align:center;color:#94a3b8;background:#f8fafc;border-radius:8px;border:2px dashed #e2e8f0;">
+            container.innerHTML = HtmlSafe.html`<div style="padding:2.5rem;text-align:center;color:#94a3b8;background:#f8fafc;border-radius:8px;border:2px dashed #e2e8f0;">
                 <i class="fas fa-cloud-upload-alt" style="font-size:2rem;margin-bottom:0.75rem;display:block;"></i>
                 <div style="font-weight:600;color:#64748b;margin-bottom:0.35rem;">Content not yet available</div>
                 <div style="font-size:0.82rem;">Message content is stored in object storage.<br>It may still be uploading or object storage may be unavailable.</div>
@@ -2380,7 +2382,7 @@ class MessageManager {
             // Left pane: three overlapping panes (Raw XML / CDA Viewer / Parsed CCD), switched
             // via a persistent button bar shown identically in all three (_cdaButtonBar).
             // Right pane: pipeline output / sent payload (existing toggle)
-            container.innerHTML = `
+            container.innerHTML = HtmlSafe.html`
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;height:${height};min-height:0;">
                     <div id="cdaLeftPanel"
                          data-message-id="${messageId}"
@@ -2401,7 +2403,7 @@ class MessageManager {
                                 <span style="font-size:0.8rem;font-weight:700;color:#374151;">Clinical Document</span>
                                 <div style="margin-left:auto;display:flex;gap:0.4rem;align-items:center;">
                                     <span data-cda-btnbar>${this._cdaButtonBar('parsed')}</span>
-                                    <button onclick="messageManager._downloadJsonTree('cdaParsedMount','parsed-ccd-${messageId}.json')"
+                                    <button data-file-name="parsed-ccd-${messageId}.json" onclick="messageManager._downloadJsonTree('cdaParsedMount',this.dataset.fileName)"
                                         style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.25rem 0.6rem;border-radius:4px;cursor:pointer;font-size:0.75rem;">
                                         <i class="fas fa-download"></i> Download</button>
                                     <button onclick="messageManager._copyJsonTree('cdaParsedMount')"
@@ -2434,10 +2436,10 @@ class MessageManager {
             // absolutely-positioned overlay, which used to collide with that toggle)
             // plus a narrative overlay pane — mirrors the CDA Raw/Viewer toggle so raw
             // FHIR JSON always stays reachable instead of being permanently replaced.
-            const narrativeToggleBtn = `<button id="fhirNarrativeToggleBtn" onclick="messageManager._switchFHIRPane('narrative')"
+            const narrativeToggleBtn = HtmlSafe.html`<button id="fhirNarrativeToggleBtn" onclick="messageManager._switchFHIRPane('narrative')"
                 style="background:#2563eb;color:#fff;border:none;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;white-space:nowrap;">
                 <i class="fas fa-align-left"></i> Narrative View</button>`;
-            container.innerHTML = `
+            container.innerHTML = HtmlSafe.html`
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;height:${height};min-height:0;">
                     ${this._contentPanel('inbound', 'Inbound', rawContent, message.raw_content_uri, { source: 'raw', messageId })}
                     <div id="fhirOutboundPanel" style="height:100%;min-height:0;position:relative;">
@@ -2468,7 +2470,7 @@ class MessageManager {
             return;
         }
 
-        container.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;height:calc(90vh - 280px);min-height:0;">
+        container.innerHTML = HtmlSafe.html`<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;height:calc(90vh - 280px);min-height:0;">
             ${this._contentPanel('inbound', 'Inbound', rawContent, message.raw_content_uri, { source: 'raw', messageId })}
             ${this._contentPanel('outbound', outboundLabel, outboundContent, message.transformed_content_uri, { source: outboundSource, messageId })}
         </div>`;
@@ -2488,7 +2490,7 @@ class MessageManager {
             const rightPanel = container.querySelector('[data-panel="outbound"]');
             if (!rightPanel) return;
             const label = (data.source || nextSource) === 'outbound' ? 'Outbound (Sent)' : 'Pipeline Output';
-            rightPanel.outerHTML = this._contentPanel('outbound', label, data.content, null, { source: data.source || nextSource, messageId });
+            rightPanel.outerHTML = HtmlSafe.html`${this._contentPanel('outbound', label, data.content, null, { source: data.source || nextSource, messageId })}`;
         } catch(e) { /* ignore */ }
     }
 
@@ -2502,12 +2504,12 @@ class MessageManager {
             { key: 'viewer', label: 'CDA Viewer',  icon: 'fa-file-medical-alt' },
             { key: 'parsed', label: 'Parsed CCD',  icon: 'fa-sitemap' },
         ];
-        return `<div style="display:flex;gap:0.4rem;">` + buttons.map(b => {
+        return HtmlSafe.html`<div style="display:flex;gap:0.4rem;">${buttons.map(b => {
             const isActive = b.key === active;
-            return `<button onclick="messageManager._switchCDAPane('${b.key}')" ${isActive ? 'disabled' : ''}
+            return HtmlSafe.html`<button onclick="messageManager._switchCDAPane('${b.key}')" ${isActive ? 'disabled' : ''}
                 style="background:${isActive ? '#2563eb' : '#f1f5f9'};color:${isActive ? '#fff' : '#475569'};border:1px solid ${isActive ? '#2563eb' : '#cbd5e1'};padding:0.2rem 0.5rem;border-radius:4px;cursor:${isActive ? 'default' : 'pointer'};font-size:0.72rem;font-weight:${isActive ? '600' : '400'};">
                 <i class="fas ${b.icon}"></i> ${b.label}</button>`;
-        }).join('') + `</div>`;
+        })}</div>`;
     }
 
     // Switches the FHIR outbound panel between the raw JSON pane (with its own
@@ -2542,7 +2544,7 @@ class MessageManager {
             el.style.display = (key === target) ? 'flex' : 'none';
             // Re-render the button bar inside this pane's header so all three stay in sync.
             const bar = el.querySelector('[data-cda-btnbar]');
-            if (bar) bar.innerHTML = this._cdaButtonBar(target);
+            if (bar) bar.innerHTML = HtmlSafe.html`${this._cdaButtonBar(target)}`;
         }
 
         const interfaceId = leftPanel.dataset.interfaceId;
@@ -2567,10 +2569,10 @@ class MessageManager {
                     if (resp.ok && data.success && data.parsedContent) {
                         this._renderJsonTree(mountEl, data.parsedContent);
                     } else {
-                        mountEl.innerHTML = `<div style="padding:1rem;color:#94a3b8;font-size:0.85rem;">${this._escapeHtml(data.error || 'Parsed CCD JSON not available for this message')}</div>`;
+                        mountEl.innerHTML = HtmlSafe.html`<div style="padding:1rem;color:#94a3b8;font-size:0.85rem;">${data.error || 'Parsed CCD JSON not available for this message'}</div>`;
                     }
                 } catch (err) {
-                    mountEl.innerHTML = `<div style="padding:1rem;color:#94a3b8;font-size:0.85rem;">Failed to load parsed CCD JSON: ${this._escapeHtml(err.message)}</div>`;
+                    mountEl.innerHTML = HtmlSafe.html`<div style="padding:1rem;color:#94a3b8;font-size:0.85rem;">Failed to load parsed CCD JSON: ${err.message}</div>`;
                 }
             }
         }
@@ -2589,25 +2591,25 @@ class MessageManager {
         let typeTag, highlighted;
         if (isEmpty) {
             typeTag = '';
-            highlighted = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:0.85rem;">
+            highlighted = HtmlSafe.html`<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:0.85rem;">
                 <span><i class="fas fa-minus-circle" style="margin-right:0.4rem;"></i>Not available</span></div>`;
         } else if (isHL7) {
-            typeTag = `<span style="background:#dbeafe;color:#1e40af;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">HL7 v2</span>`;
+            typeTag = HtmlSafe.html`<span style="background:#dbeafe;color:#1e40af;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">HL7 v2</span>`;
             highlighted = this._highlightHL7(content);
         } else if (isCDAXML) {
-            typeTag = `<span style="background:#fef3c7;color:#92400e;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">CDA/CCD XML</span>`;
-            highlighted = this._escapeHtml(content);
+            typeTag = HtmlSafe.html`<span style="background:#fef3c7;color:#92400e;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">CDA/CCD XML</span>`;
+            highlighted = content;
         } else if (isFHIR) {
-            typeTag = `<span style="background:#dcfce7;color:#166534;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">FHIR JSON</span>`;
-            try { highlighted = this._escapeHtml(JSON.stringify(JSON.parse(content), null, 2)); }
-            catch { highlighted = this._escapeHtml(content); }
+            typeTag = HtmlSafe.html`<span style="background:#dcfce7;color:#166534;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">FHIR JSON</span>`;
+            try { highlighted = JSON.stringify(JSON.parse(content), null, 2); }
+            catch { highlighted = content; }
         } else {
-            typeTag = `<span style="background:#f3f4f6;color:#374151;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">Text</span>`;
-            highlighted = this._escapeHtml(content);
+            typeTag = HtmlSafe.html`<span style="background:#f3f4f6;color:#374151;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">Text</span>`;
+            highlighted = content;
         }
 
         const sizeStr = content ? this.formatBytes(content.length) : '';
-        const uriHtml = uri ? `<span style="color:#94a3b8;font-size:0.7rem;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;" title="${uri}">📦 ${uri.split('/').slice(-1)[0]}</span>` : '';
+        const uriHtml = uri ? HtmlSafe.html`<span style="color:#94a3b8;font-size:0.7rem;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;" title="${uri}">📦 ${uri.split('/').slice(-1)[0]}</span>` : '';
 
         // Toggle buttons: pipeline-output toggle (outbound), or a caller-supplied bar
         // (e.g. the CDA Viewer/Raw XML/Parsed CCD button group) that replaces all
@@ -2618,13 +2620,13 @@ class MessageManager {
             toggleBtn = opts.customToggleHtml;
         } else if (side === 'outbound' && messageId) {
             if (source === 'outbound') {
-                toggleBtn = `<button onclick="messageManager._toggleOutboundSource('${messageId}','outbound')"
+                toggleBtn = HtmlSafe.html`<button data-message-id="${messageId}" onclick="messageManager._toggleOutboundSource(this.dataset.messageId,'outbound')"
                     title="View full pipeline context (all step variables)"
                     style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
                     <i class="fas fa-code-branch"></i> Pipeline Output</button>`;
             } else if (source === 'pipeline') {
-                sourceNote = `<span style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:0.15rem 0.5rem;border-radius:4px;font-size:0.72rem;" title="No outbound connector payload found; showing pipeline context">⚠ Pipeline fallback</span>`;
-                toggleBtn = `<button onclick="messageManager._toggleOutboundSource('${messageId}','pipeline')"
+                sourceNote = HtmlSafe.html`<span style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:0.15rem 0.5rem;border-radius:4px;font-size:0.72rem;" title="No outbound connector payload found; showing pipeline context">⚠ Pipeline fallback</span>`;
+                toggleBtn = HtmlSafe.html`<button data-message-id="${messageId}" onclick="messageManager._toggleOutboundSource(this.dataset.messageId,'pipeline')"
                     title="Try to load the exact delivered payload"
                     style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
                     <i class="fas fa-arrow-left"></i> Sent Payload</button>`;
@@ -2636,13 +2638,13 @@ class MessageManager {
         // input. Available for every format (HL7, CDA, FHIR).
         let parsedJsonBtn = '';
         if (!opts.customToggleHtml && side === 'inbound' && messageId) {
-            parsedJsonBtn = `<button onclick="messageManager._toggleParsedJSON(true,'${idSuffix}','${messageId}')"
+            parsedJsonBtn = HtmlSafe.html`<button data-message-id="${messageId}" onclick="messageManager._toggleParsedJSON(true,'${idSuffix}',this.dataset.messageId)"
                 title="Show the JSON document this message was converted to for downstream pipeline processing"
                 style="background:#ede9fe;color:#5b21b6;border:1px solid #ddd6fe;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
                 <i class="fas fa-code"></i> Parsed JSON</button>`;
         }
 
-        return `
+        return HtmlSafe.html`
         <div data-panel="${side}" style="position:relative;height:100%;min-height:0;display:flex;flex-direction:column;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
             <div style="display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.85rem;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;flex-wrap:wrap;">
                 <span style="font-size:0.8rem;font-weight:700;color:#374151;">${label}</span>
@@ -2654,13 +2656,13 @@ class MessageManager {
                     <span data-cda-btnbar>${toggleBtn}</span>
                     ${opts.extraButtonsHtml || ''}
                     ${parsedJsonBtn}
-                    ${!isEmpty ? `<button onclick="messageManager._copyContentById('${idSuffix}')"
+                    ${!isEmpty ? HtmlSafe.html`<button onclick="messageManager._copyContentById('${idSuffix}')"
                         style="background:#2563eb;color:white;border:none;padding:0.25rem 0.6rem;border-radius:4px;cursor:pointer;font-size:0.75rem;">
                         <i class="fas fa-copy"></i> Copy</button>` : ''}
                 </div>
             </div>
             <div id="${idSuffix}" style="flex:1;overflow:auto;padding:1rem;background:#0f172a;color:#e2e8f0;font-family:'Courier New',monospace;font-size:0.78rem;line-height:1.6;white-space:pre-wrap;word-break:break-all;">${highlighted}</div>
-            ${parsedJsonBtn ? `
+            ${parsedJsonBtn ? HtmlSafe.html`
             <div id="parsedJsonPane-${idSuffix}" style="position:absolute;inset:0;display:none;flex-direction:column;background:#fff;">
                 <div style="display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.85rem;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
                     <span style="font-size:0.8rem;font-weight:700;color:#374151;">Parsed JSON</span>
@@ -2669,7 +2671,7 @@ class MessageManager {
                         <button onclick="messageManager._toggleParsedJSON(false,'${idSuffix}')"
                             style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
                             <i class="fas fa-arrow-left"></i> Back</button>
-                        <button onclick="messageManager._downloadJsonTree('parsedJsonMount-${idSuffix}','parsed-content-${messageId}.json')"
+                        <button data-file-name="parsed-content-${messageId}.json" onclick="messageManager._downloadJsonTree('parsedJsonMount-${idSuffix}',this.dataset.fileName)"
                             style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:0.2rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;">
                             <i class="fas fa-download"></i> Download</button>
                         <button onclick="messageManager._copyJsonTree('parsedJsonMount-${idSuffix}')"
@@ -2710,15 +2712,15 @@ class MessageManager {
             if (resp.ok && data.success && data.parsedContent) {
                 this._renderJsonTree(mountEl, data.parsedContent);
             } else {
-                mountEl.innerHTML = `<div style="color:#94a3b8;">${this._escapeHtml(data.error || 'Parsed JSON not available for this message')}</div>`;
+                mountEl.innerHTML = HtmlSafe.html`<div style="color:#94a3b8;">${data.error || 'Parsed JSON not available for this message'}</div>`;
             }
         } catch (err) {
-            mountEl.innerHTML = `<div style="color:#94a3b8;">Failed to load parsed JSON: ${this._escapeHtml(err.message)}</div>`;
+            mountEl.innerHTML = HtmlSafe.html`<div style="color:#94a3b8;">Failed to load parsed JSON: ${err.message}</div>`;
         }
     }
 
     _escapeHtml(s) {
-        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return HtmlSafe.escapeHtml(s);
     }
 
     // Render delivery-stage log details as a structured HTTP request/response card
@@ -2730,33 +2732,33 @@ class MessageManager {
         const statusBg    = isOk ? '#dcfce7' : '#fee2e2';
 
         const row = (label, value, mono) => value != null && value !== ''
-            ? `<tr><td style="color:#64748b;padding:0.2rem 0.6rem 0.2rem 0;white-space:nowrap;font-size:0.78rem;">${label}</td>
-               <td style="font-family:${mono?'monospace':'inherit'};font-size:0.78rem;">${this._escapeHtml(String(value))}</td></tr>`
+            ? HtmlSafe.html`<tr><td style="color:#64748b;padding:0.2rem 0.6rem 0.2rem 0;white-space:nowrap;font-size:0.78rem;">${label}</td>
+               <td style="font-family:${mono?'monospace':'inherit'};font-size:0.78rem;">${String(value)}</td></tr>`
             : '';
 
         // Request body: if body_uri exists the full payload is in the Content tab (outbound panel).
         // Show the preview here; the toggle button lets users switch to Content tab for the full view.
         const isTruncated = req.body_preview && req.body_preview.endsWith('... (truncated)');
         const fullPayloadNote = req.body_uri
-            ? `<div style="margin-top:0.35rem;font-size:0.75rem;color:#6366f1;">
+            ? HtmlSafe.html`<div style="margin-top:0.35rem;font-size:0.75rem;color:#6366f1;">
                  <i class="fas fa-arrow-up" style="margin-right:0.3rem;"></i>Full payload shown in <strong>Content tab → Outbound (Sent)</strong>
                </div>`
-            : (isTruncated ? `<div style="margin-top:0.35rem;font-size:0.75rem;color:#f59e0b;">⚠ Preview truncated — full payload unavailable (older message)</div>` : '');
+            : (isTruncated ? HtmlSafe.html`<div style="margin-top:0.35rem;font-size:0.75rem;color:#f59e0b;">⚠ Preview truncated — full payload unavailable (older message)</div>` : '');
 
         const reqBody = req.body_preview
-            ? `<details style="margin-top:0.5rem;">
+            ? HtmlSafe.html`<details style="margin-top:0.5rem;">
                  <summary style="cursor:pointer;font-size:0.78rem;color:#3b82f6;font-weight:600;">Request Body Preview</summary>
-                 <pre style="margin:0.4rem 0 0;background:#0f172a;color:#e2e8f0;padding:0.6rem;border-radius:4px;font-size:0.75rem;overflow:auto;max-height:160px;white-space:pre-wrap;">${this._escapeHtml(req.body_preview)}</pre>
+                 <pre style="margin:0.4rem 0 0;background:#0f172a;color:#e2e8f0;padding:0.6rem;border-radius:4px;font-size:0.75rem;overflow:auto;max-height:160px;white-space:pre-wrap;">${req.body_preview}</pre>
                  ${fullPayloadNote}
                </details>` : fullPayloadNote;
 
         const respBody = d.response_body_preview
-            ? `<details style="margin-top:0.5rem;">
+            ? HtmlSafe.html`<details style="margin-top:0.5rem;">
                  <summary style="cursor:pointer;font-size:0.78rem;color:#10b981;font-weight:600;">Response Body</summary>
-                 <pre style="margin:0.4rem 0 0;background:#0f172a;color:#e2e8f0;padding:0.6rem;border-radius:4px;font-size:0.75rem;overflow:auto;max-height:200px;white-space:pre-wrap;">${this._escapeHtml(d.response_body_preview)}</pre>
+                 <pre style="margin:0.4rem 0 0;background:#0f172a;color:#e2e8f0;padding:0.6rem;border-radius:4px;font-size:0.75rem;overflow:auto;max-height:200px;white-space:pre-wrap;">${d.response_body_preview}</pre>
                </details>` : '';
 
-        return `<div style="margin-top:0.6rem;display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;">
+        return HtmlSafe.html`<div style="margin-top:0.6rem;display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;">
             <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:0.6rem;">
                 <div style="font-size:0.75rem;font-weight:700;color:#374151;margin-bottom:0.4rem;text-transform:uppercase;letter-spacing:0.05em;">Request</div>
                 <table style="width:100%;border-collapse:collapse;">
@@ -2770,7 +2772,7 @@ class MessageManager {
             </div>
             <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:0.6rem;">
                 <div style="font-size:0.75rem;font-weight:700;color:#374151;margin-bottom:0.4rem;text-transform:uppercase;letter-spacing:0.05em;">Response</div>
-                ${statusCode ? `<div style="display:inline-block;background:${statusBg};color:${statusColor};font-weight:700;font-size:0.85rem;padding:0.15rem 0.55rem;border-radius:4px;margin-bottom:0.4rem;">${statusCode}</div>` : ''}
+                ${statusCode ? HtmlSafe.html`<div style="display:inline-block;background:${statusBg};color:${statusColor};font-weight:700;font-size:0.85rem;padding:0.15rem 0.55rem;border-radius:4px;margin-bottom:0.4rem;">${statusCode}</div>` : ''}
                 <table style="width:100%;border-collapse:collapse;">
                     ${row('Duration', d.duration_ms != null ? d.duration_ms + ' ms' : null, false)}
                     ${row('Bytes Sent', d.bytes_sent ? this.formatBytes(d.bytes_sent) : null, false)}
@@ -2785,22 +2787,19 @@ class MessageManager {
     _renderGenericDetails(details) {
         const lines = Object.entries(details)
             .filter(([, v]) => v != null && v !== '')
-            .map(([k, v]) => `<span style="color:#64748b;">${k}:</span> <span style="font-family:monospace;">${this._escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}</span>`)
-            .join(' &nbsp;·&nbsp; ');
-        return `<div style="margin-top:0.4rem;font-size:0.8rem;padding:0.4rem 0.6rem;background:rgba(0,0,0,0.03);border-radius:4px;line-height:1.7;">${lines}</div>`;
+            .map(([k, v], i) => HtmlSafe.html`${i ? HtmlSafe.html` &nbsp;·&nbsp; ` : ''}<span style="color:#64748b;">${k}:</span> <span style="font-family:monospace;">${typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>`);
+        return HtmlSafe.html`<div style="margin-top:0.4rem;font-size:0.8rem;padding:0.4rem 0.6rem;background:rgba(0,0,0,0.03);border-radius:4px;line-height:1.7;">${lines}</div>`;
     }
 
     _highlightHL7(raw) {
-        const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         // Normalize segment delimiters to \n for display
         const lines = raw.replace(/\r\n/g, '\r').replace(/\n/g, '\r').split('\r').filter(l => l.trim());
-        return lines.map(line => {
+        const segColors = { MSH: '#93c5fd', PID: '#86efac', PV1: '#fde68a', OBX: '#f9a8d4', OBR: '#c4b5fd', NK1: '#6ee7b7', EVN: '#fdba74' };
+        return HtmlSafe.html`${lines.map((line, i) => {
             const seg = line.substring(0, 3);
-            const rest = esc(line.substring(3));
-            const segColors = { MSH: '#93c5fd', PID: '#86efac', PV1: '#fde68a', OBX: '#f9a8d4', OBR: '#c4b5fd', NK1: '#6ee7b7', EVN: '#fdba74' };
             const color = segColors[seg] || '#cbd5e1';
-            return `<span style="color:${color};font-weight:600;">${seg}</span>${rest}`;
-        }).join('\n');
+            return HtmlSafe.html`${i ? '\n' : ''}<span style="color:${color};font-weight:600;">${seg}</span>${line.substring(3)}`;
+        })}`;
     }
 
     _copyContentById(elementId) {
@@ -2810,7 +2809,7 @@ class MessageManager {
             const btn = event.target.closest('button');
             const orig = btn.innerHTML;
             btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
-            setTimeout(() => { btn.innerHTML = orig; }, 2000);
+            setTimeout(() => { btn.innerHTML = HtmlSafe.raw(orig); /* the button's own markup */ }, 2000);
         });
     }
 
@@ -2832,23 +2831,23 @@ class MessageManager {
         this._jsonTreeSeq = 0;
         this._jsonTreeRaw[mountEl.id] = rawValue;
         mountEl.style.cssText = "flex:1;min-height:0;overflow:auto;padding:0.85rem 1rem;background:#0f172a;color:#e2e8f0;font-family:'Courier New',monospace;font-size:0.78rem;line-height:1.6;";
-        mountEl.innerHTML = this._renderJsonValue(rawValue, 0);
+        mountEl.innerHTML = HtmlSafe.html`${this._renderJsonValue(rawValue, 0)}`;
     }
 
     _renderJsonValue(value, depth) {
-        if (value === null || value === undefined) return `<span style="color:#64748b;">null</span>`;
+        if (value === null || value === undefined) return HtmlSafe.html`<span style="color:#64748b;">null</span>`;
         const t = typeof value;
-        if (t === 'string') return `<span style="color:#86efac;">"${this._escapeHtml(value)}"</span>`;
-        if (t === 'number') return `<span style="color:#93c5fd;">${value}</span>`;
-        if (t === 'boolean') return `<span style="color:#fca5a5;">${value}</span>`;
+        if (t === 'string') return HtmlSafe.html`<span style="color:#86efac;">"${value}"</span>`;
+        if (t === 'number') return HtmlSafe.html`<span style="color:#93c5fd;">${value}</span>`;
+        if (t === 'boolean') return HtmlSafe.html`<span style="color:#fca5a5;">${value}</span>`;
         if (Array.isArray(value)) return this._renderJsonContainer(value, true, depth);
         if (t === 'object') return this._renderJsonContainer(value, false, depth);
-        return this._escapeHtml(String(value));
+        return HtmlSafe.html`${String(value)}`;
     }
 
     _renderJsonContainer(value, isArray, depth) {
         const entries = isArray ? value.map((v, i) => [i, v]) : Object.entries(value);
-        if (entries.length === 0) return isArray ? '[]' : '{}';
+        if (entries.length === 0) return isArray ? HtmlSafe.html`[]` : HtmlSafe.html`{}`;
 
         const id = 'jt' + (++this._jsonTreeSeq);
         this._jsonTreeNodes[id] = { entries, isArray, depth };
@@ -2856,39 +2855,30 @@ class MessageManager {
         const noun = isArray ? (entries.length === 1 ? 'item' : 'items') : (entries.length === 1 ? 'key' : 'keys');
         const summary = `${entries.length} ${noun}`;
 
-        const head = `<span data-jt-toggle="${id}" onclick="messageManager._toggleJsonNode('${id}')" style="cursor:pointer;user-select:none;">` +
-            `<i class="fas fa-caret-${expanded ? 'down' : 'right'}" style="width:0.85em;display:inline-block;color:#64748b;"></i>` +
-            `${isArray ? '[' : '{'}` +
-            `<span data-jt-summary="${id}" style="display:${expanded ? 'none' : 'inline'};color:#64748b;font-style:italic;"> ${summary} ${isArray ? ']' : '}'}</span>` +
-            `</span>`;
+        const head = HtmlSafe.html`<span data-jt-toggle="${id}" onclick="messageManager._toggleJsonNode('${id}')" style="cursor:pointer;user-select:none;"><i class="fas fa-caret-${expanded ? 'down' : 'right'}" style="width:0.85em;display:inline-block;color:#64748b;"></i>${isArray ? '[' : '{'}<span data-jt-summary="${id}" style="display:${expanded ? 'none' : 'inline'};color:#64748b;font-style:italic;"> ${summary} ${isArray ? ']' : '}'}</span></span>`;
 
-        const body = `<div data-jt-body="${id}" style="display:${expanded ? 'block' : 'none'};margin-left:1.2rem;border-left:1px dashed #334155;padding-left:0.7rem;">` +
-            (expanded ? this._buildJsonChildrenHtml(id, 0, 200) : '') +
-            `</div>`;
-        const closeBracket = `<span data-jt-close="${id}" style="display:${expanded ? 'inline' : 'none'};">${isArray ? ']' : '}'}</span>`;
+        const body = HtmlSafe.html`<div data-jt-body="${id}" style="display:${expanded ? 'block' : 'none'};margin-left:1.2rem;border-left:1px dashed #334155;padding-left:0.7rem;">${expanded ? this._buildJsonChildrenHtml(id, 0, 200) : ''}</div>`;
+        const closeBracket = HtmlSafe.html`<span data-jt-close="${id}" style="display:${expanded ? 'inline' : 'none'};">${isArray ? ']' : '}'}</span>`;
 
-        return head + body + closeBracket;
+        return HtmlSafe.html`${head}${body}${closeBracket}`;
     }
 
     _buildJsonChildrenHtml(id, offset, limit) {
         const node = this._jsonTreeNodes[id];
-        if (!node) return '';
+        if (!node) return HtmlSafe.html``;
         const { entries, isArray, depth } = node;
         const slice = entries.slice(offset, offset + limit);
-        let html = slice.map(([key, val], i) => {
+        const rows = slice.map(([key, val], i) => {
             const isLast = (offset + i) === entries.length - 1;
-            const keyHtml = isArray ? '' : `<span style="color:#7dd3fc;">"${this._escapeHtml(String(key))}"</span><span style="color:#64748b;">: </span>`;
-            return `<div>${keyHtml}${this._renderJsonValue(val, depth + 1)}${isLast ? '' : '<span style="color:#64748b;">,</span>'}</div>`;
-        }).join('');
+            const keyHtml = isArray ? '' : HtmlSafe.html`<span style="color:#7dd3fc;">"${String(key)}"</span><span style="color:#64748b;">: </span>`;
+            return HtmlSafe.html`<div>${keyHtml}${this._renderJsonValue(val, depth + 1)}${isLast ? '' : HtmlSafe.html`<span style="color:#64748b;">,</span>`}</div>`;
+        });
 
         const remaining = entries.length - (offset + limit);
-        if (remaining > 0) {
-            const nextOffset = offset + limit;
-            html += `<div data-jt-more><button onclick="messageManager._loadMoreJsonNode('${id}', ${nextOffset})" ` +
-                `style="background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:0.15rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;margin:0.2rem 0;">` +
-                `Show ${Math.min(200, remaining)} more (${remaining} remaining)</button></div>`;
-        }
-        return html;
+        const more = remaining > 0
+            ? HtmlSafe.html`<div data-jt-more><button onclick="messageManager._loadMoreJsonNode('${id}', ${offset + limit})" style="background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:0.15rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.72rem;margin:0.2rem 0;">Show ${Math.min(200, remaining)} more (${remaining} remaining)</button></div>`
+            : '';
+        return HtmlSafe.html`${rows}${more}`;
     }
 
     _toggleJsonNode(id) {
@@ -2906,7 +2896,7 @@ class MessageManager {
             toggle.querySelector('i').className = 'fas fa-caret-right';
         } else {
             if (!body.dataset.built) {
-                body.innerHTML = this._buildJsonChildrenHtml(id, 0, 200);
+                body.innerHTML = HtmlSafe.html`${this._buildJsonChildrenHtml(id, 0, 200)}`;
                 body.dataset.built = '1';
             }
             body.style.display = 'block';
@@ -2921,7 +2911,7 @@ class MessageManager {
         if (!body) return;
         const moreRow = body.querySelector('[data-jt-more]');
         if (moreRow) moreRow.remove();
-        body.insertAdjacentHTML('beforeend', this._buildJsonChildrenHtml(id, offset, 200));
+        body.insertAdjacentHTML('beforeend', HtmlSafe.html`${this._buildJsonChildrenHtml(id, offset, 200)}`);
     }
 
     // Copies the full raw JSON document, independent of what's currently expanded
@@ -2934,7 +2924,7 @@ class MessageManager {
             if (!btn) return;
             const orig = btn.innerHTML;
             btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
-            setTimeout(() => { btn.innerHTML = orig; }, 2000);
+            setTimeout(() => { btn.innerHTML = HtmlSafe.raw(orig); /* the button's own markup */ }, 2000);
         });
     }
 
@@ -3034,7 +3024,7 @@ class MessageManager {
                 const interfaceType = responseData.interface?.type || 'Unknown';
                 const messageId = responseData.messageId || 'Unknown';
 
-                this.showSuccess(`📡 Message sent via ${method.toUpperCase()}!<br>
+                this.showSuccess(HtmlSafe.html`📡 Message sent via ${method.toUpperCase()}!<br>
                                  <small>Interface: ${interfaceName} (${interfaceType})<br>
                                  Endpoint: ${endpoint}<br>
                                  Message ID: ${messageId}</small>`);
@@ -3107,7 +3097,7 @@ class MessageManager {
         if (!id) return;
 
         try {
-            const response = await fetch(`/api/messages/${id}/reprocess`, {
+            const response = await fetch(`/api/messages/${encodeURIComponent(id)}/reprocess`, {
                 method: 'POST'
             });
 
@@ -3140,7 +3130,7 @@ class MessageManager {
         const poll = async () => {
             polls++;
             try {
-                const r = await fetch(`/api/messages/${messageId}`);
+                const r = await fetch(`/api/messages/${encodeURIComponent(messageId)}`);
                 if (r.ok) {
                     const data = await r.json();
                     const msg = (data.data && data.data.message) || data.data || data;
@@ -3173,7 +3163,7 @@ class MessageManager {
         if (!id) return;
 
         try {
-            const response = await fetch(`/api/messages/${id}`, {
+            const response = await fetch(`/api/messages/${encodeURIComponent(id)}`, {
                 method: 'DELETE'
             });
 
@@ -3296,7 +3286,8 @@ class MessageManager {
         const alertDiv = document.createElement('div');
         alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
         alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-        alertDiv.innerHTML = `
+        // message is text unless the caller built it with HtmlSafe.html
+        alertDiv.innerHTML = HtmlSafe.html`
             ${message}
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         `;

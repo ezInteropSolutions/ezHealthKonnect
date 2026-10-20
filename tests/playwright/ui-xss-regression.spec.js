@@ -66,3 +66,65 @@ test.describe('User-entered text is never rendered as HTML', () => {
         });
     }
 });
+
+// Message data comes from outside: the message id can be a partner's AS2
+// Message-ID header or an S3 object key, and type, correlation id, source
+// endpoint and error text are derived from what the sender sent. The row is
+// written straight into the interface's message table — exactly what a
+// connector stores — so every externally controlled field carries a payload,
+// including a quote that would break out of an onclick string.
+test.describe('Externally supplied message data is never rendered as HTML', () => {
+    const { Client } = require('pg');
+    const DB_URL = process.env.DATABASE_URL;
+    const xss = (what) => `<img src=x onerror="window.__ezhkXss='${MARK}-${what}'">`;
+    const MESSAGE_ID = `${MARK}');window.__ezhkXss='${MARK}-onclick';(' ${xss('id')}`;
+    let interfaceId;
+
+    test.beforeAll(async ({ request }) => {
+        test.skip(!DB_URL, 'No DATABASE_URL — cannot plant an external message');
+        const res = await request.post('/api/interfaces', {
+            data: { name: `PW XSS messages ${MARK}`, messageType: 'ADT^A01' },
+        });
+        const body = await res.json();
+        expect(body.success, JSON.stringify(body)).toBeTruthy();
+        interfaceId = body.interface.id;
+        const db = new Client({ connectionString: DB_URL });
+        await db.connect();
+        try {
+            await db.query(
+                `INSERT INTO messages_intf_${interfaceId.replace(/-/g, '_')}
+                   (message_id, interface_id, status, source_type, source_endpoint, message_type,
+                    correlation_id, message_size, error_count, last_error_message, delivery_status, received_at)
+                 VALUES ($1, $2, 'failed', 'as2', $3, $4, $5, 42, 1, $6, 'failed', NOW())`,
+                [MESSAGE_ID, interfaceId, `https://partner.example${xss('endpoint')}`, `ADT${xss('type')}`.slice(0, 100),
+                    `corr${xss('corr')}`, `Partner said ${xss('error')}`]);
+        } finally {
+            await db.end();
+        }
+    });
+
+    test.afterAll(async ({ request }) => {
+        if (interfaceId) await request.delete(`/api/interfaces/${interfaceId}`).catch(() => {});
+    });
+
+    test('messages list and message detail render partner data as text', async ({ page }) => {
+        const dialogs = [];
+        page.on('dialog', d => { dialogs.push(d.message()); d.dismiss().catch(() => {}); });
+        await page.goto(`/messages.html?interfaceId=${interfaceId}`);
+        const row = page.locator('tr.message-row').filter({ hasText: MARK }).first();
+        await expect(row).toBeVisible({ timeout: 20_000 });
+        const text = await row.innerText();
+        expect(text).toContain(`window.__ezhkXss='${MARK}-onclick'`);
+        expect(text).not.toMatch(/&lt;|&amp;|<span|<button/);
+        await expect(row.locator('.status-badge')).toHaveCount(1);
+
+        // Opening the message runs the row's onclick with the hostile id.
+        await row.click();
+        await expect(page.locator('#modalMessageSubtitle')).toContainText(MARK, { timeout: 15_000 });
+        await page.waitForTimeout(1500);
+
+        expect(await page.evaluate(() => window.__ezhkXss || null), 'injected markup executed').toBeNull();
+        expect(dialogs).toEqual([]);
+        expect(await page.locator(`img[onerror*="${MARK}"]`).count(), 'injected elements present').toBe(0);
+    });
+});
