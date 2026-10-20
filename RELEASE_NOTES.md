@@ -157,8 +157,9 @@ trail, and a much better-informed ezCompanion assistant.
 - Database migrations run through the application's built-in migration engine (`go-api
   migrate`), which replaces Flyway. It is fully compatible with the existing
   `flyway_schema_history`.
-- Services run with least privilege: a dedicated Linux user with hardened systemd units, and an
-  install directory on Windows that only SYSTEM and Administrators can access.
+- Services run with least privilege. On Linux: a dedicated user with hardened systemd units. On
+  Windows: a dedicated virtual service account instead of LocalSystem, which can read the
+  application and write only its data folders.
 - Every release's installers are tested end to end before publication on Ubuntu 22.04, Ubuntu
   24.04, AlmaLinux 9 and Windows. The tests cover install, an upgrade, a forced upgrade failure
   that must roll back, a rollback and uninstall.
@@ -177,8 +178,8 @@ trail, and a much better-informed ezCompanion assistant.
 - NCPDP D.0: E2, D0/D1, N/C/S transactions and the batch standard are not supported; a B1 built
   from a FHIR MedicationDispense carries no pricing (FHIR does not model point-of-sale prices).
 - DICOM: Modality Worklist, MPPS and Storage Commitment are not supported.
-- The Windows installer is not code-signed yet (SmartScreen warns on first run), and the Windows
-  service runs as LocalSystem. Linux installers are x86_64 only.
+- The Windows installer is not code-signed yet (SmartScreen warns on first run). Linux installers
+  are x86_64 only.
 - ezCompanion runs on a small local model by default; it can misread detailed schema lists, and
   some answers still favour saved configurations over the reference documentation.
 

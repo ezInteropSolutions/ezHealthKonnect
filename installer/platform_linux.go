@@ -429,8 +429,6 @@ func newestPgBinDir() string {
 	return pgBinDirFor(majors[len(majors)-1])
 }
 
-// clusterPort reads the port of the Debian/Ubuntu cluster (pg_lsclusters);
-// on RHEL the default 5432 applies.
 // debianClusterCommands makes sure the Debian/Ubuntu cluster "<major>/main"
 // exists, starts at boot and is running. apt normally creates it, but not when
 // /etc/postgresql-common/createcluster.conf disables that, and it does not
@@ -446,6 +444,8 @@ func debianClusterCommands(major string, exists bool) [][]string {
 	return append(cmds, []string{"systemctl", "enable", "--now", "postgresql@" + major + "-main"})
 }
 
+// clusterPort reads the port of the Debian/Ubuntu cluster (pg_lsclusters);
+// on RHEL the default 5432 applies.
 func clusterPort(major int) (string, error) {
 	out, err := exec.Command("pg_lsclusters", "--no-header").Output()
 	if err != nil {

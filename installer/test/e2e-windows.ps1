@@ -49,6 +49,22 @@ function Psql-App($sql) {
     Remove-Item Env:PGPASSWORD
     return ($r | Out-String).Trim()
 }
+function Assert-ServiceAccount($when) {
+    # The service runs as its own virtual account, not LocalSystem, with read
+    # access to the application, write access to data, none to backups.
+    $acct = 'NT SERVICE\ezhealthkonnect'
+    $svc = Get-CimInstance Win32_Service -Filter "Name='ezhealthkonnect'"
+    if ($svc.StartName -ne $acct) { Fail "$when`: service runs as '$($svc.StartName)', want $acct" }
+    $has = { param($path, $right) (Get-Acl $path).Access | Where-Object {
+        $_.IdentityReference -eq $acct -and $_.AccessControlType -eq 'Allow' -and ($_.FileSystemRights -band $right) -eq $right } }
+    if (-not (& $has $Dir ([System.Security.AccessControl.FileSystemRights]::ReadAndExecute))) { Fail "$when`: service cannot read the application" }
+    if (& $has $Dir ([System.Security.AccessControl.FileSystemRights]::Write)) { Fail "$when`: service can modify the application files" }
+    if (-not (& $has "$Dir\storage" ([System.Security.AccessControl.FileSystemRights]::Modify))) { Fail "$when`: service cannot write storage" }
+    if ((Get-Acl "$Dir\backups").Access | Where-Object { $_.IdentityReference -eq $acct }) { Fail "$when`: service has access to backups" }
+    if (Test-Path "$Dir\tools\pg-superuser.secret") {
+        if ((Get-Acl "$Dir\tools\pg-superuser.secret").Access | Where-Object { $_.IdentityReference -eq $acct }) { Fail "$when`: service can read the PostgreSQL superuser password" }
+    }
+}
 function Login {
     $script:Session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
     Invoke-RestMethod "$Base/api/auth/login" -Method Post -ContentType 'application/json' -WebSession $script:Session `
@@ -101,7 +117,8 @@ if ($r.Out -notmatch [regex]::Escape("setup.html?token=$(EnvGet 'SETUP_TOKEN')")
 if ($PostgresMode -eq 'fresh' -and (Test-Path "$Dir\tools\pg-superuser.secret")) {
     if ((Get-Content "$Dir\tools\pg-superuser.secret") -eq 'postgres') { Fail 'PostgreSQL superuser password is the default' }
 }
-Pass 'install directory restricted to SYSTEM and Administrators; secrets present'
+Assert-ServiceAccount 'after install'
+Pass 'install directory restricted; service runs as its virtual account; secrets present'
 
 Step 'First-run setup requires the token'
 $setup = @{ orgName = 'E2E'; firstName = 'E'; lastName = 'Tester'; email = $AdminEmail; password = $AdminPassword }
@@ -134,6 +151,7 @@ if ((Get-Content "$Dir\storage\e2e-object.txt") -ne 'patient-data') { Fail 'stor
 $secretsAfter = (Get-Content "$Dir\.env" | Where-Object { $_ -match '^(DB_PASSWORD|SESSION_SECRET|JWT_SECRET|APP_CREDENTIAL_KEY)=' }) -join "`n"
 if ($secretsAfter -ne $secretsBefore) { Fail 'secrets changed' }
 Login
+Assert-ServiceAccount 'after upgrade'
 Pass 'upgraded with data, secrets and login intact'
 
 Step 'Failing upgrade must roll back'

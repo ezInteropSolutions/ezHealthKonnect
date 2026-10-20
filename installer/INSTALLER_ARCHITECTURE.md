@@ -91,8 +91,11 @@ the installed version, then renames that backup `-restored`.
   systemd units; `CAP_NET_BIND_SERVICE` lets them use ports below 1024.
   `backups` and the state file are root-only.
 - Windows: the install directory's ACL is restricted to SYSTEM and
-  Administrators. A generated PostgreSQL superuser password is stored in
-  `tools\pg-superuser.secret`.
+  Administrators. The service runs as the virtual account
+  `NT SERVICE\ezhealthkonnect` (`windows_service_acl.go`): read and execute on
+  the application, modify on the data directories it writes, and no access
+  to `backups` or to the generated PostgreSQL superuser password
+  (`tools\pg-superuser.secret`, administrator-only).
 - The PostgreSQL Windows installer runs only if its SHA-256 matches the value
   compiled into the installer.
 
@@ -100,8 +103,6 @@ the installed version, then renames that backup `-restored`.
 
 - The Windows installer is not code-signed yet, so SmartScreen warns on first
   run.
-- The Windows service runs as LocalSystem. This is mitigated by the
-  directory ACL; a dedicated virtual service account is planned.
 - On Windows, `start-app.ps1` stops `go-api` forcefully when the service
   stops, so there is no graceful drain of in-flight messages.
 - Linux builds are x86_64 only.

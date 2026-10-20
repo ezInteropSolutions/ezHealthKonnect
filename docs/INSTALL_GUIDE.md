@@ -70,8 +70,11 @@ can also install without a browser using an answer file (see below).
   - Linux: two systemd services, `ezhealthkonnect` (web) and
     `ezhealthkonnect-api` (engine). Both run as the unprivileged system user
     `ezhealthkonnect`.
-  - Windows: one service, `ezhealthkonnect`. Only SYSTEM and Administrators
-    can read the install directory.
+  - Windows: one service, `ezhealthkonnect`. It runs as its own virtual
+    account, `NT SERVICE\ezhealthkonnect`, not as LocalSystem. The account can
+    read the application, write only the data folders, and cannot access
+    `backups`. Otherwise only SYSTEM and Administrators can access the install
+    directory.
 - **Health check.** It waits until the application reports healthy before
   saying it is done.
 

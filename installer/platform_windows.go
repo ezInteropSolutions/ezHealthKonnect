@@ -320,7 +320,8 @@ func downloadVerified(url, wantSHA, dest string) error {
 // PrepareInstall implements Platform: creates data directories and restricts
 // the whole installation to SYSTEM and Administrators. Without this, the
 // folder inherits C:\'s permissions, which let ordinary signed-in users
-// modify it — and the service runs as LocalSystem from it.
+// modify it. InstallService then grants the service's own virtual account
+// the narrower access in windowsServiceACLPlan.
 func (WindowsPlatform) PrepareInstall(dir string) error {
 	for _, d := range dataDirs {
 		if err := os.MkdirAll(filepath.Join(dir, d), 0o700); err != nil {
@@ -378,6 +379,27 @@ func (p WindowsPlatform) InstallService(dir string, _ *Config) error {
 	}
 	if out, err := exec.Command(serviceExe(dir), "install").CombinedOutput(); err != nil {
 		return fmt.Errorf("register service: %s", strings.TrimSpace(string(out)))
+	}
+	return secureServiceAccount(dir)
+}
+
+// secureServiceAccount runs the service as its virtual account instead of
+// LocalSystem and applies windowsServiceACLPlan. It runs after the service is
+// registered because the virtual account only resolves from then on; its SID
+// is derived from the service name, so re-registration on upgrade keeps it.
+func secureServiceAccount(dir string) error {
+	account := serviceAccountName(windowsServiceID)
+	if err := scRun("config", windowsServiceID, "obj=", account); err != nil {
+		return fmt.Errorf("run the service as %s: %w", account, err)
+	}
+	secret := filepath.Join(dir, "tools", pgSuperuserFile)
+	if _, err := os.Stat(secret); err != nil {
+		secret = ""
+	}
+	for _, args := range windowsServiceACLPlan(dir, account, secret) {
+		if out, err := exec.Command("icacls", args...).CombinedOutput(); err != nil {
+			return fmt.Errorf("set access for %s on %s: %s", account, args[0], strings.TrimSpace(string(out)))
+		}
 	}
 	return nil
 }
