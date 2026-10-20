@@ -10,7 +10,7 @@ const html = require('eslint-plugin-html');
 
 const escape = {
     taggedTemplates: ['html', 'HtmlSafe.html'],
-    methods: ['escapeHtml', 'HtmlSafe.escapeHtml', 'HtmlSafe.raw'],
+    methods: ['escapeHtml', 'HtmlSafe.escapeHtml', 'HtmlSafe.raw', 'HtmlSafe.sanitize'],
 };
 
 module.exports = [

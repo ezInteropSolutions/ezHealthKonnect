@@ -67,6 +67,74 @@ test.describe('User-entered text is never rendered as HTML', () => {
     }
 });
 
+// Clinical documents are rendered as formatted content on purpose, so they are
+// sanitized (FHIR narratives) or isolated (CDA rendering) rather than escaped.
+test.describe('Clinical document content cannot run script', () => {
+    const HOSTILE_NARRATIVE =
+        `<div xmlns="http://www.w3.org/1999/xhtml"><b>Allergy</b> to <i>penicillin</i>` +
+        `<img src=x onerror="window.__ezhkXss='narr-img'"><script>window.__ezhkXss='narr-script'</script>` +
+        `<a href="javascript:window.__ezhkXss='narr-href'" id="clobber">link</a>` +
+        `<svg><a href="javascript:alert(1)"><text>x</text></a></svg>` +
+        `<p style="background:url(https://evil.example/x)" onclick="window.__ezhkXss='narr-click'">para</p>` +
+        `<table><tr><td colspan="2">cell</td></tr></table></div>`;
+
+    test.beforeEach(async ({ page }) => {
+        await page.goto('/messages.html?interfaceId=00000000-0000-0000-0000-000000000000');
+        // a top-level class is a global binding, not a window property
+        await page.waitForFunction(() => window.HtmlSafe && typeof ClinicalDocumentViewer !== 'undefined');
+    });
+
+    test('HtmlSafe.sanitize keeps formatting and removes everything executable', async ({ page }) => {
+        const out = await page.evaluate((m) => String(HtmlSafe.sanitize(m)), HOSTILE_NARRATIVE);
+        expect(out).toContain('<b>Allergy</b>');
+        expect(out).toContain('<i>penicillin</i>');
+        expect(out).toContain('<td colspan="2">cell</td>');
+        expect(out).not.toMatch(/onerror|onclick|<script|javascript:|<svg|url\(|id="clobber"/i);
+        expect(out).toContain('<a>link</a>'); // the javascript: href is dropped, the text kept
+    });
+
+    test('FHIR narratives render formatted, with nothing executable', async ({ page }) => {
+        const result = await page.evaluate(async (narrative) => {
+            const mount = document.createElement('div');
+            document.body.appendChild(mount);
+            const bundle = { resourceType: 'Bundle', entry: [
+                { resource: { resourceType: 'AllergyIntolerance', id: 'a1', text: { status: 'generated', div: narrative } } },
+            ] };
+            await new ClinicalDocumentViewer(mount, { format: 'fhir', parsedContent: bundle }).mount();
+            await new Promise(r => setTimeout(r, 500));
+            return { fired: window.__ezhkXss || null, html: mount.innerHTML };
+        }, HOSTILE_NARRATIVE);
+        expect(result.fired).toBeNull();
+        expect(result.html).toContain('<b>Allergy</b>');
+        expect(result.html).not.toMatch(/onerror|onclick|<script|javascript:/i);
+    });
+
+    test('CDA rendering is isolated in a script-less sandbox', async ({ page }) => {
+        const result = await page.evaluate(async () => {
+            const mount = document.createElement('div');
+            mount.style.height = '300px';
+            document.body.appendChild(mount);
+            const viewer = new ClinicalDocumentViewer(mount, { format: 'ccda', interfaceId: 'x', messageId: 'y' });
+            viewer._fetchRawXml = async () =>
+                '<ClinicalDocument xmlns="urn:hl7-org:v3"><title>Doc</title><component><structuredBody><component><section>' +
+                '<title>Problems</title><text><paragraph>Hostile <linkHtml href="javascript:parent.__ezhkXss=1">x</linkHtml></paragraph></text>' +
+                '</section></component></structuredBody></component></ClinicalDocument>';
+            await viewer.mount();
+            const iframe = mount.querySelector('iframe');
+            await new Promise(r => setTimeout(r, 800));
+            let reachable = true;
+            try { void iframe.contentDocument.body; reachable = !!iframe.contentDocument; } catch (e) { reachable = false; }
+            return { sandbox: iframe && iframe.getAttribute('sandbox'), srcdoc: !!(iframe && iframe.srcdoc), reachable, fired: window.__ezhkXss || null };
+        });
+        expect(result.sandbox).toBe('');      // no scripts, opaque origin
+        expect(result.srcdoc).toBe(true);
+        expect(result.reachable).toBe(false); // the app cannot be reached from it (nor it from the app)
+        expect(result.fired).toBeNull();
+        // ...and the document is still shown.
+        await expect(page.frameLocator('iframe[title="Clinical document"]').locator('body')).toContainText('Hostile', { timeout: 10_000 });
+    });
+});
+
 // Message data comes from outside: the message id can be a partner's AS2
 // Message-ID header or an S3 object key, and type, correlation id, source
 // endpoint and error text are derived from what the sender sent. The row is

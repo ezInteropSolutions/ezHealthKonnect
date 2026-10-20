@@ -1,7 +1,7 @@
 // tests/unit/htmlSafe.test.js — public/js/core/html-safe.js and its wiring.
 const fs = require('fs');
 const path = require('path');
-const { escapeHtml, html, raw } = require('../../public/js/core/html-safe');
+const { escapeHtml, html, raw, sanitize } = require('../../public/js/core/html-safe');
 
 const ROOT = path.join(__dirname, '..', '..');
 
@@ -34,6 +34,16 @@ describe('HtmlSafe.html', () => {
     });
     it('raw() passes trusted markup through', () => {
         expect(String(html`<p>${raw('<br>')}</p>`)).toBe('<p><br></p>');
+    });
+});
+
+describe('HtmlSafe.sanitize without a DOM', () => {
+    // The browser path (allowlist rebuild in an inert document) is covered by
+    // tests/playwright/ui-xss-regression.spec.js; without DOMParser it must
+    // never pass markup through.
+    it('falls back to showing the markup as text', () => {
+        expect(String(sanitize('<b onclick="x()">hi</b>'))).toBe('&lt;b onclick=&quot;x()&quot;&gt;hi&lt;/b&gt;');
+        expect(String(sanitize(null))).toBe('');
     });
 });
 
