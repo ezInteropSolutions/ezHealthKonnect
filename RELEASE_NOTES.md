@@ -1,5 +1,136 @@
 # Release Notes
 
+## v26.10 — 2026-10-20
+
+*Previous release: [v26.08](../../releases/tag/v26.08) (2026-08-30). Migrations V229–V281.*
+
+This release adds three new standards families — **EDI X12**, **NCPDP** (SCRIPT e-prescribing and
+Telecommunication D.0 pharmacy claims) and **medical-device connectivity** (HL7 over TCP/IP or RS232,
+ASTM, DICOM) — plus a security hardening pass, new healthcare transports, a compliance-grade audit
+trail, and a much better-informed ezCompanion assistant.
+
+> **Upgrade notes — read before upgrading**
+> - **Partner real-time endpoints now require credentials.** Calls to `/api/eligibility`,
+>   `/api/claim-status`, `/api/prior-auth` and `/api/pharmacy-claim` are refused (`401`) until an
+>   engineer sets **Partner Endpoint Authentication** (API key, Basic or Bearer) on the interface.
+> - **Role checks are enforced.** Users with the plain `user` role can no longer change interfaces,
+>   pipelines or code templates, or use ezCompanion; give them `operator` or `viewer`.
+> - **Credential encryption key.** Installers now generate `APP_CREDENTIAL_KEY` (kept on
+>   re-install). Existing connector passwords/tokens are encrypted at first start. **Back up
+>   `.env`** — losing this key makes stored credentials unreadable.
+> - **Production refuses weak secrets.** The server will not start in production with a missing,
+>   placeholder or short (< 32 chars) `SESSION_SECRET` or `JWT_SECRET`.
+> - **Device ACK default changed.** The HL7 listener now answers a frame it cannot read with `AR`
+>   and a message it cannot queue with `AE` (the device resends), instead of `AA`. Existing
+>   interfaces keep their stored `on_error` setting.
+> - **Behind HTTPS:** set `TRUST_PROXY` and `SESSION_COOKIE_SECURE=auto` (see Capabilities Guide).
+> - **First start after upgrade** re-embeds ezCompanion's knowledge in the background (about
+>   30–60 minutes of CPU on a CPU-only server); the app is fully usable meanwhile.
+
+---
+
+### EDI X12 005010 (new)
+
+- Schema-driven parse / validate / build engine (`edi/`) — a new transaction set is schema data,
+  not new code. Delimiters are read from each file's own ISA header.
+- Transaction sets: **835, 837P, 837I, 999, 270, 271, 276, 277, 278, 834**.
+- X12 → FHIR R4 templates for each (Claim, ExplanationOfBenefit, PaymentReconciliation, Coverage,
+  Patient, Organization, Task, ClaimResponse), plus a **Universal Receiver** template that accepts
+  any of them on one interface and routes each file by its own transaction set.
+- `edi.map_to_canonical` builds outbound X12 from any source shape; `edi.generate_999` produces a
+  999 acknowledgment from validation results; trading-partner custom validation rules.
+- Synchronous request/response endpoints for eligibility (270→271), claim status (276→277) and
+  prior authorization (278).
+- Verified against real X12.org worked examples and third-party samples; several real parsing-
+  engine and mapping bugs found that way were fixed (sibling-loop discrimination, RD8 date ranges,
+  ICD-9/ICD-10 qualifiers, maintenance-type codes).
+
+### NCPDP (new)
+
+- **SCRIPT 2017071** (e-prescribing XML): NewRx, CancelRx/Response, RxChangeRequest/Response,
+  RxRenewalRequest/Response, RxFill, Status, Error, Verify, GetMessage — with SCRIPT → FHIR templates
+  (MedicationRequest, MedicationDispense, Task). Verified against 33 real third-party fixtures.
+- **Telecommunication D.0** (pharmacy claims): B1, B2, B3, E1 request/response, including signed-
+  overpunch decimals; B1 → FHIR Claim/ClaimResponse templates and a synchronous
+  `/api/pharmacy-claim/{interfaceId}/submit` endpoint.
+- **Outbound**: FHIR MedicationRequest → NewRx and FHIR MedicationDispense → B1 claim templates; the
+  no-code mapping works from HL7, CSV or database sources too.
+
+### Medical device connectivity (new)
+
+- **Connect a Device** wizard with templates named by how the device talks: HL7 over TCP/IP, **HL7
+  over Serial Port (RS232)**, ASTM over TCP/IP, ASTM over Serial Port, DICOM Storage SCP.
+- ASTM E1394-97 engine (parse / validate / build) and transports; DICOM Storage SCP with TLS,
+  mutual TLS and a per-instance size cap. A go-dicom protocol bug that broke C-STORE from
+  non-go-dicom senders was found (using dcm4che as an independent device stand-in) and fixed.
+- HL7 over RS232 uses the same MLLP framing and HL7 ACK as the network listener; the serial
+  connector's new **Protocol** setting chooses ASTM (default) or HL7.
+- The wizard shows the real reason when a listener cannot start (e.g. port already in use) instead
+  of waiting for a device that can never connect.
+
+### Transports
+
+- **AS2** inbound/outbound (signed + encrypted HTTP with synchronous MDN).
+- **Direct Messaging** (DirectTrust S/MIME over IMAP/SMTP).
+- **WebSocket** inbound/outbound; outbound connector responses (HTTP body, MLLP ACK code, WebSocket
+  reply) are available to later pipeline steps.
+
+### Security
+
+- Every API route that reaches the processing engine requires a logged-in user **and** an
+  appropriate role (reads: viewer and above; changes: operator and above), enforced in both the
+  Node and Go layers. Previously several route groups were reachable without logging in.
+- Per-interface credentials for partner endpoints, with brute-force lockout (10 failures / 15 min
+  per caller address → 15-minute block) and audit of failed attempts.
+- Connector credentials in interface settings are encrypted at rest (AES-256-GCM) and masked on
+  every read and in logs.
+- Content-Security-Policy, real client IP in audit records, HTTPS-aware session cookies, and a
+  production secrets guard.
+- Go 1.26.9 and updated dependencies: govulncheck reports 0 reachable vulnerabilities; `npm audit`
+  reports 0 production vulnerabilities.
+
+### Audit logging and compliance
+
+- Unified audit taxonomy shared by the Go and Node services; coverage for interface, message,
+  pipeline, credential, role and password events.
+- **ATNA export**: RFC 5424 syslog with DICOM AuditMessage XML, configurable live in Settings.
+- **GDPR**: subject data export (Art. 15) and erasure by anonymization (Art. 17).
+- Query indexes for the audit log viewer; graceful shutdown fixes so audit records are flushed
+  on container stop.
+
+### Coverage Audit
+
+- Extended from C-CDA to **HL7 v2, FHIR, EDI X12 and NCPDP**, at element level (e.g. `PID.5.1`),
+  including live tracking for HL7 → FHIR transforms.
+
+### ezCompanion
+
+- Learns this release's capabilities: documentation for every new pipeline step, the EDI / NCPDP /
+  D.0 / ASTM schemas, a condensed HL7 v2.5.1 and FHIR R4 (plus US Core and Da Vinci PAS) summary,
+  and a new question-oriented **Capabilities Guide**.
+- Knowledge refreshes automatically on upgrade (only changed sources are re-embedded).
+- Fixed: it had no knowledge of configured interfaces (every interface failed to load), and
+  category-filtered searches returned nothing; documentation now always gets a share of each answer.
+
+### Fixes worth noting
+
+- Interfaces created via "Use Template" could be left without their message table.
+- Re-running the wizard on an existing interface called a method that did not exist.
+- Template gallery tabs dropped the EDI, NCPDP and CDA categories.
+- Several pipeline-engine fixes found through real interop testing (field validation was inert,
+  untaken switch/if branches still ran, single-object repeating segments were dropped on build).
+
+### Known limitations
+
+- HL7 over serial requires MLLP framing; the bidirectional order-query mode is TCP-only.
+- NCPDP D.0: E2, D0/D1, N/C/S transactions and the batch standard are not supported; a B1 built
+  from a FHIR MedicationDispense carries no pricing (FHIR does not model point-of-sale prices).
+- DICOM: Modality Worklist, MPPS and Storage Commitment are not supported.
+- ezCompanion runs on a small local model by default; it can misread detailed schema lists, and
+  some answers still favour saved configurations over the reference documentation.
+
+---
+
 ## v26.08 — 2026-08-30
 
 *Previous release: [v26.06.08](../../releases/tag/v26.06.08) (2026-06-08). 30 commits, ~4,700 files changed.*
