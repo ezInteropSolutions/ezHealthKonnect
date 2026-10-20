@@ -57,7 +57,7 @@ func NewAIServiceWithProvider(db *sql.DB, chatProvider LLMProvider, embedProvide
 		db:          db,
 		rag:         newRAGServiceWithProvider(db, chatProvider, embedProvider),
 		embedding:   embedding,
-		Ingestion:   NewKnowledgeIngestionService(embedding),
+		Ingestion:   NewKnowledgeIngestionService(embedding, NewPostgresKnowledgeSourceStore(db)),
 		Operational: operational,
 		ContextBld:  NewContextBuilder(db),
 		Memory:      NewConversationMemory(db),
@@ -1136,25 +1136,14 @@ func (s *AIService) BackgroundIngestAll(schemaDir string) {
 	go func() {
 		ctx := context.Background()
 
-		// Skip expensive static schema ingest (HL7, FHIR, X12, CCD) when the KB
-		// already has app_docs and schema chunks from a previous run. Static schemas
-		// don't change between restarts — only re-ingest them via POST /api/ai/ingest.
-		// Operational data (interfaces, pipelines) is always refreshed because it changes.
-		skipStatic := false
-		if s.db != nil {
-			var n int
-			if err := s.db.QueryRowContext(ctx,
-				`SELECT COUNT(*) FROM ai_knowledge_chunks WHERE source_type IN ('app_docs','ig_anchors','ig_assemblyrules','ig_valuesets','x12','ccd')`).
-				Scan(&n); err == nil && n > 0 {
-				skipStatic = true
-				log.Printf("🤖 AI KB — %d static chunks already present, skipping schema re-ingest (restart optimisation)", n)
-			}
-		}
-
-		var schemaResults []IngestionResult
-		if !skipStatic {
-			log.Printf("🤖 AI KB — starting full knowledge ingestion from %s", schemaDir)
-			schemaResults = s.Ingestion.IngestAll(ctx, schemaDir)
+		// Static knowledge (schemas, docs, step docs, built-in overviews) is
+		// re-ingested per source only when its content changed since the last
+		// successful ingestion (knowledge_sources.go) — so an upgrade picks up
+		// new docs and schemas, while an unchanged restart re-embeds nothing.
+		// Operational data (interfaces, pipelines) is always refreshed.
+		schemaResults := s.Ingestion.IngestChanged(ctx, schemaDir)
+		if len(schemaResults) > 0 {
+			log.Printf("🤖 AI KB — refreshed %d changed knowledge source(s)", len(schemaResults))
 		}
 		opResults := s.Operational.IngestAll(ctx)
 

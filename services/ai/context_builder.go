@@ -99,10 +99,12 @@ func (cb *ContextBuilder) fetchInterfaceContext(ctx context.Context, interfaceID
 		SELECT
 			name,
 			COALESCE(description, ''),
-			source_type,
-			COALESCE(source_connectivity, ''),
-			target_type,
-			COALESCE(target_connectivity, ''),
+			COALESCE(source_type, ''),
+			-- JSONB {type, config}: only the connector type name, never the
+			-- config (COALESCE(jsonb, '') errored on every row).
+			COALESCE(source_connectivity->>'type', ''),
+			COALESCE(target_type, ''),
+			COALESCE(target_connectivity->>'type', ''),
 			COALESCE(message_type, ''),
 			COALESCE(interface_status, 'unknown'),
 			COALESCE(total_processed, 0),
