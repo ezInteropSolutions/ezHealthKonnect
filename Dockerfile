@@ -108,7 +108,7 @@ COPY architecture/    ./architecture/
 # guide doc — installer/ also holds unrelated build assets/dist output that
 # don't belong in the runtime image), and the root-level master reference doc.
 COPY docs/                                ./docs/
-COPY installer/ONE_CLICK_INSTALLER_GUIDE.md ./installer/ONE_CLICK_INSTALLER_GUIDE.md
+COPY installer/INSTALLER_ARCHITECTURE.md    ./installer/INSTALLER_ARCHITECTURE.md
 COPY SYSTEM_DOCUMENTATION.md              ./SYSTEM_DOCUMENTATION.md
 
 # Go binary (compiled in gobuilder)

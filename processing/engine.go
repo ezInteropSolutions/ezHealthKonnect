@@ -1271,7 +1271,8 @@ func (pe *ProcessingEngine) TransformInterfaceMessages(
 // it operates on the EXISTING database row — no new row is inserted — so the message
 // ID stays stable across retries.
 //
-// Content priority: raw_content_uri (object storage) → raw_message (DB column).
+// Content comes from object storage (raw_content_uri); interface tables have
+// no raw_message column since V60.
 // The pipeline is executed asynchronously; status is updated to "processing" immediately.
 // This is the single-message UI entry point (fire-and-forget, caller doesn't wait for
 // the pipeline). For bulk reprocessing under caller-controlled concurrency, see
@@ -1313,7 +1314,7 @@ func (pe *ProcessingEngine) ReprocessMessageSync(interfaceID, messageID string) 
 // reprocessLookup holds the row data ReprocessMessage/ReprocessMessageSync both need
 // before handing off to reprocessMessageWork.
 type reprocessLookup struct {
-	rawContentURI, rawMessage, msgType, srcType string
+	rawContentURI, msgType, srcType string
 }
 
 // reprocessLookupAndMark loads the existing message row and marks it "processing".
@@ -1326,10 +1327,10 @@ func (pe *ProcessingEngine) reprocessLookupAndMark(interfaceID, messageID string
 	tableName := fmt.Sprintf("messages_intf_%s", sanitizeInterfaceID(interfaceID))
 	var l reprocessLookup
 	err := pe.db.QueryRow(
-		fmt.Sprintf(`SELECT COALESCE(raw_content_uri,''), COALESCE(raw_message,''), COALESCE(message_type,''), COALESCE(source_type,'')
+		fmt.Sprintf(`SELECT COALESCE(raw_content_uri,''), COALESCE(message_type,''), COALESCE(source_type,'')
 		             FROM %s WHERE message_id = $1`, tableName),
 		messageID,
-	).Scan(&l.rawContentURI, &l.rawMessage, &l.msgType, &l.srcType)
+	).Scan(&l.rawContentURI, &l.msgType, &l.srcType)
 	if err != nil {
 		return reprocessLookup{}, fmt.Errorf("message %s not found: %w", messageID, err)
 	}
@@ -1382,24 +1383,16 @@ func (pe *ProcessingEngine) reprocessMessageWork(ctx context.Context, interfaceI
 				})
 			}
 		} else {
-			log.Printf("⚠️  [reprocess] object storage read failed for %s: %v — trying raw_message column", messageID, readErr)
+			log.Printf("⚠️  [reprocess] object storage read failed for %s: %v", messageID, readErr)
 			if logger != nil {
-				logger.Warning(services.LogCategoryConnection, "Object storage read failed — falling back to DB column", map[string]interface{}{
+				logger.Warning(services.LogCategoryConnection, "Object storage read failed", map[string]interface{}{
 					"error": readErr.Error(),
 				})
 			}
 		}
 	}
 	if content == "" {
-		content = l.rawMessage
-		if content != "" && logger != nil {
-			logger.Info(services.LogCategoryConnection, "Raw content loaded from database column", map[string]interface{}{
-				"content_len": len(content),
-			})
-		}
-	}
-	if content == "" {
-		errMsg := "Reprocess failed: no raw content found in storage or database"
+		errMsg := "Reprocess failed: the message's raw content is not in object storage"
 		if logger != nil {
 			logger.Error(services.LogCategoryConnection, errMsg, nil)
 		}
@@ -1620,7 +1613,7 @@ func (pe *ProcessingEngine) recoverUnprocessedMessages(ctx context.Context) {
 		query := fmt.Sprintf(`
 			SELECT message_id,
 			       COALESCE(message_type, ''),
-			       COALESCE(raw_message, '')
+			       COALESCE(raw_content_uri, '')
 			FROM %s
 			WHERE status IN ('received', 'processing')
 			  AND received_at < $1
@@ -1632,18 +1625,30 @@ func (pe *ProcessingEngine) recoverUnprocessedMessages(ctx context.Context) {
 			continue
 		}
 
-		type staleMsg struct{ id, msgType, raw string }
+		type staleMsg struct{ id, msgType, uri string }
 		var stale []staleMsg
 		for msgRows.Next() {
 			var m staleMsg
-			if scanErr := msgRows.Scan(&m.id, &m.msgType, &m.raw); scanErr == nil {
+			if scanErr := msgRows.Scan(&m.id, &m.msgType, &m.uri); scanErr == nil {
 				stale = append(stale, m)
 			}
 		}
 		msgRows.Close()
 
 		for _, m := range stale {
-			if enqErr := pe.messageQueue.EnqueueForRecovery(interfaceID, m.id, m.msgType, m.raw); enqErr != nil {
+			// Raw content lives in object storage (raw_content_uri). A message
+			// whose content cannot be loaded is left for manual reprocessing,
+			// never re-enqueued empty.
+			if m.uri == "" || pe.objectStorage == nil {
+				log.Printf("⚠️  [Recovery] Skipping %s: no stored raw content to recover from", m.id)
+				continue
+			}
+			data, readErr := pe.objectStorage.GetRawMessageByURI(ctx, m.uri)
+			if readErr != nil || len(data) == 0 {
+				log.Printf("⚠️  [Recovery] Skipping %s: raw content could not be read from storage: %v", m.id, readErr)
+				continue
+			}
+			if enqErr := pe.messageQueue.EnqueueForRecovery(interfaceID, m.id, m.msgType, string(data)); enqErr != nil {
 				log.Printf("⚠️  [Recovery] Failed to re-enqueue %s: %v", m.id, enqErr)
 			} else {
 				totalRecovered++

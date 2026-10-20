@@ -190,14 +190,15 @@ func (p LinuxPlatform) EnsurePostgres(cfg *Config, rep Reporter) (*PgSetup, erro
 	}
 	admin := linuxAdmin{psql: filepath.Join(bin, "psql"), port: cfg.DBPort}
 	var lastErr error
+	var lastOut string
 	for i := 0; i < 30; i++ {
-		if _, lastErr = admin.Exec("postgres", "SELECT 1"); lastErr == nil {
+		if lastOut, lastErr = admin.Exec("postgres", "SELECT 1"); lastErr == nil {
 			rep.OK("PostgreSQL %d installed and running", PostgresMajorToInstall)
 			return &PgSetup{BinDir: bin, Admin: admin}, nil
 		}
 		time.Sleep(2 * time.Second)
 	}
-	return nil, fmt.Errorf("PostgreSQL %d did not start: %v", PostgresMajorToInstall, lastErr)
+	return nil, fmt.Errorf("PostgreSQL %d is not reachable on port %s: %s", PostgresMajorToInstall, cfg.DBPort, firstLine(lastOut, lastErr))
 }
 
 // PostgresAdmin implements Platform.
@@ -246,7 +247,19 @@ func installPostgresPackages(clientOnly bool, rep Reporter) error {
 		if !clientOnly {
 			pkgs = append(pkgs, "postgresql-"+major)
 		}
-		return run("apt-get", append([]string{"install", "-y", "-q"}, pkgs...)...)
+		if err := run("apt-get", append([]string{"install", "-y", "-q"}, pkgs...)...); err != nil {
+			return err
+		}
+		if clientOnly {
+			return nil
+		}
+		port, _ := clusterPort(PostgresMajorToInstall)
+		for _, c := range debianClusterCommands(major, port != "") {
+			if err := run(c[0], c[1:]...); err != nil {
+				return fmt.Errorf("start PostgreSQL %s: %w", major, err)
+			}
+		}
+		return nil
 	case "dnf", "yum":
 		pm := packageManager()
 		if err := run(pm, "install", "-y", "-q", pgdgRPMURL()); err != nil && !strings.Contains(err.Error(), "already installed") {
@@ -418,6 +431,21 @@ func newestPgBinDir() string {
 
 // clusterPort reads the port of the Debian/Ubuntu cluster (pg_lsclusters);
 // on RHEL the default 5432 applies.
+// debianClusterCommands makes sure the Debian/Ubuntu cluster "<major>/main"
+// exists, starts at boot and is running. apt normally creates it, but not when
+// /etc/postgresql-common/createcluster.conf disables that, and it does not
+// start it when the postgresql service is disabled — common on hosts that
+// already had another PostgreSQL version (whose cluster then also keeps 5432,
+// so the new one gets the next free port; clusterPort reads it afterwards).
+func debianClusterCommands(major string, exists bool) [][]string {
+	var cmds [][]string
+	if !exists {
+		cmds = append(cmds, []string{"pg_createcluster", major, "main", "--",
+			"--auth-local=peer", "--auth-host=scram-sha-256", "--encoding=UTF8"})
+	}
+	return append(cmds, []string{"systemctl", "enable", "--now", "postgresql@" + major + "-main"})
+}
+
 func clusterPort(major int) (string, error) {
 	out, err := exec.Command("pg_lsclusters", "--no-header").Output()
 	if err != nil {

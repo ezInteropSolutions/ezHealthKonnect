@@ -65,3 +65,22 @@ func rewriteRepoForTest(t *testing.T, p string, major int) string {
 	b, _ := os.ReadFile(p)
 	return string(b)
 }
+
+func TestDebianClusterCommands(t *testing.T) {
+	join := func(cmds [][]string) string {
+		var s []string
+		for _, c := range cmds {
+			s = append(s, strings.Join(c, " "))
+		}
+		return strings.Join(s, "; ")
+	}
+	got := join(debianClusterCommands("17", true))
+	if got != "systemctl enable --now postgresql@17-main" {
+		t.Fatalf("existing cluster: %s", got)
+	}
+	got = join(debianClusterCommands("17", false))
+	if !strings.HasPrefix(got, "pg_createcluster 17 main -- --auth-local=peer --auth-host=scram-sha-256") ||
+		!strings.HasSuffix(got, "systemctl enable --now postgresql@17-main") {
+		t.Fatalf("missing cluster: %s", got)
+	}
+}

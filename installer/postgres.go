@@ -116,11 +116,17 @@ func (t PgTools) HasTables(c PgConn) (bool, error) {
 
 // Dump writes a custom-format backup of the database to file.
 func (t PgTools) Dump(c PgConn, file string) error {
-	out, err := t.run(c, "pg_dump", append(c.args(), "-X", "--format=custom", "--file="+file)...)
+	out, err := t.run(c, "pg_dump", dumpArgs(c, file)...)
 	if err != nil {
 		return fmt.Errorf("pg_dump: %s", firstLine(out, err))
 	}
 	return nil
+}
+
+// dumpArgs builds pg_dump's arguments. Ownership is not dumped: Restore runs
+// as the application user (pg_restore --no-owner), which owns every object.
+func dumpArgs(c PgConn, file string) []string {
+	return append(c.args(), "--no-owner", "--format=custom", "--file="+file)
 }
 
 // VerifyDump checks a backup is readable and contains the schema history,

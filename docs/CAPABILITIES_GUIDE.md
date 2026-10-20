@@ -46,9 +46,21 @@ Every MLLP message — over TCP/IP or over a serial line — gets an HL7 ACK:
 
 Settings live in the connector's **Acknowledgment** tab (sending app/facility, ACK text, optional custom `buildACK` script that can override the code).
 
-### Which network ports are open for devices in the default Docker install?
+### Which network ports can devices use?
 
-MLLP: 2575 and 6610–6670. DICOM: 11112–11120. Choose a port in these ranges, or map additional ports in the compose file.
+In an installed (Standalone) system, a listener binds the port configured on its connector directly. Any free port works; on Linux this includes ports below 1024, such as DICOM's 104. The installer does not change the operating system's firewall. Allow each listener port in the Windows Firewall, `firewalld` or `ufw`, and in any network firewall between the devices and the server. The usual conventions are 2575 for HL7/MLLP and 104 or 11112 for DICOM.
+
+(The development `docker-compose.yml` publishes only MLLP 2575 and 6610–6670 and DICOM 11112–11120.)
+
+## How do I install, upgrade or roll back ezHealthKonnect?
+
+See `docs/INSTALL_GUIDE.md`.
+- **Install:** run `ezHealthKonnect-Setup-Win64.exe` (Windows) or `ezHealthKonnect-Setup-Linux-x64` (Linux) as administrator or root. On a server without a desktop, use `install --config answers.json`. Docker is not used in production.
+- **First administrator:** open the one-time setup link the installer prints. There is no default login.
+- **Upgrade:** run the newer installer. Before changing anything, it checks the database, the backup tools and at least 2 GB of free disk space. It then backs up the database and the application, installs and migrates the new version, and waits for the health check. On any failure it restores the previous version and its data automatically. `.env` and the data folders (`storage`, `logs`, `uploads`, `schemas`, `backups`) are never touched. Downgrades are refused.
+- **Roll back:** `rollback --yes` returns to the version before the last upgrade. Data received since that upgrade is lost.
+- **Uninstall:** `uninstall --yes` removes the services and the whole install directory, including stored messages and backups. It drops the database only if the installer created it; add `--keep-database` to keep it.
+- **Database migrations** are applied by the application itself (`go-api migrate`). Flyway is not needed.
 
 ## How do I exchange EDI X12?
 

@@ -4,6 +4,34 @@ Product and architecture decisions that change what the platform supports or how
 
 ---
 
+## 2026-10-20 — Production installs are Standalone only; Docker is for development
+
+**Decision:** Customers install ezHealthKonnect natively, as a Windows service or as Linux systemd services, using one self-contained installer per OS. The Docker edition, its install scripts and its production compose files are removed. `docker-compose.yml` remains only for developing ezHealthKonnect itself. The installer upgrades in place with a backup first and restores automatically on any failure. New installs get PostgreSQL 17; existing servers need PostgreSQL 15 or newer. Message content is stored on local disk by default; MinIO is not provided, and S3-compatible storage stays available.
+
+**Why:** Depending on Docker in production meant depending on Docker Desktop licensing and on engine changes outside our control, and many hospital servers do not allow it. MinIO only ever stood in for S3 during development. Upgrades were manual ("back up, re-run, hope") with no automatic recovery, which is not acceptable for live clinical interfaces. PostgreSQL 15 reaches end of life in November 2027.
+
+**Impact:** Installations made with the v26.08 installers cannot be upgraded in place: back up the database and `.env`, then install v26.10. Every release's installers are tested end to end (install, upgrade, a forced failed upgrade that must roll back, rollback, uninstall) on Ubuntu 22.04/24.04, AlmaLinux 9 and Windows before they are published.
+
+---
+
+## 2026-10-20 — The application runs its own database migrations (Flyway retired)
+
+**Decision:** `go-api migrate` (`services/migrator`) applies `database/migrations` in place of Flyway. It uses Flyway's own history table (`flyway_schema_history`) and checksum algorithm. It refuses to run against a database that has tables but no migration history, unless an explicit baseline is given.
+
+**Why:** Flyway needed a separate Java runtime, or a Docker container, on every customer server just to apply SQL files. The built-in engine ships inside the application binary.
+
+**Evidence:** All 279 checksums match the values Flyway recorded. On a fresh database, the engine produces a schema identical to Flyway's (a full `pg_dump` diff is empty) and the same data in all 87 seeded tables. `flyway validate` accepts its history afterwards.
+
+---
+
+## 2026-10-20 — No default administrator account
+
+**Decision:** No account with a known password exists after install. The installer writes a random `SETUP_TOKEN` to `.env` and prints a one-time link. The setup page creates the first administrator only with that token, and completing setup is atomic.
+
+**Why:** A published default login (`admin123`) on a healthcare integration engine is a takeover risk for every install that is reachable before someone changes it.
+
+---
+
 ## 2026-10-20 — No committed secrets, no secret defaults, refuse publicly-known values
 
 **Decision:** No secret value is ever committed, and no code falls back to a built-in secret. Every secret comes from `.env` (from source: `npm run setup:env`; installers generate their own). In production, the web server and the processing engine both refuse to start if any secret matches a publicly known value. The processing engine fails closed when its proxy secret is missing.

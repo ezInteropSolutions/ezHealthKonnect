@@ -195,9 +195,12 @@ Key environment variables in `.env`:
 - Concurrent execution via `concurrently` package
 
 ### Database Setup
-- PostgreSQL required for production mode
-- Sequelize handles schema migration and synchronization
-- Default admin credentials: admin@ezhealthkonnect.com / admin123
+- PostgreSQL required (new installs: 17; supported: 15+)
+- Schema migrations: `database/migrations/V*__*.sql`, applied by the built-in engine `go-api migrate` (`services/migrator`, Flyway-compatible history and checksums; Flyway is retired). Docker dev: the `migrate` compose service runs it before `app`. Never edit an applied migration — the checksum mismatch is reported, not silently repaired.
+- No default admin account: the first administrator is created via `/setup.html?token=<SETUP_TOKEN from .env>`
+
+### Production installation (v26.10+) — Standalone only
+Docker (`docker-compose.yml`) is development-only. Customers use `installer/` (one self-contained installer per OS; bundle from `cmd/bundle-builder` + `packaging/bundle-manifest.json`, git-tracked files only). Upgrades back up (pg_dump + app files) and auto-restore on failure; protected data entries are never touched. Design: [installer/INSTALLER_ARCHITECTURE.md](installer/INSTALLER_ARCHITECTURE.md). User guide: [docs/INSTALL_GUIDE.md](docs/INSTALL_GUIDE.md). E2E: `.github/workflows/installer.yml`. A new runtime directory the app reads at runtime must be added to BOTH the Dockerfile and the bundle manifest (a bundle-builder test enforces this).
 
 ## Development Notes
 
@@ -3187,7 +3190,7 @@ The 2026-10-19 release review found ezCompanion answering "I don't have specific
 
 **HL7/FHIR dictionaries are ingested as digests (2026-10-19)**: the raw files can't be embedded — they are `.gz` and fully expanded (one uncompressed v2.5.1 message file ≈ 20 MB, HL7 tree 1.5 GB compressed; ~1.5 s/chunk on CPU = months). `services/ai/schema_digest*.go` condense them: `schemaDigestSources` table (HL7 v2.5.1, FHIR R4 resources, US Core, Da Vinci PAS) × a `SchemaDigester` per family — HL7: one doc per distinct segment (fields: type, R/O, repeat, table, component names one level deep) + one per message structure (segments/groups in JSON key order — the files' `sequence` values are unreliable); FHIR: one doc per resource/profile (elements with type, cardinality, MS, binding; inherited boilerplate dropped). ≈1,390 chunks total. Another HL7 version / FHIR profile set = one table row. `TestSchemaDigest_RealSchemasStayCompact` fails if any digest exceeds ~3,000 chunks.
 - Schemas: HL7 v2 + FHIR (digests, see above), CDA (`cda/schemas`), and — table-driven since 2026-10-19 — EDI X12, NCPDP SCRIPT, NCPDP D.0 and ASTM (`services/ai/standard_schema_ingestion.go`'s `standardSchemaSources`; **a new standard/version is one table row**, guarded by a test that every row's directory holds schemas).
-- Docs: `architecture/*.md`, `docs/*.md` (incl. `docs/CAPABILITIES_GUIDE.md`, the question-oriented overview of formats, device connectivity, templates, partner endpoint auth, roles and security settings), `installer/ONE_CLICK_INSTALLER_GUIDE.md`, `SYSTEM_DOCUMENTATION.md`. `connectivity/` is excluded from the image (`.dockerignore`), so connector knowledge must live in `docs/`.
+- Docs: `architecture/*.md`, `docs/*.md` (incl. `docs/CAPABILITIES_GUIDE.md`, the question-oriented overview of formats, device connectivity, templates, partner endpoint auth, roles and security settings), `installer/INSTALLER_ARCHITECTURE.md`, `SYSTEM_DOCUMENTATION.md`. `connectivity/` is excluded from the image (`.dockerignore`), so connector knowledge must live in `docs/`.
 - Pipeline step docs: **only through the exported snapshot** `architecture/generated/pipeline_step_docs.json`, generated from `public/js/pipeline/documentation/*.js` by `npm run docs:export-step-docs`.
 
 ### Checklist when shipping a feature

@@ -31,6 +31,15 @@ trail, and a much better-informed ezCompanion assistant.
 > - **Device ACK default changed.** The HL7 listener now answers a frame it cannot read with `AR`
 >   and a message it cannot queue with `AE` (the device resends), instead of `AA`. Existing
 >   interfaces keep their stored `on_error` setting.
+> - **New installer; the Docker edition is retired.** ezHealthKonnect now installs natively
+>   (Windows service or Linux systemd), and the Docker install scripts and production compose
+>   files are gone. Installations made with the v26.08 installers cannot be upgraded in place:
+>   back up the database and `.env`, then install v26.10. From v26.10 on, run the newer
+>   installer to upgrade; it backs up first and rolls back automatically if anything fails.
+> - **No default administrator.** The `admin@ezhealthkonnect.com` / `admin123` account is gone.
+>   Create the first administrator with the one-time setup link the installer prints.
+> - **MinIO is no longer provided.** Messages are stored on local disk by default. S3-compatible
+>   storage is still supported through `OBJECT_STORAGE_DRIVER=s3`.
 > - **Behind HTTPS:** set `TRUST_PROXY` and `SESSION_COOKIE_SECURE=auto` (see Capabilities Guide).
 > - **First start after upgrade** re-embeds ezCompanion's knowledge in the background (about
 >   30–60 minutes of CPU on a CPU-only server); the app is fully usable meanwhile.
@@ -123,6 +132,28 @@ trail, and a much better-informed ezCompanion assistant.
 - Fixed: it had no knowledge of configured interfaces (every interface failed to load), and
   category-filtered searches returned nothing; documentation now always gets a share of each answer.
 
+### Installation and upgrades (new)
+
+- One installer per OS, `ezHealthKonnect-Setup-Win64.exe` and `ezHealthKonnect-Setup-Linux-x64`.
+  Each includes the whole application and its own Node.js runtime. Use the setup window or the
+  headless commands `install --config answers.json`, `upgrade`, `rollback --yes`,
+  `uninstall --yes`, `status`. See [docs/INSTALL_GUIDE.md](docs/INSTALL_GUIDE.md).
+- New installs get PostgreSQL 17. Existing PostgreSQL 15+ servers, including managed cloud
+  databases, are supported.
+- **Safe upgrades.** Before changing anything, an upgrade checks the database, the backup tools
+  and the free disk space. It then backs up the database and the application, and installs and
+  migrates the new version. If the health check fails it restores both automatically. Customer
+  data folders and `.env` are never touched. Downgrades are refused, and `rollback` returns to
+  the previous version.
+- Database migrations run through the application's built-in migration engine (`go-api
+  migrate`), which replaces Flyway. It is fully compatible with the existing
+  `flyway_schema_history`.
+- Services run with least privilege: a dedicated Linux user with hardened systemd units, and an
+  install directory on Windows that only SYSTEM and Administrators can access.
+- Every release's installers are tested end to end before publication on Ubuntu 22.04, Ubuntu
+  24.04, AlmaLinux 9 and Windows. The tests cover install, an upgrade, a forced upgrade failure
+  that must roll back, a rollback and uninstall.
+
 ### Fixes worth noting
 
 - Interfaces created via "Use Template" could be left without their message table.
@@ -137,6 +168,8 @@ trail, and a much better-informed ezCompanion assistant.
 - NCPDP D.0: E2, D0/D1, N/C/S transactions and the batch standard are not supported; a B1 built
   from a FHIR MedicationDispense carries no pricing (FHIR does not model point-of-sale prices).
 - DICOM: Modality Worklist, MPPS and Storage Commitment are not supported.
+- The Windows installer is not code-signed yet (SmartScreen warns on first run), and the Windows
+  service runs as LocalSystem. Linux installers are x86_64 only.
 - ezCompanion runs on a small local model by default; it can misread detailed schema lists, and
   some answers still favour saved configurations over the reference documentation.
 

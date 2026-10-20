@@ -6,7 +6,7 @@
     "app.js",
     "server.js",
     "SYSTEM_DOCUMENTATION.md",
-    "installer/ONE_CLICK_INSTALLER_GUIDE.md",
+    "installer/INSTALLER_ARCHITECTURE.md",
     "LICENSE",
     "COMMERCIAL_LICENSE.md",
     "THIRD-PARTY-NOTICES.txt"
