@@ -23,11 +23,10 @@
 //
 // Scope boundary (named, not silently absent): the request body must be a
 // raw 278 X12 payload — a JSON prior-auth-request input mode is not
-// implemented in this pass. Authentication is whatever already gates every
-// other /api route (requireProxiedRequest() in Go, forwarded through the
-// Node.js proxy) — this endpoint is not yet exposed with partner-facing
-// authentication (API keys, its own listener) the way a real external AS2/
-// UMO trading-partner integration would eventually need.
+// implemented in this pass. Authentication is per interface: the route group
+// is wrapped by SyncEndpointAuth (sync_endpoint_auth.go), which checks the
+// partner's API key / Basic / Bearer credentials against the interface's own
+// source_config.endpoint_auth (or accepts a verified app user).
 package controllers
 
 import (

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a self-contained Linux installer for ezHealthKonnect.
-# Requires Docker to be running (cross-compilation via golang:1.25-alpine).
+# Requires Docker to be running (cross-compilation via golang:1.26-alpine).
 #
 # Usage:
 #   cd installer
@@ -67,7 +67,7 @@ else
     -e GOOS=linux \
     -e GOARCH=amd64 \
     -e CGO_ENABLED=0 \
-    golang:1.25-alpine \
+    golang:1.26-alpine \
     go build -ldflags "-s -w" -o /work/installer/assets/_go-api-linux-tmp .
 
   mv "$ASSETS_DIR/_go-api-linux-tmp" "$GO_API_IN_BUNDLE"
@@ -137,7 +137,7 @@ docker run --rm \
   -e GOOS=linux \
   -e GOARCH=amd64 \
   -e CGO_ENABLED=0 \
-  golang:1.25-alpine \
+  golang:1.26-alpine \
   go build -tags embedded -ldflags "-s -w" \
   -o /work/dist/ezHealthKonnect-Setup-Linux-x64 .
 

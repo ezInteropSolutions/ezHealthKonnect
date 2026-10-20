@@ -9196,7 +9196,8 @@ window.testFHIRMappings = async function() {
         // Re-run the transformation to test current mappings
         console.log('🔄 Re-running transformation...');
 
-        const response = await fetch('http://localhost:8080/api/fhir/test-transform-v3', {
+        const response = await fetch('/api/fhir/test-transform-v3', { // via the authenticated proxy (was a direct, cross-origin call to the Go port)
+            credentials: 'include',
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

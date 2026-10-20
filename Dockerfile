@@ -3,7 +3,7 @@
 # --platform=$BUILDPLATFORM + explicit GOOS/GOARCH cross-compiles natively on
 # the build host instead of emulating the target arch via QEMU. Go's toolchain
 # cross-compiles for free; there's no reason to pay for (or risk) emulation.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS gobuilder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS gobuilder
 
 ARG TARGETOS
 ARG TARGETARCH

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build self-contained macOS installers for ezHealthKonnect.
 # Produces TWO binaries: arm64 (Apple Silicon) and amd64 (Intel).
-# Requires Docker to be running (cross-compilation via golang:1.25-alpine).
+# Requires Docker to be running (cross-compilation via golang:1.26-alpine).
 #
 # Usage:
 #   cd installer
@@ -84,7 +84,7 @@ build_arch() {
       -e GOOS=darwin \
       -e GOARCH="$ARCH" \
       -e CGO_ENABLED=0 \
-      golang:1.25-alpine \
+      golang:1.26-alpine \
       go build -ldflags "-s -w" -o "/work/installer/assets/_go-api-darwin-$ARCH-tmp" .
 
     mv "$ASSETS_DIR/_go-api-darwin-$ARCH-tmp" "$GO_API_IN_BUNDLE"
@@ -137,7 +137,7 @@ build_arch() {
     -e GOOS=darwin \
     -e GOARCH="$ARCH" \
     -e CGO_ENABLED=0 \
-    golang:1.25-alpine \
+    golang:1.26-alpine \
     go build -tags embedded -ldflags "-s -w" \
     -o "/work/dist/ezHealthKonnect-Setup-$SUFFIX" .
 

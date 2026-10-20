@@ -1159,3 +1159,31 @@ func credStoreMin(a, b int) int {
 	return b
 }
 
+
+// The installers write APP_CREDENTIAL_KEY in URL-safe unpadded base64
+// (installer/env_secrets.go); `openssl rand -base64 32` produces standard
+// base64. Both must decode to the SAME key so a value encrypted under one
+// representation decrypts under the other (Node's Buffer.from(k,'base64')
+// already accepts both — Go must match it).
+func TestNewCredentialStore_URLSafeKey_InteroperatesWithStandardForm(t *testing.T) {
+	raw := make([]byte, 32)
+	for i := range raw {
+		raw[i] = byte(250 - i) // forces '+'/'/' (std) vs '-'/'_' (url-safe) characters
+	}
+	std, err := NewCredentialStore(base64.StdEncoding.EncodeToString(raw))
+	if err != nil {
+		t.Fatalf("standard key: %v", err)
+	}
+	urlSafe, err := NewCredentialStore(base64.RawURLEncoding.EncodeToString(raw))
+	if err != nil {
+		t.Fatalf("URL-safe key must be accepted: %v", err)
+	}
+	ct, err := std.Encrypt([]byte("partner-secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pt, err := urlSafe.Decrypt(ct)
+	if err != nil || string(pt) != "partner-secret" {
+		t.Fatalf("URL-safe key must decrypt what the standard key encrypted: %q, %v", pt, err)
+	}
+}

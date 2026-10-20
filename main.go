@@ -13,6 +13,7 @@ import (
 	"ezhealthkonnect/processing"
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/audit"
+	"ezhealthkonnect/services/authguard"
 	"ezhealthkonnect/services/backpressure"
 	cdaSchemaLoader "ezhealthkonnect/cda"
 	cdacoverage "ezhealthkonnect/services/cda_coverage"
@@ -461,6 +462,16 @@ func main() {
 
 	router := gin.Default()
 
+	// Real client IP: every request reaches Go through Node's forwardToGo on
+	// loopback, which sets X-Forwarded-For to the caller's address. Trust that
+	// header ONLY from loopback (gin's default trusts every proxy, letting anyone
+	// who reaches this port spoof their IP). Without this, c.ClientIP() was
+	// 127.0.0.1 for every request — wrong in audit rows and useless for
+	// per-client lockout (2026-10-19 release hardening).
+	if err := router.SetTrustedProxies([]string{"127.0.0.1", "::1"}); err != nil {
+		log.Fatalf("❌ FATAL: invalid trusted proxy list: %v", err)
+	}
+
 	// Configure CORS
 	corsConfig := cors.Config{
 		AllowOrigins:     cfg.AllowedOrigins,
@@ -819,9 +830,17 @@ func main() {
 			// Synchronous 270/271 eligibility check — calls ExecutePipeline
 			// directly from the HTTP handler and returns the real result in
 			// the same response, unlike every other (async) inbound path.
+			// Per-interface partner authentication for the four synchronous
+			// endpoints below (controllers/sync_endpoint_auth.go). They are on
+			// admin_auth.go's publicClientRoutes allow-list because partner
+			// systems have no app session — this middleware is what gates them.
+			syncEndpointAuth := controllers.NewSyncEndpointAuth(
+				controllers.NewDBEndpointAuthConfigSource(db, credStore), appAuditLogger,
+				authguard.NewInMemoryFailureLimiter(authguard.DefaultPolicy, nil))
+
 			syncEligibilityPipelineSvc := services.NewTransformationPipelineService(db, credStore)
 			syncEligibilityCtrl := controllers.NewSyncEligibilityController(syncEligibilityPipelineSvc)
-			eligibilityGroup := api.Group("/eligibility")
+			eligibilityGroup := api.Group("/eligibility", syncEndpointAuth.Middleware())
 			syncEligibilityCtrl.RegisterRoutes(eligibilityGroup)
 
 			// Synchronous 276/277 claim status check — same pattern as
@@ -829,7 +848,7 @@ func main() {
 			// not shared.
 			syncClaimStatusPipelineSvc := services.NewTransformationPipelineService(db, credStore)
 			syncClaimStatusCtrl := controllers.NewSyncClaimStatusController(syncClaimStatusPipelineSvc)
-			claimStatusGroup := api.Group("/claim-status")
+			claimStatusGroup := api.Group("/claim-status", syncEndpointAuth.Middleware())
 			syncClaimStatusCtrl.RegisterRoutes(claimStatusGroup)
 
 			// Synchronous 278 prior authorization check — same pattern as
@@ -837,7 +856,7 @@ func main() {
 			// pipeline-service instance, not shared.
 			syncPriorAuthPipelineSvc := services.NewTransformationPipelineService(db, credStore)
 			syncPriorAuthCtrl := controllers.NewSyncPriorAuthController(syncPriorAuthPipelineSvc)
-			priorAuthGroup := api.Group("/prior-auth")
+			priorAuthGroup := api.Group("/prior-auth", syncEndpointAuth.Middleware())
 			syncPriorAuthCtrl.RegisterRoutes(priorAuthGroup)
 
 			// Synchronous NCPDP Telecom D.0 B1 pharmacy claim submit — same
@@ -847,7 +866,7 @@ func main() {
 			// so this ships as part of D.0's own Phase 1, not a later add-on.
 			syncPharmacyClaimPipelineSvc := services.NewTransformationPipelineService(db, credStore)
 			syncPharmacyClaimCtrl := controllers.NewSyncPharmacyClaimController(syncPharmacyClaimPipelineSvc)
-			pharmacyClaimGroup := api.Group("/pharmacy-claim")
+			pharmacyClaimGroup := api.Group("/pharmacy-claim", syncEndpointAuth.Middleware())
 			syncPharmacyClaimCtrl.RegisterRoutes(pharmacyClaimGroup)
 
 			// FHIR Narrative Generator

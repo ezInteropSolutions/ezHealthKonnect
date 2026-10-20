@@ -341,9 +341,18 @@ run_migrations() {
 
 # ── Config ────────────────────────────────────────────────────────────────────
 write_env() {
-  local session_secret jwt_secret
+  local session_secret jwt_secret cred_key
   session_secret=$(gen_secret)
   jwt_secret=$(gen_secret)
+  # APP_CREDENTIAL_KEY encrypts stored connector credentials: reuse the existing
+  # key on a re-install (a new key would make every stored credential unreadable).
+  cred_key=""
+  if [ -f "${INSTALL_DIR}/.env" ]; then
+    cred_key=$(grep -E '^APP_CREDENTIAL_KEY=' "${INSTALL_DIR}/.env" | head -1 | cut -d= -f2-)
+  fi
+  if [ -z "$cred_key" ]; then
+    cred_key=$(openssl rand -base64 32 2>/dev/null || head -c 32 /dev/urandom | base64)
+  fi
 
   mkdir -p "$INSTALL_DIR"
   cat > "${INSTALL_DIR}/.env" <<EOF
@@ -363,6 +372,9 @@ DB_SSL=false
 
 SESSION_SECRET=${session_secret}
 JWT_SECRET=${jwt_secret}
+
+# Encrypts stored connector credentials. Preserved on re-install — never change it.
+APP_CREDENTIAL_KEY=${cred_key}
 
 NODE_ENV=production
 LOG_LEVEL=info

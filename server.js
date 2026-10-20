@@ -6,6 +6,10 @@ const { PORT = 3000 } = process.env;
 async function startServer() {
     try {
         console.log('🚀 Starting ezHealthKonnect Enterprise Server...');
+
+        // Refuse to run production on missing/placeholder secrets (see config/SecretsGuard.js).
+        const SecretsGuard = require('./config/SecretsGuard');
+        new SecretsGuard(process.env).enforce(console);
         console.log('🗄️  Mode: PostgreSQL Only (Production Ready)');
 
         // Verify PostgreSQL connection before starting server
@@ -19,6 +23,16 @@ async function startServer() {
 
             await database.sync();
             console.log('✅ PostgreSQL database verified and ready');
+
+            // Encrypt any connector secrets still stored in plaintext on interface rows
+            // (idempotent; no-op without APP_CREDENTIAL_KEY). A failure is logged, never fatal.
+            try {
+                const InterfaceCredentialMigrator = require('./services/InterfaceCredentialMigrator');
+                const protector = require('./services/InterfaceConfigProtector').default;
+                await new InterfaceCredentialMigrator({ sequelize: database.sequelize, protector }).run();
+            } catch (migrateErr) {
+                console.error('⚠️  Interface credential encryption pass failed:', migrateErr.message);
+            }
             console.log('ℹ️  All TCP/MLLP listeners managed by Go backend (port 8080)');
 
             // Load session timeout from system_settings BEFORE requiring app.js

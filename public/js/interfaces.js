@@ -2578,6 +2578,24 @@ async function handleEditInterface(event) {
         interfaceData = collectInterfaceFormData();
     }
 
+    // Partner Endpoint Authentication — sent as its own `endpointAuth` field
+    // (undefined = leave unchanged, null = remove); the server never takes it
+    // from sourceConfig. See EndpointAuthEditor.js.
+    if (window.editEndpointAuthEditor) {
+        const endpointAuthError = window.editEndpointAuthEditor.validate();
+        if (endpointAuthError) {
+            AppDialogs.toast(endpointAuthError, 'error');
+            handleEditInterface.isProcessing = false;
+            if (saveButton) {
+                saveButton.textContent = originalText || '💾 Save Changes';
+                saveButton.disabled = false;
+            }
+            return;
+        }
+        const endpointAuth = window.editEndpointAuthEditor.collect();
+        if (endpointAuth !== undefined) interfaceData.endpointAuth = endpointAuth;
+    }
+
     // Always collect FHIR validation policy (not managed by config manager)
     const policySelect = document.getElementById('fhirValidationPolicy');
     if (policySelect && policySelect.value) {
@@ -2653,7 +2671,7 @@ async function handleEditInterface(event) {
         }
     }
 
-    console.log('🔄 Submitting interface update:', interfaceData);
+    console.log('🔄 Submitting interface update:', interfaceData.endpointAuth ? { ...interfaceData, endpointAuth: '[redacted]' } : interfaceData);
 
     try {
         const response = await fetch(`/api/interfaces/${interfaceData.id}`, {

@@ -414,6 +414,10 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <!-- Partner Endpoint Authentication — source_config.endpoint_auth,
+                                     rendered by EndpointAuthEditor.js (see its header comment). -->
+                                ${window.editEndpointAuthEditor ? window.editEndpointAuthEditor.render() : ''}
                             </div>
 
                             <!-- Tab 2: Source (Inbound) Connector — powered by ConnectorConfigBuilder -->
@@ -650,6 +654,12 @@
         }
         if (typeof window._toggleEditCoverageAuditNotify === 'function') {
             window._toggleEditCoverageAuditNotify(isCoverageEnabled);
+        }
+
+        // Partner Endpoint Authentication (masked secrets from the API).
+        if (window.editEndpointAuthEditor) {
+            const sourceConfig = interfaceData.sourceConfig || {};
+            window.editEndpointAuthEditor.populate(sourceConfig.endpoint_auth || null);
         }
     };
 

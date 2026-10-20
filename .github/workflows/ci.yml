@@ -11,7 +11,7 @@ on:
     branches: [master, main]
 
 env:
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.26'
   NODE_VERSION: '20'
 
 jobs:
@@ -44,7 +44,7 @@ jobs:
         # (not just "a dependency somewhere has a CVE"). Security audit (2026-07)
         # found 8 real, reachable vulnerabilities in golang.org/x/crypto and
         # github.com/redis/go-redis/v9 this way — both fixed by dependency bumps.
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...  # pinned: @latest began requiring a newer Go than this repo used (2026-10-19)
 
   # ── Go test suite ────────────────────────────────────────────────────────────
   # check-go above only builds/vets/scans — it never actually runs `go test`.
@@ -197,7 +197,10 @@ jobs:
         run: npm ci --prefer-offline
 
       - name: npm audit
-        run: npm audit --audit-level=moderate
+        # --omit=dev: audit what actually ships. The image installs with
+        # `npm ci --omit=dev` (Dockerfile), so dev-only tooling (jest, nodemon)
+        # never reaches production; its advisories are tracked separately.
+        run: npm audit --omit=dev --audit-level=moderate
 
       - name: Check for secrets accidentally staged
         run: |

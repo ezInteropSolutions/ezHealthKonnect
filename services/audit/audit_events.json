@@ -348,6 +348,14 @@
     "defaultResult": "failure",
     "complianceFlags": { "hipaa": true }
   },
+  "SYNC_ENDPOINT_AUTH_FAILED": {
+    "atnaEventId": "110114",
+    "atnaEventIdDisplay": "User Authentication",
+    "eventActionCode": "E",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "failure",
+    "complianceFlags": { "hipaa": true }
+  },
   "LOGIN_ERROR": {
     "atnaEventId": "110114",
     "atnaEventIdDisplay": "User Authentication",

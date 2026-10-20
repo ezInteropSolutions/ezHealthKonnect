@@ -90,17 +90,74 @@ func verifyProxySecret(c *gin.Context) bool {
 	return strings.EqualFold(c.GetHeader("X-Internal-Proxy-Secret"), internalProxySecret)
 }
 
+// clientOriginHeader is set by app.js's forwardToGo on every request it proxies
+// from an outside client (browser, API caller, partner system). Node's own
+// server-to-server calls (services/goBackendClient.js) never set it. A client
+// cannot add or remove it: forwardToGo builds Go-bound headers from scratch.
+const clientOriginHeader = "X-Proxy-Origin"
+
+// publicClientRoute is a route a client may reach WITHOUT a verified app user.
+// Either an exact method+path, or a path prefix whose routes enforce their own,
+// non-session authentication.
+type publicClientRoute struct {
+	method     string // "" = any method
+	path       string
+	prefixOnly bool
+	reason     string
+}
+
+// publicClientRoutes is the complete allow-list of anonymous-client access to
+// the Go API. Everything else requires the verified user Node forwards as
+// X-User-ID. Adding an entry here is a deliberate security decision.
+var publicClientRoutes = []publicClientRoute{
+	{method: http.MethodGet, path: "/api/system/health", reason: "liveness probe"},
+	{path: "/api/eligibility/", prefixOnly: true, reason: "partner endpoint — per-interface auth (requireSyncEndpointAuth)"},
+	{path: "/api/claim-status/", prefixOnly: true, reason: "partner endpoint — per-interface auth (requireSyncEndpointAuth)"},
+	{path: "/api/prior-auth/", prefixOnly: true, reason: "partner endpoint — per-interface auth (requireSyncEndpointAuth)"},
+	{path: "/api/pharmacy-claim/", prefixOnly: true, reason: "partner endpoint — per-interface auth (requireSyncEndpointAuth)"},
+}
+
+// isPublicClientRoute reports whether method+path is on the anonymous allow-list.
+func isPublicClientRoute(method, path string) bool {
+	for _, r := range publicClientRoutes {
+		if r.method != "" && r.method != method {
+			continue
+		}
+		if r.prefixOnly && strings.HasPrefix(path, r.path) {
+			return true
+		}
+		if !r.prefixOnly && path == r.path {
+			return true
+		}
+	}
+	return false
+}
+
 // requireProxiedRequest is the base middleware applied to ALL /api routes.
-// It verifies only that the request passed through the authenticated Node.js
-// proxy (X-Internal-Proxy-Secret). No role check is performed here — role
-// enforcement is left to requireProxiedAdmin() and requireProxiedSuperAdmin()
-// on sensitive sub-groups.
+// It verifies that the request passed through the Node.js proxy
+// (X-Internal-Proxy-Secret) and — for client-originated requests — that Node
+// actually authenticated a user (X-User-ID), unless the route is on
+// publicClientRoutes. That second check is defense in depth: the proxy secret
+// alone proves only that a request came through Node, which attaches it to
+// every forwarded request, authenticated or not (the 2026-10-19 regression
+// found whole route groups forwarded without auth for exactly this reason).
+// Role enforcement is left to requireProxiedAdmin()/requireProxiedSuperAdmin().
 func requireProxiedRequest() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !verifyProxySecret(c) {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"error":   "direct access to internal API not permitted",
+			})
+			c.Abort()
+			return
+		}
+		if strings.EqualFold(c.GetHeader(clientOriginHeader), "client") &&
+			strings.TrimSpace(c.GetHeader("X-User-ID")) == "" &&
+			!isPublicClientRoute(c.Request.Method, c.Request.URL.Path) {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"error":   "authentication required",
 			})
 			c.Abort()
 			return

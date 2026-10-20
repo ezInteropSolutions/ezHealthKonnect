@@ -36,6 +36,7 @@ func backpressureRegistry() *backpressure.Registry { return backpressure.Get() }
 // ProcessingEngine provides basic interface engine functionality
 type ProcessingEngine struct {
 	db                   *sql.DB
+	credStore            *services.CredentialStore // decrypts ENC:v1: secrets in interface-level configs; nil = passthrough
 	activeInterfaces     map[string]*InterfaceStatus
 	activeConnectors     map[string]InputConnector               // Track active connectors (ALL 32 types)
 	messageChan          map[string]chan *models.InboundMessage  // Message channels per interface (UNIFIED MODEL)
@@ -125,6 +126,7 @@ type EngineStats struct {
 func NewProcessingEngine(db *sql.DB, credStore *services.CredentialStore) *ProcessingEngine {
 	engine := &ProcessingEngine{
 		db:               db,
+		credStore:        credStore,
 		activeInterfaces: make(map[string]*InterfaceStatus),
 		activeConnectors: make(map[string]InputConnector),
 		messageChan:      make(map[string]chan *models.InboundMessage),
@@ -646,6 +648,15 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 			}
 		}
 		sourceConfig["interface_id"] = interfaceID
+
+		// Interface-level configs store secret fields encrypted at rest
+		// (services/InterfaceConfigProtector.js); decrypt before the connector sees them.
+		// Plaintext values written before that existed pass through unchanged.
+		if decrypted, decErr := pe.credStore.DecryptConfigFields(sourceConfig); decErr != nil {
+			log.Printf("⚠️  [CredentialStore] Failed to decrypt source config for interface %s: %v — using stored values", interfaceID, decErr)
+		} else {
+			sourceConfig = decrypted
+		}
 
 		logger.Debug("source config resolved (legacy fallback)", "interface_id", interfaceID)
 

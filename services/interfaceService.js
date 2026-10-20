@@ -4,6 +4,8 @@
 
 const database = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
+// Secret fields in connector configs are encrypted at rest (see services/InterfaceConfigProtector.js).
+const configProtector = require('./InterfaceConfigProtector').default;
 
 class InterfaceService {
     constructor() {
@@ -133,11 +135,11 @@ class InterfaceService {
                 // V30+ migration: ONLY use connectivity fields (no legacy duplication)
                 source_connectivity: {
                     type: interfaceData.sourceConnectivity || 'tcp',
-                    config: interfaceData.sourceConfig || {}
+                    config: configProtector.protectForStorage(interfaceData.sourceConfig || {}, {})
                 },
                 target_connectivity: {
                     type: targetConnType,
-                    config: cleanedTargetConfig
+                    config: configProtector.protectForStorage(cleanedTargetConfig, {})
                 },
                 // REMOVED: Legacy columns source_config/target_config - use *_connectivity only
                 // FIXED: Handle both wizard formats - transformationMapping (object with atomicMappings) or mappings (array)
@@ -166,8 +168,8 @@ class InterfaceService {
                 name: createData.name,
                 source_type: createData.source_type,
                 target_type: createData.target_type,
-                source_connectivity: createData.source_connectivity,
-                target_connectivity: createData.target_connectivity,
+                source_connectivity: configProtector.maskForDisplay(createData.source_connectivity),
+                target_connectivity: configProtector.maskForDisplay(createData.target_connectivity),
                 status: createData.status
             });
 
@@ -274,8 +276,59 @@ class InterfaceService {
         }
     }
 
-    // Keep all other methods from the original file unchanged...
-    
+    /**
+     * Updates an existing interface from the wizard's re-run path
+     * (wizardController.completeWizard with an existing interfaceId). This
+     * method was called there but never existed, so re-running the wizard on an
+     * existing interface threw (found 2026-10-19). Only whitelisted columns are
+     * written; undefined values are left unchanged; connector configs are
+     * protected at rest against the currently stored values (masked
+     * placeholders resolve to the stored secrets).
+     * @returns {Promise<object|null>} the updated row (masked), or null when not found / not owned
+     */
+    async updateInterface(interfaceId, fields, userId) {
+        await this.ensureDatabaseConnection();
+        const record = await this.database.models.Interface.findOne({
+            where: { id: interfaceId, user_id: userId, is_active: true }
+        });
+        if (!record) return null;
+
+        const UPDATABLE = ['name', 'description', 'source_type', 'target_type', 'message_type',
+            'status', 'auto_start', 'deployment_mode'];
+        const updates = {};
+        for (const key of UPDATABLE) {
+            if (fields[key] !== undefined) updates[key] = fields[key];
+        }
+        for (const column of ['source_connectivity', 'target_connectivity']) {
+            const incoming = fields[column];
+            if (!incoming) continue;
+            const stored = record.get(column) || {};
+            updates[column] = {
+                type: incoming.type || stored.type,
+                config: configProtector.protectForStorage(incoming.config || {}, stored.config || {}),
+            };
+        }
+        updates.updated_by = userId;
+        updates.updated_at = new Date();
+
+        await record.update(updates);
+        return this._toSafeJSON(record);
+    }
+
+    /**
+     * toJSON() of an Interface row with every stored connector secret masked —
+     * these objects are returned to the browser.
+     */
+    _toSafeJSON(record) {
+        const json = record.toJSON();
+        for (const column of ['source_config', 'target_config', 'source_connectivity', 'target_connectivity']) {
+            if (json[column] && typeof json[column] === 'object') {
+                json[column] = configProtector.maskForDisplay(json[column]);
+            }
+        }
+        return json;
+    }
+
     async getInterface(interfaceId, userId) {
         try {
             if (!this.database || !this.database.models || !this.database.models.Interface) {
@@ -294,7 +347,7 @@ class InterfaceService {
                 return null;
             }
             
-            const json = interfaceRecord.toJSON();
+            const json = this._toSafeJSON(interfaceRecord);
             
             try {
                 json.sourceConfig = JSON.parse(json.source_config || '{}');
@@ -344,7 +397,7 @@ class InterfaceService {
             });
             
             const processedInterfaces = interfaces.map(i => {
-                const json = i.toJSON();
+                const json = this._toSafeJSON(i);
                 
                 try {
                     json.sourceConfig = JSON.parse(json.source_config || '{}');
