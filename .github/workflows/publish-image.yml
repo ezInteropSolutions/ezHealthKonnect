@@ -65,12 +65,12 @@ jobs:
 
           echo ""
           echo "=== Verifying .env is NOT baked into image ==="
-          docker run --rm ${{ env.LOCAL_TAG }} sh -c \
+          docker run --rm --entrypoint "" ${{ env.LOCAL_TAG }} sh -c \
             'test -f /app/.env && echo "FAIL: .env found in image" && exit 1 || echo "OK: No .env in image"'
 
           echo ""
           echo "=== Verifying .git is NOT baked into image ==="
-          docker run --rm ${{ env.LOCAL_TAG }} sh -c \
+          docker run --rm --entrypoint "" ${{ env.LOCAL_TAG }} sh -c \
             'test -d /app/.git && echo "FAIL: .git found in image" && exit 1 || echo "OK: No .git in image"'
 
       # ── CVE scan with Trivy ───────────────────────────────────────────────
@@ -110,14 +110,14 @@ jobs:
       - name: Smoke test — binaries present and executable
         run: |
           echo "=== Checking go-api binary ==="
-          docker run --rm ${{ env.LOCAL_TAG }} sh -c \
+          docker run --rm --entrypoint "" ${{ env.LOCAL_TAG }} sh -c \
             'test -x /app/go-api && echo "OK: go-api binary is present and executable"'
 
           echo "=== Checking Node.js ==="
-          docker run --rm ${{ env.LOCAL_TAG }} node --version
+          docker run --rm --entrypoint "" ${{ env.LOCAL_TAG }} node --version
 
           echo "=== Checking curl (health check tool) ==="
-          docker run --rm ${{ env.LOCAL_TAG }} curl --version | head -1
+          docker run --rm --entrypoint "" ${{ env.LOCAL_TAG }} curl --version | head -1
 
       # ── Smoke test: full stack starts healthy ─────────────────────────────
       - name: Smoke test — full stack health check
