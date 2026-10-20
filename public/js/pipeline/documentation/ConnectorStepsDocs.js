@@ -203,7 +203,7 @@
                         { name: 'connect_timeout', type: 'integer', default: '10', notes: 'SSH connect timeout in seconds.' },
                         { name: 'read_timeout', type: 'integer', default: '60', notes: 'Per-file download timeout in seconds.' }
                     ],
-                    example: { connectorType: 'sftp_inbound', config: { host: 'sftp.partner.org', port: 22, username: 'hl7feed', auth_type: 'key', key_content: '-----BEGIN PRIVATE KEY-----...', remote_dir: '/outbound/hl7', file_pattern: '*.hl7', after_processing: 'archive', archive_dir: '/outbound/hl7/processed', max_files_per_run: 50 } }
+                    example: { connectorType: 'sftp_inbound', config: { host: 'sftp.partner.org', port: 22, username: 'hl7feed', auth_type: 'key', key_content: '<PEM private key>', remote_dir: '/outbound/hl7', file_pattern: '*.hl7', after_processing: 'archive', archive_dir: '/outbound/hl7/processed', max_files_per_run: 50 } }
                 },
                 {
                     typeName: 'edi_x12_inbound', displayName: 'EDI X12 Inbound (835 / 837 / 999)', icon: '💰', mode: 'pull',
@@ -248,7 +248,7 @@
                         { name: 'tls_key_file', type: 'string', default: '—', notes: 'TLS key file path (when TLS enabled).' },
                         { name: 'request_timeout_seconds', type: 'integer', default: '30', notes: 'Per-request timeout.' }
                     ],
-                    example: { connectorType: 'as2_inbound', config: { port: 8443, base_path: '/as2', as2_to: 'EZHEALTHKONNECT', own_cert_pem: '-----BEGIN CERTIFICATE-----...', own_key_pem: '-----BEGIN PRIVATE KEY-----...', partner_cert_pem: '-----BEGIN CERTIFICATE-----...', tls_enabled: true } }
+                    example: { connectorType: 'as2_inbound', config: { port: 8443, base_path: '/as2', as2_to: 'EZHEALTHKONNECT', own_cert_pem: '<PEM certificate>', own_key_pem: '<PEM private key>', partner_cert_pem: '<PEM certificate>', tls_enabled: true } }
                 },
                 {
                     typeName: 'direct_messaging_inbound', displayName: 'Direct Messaging Inbound', icon: '📧', mode: 'pull',
@@ -266,7 +266,7 @@
                         { name: 'partner_cert_pem', type: 'string', required: true, default: '—', notes: 'Verifies the sender\'s signature — direct-trust model, same as AS2.' },
                         { name: 'polling_interval_seconds', type: 'integer', default: '60', notes: 'Seconds between IMAP poll cycles.' }
                     ],
-                    example: { connectorType: 'direct_messaging_inbound', config: { imap_host: 'imap.directtrust-hisp.com', imap_port: 993, username: 'provider@direct.hospital.org', password: '••••', cert_content: '-----BEGIN CERTIFICATE-----...', private_key: '-----BEGIN PRIVATE KEY-----...', partner_cert_pem: '-----BEGIN CERTIFICATE-----...', polling_interval_seconds: 60 } }
+                    example: { connectorType: 'direct_messaging_inbound', config: { imap_host: 'imap.directtrust-hisp.com', imap_port: 993, username: 'provider@direct.hospital.org', password: '••••', cert_content: '<PEM certificate>', private_key: '<PEM private key>', partner_cert_pem: '<PEM certificate>', polling_interval_seconds: 60 } }
                 },
                 {
                     typeName: 'websocket_inbound', displayName: 'WebSocket Server', icon: '🔌', mode: 'push',
@@ -536,7 +536,7 @@
                         { name: 'partner_cert_pem', type: 'string', required: true, default: '—', notes: 'Encrypts outgoing messages and verifies the partner MDN.' },
                         { name: 'request_mdn', type: 'boolean', default: 'true', notes: 'Synchronous MDN only in this phase.' }
                     ],
-                    example: { connectorType: 'as2_outbound', config: { partner_url: 'https://partner.example.com/as2', as2_from: 'EZHEALTHKONNECT', as2_to: 'PARTNERSTATION', own_cert_pem: '-----BEGIN CERTIFICATE-----...', own_key_pem: '-----BEGIN PRIVATE KEY-----...', partner_cert_pem: '-----BEGIN CERTIFICATE-----...' } }
+                    example: { connectorType: 'as2_outbound', config: { partner_url: 'https://partner.example.com/as2', as2_from: 'EZHEALTHKONNECT', as2_to: 'PARTNERSTATION', own_cert_pem: '<PEM certificate>', own_key_pem: '<PEM private key>', partner_cert_pem: '<PEM certificate>' } }
                 },
                 {
                     typeName: 'direct_messaging_outbound', displayName: 'Direct Messaging Outbound', icon: '📧', mode: 'push',
@@ -551,7 +551,7 @@
                         { name: 'partner_cert_pem', type: 'string', required: true, default: '—', notes: 'Encrypts outgoing messages to the recipient.' },
                         { name: 'recipient_address', type: 'string', required: true, default: '—', notes: 'Default recipient Direct address.' }
                     ],
-                    example: { connectorType: 'direct_messaging_outbound', config: { smtp_host: 'smtp.directtrust-hisp.com', smtp_port: 587, username: 'provider@direct.hospital.org', cert_content: '-----BEGIN CERTIFICATE-----...', private_key: '-----BEGIN PRIVATE KEY-----...', partner_cert_pem: '-----BEGIN CERTIFICATE-----...', recipient_address: 'labs@direct.partner.org' } }
+                    example: { connectorType: 'direct_messaging_outbound', config: { smtp_host: 'smtp.directtrust-hisp.com', smtp_port: 587, username: 'provider@direct.hospital.org', cert_content: '<PEM certificate>', private_key: '<PEM private key>', partner_cert_pem: '<PEM certificate>', recipient_address: 'labs@direct.partner.org' } }
                 },
                 {
                     typeName: 'edi_x12_outbound', displayName: 'EDI X12 Outbound (SFTP)', icon: '💰', mode: 'push',

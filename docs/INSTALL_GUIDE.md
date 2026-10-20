@@ -1,368 +1,234 @@
-# ezHealthKonnect — Installation Guide
+# Installing ezHealthKonnect
 
-**Version:** 1.0  
-**Platforms:** Windows 10/11, Linux (Ubuntu/Debian/RHEL/Rocky)
+ezHealthKonnect installs natively on Windows and Linux servers as system
+services. Docker is not needed and is not used. (The repository's
+`docker-compose.yml` is for developing ezHealthKonnect itself and is not a
+supported way to run it in production.)
 
----
+Each release has two installers and a checksum file:
 
-## Table of Contents
+| File | For |
+|------|-----|
+| `ezHealthKonnect-Setup-Win64.exe` | Windows Server 2019+ / Windows 10 and 11, x64 |
+| `ezHealthKonnect-Setup-Linux-x64` | Linux x86_64 with systemd: Ubuntu 22.04/24.04, Debian 11+, RHEL/Rocky/AlmaLinux 8 and 9 |
+| `SHA256SUMS.txt` | Checksums — verify before running |
 
-1. [Overview](#overview)
-2. [System Requirements](#system-requirements)
-3. [Windows Installation](#windows-installation)
-4. [Linux Installation](#linux-installation)
-5. [First Login](#first-login)
-6. [Uninstalling](#uninstalling)
-7. [Troubleshooting](#troubleshooting)
+Each installer contains the whole application, including its own Node.js
+runtime. During the install it needs internet access only to obtain
+PostgreSQL, and only when PostgreSQL is not already on the machine.
 
----
-
-## Overview
-
-ezHealthKonnect is an AI-powered healthcare integration platform that transforms HL7 messages to FHIR format. The installer sets up all required components automatically:
-
-- **PostgreSQL 15** — primary database
-- **Node.js 20 LTS** — web application runtime
-- **ezHealthKonnect Go API** — high-performance HL7/FHIR transformation engine
-- **HL7 schemas** — v2.3, v2.5, v2.5.1 (core) + FHIR R4
-
-After installation, the platform is accessible from your browser at `http://localhost:3000`.
+Every release's installers are tested end to end on fresh Ubuntu 22.04,
+Ubuntu 24.04, AlmaLinux 9 and Windows hosts before they are published. The
+tests cover install, an upgrade, a failed upgrade that must roll back, a
+manual rollback and uninstall.
 
 ---
 
-## System Requirements
+## 1. Verify the download
 
-| Component | Minimum |
-|---|---|
-| RAM | 4 GB (8 GB recommended) |
-| Disk space | 3 GB free |
-| Network | Internet connection required during installation |
+```bash
+sha256sum -c SHA256SUMS.txt --ignore-missing          # Linux
+```
+```powershell
+Get-FileHash .\ezHealthKonnect-Setup-Win64.exe -Algorithm SHA256   # compare with SHA256SUMS.txt
+```
+
+## 2. Install
 
 ### Windows
-- Windows 10 (version 1709 or later) or Windows 11
-- Windows Server 2019 or later
-- winget (App Installer) — pre-installed on Windows 11; available via Microsoft Store on Windows 10
+
+Run `ezHealthKonnect-Setup-Win64.exe` as an administrator. A setup window
+opens. It checks the machine, asks for the ports and the database, and
+installs.
 
 ### Linux
-- Ubuntu 20.04 LTS or later
-- Debian 11 or later
-- RHEL / Rocky Linux / AlmaLinux 8 or later
-- CentOS Stream 9 or later
-- Run as root or a user with `sudo` privileges
-
----
-
-## Windows Installation
-
-### Step 1 — Download the installer
-
-Download `ezHealthKonnect-Setup-Win64.exe` from the ezInterOp Solutions releases page.
-
-> The installer is a single self-contained file (~350 MB). No additional files are needed.
-
-### Step 2 — Run the installer
-
-Double-click `ezHealthKonnect-Setup-Win64.exe`. Windows may display a SmartScreen warning on first run — click **More info**, then **Run anyway**.
-
-The installer opens a wizard in your default browser:
-
-```
-http://127.0.0.1:<random-port>
-```
-
-> If the browser does not open automatically, the installer window shows the URL — copy and paste it manually.
-
-### Step 3 — Choose installation type
-
-Select **Standalone Edition** (recommended for single-server deployments that do not have Docker).
-
-Select **Docker Edition** if Docker Desktop is already installed and you prefer container-based deployment.
-
-### Step 4 — Run prerequisite checks
-
-Click **Check Prerequisites**. The installer verifies:
-
-- Available disk space (3 GB minimum)
-- Network ports 3000, 8080, and 5432 are not in use
-- winget package manager availability
-
-> If a port is in use, you can change it in the Configuration step — no action required at this stage.
-
-### Step 5 — Configure (optional)
-
-The defaults work for most installations:
-
-| Setting | Default | Notes |
-|---|---|---|
-| Install directory | `C:\ezHealthKonnect` | Must not already exist |
-| Web port | `3000` | Browser access URL |
-| API port | `8080` | Internal — no firewall rule needed |
-| Database host | `localhost` | Change only for external PostgreSQL |
-| Database port | `5432` | Standard PostgreSQL port |
-
-> **External database**: If you have an existing PostgreSQL server, enter its host address, port, and the superuser password. The installer will create the application database and user automatically.
-
-### Step 6 — Install
-
-Click **Install**. The installer runs up to 10 steps and shows live progress:
-
-1. Prepares the install directory
-2. Installs PostgreSQL 15 (via winget, or direct download as fallback ~350 MB)
-3. Installs Node.js 20 LTS (via winget, or direct download ~30 MB)
-4. Extracts the application
-5. Installs Node.js dependencies
-6. Creates the database and user
-7. Writes the configuration file
-8. Runs database migrations
-9. Registers Windows services (auto-start on boot)
-10. Waits for the application to become ready
-
-**Typical installation time:** 5–15 minutes depending on internet speed.
-
-### Step 7 — Complete
-
-When installation completes, the wizard shows a **Go to Platform** button. Click it to open ezHealthKonnect.
-
-The platform is now registered as a single Windows service, `ezhealthkonnect`, which runs both
-the Node.js web frontend and the Go API backend (via a small start-app.ps1 wrapper).
-
-The service starts automatically when Windows boots.
-
----
-
-## Linux Installation
-
-### Step 1 — Download the installer
-
-Download `ezHealthKonnect-Setup-Linux-x64` from the ezInterOp Solutions releases page.
-
-### Step 2 — Make the file executable
-
-Open a terminal and run:
 
 ```bash
 chmod +x ezHealthKonnect-Setup-Linux-x64
-```
-
-### Step 3 — Run the installer
-
-The installer must run with root or sudo privileges to install system packages and register services:
-
-```bash
 sudo ./ezHealthKonnect-Setup-Linux-x64
 ```
 
-The installer opens a wizard in your default browser. On headless servers, copy the URL printed to the terminal and open it from another machine:
+On a server without a desktop, the installer prints the setup address
+together with an `ssh -L` command for opening it from your own machine. You
+can also install without a browser using an answer file (see below).
 
-```
-http://<server-ip>:<port>
-```
+### What the installer does
 
-> **Firewall note:** The installer wizard runs on a random local port. If accessing remotely, you may need to temporarily open that port or use SSH port forwarding:
-> ```bash
-> ssh -L 7788:localhost:7788 user@server
-> ```
-> Then open `http://localhost:7788` in your local browser.
+- **Database.** It uses PostgreSQL on this machine. If PostgreSQL is missing,
+  the installer adds PostgreSQL 17: from the official PostgreSQL repositories
+  on Linux, or with the official EDB installer on Windows (downloaded only
+  when needed, and run only if its SHA-256 checksum matches). It creates a
+  dedicated database user with a generated password. Alternatively, you can
+  point it at an existing database, for example a managed cloud PostgreSQL.
+  PostgreSQL 15 or newer is required.
+- **Database schema.** It creates and upgrades the database schema with the
+  application's built-in migration tool (`go-api migrate`).
+- **Secrets.** It writes `.env` with freshly generated secrets: the session
+  and JWT keys, the internal proxy secret, the key that encrypts connector
+  credentials (`APP_CREDENTIAL_KEY`), and a one-time setup token.
+- **Services.**
+  - Linux: two systemd services, `ezhealthkonnect` (web) and
+    `ezhealthkonnect-api` (engine). Both run as the unprivileged system user
+    `ezhealthkonnect`.
+  - Windows: one service, `ezhealthkonnect`. It runs as its own virtual
+    account, `NT SERVICE\ezhealthkonnect`, not as LocalSystem. The account can
+    read the application, write only the data folders, and cannot access
+    `backups`. Otherwise only SYSTEM and Administrators can access the install
+    directory.
+- **Health check.** It waits until the application reports healthy before
+  saying it is done.
 
-### Step 4 — Choose Standalone Edition
+Default locations: `/opt/ezhealthkonnect` (Linux) and `C:\ezHealthKonnect`
+(Windows).
 
-Select **Standalone Edition**. The Linux installer automatically detects your package manager (apt-get, dnf, or yum) and installs the required components.
+## 3. Create the first administrator
 
-### Step 5 — Configure (optional)
+When the install finishes, the installer shows a one-time link:
+`http://<server>:3000/setup.html?token=…`. Open it to create the first
+administrator account. There is no default password. Until setup is
+completed, the setup page refuses anyone who does not have the token, which
+is stored as `SETUP_TOKEN` in `.env`. Keep the link private.
 
-The defaults are recommended for first-time installations:
+---
 
-| Setting | Default |
-|---|---|
-| Install directory | `/opt/ezhealthkonnect` |
-| Web port | `3000` |
-| API port | `8080` |
-
-### Step 6 — Install
-
-The installer runs the following steps automatically:
-
-1. Creates `/opt/ezhealthkonnect/`
-2. Installs PostgreSQL 15 from the PGDG repository
-3. Installs Node.js 20 LTS from NodeSource repository
-4. Extracts the application files
-5. Installs Node.js dependencies
-6. Creates the PostgreSQL database and user
-7. Writes `/opt/ezhealthkonnect/.env`
-8. Runs database migrations
-9. Registers `ezhealthkonnect` and `ezhealthkonnect-api` systemd services
-10. Waits for health check
-
-**Typical installation time:** 5–15 minutes.
-
-### Step 7 — Verify services are running
+## Installing without a browser (answer file)
 
 ```bash
-systemctl status ezhealthkonnect
-systemctl status ezhealthkonnect-api
+sudo ./ezHealthKonnect-Setup-Linux-x64 install --config answers.json
+```
+```powershell
+.\ezHealthKonnect-Setup-Win64.exe install --config answers.json   # elevated prompt
 ```
 
-Both should show `active (running)`.
+`answers.json`, with defaults shown. Every field is optional.
 
-### Accessing the platform
+```json
+{
+  "installDir": "/opt/ezhealthkonnect",
+  "appPort": "3000",
+  "apiPort": "8080",
+  "dbMode": "local",
+  "dbPort": "5432",
+  "dbName": "ezhealthkonnect",
+  "dbUser": "ezhealth_user",
+  "withAI": false
+}
+```
 
-From the server itself:
-```
-http://localhost:3000
-```
+To use an existing database, set `"dbMode": "external"` together with
+`dbHost`, `dbPort`, `dbName`, `dbUser`, `dbPassword` and `dbSslMode`
+(`require` by default; `disable`, `verify-ca` and `verify-full` are also
+accepted). The installer only connects to it, so the database and the user
+must already exist.
 
-From another machine on the same network (replace `<server-ip>` with the server's IP address):
-```
-http://<server-ip>:3000
-```
+On Windows, if PostgreSQL is already installed on the machine, also set
+`pgAdminPassword` (the `postgres` superuser password). The installer needs it
+to create the database and user.
 
-> To allow remote access, open port 3000 in your firewall:
-> ```bash
-> # Ubuntu/Debian (UFW)
-> sudo ufw allow 3000/tcp
->
-> # RHEL/Rocky (firewalld)
-> sudo firewall-cmd --add-port=3000/tcp --permanent
-> sudo firewall-cmd --reload
-> ```
+The installer prints the one-time setup link when it finishes.
 
 ---
 
-## First Login
+## Upgrading
 
-After installation on any platform, open a browser and navigate to:
+Run the newer installer on the same machine. The setup window detects the
+existing installation and offers **Upgrade**. Headless:
 
+```bash
+sudo ./ezHealthKonnect-Setup-Linux-x64 upgrade        # --dir if not the default
 ```
-http://localhost:3000
+
+Before changing anything, an upgrade checks three things: the database is
+reachable, the PostgreSQL backup tools are present, and there are at least
+2 GB of free disk space. If any check fails, the upgrade stops and nothing is
+changed. Then the upgrade:
+
+1. Stops the services.
+2. Backs up the database (`pg_dump`) and the application files into
+   `<install dir>/backups/<timestamp>-<old version>`.
+3. Installs the new application files. New settings are added to `.env`;
+   existing values are never changed.
+4. Applies database migrations.
+5. Starts the services and waits for a healthy response.
+
+**If any step fails, the installer restores the database and the files from
+that backup automatically and starts the previous version again.**
+
+Your data is never touched by an upgrade: `.env`, `storage`, `logs`,
+`uploads`, `schemas`, `backups` and the other data folders. Installing an
+older version over a newer one is refused. The three most recent upgrade
+backups are kept.
+
+## Rolling back
+
+To return to the version before the last successful upgrade:
+
+```bash
+sudo ./ezHealthKonnect-Setup-Linux-x64 rollback --yes
 ```
 
-Log in with the default administrator credentials:
+This restores the database exactly as it was before that upgrade. **Messages
+and configuration changes made since that upgrade are lost**, which is why
+`--yes` is required. The setup window offers the same action.
 
-| Field | Value |
-|---|---|
-| Email | `admin@ezhealthkonnect.com` |
-| Password | `admin123` |
+## Status
 
-> **Security:** Change the default password immediately after your first login.
-> Click your profile icon (top right) → **Profile** → **Change Password**.
-
-### Post-installation steps
-
-1. **Change the admin password** — required before connecting any real data sources
-2. **Create additional user accounts** — navigate to **Admin → User Management**
-3. **Configure your first interface** — click **New Interface** on the dashboard
-4. **Test with a sample HL7 message** — use the built-in message tester
-
----
+```bash
+sudo ./ezHealthKonnect-Setup-Linux-x64 status     # installed version, history, backups
+./ezHealthKonnect-Setup-Linux-x64 version         # versions this installer contains
+```
 
 ## Uninstalling
 
-### Windows
-
-**Option 1 — Add/Remove Programs:**
-Open **Windows Settings → Apps → Installed apps**, search for "ezHealthKonnect", click **Uninstall**.
-
-**Option 2 — Re-run the installer:**
-Run `ezHealthKonnect-Setup-Win64.exe` again. If the application is already installed, the wizard shows an **Uninstall** option.
-
-The uninstaller stops all services, drops the PostgreSQL database and user, and removes all application files.
-
-> PostgreSQL itself is not uninstalled (it may be used by other applications). To remove PostgreSQL, use **Add/Remove Programs** and uninstall "PostgreSQL 15".
-
-### Linux
-
-Re-run the installer and click **Uninstall**, or run manually:
+Use the setup window, **Add or remove programs** (Windows), or:
 
 ```bash
-sudo systemctl stop ezhealthkonnect ezhealthkonnect-api
-sudo systemctl disable ezhealthkonnect ezhealthkonnect-api
-sudo rm /etc/systemd/system/ezhealthkonnect*.service
-sudo systemctl daemon-reload
-sudo -u postgres psql -c "DROP DATABASE IF EXISTS ezhealthkonnect;"
-sudo -u postgres psql -c "DROP USER IF EXISTS ezhealth_user;"
-sudo rm -rf /opt/ezhealthkonnect
+sudo ./ezHealthKonnect-Setup-Linux-x64 uninstall --yes                  # also drops the database
+sudo ./ezHealthKonnect-Setup-Linux-x64 uninstall --yes --keep-database  # keep the data
 ```
 
+Uninstall removes the services and **the whole install directory, including
+`storage`, `logs`, `uploads` and `backups`**. Copy anything you want to keep
+before running it. It drops the database only when the installer created it
+(`dbMode: local`) and `--keep-database` is not given. An existing database
+(`dbMode: external`) is never dropped. PostgreSQL itself is not removed.
+
+On Windows, where PostgreSQL was already installed before ezHealthKonnect,
+the installer used your `postgres` password only during installation and
+never stored it. Uninstall therefore leaves the database in place and says
+so. To remove it, connect as `postgres` and run
+`DROP DATABASE ezhealthkonnect; DROP ROLE ezhealth_user;`.
+
 ---
+
+## Day-to-day operations
+
+**Linux**
+```bash
+systemctl status ezhealthkonnect ezhealthkonnect-api
+systemctl restart ezhealthkonnect ezhealthkonnect-api
+journalctl -u ezhealthkonnect-api -n 100 --no-pager
+```
+Configuration is in `/opt/ezhealthkonnect/.env`, readable only by root and
+the service user. Restart both services after changing it.
+
+**Windows**
+```powershell
+Get-Service ezhealthkonnect
+Restart-Service ezhealthkonnect
+```
+Logs are in `C:\ezHealthKonnect\logs`. Configuration is in
+`C:\ezHealthKonnect\.env`.
 
 ## Troubleshooting
 
-### The browser does not open automatically
-
-The installer prints the URL to its console window. Copy and paste it into any browser.
-On Linux servers without a desktop, use the URL from another machine (see [Linux Installation](#linux-installation)).
-
-### Port 3000 or 8080 is already in use
-
-During configuration (Step 5), change the **Web port** or **API port** to a free port (e.g., 3001, 8081). The installer will configure all components to use the new port.
-
-### PostgreSQL installation fails (Windows)
-
-The installer tries winget first, then a direct download. If the direct download also fails:
-
-1. Download and install [PostgreSQL 15](https://www.enterprisedb.com/downloads/postgres-postgresql-downloads) manually
-2. During installation, set the superuser password to `postgres`
-3. Re-run the ezHealthKonnect installer — it will detect the existing PostgreSQL and skip installation
-
-### PostgreSQL installation fails (Linux — permission denied)
-
-Ensure you are running the installer with `sudo`:
-```bash
-sudo ./ezHealthKonnect-Setup-Linux-x64
-```
-
-### "Database already exists" during migration
-
-This is a warning, not an error. The installer is safe to re-run. Existing migrations are detected and skipped automatically.
-
-### Application does not start after installation
-
-Check the service logs:
-
-**Windows:**
-```
-C:\ezHealthKonnect\logs\
-```
-
-**Linux:**
-```bash
-journalctl -u ezhealthkonnect -n 50
-journalctl -u ezhealthkonnect-api -n 50
-```
-
-### Checking service status
-
-**Windows (PowerShell):**
-```powershell
-Get-Service ezhealthkonnect
-```
-
-**Linux:**
-```bash
-systemctl status ezhealthkonnect ezhealthkonnect-api
-```
-
-### Restarting services manually
-
-**Windows:**
-```powershell
-Restart-Service ezhealthkonnect
-```
-
-**Linux:**
-```bash
-sudo systemctl restart ezhealthkonnect ezhealthkonnect-api
-```
-
----
-
-## Support
-
-For assistance, contact ezInterOp Solutions:
-
-- **Website:** [https://www.ezInterOpSolutions.com](https://www.ezInterOpSolutions.com)
-- **Email:** support@ezinteropsolutions.com
-
----
-
-*ezHealthKonnect is a proprietary product of ezInterOp Solutions. All rights reserved.*
+- **A port is in use.** The setup window checks the ports before installing.
+  Choose different `appPort`/`apiPort` values, or stop the program that is
+  using the port.
+- **An upgrade failed.** The installer has already rolled back. It prints the
+  step that failed and the backup it restored. The services' logs explain
+  migration and startup errors.
+- **PostgreSQL could not be installed** (no internet or a blocked
+  repository). Install PostgreSQL 15 or newer yourself, then choose an
+  existing database (`dbMode: external`).
+- **Help:** [github.com/ezinteropsolutions/ezhealthkonnect/issues](https://github.com/ezinteropsolutions/ezhealthkonnect/issues)

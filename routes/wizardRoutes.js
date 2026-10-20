@@ -239,7 +239,9 @@ router.post('/save-mapping-config',                      // operator+
  * Get runtime mapping configuration for Go services
  * GET /api/wizard/runtime-mapping/:interfaceId/:messageType
  */
-router.get('/runtime-mapping/:interfaceId/:messageType', async (req, res) => {
+// Session required (2026-10-19 release hardening): was anonymous despite returning an
+// interface's mapping configuration. No server-side caller exists (repo-wide grep).
+router.get('/runtime-mapping/:interfaceId/:messageType', requireAuth, canRead, async (req, res) => {
     try {
         const { interfaceId, messageType } = req.params;
 

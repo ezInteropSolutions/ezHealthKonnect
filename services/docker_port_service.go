@@ -23,6 +23,16 @@ type DockerPortConfig struct {
 	DeploymentMode     string `json:"deployment_mode"`      // "docker" | "standalone"
 }
 
+// RunningInContainer reports whether this process runs inside a Docker
+// container (local development / CI). Customer installs run as native
+// services, where Docker port management does not apply.
+func RunningInContainer() bool {
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	return false
+}
+
 // DockerPortService manages Docker port configuration and container lifecycle.
 type DockerPortService struct {
 	httpClient *http.Client

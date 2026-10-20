@@ -141,7 +141,7 @@ test('EDI 835 to FHIR template renders all 9 steps on canvas with correct config
     await page.click('a[href="#templates"]');
     await page.waitForSelector('.tg-card', { timeout: 15000 });
 
-    const card = page.locator('.tg-card', { hasText: 'EDI X12 835 to FHIR' });
+    const card = page.locator('.tg-card', { hasText: 'EDI X12 835 to FHIR (SFTP)' });
     await expect(card, 'Templates gallery should list the EDI 835 to FHIR template').toBeVisible({ timeout: 5000 });
     await card.locator('.tg-use-btn').click();
 
@@ -292,12 +292,12 @@ test('edi_x12_inbound connector config: transaction_types checkbox, auth_type vi
     // backed by a hidden field carrying the same comma-joined value
     // getConfig() already expects.
     const transactionCheckboxes = page.locator('.connector-config-array-checklist input[type="checkbox"]');
-    await expect(transactionCheckboxes, 'transaction_types should render 6 checkboxes (835/837P/837I/999/270/271)').toHaveCount(6);
+    await expect(transactionCheckboxes, 'transaction_types should render 10 checkboxes (835/837P/837I/999/270/271/276/277/278/834)').toHaveCount(10);
     // The checkbox itself carries no value attribute (ConnectorConfigBuilder.js
     // never sets cb.value — it browser-defaults to "on") — the real option
     // text lives on the associated <label for="...">, matched by id.
     const checkedValues = await transactionCheckboxes.evaluateAll(
-        boxes => boxes.filter(b => b.checked).map(b => document.querySelector(`label[for="${b.id}"]`)?.textContent.trim())
+        boxes => boxes.filter(b => b.checked).map(b => (document.querySelector(`label[for="${b.id}"]`)?.textContent.trim() || "").split(/\s/)[0])
     );
     expect(checkedValues, 'only 835 should be pre-checked from the seeded config').toEqual(['835']);
     await expect(page.locator('.connector-config-field[data-field="transaction_types"]')).toHaveValue('835');
@@ -412,7 +412,7 @@ test('payload.builder Resource Paths has a working field picker sourced from the
     await page.goto('/dashboard.html');
     await page.click('a[href="#templates"]');
     await page.waitForSelector('.tg-card', { timeout: 15000 });
-    await page.locator('.tg-card', { hasText: 'EDI X12 835 to FHIR' }).locator('.tg-use-btn').click();
+    await page.locator('.tg-card', { hasText: 'EDI X12 835 to FHIR (SFTP)' }).locator('.tg-use-btn').click();
     await page.waitForSelector('#tgConfigureModal', { state: 'visible', timeout: 5000 });
     await page.fill('#tcf_name', `PW Picker Test ${Date.now()}`);
     await page.click('#tcf_submit');
@@ -470,7 +470,7 @@ test('EDI Phase 2: transaction set picker offers 837P/837I/999, and edi.map_to_c
     });
     await page.waitForSelector('#stepPropertiesModal', { state: 'visible', timeout: 5000 });
     const buildOptions = await page.locator('#ediBuildTransactionSet option').allTextContents();
-    expect(buildOptions, 'edi.build Transaction Set dropdown should list all 6 real transaction sets').toEqual(['835', '837P', '837I', '999', '270', '271']);
+    expect(buildOptions, 'edi.build Transaction Set dropdown should list all 10 real transaction sets').toEqual(['835', '837P', '837I', '999', '270', '271', '276', '277', '278', '834']);
     await expect(page.locator('#ediBuildTransactionSet')).toHaveValue('835');
     await page.locator('#stepPropertiesModal .modal-close').first().click();
     await page.waitForSelector('#stepPropertiesModal', { state: 'hidden', timeout: 5000 }).catch(() => {});
@@ -491,7 +491,7 @@ test('EDI Phase 2: transaction set picker offers 837P/837I/999, and edi.map_to_c
     const mapTxSetSelect = page.locator('#ediMapToCanonicalBuilder select').first();
     await expect(mapTxSetSelect, 'edi.map_to_canonical should now have its own Transaction Set picker').toBeVisible();
     const mapOptions = await mapTxSetSelect.locator('option').allTextContents();
-    expect(mapOptions, 'edi.map_to_canonical Transaction Set dropdown should list all 6 real transaction sets').toEqual(['835', '837P', '837I', '999', '270', '271']);
+    expect(mapOptions, 'edi.map_to_canonical Transaction Set dropdown should list all 10 real transaction sets').toEqual(['835', '837P', '837I', '999', '270', '271', '276', '277', '278', '834']);
     await expect(mapTxSetSelect).toHaveValue('835');
     let panelText = await page.locator('#formTabContent').innerText();
     expect(panelText, 'default (835) loop tree should show 2100/2110').toContain('2110');

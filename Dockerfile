@@ -3,7 +3,7 @@
 # --platform=$BUILDPLATFORM + explicit GOOS/GOARCH cross-compiles natively on
 # the build host instead of emulating the target arch via QEMU. Go's toolchain
 # cross-compiles for free; there's no reason to pay for (or risk) emulation.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS gobuilder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS gobuilder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -108,7 +108,7 @@ COPY architecture/    ./architecture/
 # guide doc — installer/ also holds unrelated build assets/dist output that
 # don't belong in the runtime image), and the root-level master reference doc.
 COPY docs/                                ./docs/
-COPY installer/ONE_CLICK_INSTALLER_GUIDE.md ./installer/ONE_CLICK_INSTALLER_GUIDE.md
+COPY installer/INSTALLER_ARCHITECTURE.md    ./installer/INSTALLER_ARCHITECTURE.md
 COPY SYSTEM_DOCUMENTATION.md              ./SYSTEM_DOCUMENTATION.md
 
 # Go binary (compiled in gobuilder)

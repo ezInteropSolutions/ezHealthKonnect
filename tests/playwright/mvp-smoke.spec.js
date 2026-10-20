@@ -196,9 +196,13 @@ test.describe('MVP-S2 HL7→FHIR ADT', () => {
         const api      = new ApiHelper(request);
         const messages = await api.getMessages(state.adtId);
         if (messages.length === 0) test.skip();
-        // Accept any terminal state: completed/delivered (success) or failed (pipeline ran, delivery failed)
-        const ok = messages.some(m => /completed|delivered|processed|failed/i.test(m.status || ''));
-        expect(ok).toBeTruthy();
+        // Processing is asynchronous, so poll. Accept any terminal state:
+        // completed/delivered (success) or failed (pipeline ran, delivery failed).
+        const isTerminal = m => /completed|delivered|processed|failed/i.test(m.status || '');
+        await expect.poll(async () => (await api.getMessages(state.adtId)).some(isTerminal), {
+            timeout: 30000,
+            message: 'at least one ADT message should reach a terminal pipeline state',
+        }).toBe(true);
     });
 });
 
@@ -290,10 +294,11 @@ test.describe('MVP-S5 HL7→File', () => {
 test.describe('MVP-S6 UI Smoke', () => {
     test('MVP-S6-001 MVP_SMOKE interfaces appear on the Interfaces page', async ({ page }) => {
         await page.goto('/interfaces.html');
-        await page.waitForLoadState('load');
-        await page.waitForTimeout(2500);
-        const text = await page.locator('body').innerText();
-        expect(text).toContain('MVP_SMOKE');
+        await page.waitForSelector('.interface-card, [data-interface-id]', { timeout: 15000 });
+        // The list is paginated (25/page); on a populated install the seeded
+        // interfaces need not land on page 1, so find them via the page's own search.
+        await page.fill('#interfaceSearchInput', 'MVP_SMOKE');
+        await expect(page.locator('body')).toContainText('MVP_SMOKE', { timeout: 10000 });
     });
 
     test('MVP-S6-002 Interface cards have status badges', async ({ page }) => {

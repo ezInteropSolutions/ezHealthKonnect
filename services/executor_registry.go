@@ -149,7 +149,7 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 	er.Register(enrichment.NewScriptEnrichmentExecutor())        // enrichment.script
 
 	// Transformation executors
-	hl7FhirExecutor := NewHL7FHIRMappingExecutor(er.db)
+	hl7FhirExecutor := NewHL7FHIRMappingExecutor(er.db, er.credStore)
 	er.Register(hl7FhirExecutor)                             // hl7_fhir_transform
 	er.Register(enrichment.NewFieldMappingExecutor())        // field_mapping
 	er.Register(enrichment.NewFileParserExecutor(er.db, er.credStore.DecryptConfigBytes)) // file_parser
@@ -368,13 +368,15 @@ func (er *ExecutorRegistry) ListExecutors() []string {
 // HL7FHIRMappingExecutor handles HL7 to FHIR transformation
 type HL7FHIRMappingExecutor struct {
 	db               *sql.DB
+	credStore        *CredentialStore // decrypts secret fields in interfaces.target_config; nil = passthrough
 	transformService *HL7FHIRTransformServiceV3
 	scorer           *TransformationScorer
 }
 
-func NewHL7FHIRMappingExecutor(db *sql.DB) *HL7FHIRMappingExecutor {
+func NewHL7FHIRMappingExecutor(db *sql.DB, credStore *CredentialStore) *HL7FHIRMappingExecutor {
 	return &HL7FHIRMappingExecutor{
 		db:               db,
+		credStore:        credStore,
 		transformService: NewHL7FHIRTransformServiceV3(db),
 		scorer:           NewTransformationScorer(db),
 	}
@@ -695,6 +697,12 @@ func (hme *HL7FHIRMappingExecutor) getDestinationConfig(
 	if err := json.Unmarshal(targetConfigJSON, &targetConfig); err != nil {
 		log.Printf("⚠️  Failed to parse target_config JSON: %v, using default", err)
 		return "http://localhost:8080/fhir", authHeaders
+	}
+	// Secret fields (password/token/api key) are encrypted at rest; plaintext passes through.
+	if decrypted, decErr := hme.credStore.DecryptConfigFields(targetConfig); decErr != nil {
+		log.Printf("⚠️  [CredentialStore] Failed to decrypt target_config for interface %s: %v — using stored values", interfaceID, decErr)
+	} else {
+		targetConfig = decrypted
 	}
 
 	var endpoint string

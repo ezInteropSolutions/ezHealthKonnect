@@ -1160,9 +1160,12 @@ func (sc *SettingsController) GetDockerPortSettings(c *gin.Context) {
 
 	svc := services.NewDockerPortService()
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    cfg,
+		"success":          true,
+		"data":             cfg,
 		"docker_available": svc.IsDockerAvailable(),
+		// Standalone (native service) installs have no container ports to
+		// manage; the settings page hides this section for them.
+		"running_in_docker": services.RunningInContainer(),
 	})
 }
 

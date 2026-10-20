@@ -267,9 +267,19 @@
 
 </div>
 
+<script src="/js/core/html-safe.js"></script>
 <script>
 (function () {
     'use strict';
+
+    // ── One-time setup token from the installer's link ─────────────────────
+    // Kept for this tab only and removed from the address bar.
+    const urlToken = new URLSearchParams(window.location.search).get('token');
+    if (urlToken) {
+        sessionStorage.setItem('ezhk-setup-token', urlToken);
+        history.replaceState(null, '', window.location.pathname);
+    }
+    const setupToken = sessionStorage.getItem('ezhk-setup-token') || '';
 
     // ── Check if setup is still needed ──────────────────────────────────────
     fetch('/api/setup/status')
@@ -278,6 +288,11 @@
             if (!d.setupRequired) {
                 // Already set up — redirect to login
                 window.location.replace('/');
+                return;
+            }
+            if (d.tokenRequired && !setupToken) {
+                showAlert('alert-1', 'Open this page with the setup link shown by the installer when it finished ' +
+                    '(it contains a one-time token). It is also stored as SETUP_TOKEN in the .env file of the installation.');
             }
         })
         .catch(() => {}); // offline / error — proceed with setup page
@@ -381,7 +396,7 @@
             const r = await fetch('/api/setup/complete', {
                 method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body:    JSON.stringify({ orgName, firstName, lastName, email, password })
+                body:    JSON.stringify({ orgName, firstName, lastName, email, password, setupToken })
             });
             const data = await r.json().catch(() => ({}));
 

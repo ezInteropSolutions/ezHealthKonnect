@@ -49,8 +49,6 @@ package connectors
 
 import (
 	"context"
-	"crypto/subtle"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -76,12 +74,8 @@ type HTTPFHIRInboundConnector struct {
 	basePath       string
 	bundleMode     string // "bundle_as_unit" | "bundle_unwrap"
 	allowedMethods map[string]bool // nil = allow all
-	authType       string
-	authUsername   string
-	authPassword   string
-	apiKey         string
-	apiKeyHeader   string // header name for API key auth (default: X-API-Key)
-	bearerToken    string
+	authType       string                // as configured (none|basic|bearer|api_key), for display
+	auth           *InboundAuthenticator // the shared, fail-closed credential check
 	fhirVersion    string
 	enableCORS     bool
 	maxBodySize    int64
@@ -113,7 +107,8 @@ func NewHTTPFHIRInboundConnector() InboundConnector {
 		bundleMode:           "bundle_as_unit",
 		fhirVersion:          "R4",
 		enableCORS:           true,
-		apiKeyHeader:         "X-API-Key",
+		authType:             InboundAuthNone,
+		auth:                 noInboundAuth(),
 		maxBodySize:          10 * 1024 * 1024, // 10 MB
 		requestTimeout:       30 * time.Second,
 	}
@@ -165,20 +160,13 @@ func (h *HTTPFHIRInboundConnector) Initialize(config []byte) error {
 	}
 
 	// Authentication
-	if authType, ok := cfg["authType"].(string); ok {
-		h.authType = authType
-		switch authType {
-		case "basic":
-			h.authUsername, _ = cfg["username"].(string)
-			h.authPassword, _ = cfg["password"].(string)
-		case "bearer":
-			h.bearerToken, _ = cfg["bearerToken"].(string)
-		case "api_key":
-			h.apiKey, _ = cfg["apiKey"].(string)
-			if v, ok := cfg["apiKeyHeader"].(string); ok && v != "" {
-				h.apiKeyHeader = v
-			}
-		}
+	auth, err := fhirInboundAuthenticator(cfg)
+	if err != nil {
+		return err
+	}
+	h.auth = auth
+	if v, _ := cfg["authType"].(string); strings.TrimSpace(v) != "" {
+		h.authType = strings.TrimSpace(v)
 	}
 
 	// Allowed HTTP methods (nil = all allowed)
@@ -724,59 +712,56 @@ func (h *HTTPFHIRInboundConnector) authMiddleware(next http.Handler) http.Handle
 			next.ServeHTTP(w, r)
 			return
 		}
-		if h.authType == "" || h.authType == "none" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		switch h.authType {
-		case "basic":
-			if !h.validateBasicAuth(r) {
+		if !h.auth.Authenticate(r) {
+			if h.auth.Type() == InboundAuthBasic {
 				w.Header().Set("WWW-Authenticate", `Basic realm="FHIR API"`)
-				h.sendOperationOutcome(w, http.StatusUnauthorized, "error", "security", "Authentication required")
-				return
 			}
-		case "bearer":
-			if !h.validateBearerToken(r) {
-				h.sendOperationOutcome(w, http.StatusUnauthorized, "error", "security", "Invalid or missing bearer token")
-				return
-			}
-		case "api_key":
-			if !h.validateAPIKey(r) {
-				h.sendOperationOutcome(w, http.StatusUnauthorized, "error", "security", "Invalid or missing API key")
-				return
-			}
+			h.sendOperationOutcome(w, http.StatusUnauthorized, "error", "security", fhirAuthFailureText[h.auth.Type()])
+			return
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 
-func (h *HTTPFHIRInboundConnector) validateBasicAuth(r *http.Request) bool {
-	auth := r.Header.Get("Authorization")
-	if !strings.HasPrefix(auth, "Basic ") {
-		return false
-	}
-	payload, err := base64.StdEncoding.DecodeString(auth[6:])
-	if err != nil {
-		return false
-	}
-	parts := strings.SplitN(string(payload), ":", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(parts[0]), []byte(h.authUsername)) == 1 &&
-		subtle.ConstantTimeCompare([]byte(parts[1]), []byte(h.authPassword)) == 1
+// fhirInboundAuthTypes maps this connector's authType vocabulary onto the
+// shared InboundAuthenticator's. An unknown value is rejected at Initialize,
+// so a misspelled type can never fall through to an open listener.
+var fhirInboundAuthTypes = map[string]string{
+	"":        InboundAuthNone,
+	"none":    InboundAuthNone,
+	"basic":   InboundAuthBasic,
+	"bearer":  InboundAuthBearerToken,
+	"api_key": InboundAuthAPIKey,
 }
 
-func (h *HTTPFHIRInboundConnector) validateBearerToken(r *http.Request) bool {
-	auth := r.Header.Get("Authorization")
-	if !strings.HasPrefix(auth, "Bearer ") {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(h.bearerToken)) == 1
+var fhirAuthFailureText = map[string]string{
+	InboundAuthBasic:       "Authentication required",
+	InboundAuthBearerToken: "Invalid or missing bearer token",
+	InboundAuthAPIKey:      "Invalid or missing API key",
 }
 
-func (h *HTTPFHIRInboundConnector) validateAPIKey(r *http.Request) bool {
-	return subtle.ConstantTimeCompare([]byte(r.Header.Get(h.apiKeyHeader)), []byte(h.apiKey)) == 1
+// fhirInboundAuthenticator builds the shared authenticator from this
+// connector's config keys (authType, username, password, bearerToken,
+// apiKey, apiKeyHeader), which the stored configs and the UI form use.
+func fhirInboundAuthenticator(cfg map[string]interface{}) (*InboundAuthenticator, error) {
+	str := func(k string) string { v, _ := cfg[k].(string); return v }
+	authType, ok := fhirInboundAuthTypes[strings.TrimSpace(str("authType"))]
+	if !ok {
+		return nil, fmt.Errorf("authType must be none, basic, bearer or api_key, got %q", str("authType"))
+	}
+	return NewInboundAuthenticator(map[string]interface{}{
+		"authentication_type": authType,
+		"username":            str("username"),
+		"password":            str("password"),
+		"bearer_token":        str("bearerToken"),
+		"api_key":             str("apiKey"),
+		"api_key_header":      str("apiKeyHeader"),
+	}, InboundAuthNone)
+}
+
+func noInboundAuth() *InboundAuthenticator {
+	a, _ := NewInboundAuthenticator(map[string]interface{}{}, InboundAuthNone)
+	return a
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -853,7 +838,7 @@ func (h *HTTPFHIRInboundConnector) Validate() error {
 	if h.port < 1 || h.port > 65535 {
 		return fmt.Errorf("port must be between 1 and 65535")
 	}
-	return nil
+	return h.auth.Validate()
 }
 
 func (h *HTTPFHIRInboundConnector) TestConnection(ctx context.Context) error {

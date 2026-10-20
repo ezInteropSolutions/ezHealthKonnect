@@ -110,9 +110,10 @@ func Load() *Config {
 		DBSSLMode:  getEnv("DB_SSL", "disable"),
 
 		// Security
-		JWTSecret:     getEnv("JWT_SECRET", "dev-jwt-secret"),
-		SessionSecret: getEnv("SESSION_SECRET", "dev-session-secret"),
-		EncryptionKey: getEnv("ENCRYPTION_KEY", "dev-encryption-key"),
+		// No fallback values — a publicly-known default must never protect anything.
+		JWTSecret:     getEnv("JWT_SECRET", ""),
+		SessionSecret: getEnv("SESSION_SECRET", ""),
+		EncryptionKey: getEnv("ENCRYPTION_KEY", ""),
 	}
 
 	// Set FHIR schema directory relative to main schema directory

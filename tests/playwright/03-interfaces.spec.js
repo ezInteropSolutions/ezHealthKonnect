@@ -381,7 +381,7 @@ test.describe('Interfaces', () => {
     // CDA/CCD" — this test pins the actual visibility gate (message_type ===
     // 'CCD', the same convention messages.js's own isCDA check uses), not
     // just the disclaimer copy.
-    test('TC-IFACE-019 CDA Coverage Audit section shows only for CCD-message-type interfaces', async ({ page, request }) => {
+    test('TC-IFACE-019 Coverage Audit section is available for CCD and non-CCD interfaces', async ({ page, request }) => {
         const unique = Date.now();
         const createInterface = async (name, messageType) => {
             const res = await request.post('/api/interfaces', {
@@ -415,7 +415,10 @@ test.describe('Interfaces', () => {
 
         await page.evaluate((id) => window.showEditModal(id), nonCcdId);
         await page.waitForSelector('#editModal.show', { timeout: 5000 });
-        await expect(page.locator('#editCdaCoverageAuditSection'), 'non-CCD interface should hide the Coverage Audit section').toBeHidden();
+        // The CCD-only gate was deliberately removed (2026-09-27) once Coverage
+        // Audit was generalized to HL7/FHIR/EDI/NCPDP — the section must now be
+        // reachable for non-CCD interfaces too.
+        await expect(page.locator('#editCdaCoverageAuditSection'), 'non-CCD interface should also show the Coverage Audit section').toBeVisible();
     });
 
     // ─── Shared helper ──────────────────────────────────────────────────────────

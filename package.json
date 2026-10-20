@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "jest",
+    "setup:env": "node scripts/init-dev-env.js",
+    "prepare": "git config core.hooksPath .githooks || echo \"git hooks not installed (no git repository)\"",
     "test:coverage": "jest --coverage",
     "release": "node scripts/release.js",
     "docs:export-step-docs": "node scripts/export-pipeline-step-docs.js",
@@ -14,7 +16,8 @@
     "test:pas": "node tests/pas_template_test.js",
     "test:pas:db": "PAS_TEST_DB=1 node tests/pas_template_test.js",
     "start:all": "concurrently \"npm run dictionary\" \"go run main.go\"",
-    "dev:all": "concurrently \"npm run dictionary:dev\" \"go run main.go\""
+    "dev:all": "concurrently \"npm run dictionary:dev\" \"go run main.go\"",
+    "lint:xss": "eslint public"
   },
   "keywords": [
     "hl7",
@@ -38,7 +41,6 @@
     "fast-xml-parser": "^5.2.5",
     "helmet": "^8.1.0",
     "hl7-dictionary": "^1.0.1",
-    "http-proxy-middleware": "^3.0.5",
     "ioredis": "^5.6.1",
     "joi": "^18.0.1",
     "jsonwebtoken": "^9.0.2",
@@ -58,6 +60,9 @@
     "@playwright/test": "^1.58.2",
     "cheerio": "^1.1.0",
     "concurrently": "^9.0.0",
+    "eslint": "10.11.0",
+    "eslint-plugin-html": "8.2.1",
+    "eslint-plugin-no-unsanitized": "4.1.5",
     "jest": "^30.4.2",
     "nodemon": "^3.0.1"
   },

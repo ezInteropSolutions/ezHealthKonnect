@@ -516,59 +516,8 @@ async sync() {
     }
 }
 
-    // Create default admin in PostgreSQL
-    async createDefaultAdmin() {
-        try {
-            if (!this.isConnected) return false;
-
-            const adminEmail = 'admin@ezhealthkonnect.com';
-            const existing = await this.models.User.findByEmail(adminEmail);
-            
-            if (!existing) {
-                const bcrypt = require('bcryptjs');
-                const hashedPassword = await bcrypt.hash('admin123', 12);
-                
-                const admin = await this.models.User.create({
-                    email: adminEmail,
-                    password_hash: hashedPassword,
-                    first_name: 'System',
-                    last_name: 'Administrator',
-                    role: 'admin',
-                    status: 'active',
-                    email_verified: true,
-                    created_by: null, // System created
-                    data_consent_given: true,
-                    data_consent_date: new Date()
-                });
-
-                // Log admin creation
-                await this.models.AuditLog.logAction({
-                    user_id: admin.id,
-                    action: 'ADMIN_CREATED',
-                    entity_type: 'User',
-                    entity_id: admin.id,
-                    metadata: {
-                        email: admin.email,
-                        created_by: 'system'
-                    },
-                    risk_level: 'high',
-                    compliance_flags: {
-                        admin_account: true
-                    }
-                });
-
-                console.log('✅ Default admin created in PostgreSQL');
-                return admin;
-            } else {
-                console.log('✅ Default admin already exists in PostgreSQL');
-                return existing;
-            }
-
-        } catch (error) {
-            console.error('❌ Failed to create default admin:', error.message);
-            return null;
-        }
-    }
+    // (No default-admin creation here: the first administrator is created by the
+    // first-run setup wizard — controllers/setupController.js.)
 
     // Health check
     async healthCheck() {

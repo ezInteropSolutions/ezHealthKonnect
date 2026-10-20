@@ -38,7 +38,6 @@ package connectors
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -61,12 +60,7 @@ type HTTPRestInboundConnector struct {
 	httpMethods    map[string]bool
 	contentType    string
 	maxBodySize    int64
-	authType       string
-	apiKeyHeader   string
-	apiKey         string
-	username       string
-	password       string
-	bearerToken    string
+	auth           *InboundAuthenticator // shared with the sync partner endpoints (inbound_auth.go)
 	requestTimeout time.Duration
 
 	server      *http.Server
@@ -89,14 +83,14 @@ func NewHTTPRestInboundConnector() InboundConnector {
 			"supports_batch": false,
 		},
 	}
+	defaultAuth, _ := NewInboundAuthenticator(nil, InboundAuthAPIKey) // valid constant type; cannot fail
 	return &HTTPRestInboundConnector{
 		BaseInboundConnector: NewBaseInboundConnector(metadata),
 		endpointPath:         "/api/hl7/receive",
 		httpMethods:          map[string]bool{"POST": true},
 		contentType:          "text/plain",
 		maxBodySize:          10 * 1024 * 1024,
-		authType:             "api_key",
-		apiKeyHeader:         "X-API-Key",
+		auth:                 defaultAuth,
 		requestTimeout:       30 * time.Second,
 	}
 }
@@ -135,24 +129,14 @@ func (h *HTTPRestInboundConnector) Initialize(config []byte) error {
 		h.maxBodySize = int64(v) * 1024 * 1024
 	}
 
-	if v := cfg.GetString("authentication_type"); v != "" {
-		h.authType = v
+	auth, err := NewInboundAuthenticator(cfg.Config, InboundAuthAPIKey)
+	if err != nil {
+		return err
 	}
-	switch h.authType {
-	case "none", "api_key", "basic_auth", "bearer_token":
-	default:
-		return fmt.Errorf("authentication_type must be 'none', 'api_key', 'basic_auth', or 'bearer_token', got %q", h.authType)
-	}
-	if v := cfg.GetString("api_key_header"); v != "" {
-		h.apiKeyHeader = v
-	}
-	h.apiKey = cfg.GetString("api_key")
-	h.username = cfg.GetString("username")
-	h.password = cfg.GetString("password")
-	h.bearerToken = cfg.GetString("bearer_token")
+	h.auth = auth
 
 	log.Printf("✅ HTTP/REST Inbound initialized: port=%d path=%s methods=%v auth=%s",
-		h.port, h.endpointPath, h.httpMethods, h.authType)
+		h.port, h.endpointPath, h.httpMethods, h.auth.Type())
 	return nil
 }
 
@@ -164,21 +148,7 @@ func (h *HTTPRestInboundConnector) Validate() error {
 	if h.port < 1 || h.port > 65535 {
 		return fmt.Errorf("port must be between 1 and 65535")
 	}
-	switch h.authType {
-	case "api_key":
-		if h.apiKey == "" {
-			return fmt.Errorf("api_key is required when authentication_type is 'api_key'")
-		}
-	case "basic_auth":
-		if h.username == "" || h.password == "" {
-			return fmt.Errorf("username and password are required when authentication_type is 'basic_auth'")
-		}
-	case "bearer_token":
-		if h.bearerToken == "" {
-			return fmt.Errorf("bearer_token is required when authentication_type is 'bearer_token'")
-		}
-	}
-	return nil
+	return h.auth.Validate()
 }
 
 // TestConnection verifies the configured port is available.
@@ -247,7 +217,7 @@ func (h *HTTPRestInboundConnector) GetStatus() ConnectorStatus {
 		Metadata: map[string]string{
 			"port":          fmt.Sprintf("%d", h.port),
 			"endpoint_path": h.endpointPath,
-			"auth":          h.authType,
+			"auth":          h.auth.Type(),
 		},
 	}
 	if h.server != nil {
@@ -316,26 +286,6 @@ func (h *HTTPRestInboundConnector) handleRequest(w http.ResponseWriter, r *http.
 }
 
 func (h *HTTPRestInboundConnector) checkAuth(r *http.Request) bool {
-	switch h.authType {
-	case "none":
-		return true
-	case "api_key":
-		return subtle.ConstantTimeCompare([]byte(r.Header.Get(h.apiKeyHeader)), []byte(h.apiKey)) == 1
-	case "basic_auth":
-		user, pass, ok := r.BasicAuth()
-		if !ok {
-			return false
-		}
-		return subtle.ConstantTimeCompare([]byte(user), []byte(h.username)) == 1 &&
-			subtle.ConstantTimeCompare([]byte(pass), []byte(h.password)) == 1
-	case "bearer_token":
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") {
-			return false
-		}
-		return subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(h.bearerToken)) == 1
-	default:
-		return false
-	}
+	return h.auth.Authenticate(r)
 }
 

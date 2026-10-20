@@ -1,7 +1,21 @@
 package main
 
+// ezHealthKonnect installer (Standalone edition: Windows and Linux services).
+//
+// With no arguments it opens the setup wizard in a browser. Headless
+// commands support servers without a desktop, scripted deployment and CI:
+//
+//	ezhealthkonnect-setup install   --config answers.json [--bundle app.zip]
+//	ezhealthkonnect-setup upgrade   [--dir DIR] [--bundle app.zip]
+//	ezhealthkonnect-setup rollback  [--dir DIR] --yes
+//	ezhealthkonnect-setup uninstall [--dir DIR] --yes [--keep-database]
+//	ezhealthkonnect-setup status    [--dir DIR]
+//	ezhealthkonnect-setup version
+
 import (
 	"embed"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"io/fs"
 	"net"
@@ -17,152 +31,177 @@ import (
 //go:embed web
 var webFS embed.FS
 
-// version is injected at build time by the release workflow:
-// go build -ldflags "-X main.version=v1.2.3"
+// version is injected at build time: -ldflags "-X main.version=v26.10".
 var version string
 
-// done is closed when the user clicks Finish / Close in the wizard.
-var done = make(chan struct{})
-
 func main() {
-	// --uninstall flag: invoked by Add/Remove Programs — run headless uninstall
-	// then open the browser on the progress page.
-	for _, arg := range os.Args[1:] {
-		if strings.EqualFold(arg, "--uninstall") {
-			runHeadlessUninstall()
-			return
+	args := os.Args[1:]
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		os.Exit(runCommand(args[0], args[1:]))
+	}
+	uninstall := false
+	for _, a := range args {
+		if strings.EqualFold(a, "--uninstall") {
+			uninstall = true
 		}
 	}
+	os.Exit(runGUI(uninstall))
+}
 
-	port := freePort()
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	url := "http://" + addr
-
-	mux := http.NewServeMux()
-	registerHandlers(mux)
-
-	// Serve embedded web assets
-	webRoot, _ := fs.Sub(webFS, "web")
-	mux.Handle("/", http.FileServer(http.FS(webRoot)))
-
-	srv := &http.Server{Addr: addr, Handler: mux}
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Fprintln(os.Stderr, "installer server error:", err)
-			os.Exit(1)
+// bundleSource picks the application bundle: an explicit --bundle file, the
+// bundle compiled into this installer, or a zip next to the installer.
+func bundleSource(explicit string) BundleSource {
+	if explicit != "" {
+		return FileBundle{File: explicit}
+	}
+	if b := embeddedBundle(); len(b) > 0 {
+		return EmbeddedBundle{Data: b}
+	}
+	if exe, err := os.Executable(); err == nil {
+		side := filepath.Join(filepath.Dir(exe), fmt.Sprintf("ezhealthkonnect-%s-%s.zip", goosName(), runtime.GOARCH))
+		if _, err := os.Stat(side); err == nil {
+			return FileBundle{File: side}
 		}
-	}()
-
-	// Give the server a moment to bind before opening the browser.
-	time.Sleep(300 * time.Millisecond)
-
-	fmt.Println("ezHealthKonnect Installer")
-	fmt.Println("Opening browser at", url)
-	fmt.Println("If the browser did not open, navigate to:", url)
-	openBrowser(url)
-
-	<-done
-	fmt.Println("Installer finished.")
+	}
+	return nil
 }
 
-// runHeadlessUninstall opens the installer UI pre-navigated to the uninstall
-// confirmation page, so the user sees progress (same as clicking Uninstall in the app).
-func runHeadlessUninstall() {
-	port := freePort()
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	url := "http://" + addr + "/?uninstall=1"
+func runCommand(cmd string, args []string) int {
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	p := newPlatform()
+	dir := fs.String("dir", p.DefaultInstallDir(), "installation directory")
+	bundle := fs.String("bundle", "", "application bundle zip (default: the one included in this installer)")
+	configPath := fs.String("config", "", "answer file (JSON) for install")
+	yes := fs.Bool("yes", false, "confirm a destructive operation")
+	keepDB := fs.Bool("keep-database", false, "uninstall: keep the database")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	rep := ConsoleReporter{Out: os.Stdout}
+	needBundle := cmd == "install" || cmd == "upgrade"
+	src := bundleSource(*bundle)
+	if needBundle && src == nil {
+		fmt.Fprintln(os.Stderr, "no application bundle: this installer does not include one — pass --bundle")
+		return 2
+	}
+	in := NewInstaller(p, src, rep)
 
-	mux := http.NewServeMux()
-	registerHandlers(mux)
-	webRoot, _ := fs.Sub(webFS, "web")
-	mux.Handle("/", http.FileServer(http.FS(webRoot)))
-
-	srv := &http.Server{Addr: addr, Handler: mux}
-	go srv.ListenAndServe() //nolint:errcheck
-	time.Sleep(300 * time.Millisecond)
-	openBrowser(url)
-	<-done
+	var err error
+	switch cmd {
+	case "install":
+		if *configPath == "" {
+			fmt.Fprintln(os.Stderr, "install needs --config answers.json (see INSTALL.md)")
+			return 2
+		}
+		var cfg Config
+		data, rerr := os.ReadFile(*configPath)
+		if rerr == nil {
+			rerr = json.Unmarshal(data, &cfg)
+		}
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "read %s: %v\n", *configPath, rerr)
+			return 2
+		}
+		var res *InstallResult
+		if res, err = in.Install(cfg); err == nil {
+			fmt.Printf("\nInstalled %s: %s\nCreate the first administrator (one-time link, keep it private):\n  %s\n", res.Version, res.AppURL, res.SetupURL)
+		}
+	case "upgrade":
+		var res *InstallResult
+		if res, err = in.Upgrade(*dir); err == nil {
+			fmt.Printf("\nUpgraded to %s: %s\n", res.Version, res.AppURL)
+		}
+	case "rollback":
+		if !*yes {
+			fmt.Fprintln(os.Stderr, "rollback restores the database as it was before the last upgrade; data received since then is lost. Re-run with --yes to confirm.")
+			return 2
+		}
+		err = in.Rollback(*dir)
+	case "uninstall":
+		if !*yes {
+			fmt.Fprintln(os.Stderr, "uninstall removes the application and (unless --keep-database) its database. Re-run with --yes to confirm.")
+			return 2
+		}
+		err = in.Uninstall(*dir, *keepDB)
+	case "status":
+		st, found, serr := LoadState(*dir)
+		if serr != nil {
+			err = serr
+			break
+		}
+		if !found {
+			fmt.Printf("ezHealthKonnect is not installed in %s\n", *dir)
+			return 1
+		}
+		out, _ := json.MarshalIndent(st, "", "  ")
+		fmt.Println(string(out))
+	case "version":
+		bv := ""
+		if src != nil {
+			bv = bundleVersion(src)
+		}
+		fmt.Printf("installer %s, application %s\n", version, bv)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command %q (install, upgrade, rollback, uninstall, status, version)\n", cmd)
+		return 2
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\nERROR: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
-func freePort() int {
+func runGUI(uninstall bool) int {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return 7788
+		fmt.Fprintln(os.Stderr, "cannot start the setup wizard:", err)
+		return 1
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	port := l.Addr().(*net.TCPAddr).Port
+	web, _ := fs.Sub(webFS, "web")
+	srv := NewUIServer(newPlatform(), bundleSource(""), web, port)
+	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	go httpSrv.Serve(l) //nolint:errcheck
+
+	extra := ""
+	if uninstall {
+		extra = "action=uninstall"
+	}
+	url := srv.URL(extra)
+	fmt.Println("ezHealthKonnect Setup")
+	fmt.Println("Open this address in a browser on this machine to continue:")
+	fmt.Println("  " + url)
+	if runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+		fmt.Println("\nNo desktop detected. Either forward the port over SSH:")
+		fmt.Printf("  ssh -L %d:127.0.0.1:%d <this-server>   then open the address above locally\n", port, port)
+		fmt.Println("or install without a browser:  sudo ./ezHealthKonnect-Setup-Linux-x64 install --config answers.json")
+	} else {
+		openBrowser(url)
+	}
+	<-srv.Done
+	time.Sleep(300 * time.Millisecond)
+	return 0
 }
 
-// openBrowser opens the installer URL.
-// On Windows we try to launch Edge or Chrome in --app mode (no browser chrome,
-// fixed window size) so the installer looks like a native desktop wizard.
-// Falls back to the system default browser if neither is found.
+// openBrowser opens the wizard; on Windows as a frameless Edge/Chrome window.
 func openBrowser(url string) {
 	if runtime.GOOS == "windows" {
-		if openAppMode(url) {
-			return
+		for _, base := range []string{os.Getenv("ProgramFiles(x86)"), os.Getenv("ProgramFiles"), os.Getenv("LOCALAPPDATA")} {
+			for _, rel := range []string{`Microsoft\Edge\Application\msedge.exe`, `Google\Chrome\Application\chrome.exe`} {
+				exe := filepath.Join(base, rel)
+				if base == "" {
+					continue
+				}
+				if _, err := os.Stat(exe); err == nil {
+					if exec.Command(exe, "--app="+url, "--window-size=1000,720", "--no-first-run").Start() == nil {
+						return
+					}
+				}
+			}
 		}
 		exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start() //nolint:errcheck
 		return
 	}
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	cmd.Start() //nolint:errcheck
-}
-
-// openAppMode tries to launch Edge or Chrome as a frameless app window.
-// Returns true if a browser was launched successfully.
-func openAppMode(url string) bool {
-	appArgs := []string{
-		"--app=" + url,
-		"--window-size=980,680",
-		"--no-first-run",
-		"--no-default-browser-check",
-		"--disable-extensions",
-	}
-
-	// Search paths for Edge then Chrome
-	candidates := []string{}
-
-	// Edge — installed per-machine and per-user
-	for _, base := range []string{
-		os.Getenv("ProgramFiles"),
-		os.Getenv("ProgramFiles(x86)"),
-		os.Getenv("LOCALAPPDATA"),
-	} {
-		if base != "" {
-			candidates = append(candidates,
-				filepath.Join(base, "Microsoft", "Edge", "Application", "msedge.exe"),
-			)
-		}
-	}
-	// Chrome — installed per-machine and per-user
-	for _, base := range []string{
-		os.Getenv("ProgramFiles"),
-		os.Getenv("ProgramFiles(x86)"),
-		os.Getenv("LOCALAPPDATA"),
-	} {
-		if base != "" {
-			candidates = append(candidates,
-				filepath.Join(base, "Google", "Chrome", "Application", "chrome.exe"),
-			)
-		}
-	}
-
-	for _, exe := range candidates {
-		if _, err := os.Stat(exe); err != nil {
-			continue
-		}
-		args := append([]string{exe}, appArgs...)
-		cmd := exec.Command(args[0], args[1:]...)
-		if cmd.Start() == nil {
-			return true
-		}
-	}
-	return false
+	exec.Command("xdg-open", url).Start() //nolint:errcheck
 }

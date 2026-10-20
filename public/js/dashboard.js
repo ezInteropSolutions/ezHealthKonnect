@@ -121,6 +121,9 @@ const TEMPLATE_CATEGORY_META = {
     regulatory: { label: 'Regulatory',   icon: '⚖️' },
     specialty:  { label: 'Specialty',    icon: '🔬' },
     device:     { label: 'Devices',      icon: '🔌' },
+    edi:        { label: 'EDI X12',      icon: '💵' },
+    ncpdp:      { label: 'Pharmacy (NCPDP)', icon: '💊' },
+    cda:        { label: 'CDA / CCD',    icon: '📄' },
     custom:     { label: 'Mine',         icon: '⭐' },
 };
 
@@ -293,8 +296,13 @@ function _renderCategoryTabs(categories) {
     const totals = { all: _templatesState.all.length };
     for (const c of categories) totals[c.category] = c.count;
 
-    const order = ['all', 'emr', 'hl7v2', 'fhir', 'payer', 'regulatory', 'specialty', 'device', 'custom'];
-    const present = new Set(['all', ...(categories.map(c => c.category))]);
+    // Preferred display order for known categories; any other category present
+    // in the data still gets a tab (appended before 'custom'), so a new template
+    // category never silently disappears from the gallery's tab bar.
+    const preferred = ['all', 'emr', 'hl7v2', 'fhir', 'cda', 'edi', 'ncpdp', 'payer', 'regulatory', 'specialty', 'device'];
+    const present = new Set(['all', ...(categories.map(c => c.category).filter(Boolean))]);
+    const extras = [...present].filter(k => !preferred.includes(k) && k !== 'custom').sort();
+    const order = [...preferred, ...extras, 'custom'];
 
     tabs.innerHTML = order
         .filter(k => present.has(k))
@@ -960,6 +968,7 @@ async function _submitConfigureTemplate(templateId) {
         if (hasInboundConnector && !missingRequiredSourceField && (Object.keys(sourceValues).length > 0)) {
             let activated = false;
             let activationWarnings = null;
+            let activationError = null;
             try {
                 const actRes = await fetch(`/api/runtime/interfaces/${encodeURIComponent(interfaceId)}/activate`, {
                     method: 'POST', credentials: 'include',
@@ -969,7 +978,22 @@ async function _submitConfigureTemplate(templateId) {
                 if (Array.isArray(actData.warnings) && actData.warnings.length > 0) {
                     activationWarnings = actData.warnings;
                 }
-            } catch (_) { /* non-fatal */ }
+                if (!activated) {
+                    activationError = actData.error || actData.message || `Activation failed (HTTP ${actRes.status})`;
+                }
+            } catch (err) {
+                activationError = `Activation request failed: ${err.message}`;
+            }
+
+            // A hard activation failure (e.g. the port is already used by
+            // another interface — processing/engine.go halts both for PHI
+            // safety) used to fall through to the pipeline-builder redirect
+            // with no message, leaving the user believing the device listener
+            // was running. Surface the engine's own reason instead.
+            if (!activated && activationError) {
+                _showDeviceActivationWarning(interfaceId, [activationError]);
+                return;
+            }
 
             // activationWarnings means the HTTP call reported success but the
             // engine itself logged that this step's connector never actually

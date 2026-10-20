@@ -182,7 +182,7 @@ func newConnectorWithACK(t *testing.T, ack ACKConfig) *TCPMLLPInboundConnector {
 
 func TestACK_GenerateACKMessage_DefaultSenderIdentity(t *testing.T) {
 	// TC-GO-006: empty ackConfig → MSH-3=ezHealthKonnect, MSH-4=EHK
-	// ACK MSH format: MSH|^~\&|sendingApp|sendingFacility|RecvApp|RecvFac|ts||ACK|ctrl|P|2.5
+	// ACK MSH format: MSH|^~\\&|sendingApp|sendingFacility|RecvApp|RecvFac|ts||ACK|ctrl|P|2.5
 	//   split by |: [0]=MSH [1]=encoding [2]=sendingApp [3]=sendingFacility ...
 	c := newConnectorWithACK(t, ACKConfig{})
 	hl7 := sampleHL7("CTRL001", "")
@@ -478,8 +478,10 @@ func TestACK_Initialize_EmptyAckMapGivesDefaults(t *testing.T) {
 	if c.ackConfig.Mode != "immediate" {
 		t.Errorf("default Mode expected 'immediate', got %q", c.ackConfig.Mode)
 	}
-	if c.ackConfig.OnError != "suppress" {
-		t.Errorf("default OnError expected 'suppress', got %q", c.ackConfig.OnError)
+	// Default changed from "suppress" to "nack" (2026-10-19): an AA for a
+	// message that was dropped on a full queue is silent data loss.
+	if c.ackConfig.OnError != "nack" {
+		t.Errorf("default OnError expected 'nack', got %q", c.ackConfig.OnError)
 	}
 	if c.ackConfig.SendingApp != "ezHealthKonnect" {
 		t.Errorf("default SendingApp expected 'ezHealthKonnect', got %q", c.ackConfig.SendingApp)
@@ -834,3 +836,155 @@ func TestACK_ExtractMSHField_OutOfRange(t *testing.T) {
 
 // Suppress unused import warning from models
 var _ = models.InboundMessage{}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Non-HL7 frames are rejected (AR), never accepted (2026-10-19 hardening)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestIsHL7v2Message(t *testing.T) {
+	cases := []struct {
+		name  string
+		frame string
+		want  bool
+	}{
+		{"standard pipe separator", "MSH|^~\\&|A|B|C|D|20260101||ADT^A01|1|P|2.5\r", true},
+		{"leading CRLF and BOM tolerated", "\ufeff\r\nMSH|^~\\&|A|B\r", true},
+		{"non-pipe field separator", "MSH#^~\\&#A#B#C\r", true},
+		{"garbage", "GARBAGE|not|an|hl7|message\r", false},
+		{"ASTM header record", "1H|\\^&|||Analyzer\r", false},
+		{"too short", "MSH|", false},
+		{"letter as separator", "MSHX^~\\&XAXB\r", false},
+		{"empty", "", false},
+		{"lowercase msh", "msh|^~\\&|A|B|C\r", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isHL7v2Message(tc.frame); got != tc.want {
+				t.Errorf("isHL7v2Message(%q) = %v, want %v", tc.frame, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestACKIntegration_NonHL7Frame_GetsAR_AndIsNotQueued(t *testing.T) {
+	port := findFreePort(t)
+	c := newConnectorOnPort(t, port, nil)
+	msgChan, stop := startConnector(t, c)
+	defer stop()
+
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 2*time.Second)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close()
+
+	conn.Write(buildMLLPFrame("GARBAGE|not|an|hl7|message\r"))
+	_, msa := parseACKSegments(readMLLPResponse(t, conn))
+	if len(msa) < 2 || msa[1] != "AR" {
+		t.Fatalf("expected MSA-1=AR for a non-HL7 frame, got %v", msa)
+	}
+
+	// The listener keeps working: a valid message on the same connection is accepted.
+	conn.Write(buildMLLPFrame(sampleHL7("AFTER001", "ORU^R01")))
+	_, msa = parseACKSegments(readMLLPResponse(t, conn))
+	if len(msa) < 3 || msa[1] != "AA" || msa[2] != "AFTER001" {
+		t.Fatalf("expected AA for the following valid message, got %v", msa)
+	}
+
+	// Only the valid message reached the pipeline.
+	select {
+	case m := <-msgChan:
+		if m.CorrelationID != "AFTER001" {
+			t.Fatalf("unexpected queued message %q (the non-HL7 frame must not be queued)", m.CorrelationID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("valid message was not queued")
+	}
+	select {
+	case m := <-msgChan:
+		t.Fatalf("non-HL7 frame was queued: %q", m.Content)
+	default:
+	}
+}
+
+func TestACKIntegration_NonHL7Frame_ScriptCanStillOverride(t *testing.T) {
+	port := findFreePort(t)
+	c := newConnectorOnPort(t, port, map[string]interface{}{
+		"ack": map[string]interface{}{
+			"script": `function buildACK(msg) { return { ackCode: msg.defaultCode === 'AR' ? 'AE' : msg.defaultCode, textMessage: 'custom' }; }`,
+		},
+	})
+	_, stop := startConnector(t, c)
+	defer stop()
+
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 2*time.Second)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close()
+
+	conn.Write(buildMLLPFrame("NOT HL7\r"))
+	_, msa := parseACKSegments(readMLLPResponse(t, conn))
+	if len(msa) < 2 || msa[1] != "AE" {
+		t.Fatalf("expected the ACK script to see defaultCode=AR and override it to AE, got %v", msa)
+	}
+}
+
+// startConnectorBlocked starts the connector with an unbuffered channel nobody
+// reads, so every enqueue attempt times out (simulates a full queue).
+func startConnectorBlocked(t *testing.T, c *TCPMLLPInboundConnector) func() {
+	t.Helper()
+	msgChan := make(chan *models.InboundMessage)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { c.Start(ctx, msgChan) }()
+	time.Sleep(120 * time.Millisecond)
+	return func() { cancel(); c.Stop() }
+}
+
+func readMLLPResponseWithin(t *testing.T, conn net.Conn, d time.Duration) string {
+	t.Helper()
+	conn.SetReadDeadline(time.Now().Add(d))
+	msg, err := readMLLPFrame(bufio.NewReader(conn))
+	if err != nil {
+		t.Fatalf("failed to read MLLP ACK: %v", err)
+	}
+	return msg
+}
+
+func TestACKIntegration_QueueFull_DefaultSendsAE(t *testing.T) {
+	port := findFreePort(t)
+	c := newConnectorOnPort(t, port, nil)
+	stop := startConnectorBlocked(t, c)
+	defer stop()
+
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 2*time.Second)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close()
+
+	conn.Write(buildMLLPFrame(sampleHL7("FULL001", "ORU^R01")))
+	_, msa := parseACKSegments(readMLLPResponseWithin(t, conn, 10*time.Second))
+	if len(msa) < 2 || msa[1] != "AE" {
+		t.Fatalf("expected AE when the message could not be queued (default on_error=nack), got %v", msa)
+	}
+}
+
+func TestACKIntegration_QueueFull_ExplicitSuppressStillSendsAA(t *testing.T) {
+	port := findFreePort(t)
+	c := newConnectorOnPort(t, port, map[string]interface{}{"ack": map[string]interface{}{"on_error": "suppress"}})
+	stop := startConnectorBlocked(t, c)
+	defer stop()
+
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 2*time.Second)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close()
+
+	conn.Write(buildMLLPFrame(sampleHL7("FULL002", "ORU^R01")))
+	_, msa := parseACKSegments(readMLLPResponseWithin(t, conn, 10*time.Second))
+	if len(msa) < 2 || msa[1] != "AA" {
+		t.Fatalf("explicit on_error=suppress keeps its opt-in AA behavior, got %v", msa)
+	}
+}

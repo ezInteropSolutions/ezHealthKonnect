@@ -1,0 +1,189 @@
+name: Installer — Build and End-to-End Test
+
+# Builds the real Standalone bundles and installers, then runs the real
+# installer headless on fresh GitHub Linux and Windows hosts: install, setup
+# token, data, upgrade, a failing upgrade (must roll back), manual rollback
+# and uninstall. release.yml calls this workflow and publishes only what it
+# built and tested.
+
+on:
+  pull_request:
+    paths:
+      - 'installer/**'
+      - 'cmd/bundle-builder/**'
+      - 'packaging/**'
+      - 'database/migrations/**'
+      - 'services/migrator/**'
+      - 'migrate_command.go'
+      - 'Dockerfile'
+      - 'controllers/setupController.js'
+      - '.github/workflows/installer.yml'
+  push:
+    branches: [main, 'release/**']
+    paths:
+      - 'installer/**'
+      - 'cmd/bundle-builder/**'
+      - 'packaging/**'
+      - 'database/migrations/**'
+      - 'services/migrator/**'
+      - 'migrate_command.go'
+      - 'Dockerfile'
+      - 'controllers/setupController.js'
+      - '.github/workflows/installer.yml'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+
+env:
+  GO_VERSION: '1.26'
+  NODE_VERSION: '22'
+
+jobs:
+  unit:
+    name: Installer unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+      - name: Installer (Linux + Windows builds)
+        working-directory: installer
+        run: |
+          go vet ./...
+          GOOS=windows go vet ./...
+          GOOS=windows go test -c -o /dev/null .
+          go test -count=1 ./...
+      - name: Bundle builder
+        run: go test -count=1 ./cmd/bundle-builder
+
+  build:
+    name: Build ${{ matrix.os }} installer
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            ext: ''
+            bundle: bundle-linux-amd64.zip
+            setup: ezHealthKonnect-Setup-Linux-x64
+          - os: windows
+            ext: '.exe'
+            bundle: bundle-windows.zip
+            setup: ezHealthKonnect-Setup-Win64.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Version
+        id: ver
+        run: echo "value=${{ inputs.version || 'v0.0.1-ci' }}" >> "$GITHUB_OUTPUT"
+      - name: Build go-api
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: go build -ldflags "-s -w -X main.version=${{ steps.ver.outputs.value }}" -o dist/go-api${{ matrix.ext }} .
+      - name: Build application bundle
+        run: |
+          go run ./cmd/bundle-builder -os ${{ matrix.os }} -arch amd64 -version ${{ steps.ver.outputs.value }} \
+            -go-api dist/go-api${{ matrix.ext }} -out installer/assets/${{ matrix.bundle }}
+          cp installer/assets/${{ matrix.bundle }} dist/
+      - name: Build installer
+        working-directory: installer
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          LDFLAGS="-s -w -X main.version=${{ steps.ver.outputs.value }}"
+          if [ "${{ matrix.os }}" = windows ]; then
+            PG_URL=$(jq -r '.installerDownloads["postgresql-windows-amd64"].url' ../packaging/bundle-manifest.json)
+            PG_SHA=$(jq -r '.installerDownloads["postgresql-windows-amd64"].sha256' ../packaging/bundle-manifest.json)
+            LDFLAGS="$LDFLAGS -X main.pgInstallerURL=$PG_URL -X main.pgInstallerSHA256=$PG_SHA"
+          fi
+          go build -tags embedded -ldflags "$LDFLAGS" -o ../dist/${{ matrix.setup }} .
+          ls -la ../dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os }}
+          path: |
+            dist/${{ matrix.setup }}
+            dist/${{ matrix.bundle }}
+          retention-days: 7
+
+  e2e-linux:
+    name: E2E — ${{ matrix.runner }}
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-linux
+          path: dist
+      - name: Run the real installer end to end
+        run: |
+          chmod +x dist/ezHealthKonnect-Setup-Linux-x64
+          sudo bash installer/test/e2e-linux.sh dist/ezHealthKonnect-Setup-Linux-x64 dist/bundle-linux-amd64.zip
+
+  e2e-rhel:
+    name: E2E — AlmaLinux 9 (RHEL family)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-linux
+          path: dist
+      - name: Start an AlmaLinux 9 host with systemd
+        run: |
+          chmod +x dist/ezHealthKonnect-Setup-Linux-x64
+          docker run -d --name el9 --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            -v "$PWD:/work" almalinux/9-init
+          for i in $(seq 1 30); do
+            docker exec el9 systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded' && break
+            sleep 2
+          done
+          docker exec el9 dnf install -y -q python3 procps-ng openssl
+      - name: Run the real installer end to end
+        run: docker exec el9 bash /work/installer/test/e2e-linux.sh /work/dist/ezHealthKonnect-Setup-Linux-x64 /work/dist/bundle-linux-amd64.zip
+
+  e2e-windows:
+    name: E2E — Windows (${{ matrix.postgres }} PostgreSQL)
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: [fresh, existing]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-windows
+          path: dist
+      - name: Run the real installer end to end
+        shell: pwsh
+        run: ./installer/test/e2e-windows.ps1 -Installer dist/ezHealthKonnect-Setup-Win64.exe -BundleV1 dist/bundle-windows.zip -PostgresMode ${{ matrix.postgres }}

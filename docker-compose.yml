@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: ezhealthkonnect
       POSTGRES_USER: ezhealth_user
-      POSTGRES_PASSWORD: secure_password_change_me
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env - see .env.example}
       POSTGRES_INITDB_ARGS: "--encoding=UTF8"
     ports:
       - "5432:5432"
@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ezhealth_user
-      MINIO_ROOT_PASSWORD: secure_password_change_me
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:?MINIO_PASSWORD must be set in .env - see .env.example}
       MINIO_DATA_DIR: /data
       MINIO_BROWSER: "on"
     ports:
@@ -118,25 +118,31 @@ services:
       - ezhealthkonnect
     restart: "no"
 
-  # Flyway handles SCHEMA migrations only (version controlled)
-  flyway:
-    image: flyway/flyway:latest
-    container_name: ezhealthkonnect-flyway
+  # Applies database/migrations with the app's built-in migration engine
+  # (`go-api migrate`, services/migrator) — the same engine the installer uses,
+  # so every local and CI start exercises it. It keeps Flyway's history table
+  # and checksums, so existing dev databases continue unchanged.
+  migrate:
+    build: .
+    image: ezhealthkonnect-app
+    container_name: ezhealthkonnect-migrate
+    entrypoint: ["./go-api", "migrate"]
     environment:
-      FLYWAY_URL: jdbc:postgresql://postgres:5432/ezhealthkonnect
-      FLYWAY_USER: ezhealth_user
-      FLYWAY_PASSWORD: secure_password_change_me
-      FLYWAY_BASELINE_ON_MIGRATE: true
-      FLYWAY_PLACEHOLDER_REPLACEMENT: "false"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ezhealthkonnect
+      DB_USER: ezhealth_user
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env - see .env.example}
+      DB_SSL: "false"
     volumes:
-      # Only schema migrations (no data inserts)
-      - ./database/migrations:/flyway/sql
+      # Working-tree migrations, so a new migration needs no image rebuild.
+      - ./database/migrations:/app/database/migrations:ro
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - ezhealthkonnect
-    command: ["repair", "migrate"]
+    restart: "no"
 
   # Your Application Service - FIXED VERSION
   app:
@@ -149,7 +155,7 @@ services:
       DB_PORT: 5432
       DB_NAME: ezhealthkonnect
       DB_USER: ezhealth_user
-      DB_PASSWORD: secure_password_change_me
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env - see .env.example}
       DB_SSL: false
       
       # Application settings
@@ -158,17 +164,16 @@ services:
       NODE_ENV: development
       
       # Session secrets
-      SESSION_SECRET: ezhealthkonnect_session_secret_key_for_development_1234567890123
-      JWT_SECRET: ezhealthkonnect_jwt_secret_key_for_development_12345678901234567890
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set in .env - see .env.example}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env - see .env.example}
 
       # Connectivity credential encryption (services/credential_store.go +
       # controllers/pipelineController.js's mirror-image JS implementation) —
       # was previously unset, meaning this whole dev stack ran in plaintext
       # passthrough mode (CredentialStore.LogMode()'s own "disabled" branch).
-      # Dev-only key, same convention as SESSION_SECRET/JWT_SECRET above —
-      # generate a real one for any non-dev deployment: openssl rand -base64 32
-      APP_CREDENTIAL_KEY: ValmmzmZkn3P1lmGAL4GylNB8o7A+Knm0SpyRQIoSzc=
-
+      # Read from .env (gitignored) — never commit a key here (gitleaks gate).
+      # Generate one with: openssl rand -base64 32
+      APP_CREDENTIAL_KEY: ${APP_CREDENTIAL_KEY:?APP_CREDENTIAL_KEY must be set in .env - see .env.example}
       # ATNA syslog export (services/audit/{atna_message.go,syslog_sender.go,
       # syslog_audit_logger.go} on the Go side, services/audit/
       # atnaSyslogExporter.js on the Node side) — opt-in, unset by default.
@@ -203,7 +208,7 @@ services:
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
       OBJECT_STORAGE_PATH_STYLE: "true"
       OBJECT_STORAGE_ACCESS_KEY: ezhealth_user
-      OBJECT_STORAGE_SECRET_KEY: secure_password_change_me
+      OBJECT_STORAGE_SECRET_KEY: ${MINIO_PASSWORD:?MINIO_PASSWORD must be set in .env - see .env.example}
 
       # Local AI — Ollama LLM inference (no PHI leaves the network)
       OLLAMA_HOST: http://ollama:11434
@@ -233,7 +238,7 @@ services:
       - ./processing:/app/processing      # Go processing engine code
       - ./architecture:/app/architecture  # AI knowledge-base source docs (*.md + generated/pipeline_step_docs.json)
       - ./docs:/app/docs                  # AI knowledge-base source docs (INSTALL_GUIDE.md, RUNBOOK.md)
-      - ./installer/ONE_CLICK_INSTALLER_GUIDE.md:/app/installer/ONE_CLICK_INSTALLER_GUIDE.md  # AI knowledge-base source doc
+      - ./installer/INSTALLER_ARCHITECTURE.md:/app/installer/INSTALLER_ARCHITECTURE.md  # AI knowledge-base source doc
       - ./SYSTEM_DOCUMENTATION.md:/app/SYSTEM_DOCUMENTATION.md  # AI knowledge-base master reference doc
       # ✅ CRITICAL: These were missing in your broken config
       - ./hl7:/app/hl7                    # Go HL7 parsing code
@@ -263,7 +268,7 @@ services:
 
     # Wait for PostgreSQL, MinIO, and migrations to complete
     depends_on:
-      flyway:
+      migrate:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
@@ -287,6 +292,11 @@ services:
     # worst case.
     stop_grace_period: 60s
     restart: unless-stopped
+    # Lets the app reach services on the host as host.docker.internal on Linux
+    # too (Docker Desktop provides it already) - used by E2E specs whose test
+    # receiver runs on the host, e.g. device-ventilator-hl7-e2e.spec.js.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - ezhealthkonnect
 

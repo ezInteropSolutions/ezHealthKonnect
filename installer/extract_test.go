@@ -153,7 +153,7 @@ func TestExtractZip_PowerShellDirEntry(t *testing.T) {
 	f, _ := os.Create(tmp)
 	w := zip.NewWriter(f)
 	// Directory entry with trailing slash but no directory attribute
-	w.Create("root/database/")                                          //nolint:errcheck
+	w.Create("root/database/") //nolint:errcheck
 	fw, _ := w.Create("root/database/migrations/V1__init.sql")
 	fw.Write([]byte("CREATE TABLE x;")) //nolint:errcheck
 	w.Close()
@@ -176,9 +176,9 @@ func TestExtractZip_PowerShellDirEntry(t *testing.T) {
 func TestExtractZip_ReinstallOverPartialRun(t *testing.T) {
 	dest := t.TempDir()
 	// Simulate partial previous run: database dir exists but is incomplete
-	os.MkdirAll(filepath.Join(dest, "database", "migrations"), 0755) //nolint:errcheck
+	os.MkdirAll(filepath.Join(dest, "database", "migrations"), 0755)                                 //nolint:errcheck
 	os.WriteFile(filepath.Join(dest, "database", "migrations", "V1__init.sql"), []byte("old"), 0644) //nolint:errcheck
-	os.WriteFile(filepath.Join(dest, "app.js"), []byte("old"), 0644) //nolint:errcheck
+	os.WriteFile(filepath.Join(dest, "app.js"), []byte("old"), 0644)                                 //nolint:errcheck
 
 	zf := makeTestZip(t, map[string]string{
 		"root/app.js":                            "new",
@@ -196,5 +196,18 @@ func TestExtractZip_ReinstallOverPartialRun(t *testing.T) {
 	got, _ = os.ReadFile(filepath.Join(dest, "database", "migrations", "V1__init.sql"))
 	if string(got) != "new content" {
 		t.Errorf("V1.sql not overwritten: got %q", got)
+	}
+}
+
+func TestExtractZip_RejectsZipSlip(t *testing.T) {
+	for _, name := range []string{"root/../../escape.txt", "root/a/../../../escape.txt", "root//etc/passwd", "root/C:/x.txt"} {
+		zip := makeTestZip(t, map[string]string{name: "evil"})
+		dest := filepath.Join(t.TempDir(), "out")
+		if err := extractZip(zip, dest, true); err == nil {
+			t.Errorf("%s: expected a refusal", name)
+		}
+		if _, err := os.Stat(filepath.Join(filepath.Dir(dest), "escape.txt")); err == nil {
+			t.Errorf("%s: wrote outside the destination", name)
+		}
 	}
 }

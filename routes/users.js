@@ -103,7 +103,8 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
 // POST /api/users - Create new user (admin only)
 router.post('/', requireAuth, requireAdmin, async (req, res) => {
     try {
-        console.log('📝 Creating new user:', req.body);
+        // Never log the request body: it carries the new user's plaintext password.
+        console.log('📝 Creating new user:', { email: req.body && req.body.email, role: req.body && req.body.role });
         
         const { email, password, name, role } = req.body;
         
