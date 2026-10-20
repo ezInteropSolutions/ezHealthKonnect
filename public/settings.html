@@ -3735,6 +3735,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (navItem) navItem.style.display = '';
     }
 
+    // Docker port management only applies when running in a container
+    // (development); native-service installs have no container ports.
+    try {
+        const dp = await fetch('/api/system/settings/docker-ports').then(r => r.json());
+        if (!dp.running_in_docker) {
+            const dockerNav = document.querySelector('.settings-nav-item[data-section="docker-ports"]');
+            if (dockerNav) dockerNav.style.display = 'none';
+        }
+    } catch (_) { /* leave the section visible if the check fails */ }
+
 
     // Honour URL hash (e.g. settings.html#section-schemas → open schemas)
     const hash = location.hash.replace('#section-', '').replace('#', '');

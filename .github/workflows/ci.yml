@@ -12,7 +12,7 @@ on:
 
 env:
   GO_VERSION: '1.26'
-  NODE_VERSION: '20'
+  NODE_VERSION: '22'
 
 jobs:
   # ── Go backend ────────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ jobs:
       # so DB-touching tests get a real schema to run against, not just the
       # nil-DB safety-branch tests that make up most of the suite today.
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_DB: ezhealthkonnect
           POSTGRES_USER: ezhealth_user

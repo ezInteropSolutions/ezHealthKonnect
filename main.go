@@ -4,37 +4,37 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	cdaSchemaLoader "ezhealthkonnect/cda"
 	"ezhealthkonnect/config"
 	"ezhealthkonnect/controllers"
+	"ezhealthkonnect/edi"
 	"ezhealthkonnect/fhir"
 	"ezhealthkonnect/fhir/r4"
 	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/models"
-	"ezhealthkonnect/processing"
-	"ezhealthkonnect/services"
-	"ezhealthkonnect/services/audit"
-	"ezhealthkonnect/services/authguard"
-	"ezhealthkonnect/services/secretguard"
-	"ezhealthkonnect/services/backpressure"
-	cdaSchemaLoader "ezhealthkonnect/cda"
-	cdacoverage "ezhealthkonnect/services/cda_coverage"
-	"ezhealthkonnect/edi"
 	"ezhealthkonnect/ncpdp"
 	"ezhealthkonnect/ncpdptelecom"
+	"ezhealthkonnect/processing"
+	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/ai"
+	"ezhealthkonnect/services/audit"
+	"ezhealthkonnect/services/authguard"
+	"ezhealthkonnect/services/backpressure"
+	cdacoverage "ezhealthkonnect/services/cda_coverage"
 	cdafhir "ezhealthkonnect/services/cda_fhir"
 	cdastorage "ezhealthkonnect/services/cda_storage"
 	cdaterminology "ezhealthkonnect/services/cda_terminology"
-	cdaparser "ezhealthkonnect/services/parsers/cda"
 	"ezhealthkonnect/services/connectors"
-	svcmapping "ezhealthkonnect/services/mapping"
-	"ezhealthkonnect/services/storage"
 	"ezhealthkonnect/services/dbpool"
-	"ezhealthkonnect/services/ai"
-	"ezhealthkonnect/services/schema"
 	"ezhealthkonnect/services/executors/enrichment"
 	fhirnarrative "ezhealthkonnect/services/fhir_narrative"
 	"ezhealthkonnect/services/logger"
+	svcmapping "ezhealthkonnect/services/mapping"
 	appmetrics "ezhealthkonnect/services/metrics"
+	cdaparser "ezhealthkonnect/services/parsers/cda"
+	"ezhealthkonnect/services/schema"
+	"ezhealthkonnect/services/secretguard"
+	"ezhealthkonnect/services/storage"
 	"ezhealthkonnect/uscdi"
 	"fmt"
 	"log"
@@ -399,20 +399,6 @@ func main() {
 			log.Printf("❌ FATAL: Database connection failed after %d retries - transformation pipeline will not be available", maxRetries)
 		}
 	}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 	// OLD MLLP System - Replaced by ProcessingEngine architecture
 	// Interface listeners are now managed by ProcessingEngine via /api/processing/interfaces/:id/activate
@@ -851,7 +837,7 @@ func main() {
 			fhirGroup.POST("/pipeline/test-api-endpoint", transformTestCtrl.TestAPIEndpoint) // Test API endpoint before configuring mapping
 			fhirGroup.POST("/pipeline/validate-script", transformTestCtrl.ValidateScript)    // Validate JavaScript script
 			fhirGroup.GET("/pipeline/:interfaceId/:messageType", transformTestCtrl.GetPipeline)
-			fhirGroup.GET("/field-search", transformTestCtrl.SearchFields)   // USCDI smart search for CDA field picker
+			fhirGroup.GET("/field-search", transformTestCtrl.SearchFields) // USCDI smart search for CDA field picker
 			// Rate-limited: CDA parsing is CPU-heavy XML processing — cap at 100 req/min
 			// per authenticated user (falls back to per-IP for unauthenticated callers).
 			fhirGroup.POST("/cda/parse", rateLimitMiddleware(100, 20, rateLimitByUserOrIP), transformTestCtrl.ParseCDA) // CDA document parse + section summary (wizard preview)
@@ -1236,8 +1222,8 @@ func main() {
 					optional, _ := rMap["optional"].(bool)
 
 					preview := ResourcePreview{
-						Name:     resourceName,
-						Optional: optional,
+						Name:          resourceName,
+						Optional:      optional,
 						MinConfidence: 1.0,
 					}
 
@@ -1669,11 +1655,11 @@ func main() {
 
 				atomicMappings := svc.ConvertToAtomicMappingsPublic(fieldMappings)
 				c.JSON(http.StatusOK, gin.H{
-					"success":         true,
-					"messageType":     messageType,
-					"hl7Version":      "2.5",
-					"fhirVersion":     fhirVersion,
-					"atomicMappings":  atomicMappings,
+					"success":          true,
+					"messageType":      messageType,
+					"hl7Version":       "2.5",
+					"fhirVersion":      fhirVersion,
+					"atomicMappings":   atomicMappings,
 					"validationErrors": []string{},
 				})
 			})
@@ -1729,13 +1715,13 @@ func main() {
 
 				atomicMappings := svc.ConvertToAtomicMappingsPublic(fieldMappings)
 				c.JSON(http.StatusOK, gin.H{
-					"success":         true,
-					"interfaceId":     interfaceID,
-					"messageType":     messageType,
-					"fhirVersion":     fhirVersion,
-					"mappingMode":     mappingMode,
-					"atomicMappings":  atomicMappings,
-					"count":           len(atomicMappings),
+					"success":        true,
+					"interfaceId":    interfaceID,
+					"messageType":    messageType,
+					"fhirVersion":    fhirVersion,
+					"mappingMode":    mappingMode,
+					"atomicMappings": atomicMappings,
+					"count":          len(atomicMappings),
 				})
 			})
 
@@ -1763,12 +1749,12 @@ func main() {
 
 				transformSvc := services.NewHL7FHIRTransformServiceV3(db)
 				type batchResult struct {
-					Index       int                       `json:"index"`
-					MessageType string                    `json:"messageType"`
-					Success     bool                      `json:"success"`
-					Bundle      map[string]interface{}    `json:"bundle,omitempty"`
-					Errors      []string                  `json:"errors,omitempty"`
-					Warnings    []string                  `json:"warnings,omitempty"`
+					Index       int                    `json:"index"`
+					MessageType string                 `json:"messageType"`
+					Success     bool                   `json:"success"`
+					Bundle      map[string]interface{} `json:"bundle,omitempty"`
+					Errors      []string               `json:"errors,omitempty"`
+					Warnings    []string               `json:"warnings,omitempty"`
 				}
 
 				results := make([]batchResult, 0, len(rawMessages))
@@ -1788,8 +1774,10 @@ func main() {
 						results = append(results, batchResult{
 							Index:   i,
 							Success: false,
-							Errors:  []string{"parse failed: " + func() string {
-								if parsed != nil { return parsed.Error }
+							Errors: []string{"parse failed: " + func() string {
+								if parsed != nil {
+									return parsed.Error
+								}
 								return "nil result"
 							}()},
 						})

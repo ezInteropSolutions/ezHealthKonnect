@@ -34,7 +34,7 @@ describe('no committed secret values in deployment/config files', () => {
     const literal = new RegExp(`\\b(${SECRET_NAMES.join('|')})\\b[ \\t]*[:=][ \\t]*["']?([^\\s"'$<{}#?-][^\\s"']{7,})`, 'i');
 
     it('finds the deployment files (sanity check)', () => {
-        expect(configLike).toEqual(expect.arrayContaining(['docker-compose.yml', 'installer/assets/docker-compose.prod.yml']));
+        expect(configLike).toEqual(expect.arrayContaining(['docker-compose.yml', '.env.example']));
     });
 
     it.each(configLike.map(f => [f]))('%s gives no literal value to a secret variable', (f) => {

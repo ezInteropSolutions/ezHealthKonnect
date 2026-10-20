@@ -6,9 +6,35 @@
 
 const express  = require('express');
 const bcrypt   = require('bcryptjs');
+const crypto   = require('crypto');
 const router   = express.Router();
 
 const settingsService = require('../services/settingsService');
+
+/**
+ * Guards first-run setup with the one-time token the installer writes to
+ * SETUP_TOKEN (and gives only to the person installing). Without it, whoever
+ * reached /setup.html first — anyone on the network — could create the first
+ * administrator. When SETUP_TOKEN is not configured (local development)
+ * setup stays open, as before.
+ */
+class SetupGate {
+    constructor(env = process.env) {
+        this.token = (env.SETUP_TOKEN || '').trim();
+    }
+
+    get tokenRequired() {
+        return this.token !== '';
+    }
+
+    verify(candidate) {
+        if (!this.tokenRequired) return true;
+        if (typeof candidate !== 'string' || candidate === '') return false;
+        const a = crypto.createHash('sha256').update(candidate).digest();
+        const b = crypto.createHash('sha256').update(this.token).digest();
+        return crypto.timingSafeEqual(a, b);
+    }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -18,23 +44,29 @@ async function isSetupRequired() {
     return val !== true;
 }
 
-async function markSetupComplete() {
+/**
+ * Atomically claims setup completion inside `transaction`: only the request
+ * that flips setup_complete from not-true to true gets `true`, so two
+ * simultaneous submissions can never both create an administrator.
+ */
+async function claimSetupCompletion(transaction) {
     const { sequelize } = require('../config/database');
-    await sequelize.query(
+    const [rows] = await sequelize.query(
         `UPDATE system_settings SET value = 'true'::jsonb, updated_at = NOW()
-         WHERE key = 'setup_complete'`
+          WHERE key = 'setup_complete' AND value IS DISTINCT FROM 'true'::jsonb
+          RETURNING key`,
+        { transaction }
     );
-    settingsService.invalidate('setup_complete');
+    return rows.length === 1;
 }
 
-async function setOrgName(orgName) {
+async function setOrgName(orgName, transaction) {
     const { sequelize } = require('../config/database');
     await sequelize.query(
         `UPDATE system_settings SET value = $1::jsonb, updated_at = NOW()
          WHERE key = 'org_name'`,
-        { bind: [JSON.stringify(orgName)] }
+        { bind: [JSON.stringify(orgName)], transaction }
     );
-    settingsService.invalidate('org_name');
 }
 
 // ─── GET /api/setup/status ────────────────────────────────────────────────────
@@ -42,7 +74,7 @@ async function setOrgName(orgName) {
 router.get('/status', async (req, res) => {
     try {
         const required = await isSetupRequired();
-        res.json({ setupRequired: required });
+        res.json({ setupRequired: required, tokenRequired: required && new SetupGate().tokenRequired });
     } catch (err) {
         console.error('[setup] status error:', err.message);
         res.status(500).json({ message: 'Could not determine setup status' });
@@ -62,7 +94,13 @@ router.post('/complete', async (req, res) => {
             return res.status(409).json({ message: 'Setup has already been completed.' });
         }
 
-        const { orgName, firstName, lastName, email, password } = req.body;
+        const { orgName, firstName, lastName, email, password, setupToken } = req.body || {};
+        if (!new SetupGate().verify(setupToken)) {
+            console.warn('[setup] rejected a setup attempt without a valid setup token from', req.ip);
+            return res.status(403).json({
+                message: 'Open this page using the setup link shown by the installer (it contains a one-time token).'
+            });
+        }
 
         // ── Validate inputs ──────────────────────────────────────────────────
         const missing = [];
@@ -98,39 +136,47 @@ router.post('/complete', async (req, res) => {
         const defaultAdmin = await User.findOne({ where: { email: defaultAdminEmail } });
 
         const passwordHash = await bcrypt.hash(password, 12);
+        const { sequelize } = require('../config/database');
 
-        if (defaultAdmin) {
-            // Transform the placeholder admin into the real admin account
-            await defaultAdmin.update({
-                email:                emailLC,
-                first_name:           firstName.trim(),
-                last_name:            lastName.trim(),
-                password_hash:        passwordHash,
-                force_password_reset: false,
-                status:               'active',
-                email_verified:       true
-            });
-            console.log(`[setup] Default admin updated → ${emailLC}`);
-        } else {
-            // Edge case: placeholder was deleted — create a fresh admin
-            await User.create({
-                email:          emailLC,
-                first_name:     firstName.trim(),
-                last_name:      lastName.trim(),
-                password_hash:  passwordHash,
-                role:           'admin',
-                status:         'active',
-                email_verified: true,
-                force_password_reset: false,
-                data_consent_given:   true,
-                data_consent_date:    new Date()
-            });
-            console.log(`[setup] New admin created: ${emailLC}`);
+        // One transaction: claim completion first (only one request can), then
+        // create the administrator. Any failure leaves setup still available.
+        const claimed = await sequelize.transaction(async (transaction) => {
+            if (!(await claimSetupCompletion(transaction))) return false;
+            if (defaultAdmin) {
+                // Transform the placeholder admin into the real admin account
+                await defaultAdmin.update({
+                    email:                emailLC,
+                    first_name:           firstName.trim(),
+                    last_name:            lastName.trim(),
+                    password_hash:        passwordHash,
+                    force_password_reset: false,
+                    status:               'active',
+                    email_verified:       true
+                }, { transaction });
+            } else {
+                // Edge case: placeholder was deleted — create a fresh admin
+                await User.create({
+                    email:          emailLC,
+                    first_name:     firstName.trim(),
+                    last_name:      lastName.trim(),
+                    password_hash:  passwordHash,
+                    role:           'admin',
+                    status:         'active',
+                    email_verified: true,
+                    force_password_reset: false,
+                    data_consent_given:   true,
+                    data_consent_date:    new Date()
+                }, { transaction });
+            }
+            await setOrgName(orgName.trim(), transaction);
+            return true;
+        });
+        if (!claimed) {
+            return res.status(409).json({ message: 'Setup has already been completed.' });
         }
-
-        // ── Persist org name and mark setup complete ─────────────────────────
-        await setOrgName(orgName.trim());
-        await markSetupComplete();
+        settingsService.invalidate('setup_complete');
+        settingsService.invalidate('org_name');
+        console.log(`[setup] Administrator account set up: ${emailLC}`);
 
         // Invalidate the in-memory setup-check cache so the middleware
         // stops redirecting immediately (no 5-second wait).
@@ -153,4 +199,5 @@ router.post('/complete', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.SetupGate = SetupGate;
 module.exports.isSetupRequired = isSetupRequired;
