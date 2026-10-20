@@ -4,6 +4,21 @@ Product and architecture decisions that change what the platform supports or how
 
 ---
 
+## 2026-10-20 — One way to receive FHIR over HTTP; the Node prototypes are removed
+
+**Decision:** FHIR resources are received only by the HTTP FHIR Receiver connector (`http_fhir_inbound`). The Node routes `/fhir/receiver/*` (FhirReceiverController) and `/api/messages/fhir/*` (MessageController.receiveFHIRMessage) are removed. The connector's credential check now uses the shared `InboundAuthenticator`, the same check every other inbound listener uses.
+
+**Why:**
+- **No working capability was lost.** Neither Node route ever started a pipeline: one had a `TODO` where processing should be, and the other marked messages "processed" without processing them. Both wrote message-table columns that no longer exist, so every call already failed.
+- **Both were security risks.** One had optional authentication, and its Basic check accepted any password. The other had no authentication at all. Reviving them would have meant building and securing a second public FHIR ingestion surface that duplicates the connector.
+- **The connector's own check had gaps.** It had its own credential code, in which an empty configured secret matched a missing header, `Validate` never required the secret, and an unknown auth type left the listener open.
+
+**Impact:**
+- The removed URLs return 404, and a Jest test plus a Playwright test keep it that way.
+- An HTTP FHIR Receiver configured with an auth type but no secret now fails activation with a clear message instead of running open. Receivers set to `none` behave as before.
+
+---
+
 ## 2026-10-20 — Production installs are Standalone only; Docker is for development
 
 **Decision:** Customers install ezHealthKonnect natively, as a Windows service or as Linux systemd services, using one self-contained installer per OS. The Docker edition, its install scripts and its production compose files are removed. `docker-compose.yml` remains only for developing ezHealthKonnect itself. The installer upgrades in place with a backup first and restores automatically on any failure. New installs get PostgreSQL 17; existing servers need PostgreSQL 15 or newer. Message content is stored on local disk by default; MinIO is not provided, and S3-compatible storage stays available.

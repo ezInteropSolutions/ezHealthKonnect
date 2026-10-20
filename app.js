@@ -675,11 +675,9 @@ const deploymentRoutes = require('./routes/deploymentRoutes');
 app.use('/api/deployment', deploymentRoutes);
 console.log('✅ Deployment routes mounted at /api/deployment');
 
-// FHIR Receiver routes - Node.js handles incoming FHIR resources
-console.log('🔄 Mounting /fhir (FHIR Receiver)...');
-const fhirReceiverRoutes = require('./routes/fhirReceiverRoutes');
-app.use('/fhir', fhirReceiverRoutes);
-console.log('✅ FHIR Receiver routes mounted at /fhir');
+// FHIR resources are received by the HTTP FHIR Receiver connector
+// (http_fhir_inbound), not by Node. The former Node /fhir/receiver routes
+// (optional auth, never ran a pipeline) were removed in v26.10.
 
 // Pipeline Builder routes - with debug logging
 console.log('🔄 Mounting /api/pipelines...');

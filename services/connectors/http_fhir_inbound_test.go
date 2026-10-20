@@ -1308,3 +1308,64 @@ func TestFHIRInbound_CORS(t *testing.T) {
 		}
 	})
 }
+
+// FRI-AUTH-CLOSED — authentication fails closed (v26.10). Before, the
+// connector had its own credential checks: an empty configured secret matched
+// a missing header, Validate never required the secret, and an unknown
+// authType fell through to an open listener. It now uses the shared
+// InboundAuthenticator.
+func TestHTTPFHIRInbound_AuthFailsClosed(t *testing.T) {
+	initialize := func(cfg map[string]interface{}) (Connector, error) {
+		cfg["port"] = float64(18999)
+		b, _ := json.Marshal(cfg)
+		c := NewHTTPFHIRInboundConnector()
+		return c, c.Initialize(b)
+	}
+
+	t.Run("unknown authType is rejected at Initialize", func(t *testing.T) {
+		for _, v := range []string{"Bearer", "smart", "token"} {
+			if _, err := initialize(map[string]interface{}{"authType": v}); err == nil {
+				t.Errorf("authType %q: Initialize succeeded, want an error", v)
+			}
+		}
+	})
+
+	t.Run("Validate requires the configured secret", func(t *testing.T) {
+		for _, cfg := range []map[string]interface{}{
+			{"authType": "bearer"},
+			{"authType": "api_key"},
+			{"authType": "basic", "username": "u"},
+		} {
+			c, err := initialize(cfg)
+			if err != nil {
+				t.Fatalf("%v: Initialize: %v", cfg, err)
+			}
+			if err := c.Validate(); err == nil {
+				t.Errorf("%v: Validate passed without a secret", cfg)
+			}
+		}
+		c, _ := initialize(map[string]interface{}{"authType": "none"})
+		if err := c.Validate(); err != nil {
+			t.Errorf("authType none: Validate: %v", err)
+		}
+	})
+
+	t.Run("an empty configured secret never matches a missing header", func(t *testing.T) {
+		// fhirStart does not call Validate — the request-time check must hold on its own.
+		msgs, base, _ := fhirStart(t, map[string]interface{}{"authType": "api_key"})
+		resp := fhirDo(t, "POST", base+"/Patient", patientJSON, nil)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("status=%d want=401", resp.StatusCode)
+		}
+		fhirNoMsg(t, msgs)
+
+		msgs2, base2, _ := fhirStart(t, map[string]interface{}{"authType": "bearer"})
+		resp = fhirDo(t, "POST", base2+"/Patient", patientJSON, map[string]string{"Authorization": "Bearer "})
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("empty bearer: status=%d want=401", resp.StatusCode)
+		}
+		fhirNoMsg(t, msgs2)
+	})
+}

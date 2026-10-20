@@ -62,6 +62,19 @@ See `docs/INSTALL_GUIDE.md`.
 - **Uninstall:** `uninstall --yes` removes the services and the whole install directory, including stored messages and backups. It drops the database only if the installer created it; add `--keep-database` to keep it.
 - **Database migrations** are applied by the application itself (`go-api migrate`). Flyway is not needed.
 
+## How do I receive FHIR resources over HTTP?
+
+Use the **HTTP FHIR Receiver** connector (`http_fhir_inbound`) as an interface's inbound connector. It runs its own listener on the port you choose, and it serves a FHIR REST API under the base path you configure (default `/fhir/r4`):
+- **Create and read:** `POST <base>/<ResourceType>`, `GET`/`PUT`/`PATCH`/`DELETE <base>/<ResourceType>/<id>`
+- **Bundles:** `POST <base>/$transaction` and `$batch`
+- **Capability statement:** `GET <base>/metadata`
+
+Every request runs through the interface's pipeline.
+
+Authentication is `none`, `basic`, `bearer` or `api_key` (header `X-API-Key` by default, or a header you configure). If you choose an authentication type, its secret is required: the interface will not activate without it, and an empty or wrong credential is always refused. You can also restrict callers to listed IP addresses and enable TLS.
+
+The older URLs `/fhir/receiver/{interfaceId}` and `/api/messages/fhir/{resourceType}` were removed in v26.10 and return 404.
+
 ## How do I exchange EDI X12?
 
 Start from a template in **Templates → EDI X12**:

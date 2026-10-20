@@ -74,8 +74,8 @@ router.post('/send/:interfaceId',   sessionAuth, canWrite, (req, res) => Message
 router.post('/:messageId/reprocess', sessionAuth, canWrite, (req, res) => MessageController.reprocessMessage(req, res));
 router.delete('/:messageId',        sessionAuth, canWrite, (req, res) => MessageController.deleteMessage(req, res));
 
-// FHIR RECEIVER — unauthenticated (system-to-system endpoint)
-router.post('/fhir/Patient',       (req, res) => MessageController.receiveFHIRMessage(req, res));
-router.post('/fhir/:resourceType', (req, res) => MessageController.receiveFHIRMessage(req, res));
+// FHIR resources are received by the HTTP FHIR Receiver connector
+// (http_fhir_inbound: authenticated, validated, full pipeline). The former
+// unauthenticated /api/messages/fhir/* receiver was removed in v26.10.
 
 module.exports = router;

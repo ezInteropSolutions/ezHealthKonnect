@@ -38,6 +38,15 @@ trail, and a much better-informed ezCompanion assistant.
 >   installer to upgrade; it backs up first and rolls back automatically if anything fails.
 > - **No default administrator.** The `admin@ezhealthkonnect.com` / `admin123` account is gone.
 >   Create the first administrator with the one-time setup link the installer prints.
+> - **Legacy FHIR receiver URLs removed.** `/fhir/receiver/{interfaceId}` and
+>   `/api/messages/fhir/{resourceType}` now return 404. They were early prototypes: one had
+>   optional authentication (its Basic check accepted any password) and the other had none.
+>   Neither ever ran a pipeline, and both had stopped working in this release's schema. Receive
+>   FHIR with the **HTTP FHIR Receiver** connector (`http_fhir_inbound`) instead.
+> - **HTTP FHIR Receiver authentication now fails closed.** An interface set to Basic, Bearer
+>   or API-key authentication without the matching secret no longer activates. Previously an
+>   empty secret let a request with no credentials through, and an unrecognised auth type left
+>   the listener open. Interfaces using `none` are unaffected.
 > - **MinIO is no longer provided.** Messages are stored on local disk by default. S3-compatible
 >   storage is still supported through `OBJECT_STORAGE_DRIVER=s3`.
 > - **Behind HTTPS:** set `TRUST_PROXY` and `SESSION_COOKIE_SECURE=auto` (see Capabilities Guide).
