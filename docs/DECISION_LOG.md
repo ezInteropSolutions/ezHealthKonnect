@@ -4,6 +4,21 @@ Product and architecture decisions that change what the platform supports or how
 
 ---
 
+## 2026-10-20 — No committed secrets, no secret defaults, refuse publicly-known values
+
+**Decision:** No secret value is ever committed, and no code falls back to a built-in secret. Every secret comes from `.env` (from source: `npm run setup:env`; installers generate their own). In production, the web server and the processing engine both refuse to start if any secret matches a publicly known value. The processing engine fails closed when its proxy secret is missing.
+
+**Why:** The development `docker-compose.yml` in this public repository held a working credential-encryption key and the dev session, JWT, database and object-storage secrets for weeks, and the code had built-in fallback secrets. Anyone who copied that file or ran with a missing variable used secrets the whole internet could read. The generic gitleaks rules caught only the key.
+
+**How it works:**
+- `config/compromised_secrets.json` lists SHA-256 fingerprints of every value that was published (plus common placeholders). Add new leaks with `node scripts/fingerprint-secret.js`.
+- Recurrence is blocked at four points: a project gitleaks rule for secret variables in config files, a Jest policy test (`tests/unit/noCommittedSecrets.test.js`) covering config literals and code fallbacks, a gitleaks pre-commit hook (`.githooks/`, installed by `npm install`), and CI that generates its own secrets per run.
+- Git history was not rewritten, because the published values are permanently public anyway. They are burned instead: refused in production and rotated everywhere.
+
+**Impact:** A developer running from source must run `npm run setup:env` once. Customer installs are unaffected, because installers already generate unique secrets.
+
+---
+
 ## 2026-10-19 — Support HL7 v2 over RS232 serial
 
 **Decision:** Build it. The serial connector (`serial_inbound`) gains a **Protocol** setting: `astm` (default, unchanged) or `hl7_mllp`. A new device template, **HL7 over Serial Port**, uses it.

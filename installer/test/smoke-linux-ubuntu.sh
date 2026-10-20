@@ -8,6 +8,10 @@
 # Or pipe directly from the repo root:
 #   Get-Content installer/test/smoke-linux-ubuntu.sh | docker run --rm -i ubuntu:22.04 bash
 
+# Throwaway password for the disposable test database — generated per run so
+# no credential is committed (gitleaks rule ezhk-app-secret-literal).
+TEST_DB_PASSWORD="$(openssl rand -hex 16)"
+
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
@@ -105,7 +109,7 @@ sleep 2
 hdr "PostgreSQL Peer Auth (runuser)"
 PSQL=/usr/lib/postgresql/15/bin/psql
 
-CREATE_USER="CREATE USER ezhealth_user WITH PASSWORD 'testpass123';"
+CREATE_USER="CREATE USER ezhealth_user WITH PASSWORD '${TEST_DB_PASSWORD}';"
 CREATE_DB="CREATE DATABASE ezhealthkonnect OWNER ezhealth_user;"
 GRANT="GRANT ALL PRIVILEGES ON DATABASE ezhealthkonnect TO ezhealth_user;"
 
@@ -126,7 +130,7 @@ ok "GRANT PRIVILEGES via peer auth"
 
 # ── 7. App user connectivity ───────────────────────────────────────────────────
 hdr "App User DB Connection"
-export PGPASSWORD="testpass123"
+export PGPASSWORD="${TEST_DB_PASSWORD}"
 if $PSQL -h localhost -U ezhealth_user -d ezhealthkonnect -c "SELECT 1;" -q 2>/dev/null; then
   ok "App user can connect with password"
 else
@@ -149,7 +153,7 @@ echo "CREATE TABLE IF NOT EXISTS test_v2 (id serial PRIMARY KEY);" > /tmp/migrat
 echo "CREATE TABLE IF NOT EXISTS test_v10 (id serial PRIMARY KEY);" > /tmp/migrations/V10__Interfaces.sql
 
 for sql in /tmp/migrations/V1__Init.sql /tmp/migrations/V2__Users.sql /tmp/migrations/V10__Interfaces.sql; do
-  PGPASSWORD=testpass123 $PSQL -h localhost -U ezhealth_user -d ezhealthkonnect -f "$sql" -q 2>/dev/null \
+  PGPASSWORD="${TEST_DB_PASSWORD}" $PSQL -h localhost -U ezhealth_user -d ezhealthkonnect -f "$sql" -q 2>/dev/null \
     && ok "  $(basename $sql)" \
     || { # Try via socket
          $SUDO runuser -l postgres -c "$PSQL -U ezhealth_user -d ezhealthkonnect -f $sql -q" 2>/dev/null \

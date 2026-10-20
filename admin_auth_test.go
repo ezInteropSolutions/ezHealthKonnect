@@ -77,3 +77,36 @@ func TestIsPublicClientRoute_PrefixRequiresSlashBoundary(t *testing.T) {
 		t.Error("prefix match must not cross a path-segment boundary")
 	}
 }
+
+// Fail closed: with no proxy secret configured nothing is accepted — before
+// 2026-10-20 an unset secret let every request through.
+func TestVerifyProxySecret_FailsClosedWithoutSecret(t *testing.T) {
+	r := newProxiedRouter("")
+	t.Cleanup(func() { internalProxySecret = "" })
+	for _, h := range []map[string]string{nil, {"X-Internal-Proxy-Secret": ""}, {"X-Internal-Proxy-Secret": "anything"}} {
+		req := httptest.NewRequest(http.MethodGet, "/api/cda/documents", nil)
+		for k, v := range h {
+			req.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("headers %v: status %d, want 401 when no secret is configured", h, w.Code)
+		}
+	}
+}
+
+// The proxy secret is compared exactly — a value that differs only in case is rejected.
+func TestVerifyProxySecret_IsExactMatch(t *testing.T) {
+	secret := strings.Repeat("a", 16) + strings.Repeat("B", 16)
+	r := newProxiedRouter(secret)
+	t.Cleanup(func() { internalProxySecret = "" })
+	req := httptest.NewRequest(http.MethodGet, "/api/cda/documents", nil)
+	req.Header.Set("X-Internal-Proxy-Secret", strings.ToUpper(secret))
+	req.Header.Set("X-User-ID", "u1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("case-altered secret accepted: status %d", w.Code)
+	}
+}

@@ -150,7 +150,7 @@ router.post('/login', loginRateLimiter.middleware(), async (req, res) => {
         const jwtExpiryHours = secPolicy.jwt_expiry_hours || 24;
         const token = jwt.sign(
             { userId: user.id, email: user.email, role: user.role },
-            process.env.JWT_SECRET || 'your-secret-key-change-this-in-production',
+            process.env.JWT_SECRET, // enforced at startup by config/SecretsGuard.js — no fallback
             { expiresIn: `${jwtExpiryHours}h` }
         );
 

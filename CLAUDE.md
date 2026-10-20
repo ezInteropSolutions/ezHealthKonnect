@@ -3150,6 +3150,13 @@ The 2026-10-19 release regression found whole Go-forwarded route groups (`/api/f
 - Failed attempts audited as `SYNC_ENDPOINT_AUTH_FAILED`.
 - **Known, deliberate scope boundary**: the rest of `interfaces.source_config` is still neither encrypted nor masked (the legacy engine fallback and Node `ConnectorFactory` read it as plaintext) — only `endpoint_auth` is protected.
 
+### Secrets policy (2026-10-20) — no committed secrets, no defaults
+The dev `docker-compose.yml` once committed a working `APP_CREDENTIAL_KEY` plus session/JWT/DB/MinIO secrets to this PUBLIC repo, and code had literal fallback secrets. Now:
+- Every secret comes from `.env` (`npm run setup:env` → `scripts/init-dev-env.js`; never overwrites). `docker-compose.yml` uses `${VAR:?...}` and refuses to start without them. **Never add a literal secret or a `|| 'fallback'` / `getEnv("..SECRET..", "default")`** — `tests/unit/noCommittedSecrets.test.js` fails Jest on both; the `ezhk-app-secret-literal` gitleaks rule and `.githooks/pre-commit` catch config literals too.
+- `config/compromised_secrets.json` = SHA-256 fingerprints of every published value + placeholders. Production refuses to start on a match — Node (`config/SecretsGuard.js`) AND Go (`services/secretguard`, `main.go` `enforceNoPubliclyKnownSecrets`, needed because Standalone runs Go without Node). Add a leak: `node scripts/fingerprint-secret.js "<note>" < file`.
+- `verifyProxySecret` fails closed (no secret → every proxied request rejected), constant-time exact match.
+- CI generates per-run secrets (`init-dev-env.js` in the Playwright job, `openssl rand` in publish-image); only the test-go throwaway service container keeps the burned `secure_password_change_me` (fingerprinted, exempted by name).
+
 ### Dependency/CVE state
 Go 1.26.9 (`go.mod`, Dockerfile, CI, installer scripts) + x/net 0.60, x/crypto 0.57, amqp091 1.13, gosnowflake 2.2 → govulncheck 0 reachable; CI pins `govulncheck@v1.9.0` (`@latest` silently began requiring newer Go). npm: `npm audit fix`, unused `http-proxy-middleware` removed → 0 production vulns; CI audits with `--omit=dev` (the image installs `--omit=dev`).
 

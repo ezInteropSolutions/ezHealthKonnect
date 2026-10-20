@@ -127,21 +127,24 @@ jobs:
           APP_PORT=3000
           API_PORT=8080
           DB_USER=ezhealth_user
-          DB_PASSWORD=TestPassword123!
           DB_HOST_PORT=5432
           DB_SSL=false
           MINIO_USER=ezhealth_user
-          MINIO_PASSWORD=TestPassword123!
           MINIO_API_PORT=9000
           MINIO_CONSOLE_PORT=9001
-          SESSION_SECRET=ci-session-secret-not-for-production-use
-          JWT_SECRET=ci-jwt-secret-not-for-production-use
           OLLAMA_PORT=11434
           OLLAMA_CHAT_MODEL=llama3.2:3b
           OLLAMA_EMBED_MODEL=nomic-embed-text
           EOF
-          # Generated per run — a committed key would trip the gitleaks gate.
-          echo "APP_CREDENTIAL_KEY=$(openssl rand -base64 32)" >> /tmp/test.env
+          # Secrets are generated per run — never committed (gitleaks rule
+          # ezhk-app-secret-literal; production refuses publicly-known values).
+          {
+            echo "DB_PASSWORD=$(openssl rand -hex 18)"
+            echo "MINIO_PASSWORD=$(openssl rand -hex 18)"
+            echo "SESSION_SECRET=$(openssl rand -hex 32)"
+            echo "JWT_SECRET=$(openssl rand -hex 32)"
+            echo "APP_CREDENTIAL_KEY=$(openssl rand -base64 32)"
+          } >> /tmp/test.env
 
           DC="docker compose -f docker-compose.prod.yml --env-file /tmp/test.env -p ezhk-ci"
 

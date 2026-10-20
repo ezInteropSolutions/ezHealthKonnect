@@ -18,3 +18,23 @@ regexes = [
   '''nullKeyMarker uint64 = 0xB8E7_4CE2_3E93_D0D7''', # services/executors/transform/remove_duplicates_executor.go — sentinel constant, not a key
   '''conversational''',                                # marketing/make_daily_prompt_template.md — matched "linkedin-client-id" rule on an ordinary word
 ]
+
+# ezHealthKonnect's own secret variables. The default generic-api-key rule
+# caught the committed APP_CREDENTIAL_KEY (2026-10-06 CI run) but NOT the 64-
+# character dev SESSION_SECRET / JWT_SECRET or the database/MinIO passwords
+# that sat in docker-compose.yml — this rule catches any literal value given
+# to one of them in a deployment/config file. Values must come from .env as
+# ${NAME} references. Scoped to config-like files: application code has no
+# literal secrets at all (see tests/unit/noCommittedSecrets.test.js).
+[[rules]]
+id = "ezhk-app-secret-literal"
+description = "Literal value assigned to an ezHealthKonnect secret variable"
+regex = '''(?i)\b(SESSION_SECRET|JWT_SECRET|INTERNAL_PROXY_SECRET|APP_CREDENTIAL_KEY|DB_PASSWORD|MINIO_PASSWORD|OBJECT_STORAGE_SECRET_KEY|POSTGRES_PASSWORD|MINIO_ROOT_PASSWORD|FLYWAY_PASSWORD|PGPASSWORD)\b[ \t]*[:=][ \t]*["']?([^\s"'$<{}#?-][^\s"']{7,})'''
+secretGroup = 2
+path = '''(?i)(\.ya?ml|\.env(\.[a-z0-9_-]+)?|dockerfile[^/]*|\.sh|\.ps1|\.bat|\.cmd|\.conf|\.properties|\.toml|\.ini)$'''
+keywords = ["secret", "password", "credential_key", "pgpassword"]
+
+[rules.allowlist]
+description = "Burned CI-only throwaway database password — fingerprinted in config/compromised_secrets.json, so production refuses it"
+regexTarget = "line"
+regexes = ['''secure_password_change_me''']

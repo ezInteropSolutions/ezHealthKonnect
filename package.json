@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "jest",
+    "setup:env": "node scripts/init-dev-env.js",
+    "prepare": "git config core.hooksPath .githooks || echo \"git hooks not installed (no git repository)\"",
     "test:coverage": "jest --coverage",
     "release": "node scripts/release.js",
     "docs:export-step-docs": "node scripts/export-pipeline-step-docs.js",

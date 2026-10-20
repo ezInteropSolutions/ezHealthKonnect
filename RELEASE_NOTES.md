@@ -19,7 +19,15 @@ trail, and a much better-informed ezCompanion assistant.
 >   re-install). Existing connector passwords/tokens are encrypted at first start. **Back up
 >   `.env`** — losing this key makes stored credentials unreadable.
 > - **Production refuses weak secrets.** The server will not start in production with a missing,
->   placeholder or short (< 32 chars) `SESSION_SECRET` or `JWT_SECRET`.
+>   placeholder or short (< 32 chars) `SESSION_SECRET` or `JWT_SECRET`, or with any secret
+>   that matches a publicly known value (see `config/compromised_secrets.json`). If you ever
+>   copied secrets from this repository's `docker-compose.yml`, generate new ones before upgrading.
+>   `APP_CREDENTIAL_KEY` is the exception: replacing it needs your stored credentials re-encrypted,
+>   so contact support first.
+> - **No secret defaults.** Secrets no longer fall back to built-in values. The processing engine
+>   rejects proxied requests when no internal proxy secret (or `JWT_SECRET`) is set.
+> - **Running from source:** `docker-compose.yml` no longer contains secrets. Run
+>   `npm run setup:env` once to create `.env`.
 > - **Device ACK default changed.** The HL7 listener now answers a frame it cannot read with `AR`
 >   and a message it cannot queue with `AE` (the device resends), instead of `AA`. Existing
 >   interfaces keep their stored `on_error` setting.
@@ -86,6 +94,9 @@ trail, and a much better-informed ezCompanion assistant.
   every read and in logs.
 - Content-Security-Policy, real client IP in audit records, HTTPS-aware session cookies, and a
   production secrets guard.
+- No committed secrets and no secret defaults: production refuses publicly known secret values
+  (checked in both the web server and the processing engine), and recurrence is blocked by a
+  gitleaks rule, a repository policy test, a pre-commit hook and per-run CI secrets.
 - Go 1.26.9 and updated dependencies: govulncheck reports 0 reachable vulnerabilities; `npm audit`
   reports 0 production vulnerabilities.
 

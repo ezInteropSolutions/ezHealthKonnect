@@ -14,6 +14,7 @@ import (
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/audit"
 	"ezhealthkonnect/services/authguard"
+	"ezhealthkonnect/services/secretguard"
 	"ezhealthkonnect/services/backpressure"
 	cdaSchemaLoader "ezhealthkonnect/cda"
 	cdacoverage "ezhealthkonnect/services/cda_coverage"
@@ -86,6 +87,23 @@ var cdaDocumentStore cdastorage.CDADocumentStore
 // guarded at both use sites below.
 var appAuditLogger audit.AuditLogger
 
+// enforceNoPubliclyKnownSecrets checks the environment against
+// config/compromised_secrets.json. A missing list is reported, not fatal.
+func enforceNoPubliclyKnownSecrets() {
+	list, err := secretguard.Load(secretguard.DefaultPath)
+	if err != nil {
+		log.Printf("⚠️  SECURITY: could not load %s (%v) — publicly-known secrets are not being checked", secretguard.DefaultPath, err)
+		return
+	}
+	findings := list.Check(os.Getenv)
+	for _, f := range findings {
+		log.Printf("❌ SECURITY: %s is a publicly-known value (%s) — generate a new one", f.Variable, f.Note)
+	}
+	if len(findings) > 0 && strings.EqualFold(os.Getenv("NODE_ENV"), "production") {
+		log.Fatalf("Refusing to start in production with publicly-known secrets")
+	}
+}
+
 func main() {
 	// Register the shutdown-signal channel FIRST, before any other
 	// initialization work — deliberately ahead of even .env loading below.
@@ -123,6 +141,12 @@ func main() {
 	// after godotenv.Load() — see InitInternalProxySecret's doc comment for why
 	// this can't be a package-level var initializer.
 	InitInternalProxySecret()
+
+	// Refuse publicly-known secrets (config/compromised_secrets.json). Fatal in
+	// production; a warning elsewhere so an existing dev environment keeps
+	// working until rotated. Node applies the same list, but standalone installs
+	// run this service on its own, so it must check for itself.
+	enforceNoPubliclyKnownSecrets()
 
 	// Record start time
 	startTime = time.Now()

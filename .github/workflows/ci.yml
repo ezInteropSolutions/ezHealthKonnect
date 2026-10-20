@@ -351,7 +351,14 @@ jobs:
         # docker-compose.yml's ollama/HOST_DATA_PATH/CCD_INBOX_PATH mounts all
         # default to portable, OS-agnostic paths (named volume / repo-local
         # .devdata/ dirs) — no CI-specific overrides needed here anymore.
+        # docker-compose.yml holds no secrets — they come from .env. Generate
+        # throwaway ones for this run (never printed; masked from logs) and
+        # expose DATABASE_URL for the Playwright step's direct-DB specs.
         run: |
+          node scripts/init-dev-env.js
+          DB_PASSWORD=$(grep '^DB_PASSWORD=' .env | cut -d= -f2-)
+          echo "::add-mask::$DB_PASSWORD"
+          echo "DATABASE_URL=postgres://ezhealth_user:${DB_PASSWORD}@localhost:5432/ezhealthkonnect?sslmode=disable" >> "$GITHUB_ENV"
           docker compose -f docker-compose.yml up -d postgres minio ollama flyway app
 
       - name: Wait for app readiness
@@ -374,10 +381,9 @@ jobs:
           # Without this, every spec that seeds/reads via a direct DB
           # connection (admin-dlq.spec.js's 20 tests, bulk-reprocess-e2e.spec.js)
           # silently test.skip()s its entire suite — CI was giving zero
-          # coverage on either, not passing coverage. Same connection string
-          # already used by the Go test suite step above (postgres service
-          # published to the runner host, so localhost is correct here too).
-          DATABASE_URL: postgres://ezhealth_user:secure_password_change_me@localhost:5432/ezhealthkonnect?sslmode=disable
+          # coverage on either, not passing coverage. DATABASE_URL is set by
+          # the "Start app stack" step ($GITHUB_ENV) from this run's generated
+          # .env — the dev compose file no longer carries a password.
         run: npx playwright test --project=chromium
 
       - name: Upload Playwright report

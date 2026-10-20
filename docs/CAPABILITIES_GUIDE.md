@@ -93,6 +93,9 @@ ezCompanion is available to viewers, operators and admins. It answers read-only 
 - Connector credentials (passwords, tokens, API keys, private keys) are encrypted at rest with AES-256-GCM using `APP_CREDENTIAL_KEY`, and masked (`••••••••`) whenever configuration is shown. Leaving a masked field untouched keeps the stored value.
 - The installer generates `APP_CREDENTIAL_KEY` once and keeps it on re-install. **Never change it** — stored credentials would become unreadable.
 - In production the server refuses to start if `SESSION_SECRET` or `JWT_SECRET` is missing, a known placeholder, or shorter than 32 characters.
+- In production the server also refuses to start if any secret (`SESSION_SECRET`, `JWT_SECRET`, `INTERNAL_PROXY_SECRET`, `APP_CREDENTIAL_KEY`, `DB_PASSWORD`, `MINIO_PASSWORD`, `OBJECT_STORAGE_SECRET_KEY`) matches a value that is publicly known, either because it was once published or because it is a placeholder. The check uses SHA-256 fingerprints in `config/compromised_secrets.json`, so the list holds no secret values. Both the web server and the processing engine run this check. The engine checks on its own because Standalone installs run it as a separate service.
+- No secret has a built-in default. If the internal proxy secret is missing, the processing engine rejects every proxied request instead of accepting it.
+- Running from source: `npm run setup:env` creates a local `.env` with freshly generated secrets. It never overwrites a value that is already there. `docker-compose.yml` refuses to start until `.env` provides them, and no secret value is ever committed to the repository. CI checks this with gitleaks, a repository policy test and a pre-commit hook.
 
 ## How do I run behind HTTPS?
 

@@ -405,7 +405,7 @@ try {
 
 const sessionConfig = {
     store: _sessionStore,
-    secret: process.env.SESSION_SECRET || 'your-session-secret',
+    secret: process.env.SESSION_SECRET, // enforced at startup by config/SecretsGuard.js — no fallback
     resave: false,
     saveUninitialized: false,
     name: 'ezhealth.sid',
@@ -829,7 +829,7 @@ app.post('/api/login', async (req, res) => {
         
         const token = jwt.sign(
             { userId: user.id, email: user.email, role: user.role },
-            process.env.JWT_SECRET || 'your-secret-key-change-this-in-production',
+            process.env.JWT_SECRET, // enforced at startup by config/SecretsGuard.js — no fallback
             { expiresIn: '24h' }
         );
         

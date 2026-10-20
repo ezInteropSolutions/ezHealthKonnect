@@ -1,0 +1,29 @@
+#!/bin/sh
+# Blocks commits that contain secrets (installed by `npm install` via the
+# "prepare" script, which points core.hooksPath at .githooks).
+#
+# Uses the gitleaks binary when installed, otherwise the same gitleaks image
+# CI uses. If neither is available the commit is still allowed, with a warning
+# — the CI "Secret scan (gitleaks)" job remains the gate.
+# Bypass (only for a confirmed false positive): git commit --no-verify
+GITLEAKS_IMAGE="ghcr.io/gitleaks/gitleaks:v8.30.1"
+
+if command -v gitleaks >/dev/null 2>&1; then
+    gitleaks git --pre-commit --staged --redact -c .gitleaks.toml --no-banner
+    status=$?
+elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd):/repo" -w /repo "$GITLEAKS_IMAGE" \
+        git --pre-commit --staged --redact -c .gitleaks.toml --no-banner
+    status=$?
+else
+    echo "⚠️  pre-commit: gitleaks not found (no binary, no running Docker) — secret scan skipped." >&2
+    echo "   Install gitleaks (https://github.com/gitleaks/gitleaks) to scan before every commit." >&2
+    exit 0
+fi
+
+if [ "$status" -ne 0 ]; then
+    echo "" >&2
+    echo "❌ Commit blocked: possible secret in staged changes (see above)." >&2
+    echo "   Move the value to .env (gitignored) and reference it as \${NAME}." >&2
+fi
+exit "$status"

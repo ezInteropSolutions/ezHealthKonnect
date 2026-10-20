@@ -16,9 +16,12 @@
 //   requireProxiedAdmin()     — verifies secret + requires admin/super_admin role.
 //   requireProxiedSuperAdmin() — verifies secret + requires super_admin role only.
 //
-// When INTERNAL_PROXY_SECRET is not configured the middleware passes all
-// requests (permissive mode). A startup warning is emitted in main() so
-// operators cannot miss a misconfigured deployment.
+// When no proxy secret is configured (neither INTERNAL_PROXY_SECRET nor its
+// JWT_SECRET fallback) every proxied request is REJECTED — fail closed. Before
+// 2026-10-20 this mode let every request through, which on a standalone
+// install (Go runs as its own service) would have exposed the whole API to
+// anything that could reach the Go port. Node refuses to start without
+// JWT_SECRET, so a working deployment always has a secret.
 //
 // The Go API port (default 8080) is configurable via API_PORT. All traffic
 // to this port is expected to arrive through the Node.js proxy; the port
@@ -26,6 +29,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"log"
 	"net/http"
 	"os"
@@ -71,9 +75,8 @@ func InitInternalProxySecret() {
 // configured. Call once from main() after all services are initialised.
 func WarnIfProxySecretMissing() {
 	if internalProxySecret == "" {
-		log.Printf("⚠️  SECURITY WARNING: INTERNAL_PROXY_SECRET is not set.")
-		log.Printf("⚠️  All /api routes are accessible without authentication.")
-		log.Printf("⚠️  Set INTERNAL_PROXY_SECRET in your .env file before production deployment.")
+		log.Printf("❌ SECURITY: no proxy secret is configured (INTERNAL_PROXY_SECRET / JWT_SECRET).")
+		log.Printf("❌ All proxied /api requests will be REJECTED until one is set in .env.")
 	} else if len(internalProxySecret) < 32 {
 		log.Printf("⚠️  SECURITY WARNING: INTERNAL_PROXY_SECRET is shorter than 32 characters.")
 		log.Printf("⚠️  Use a randomly generated secret of at least 32 characters.")
@@ -81,13 +84,14 @@ func WarnIfProxySecretMissing() {
 }
 
 // verifyProxySecret checks that the request arrived through the authenticated
-// Node.js proxy. Returns true (permissive) when no secret is configured so
-// local development works out of the box.
+// Node.js proxy. Fails closed: with no secret configured nothing is accepted.
+// Exact, constant-time comparison (the header is a shared secret).
 func verifyProxySecret(c *gin.Context) bool {
 	if internalProxySecret == "" {
-		return true
+		return false
 	}
-	return strings.EqualFold(c.GetHeader("X-Internal-Proxy-Secret"), internalProxySecret)
+	got := c.GetHeader("X-Internal-Proxy-Secret")
+	return subtle.ConstantTimeCompare([]byte(got), []byte(internalProxySecret)) == 1
 }
 
 // clientOriginHeader is set by app.js's forwardToGo on every request it proxies
