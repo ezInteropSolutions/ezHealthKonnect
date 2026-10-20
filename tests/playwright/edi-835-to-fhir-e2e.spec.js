@@ -76,7 +76,7 @@ test('EDI X12 835 to FHIR template: Use Template renders 9 steps, then Test Pipe
     await page.click('a[href="#templates"]');
     await page.waitForSelector('.tg-card', { timeout: 15000 });
 
-    const card = page.locator('.tg-card', { hasText: 'EDI X12 835 to FHIR' });
+    const card = page.locator('.tg-card', { hasText: 'EDI X12 835 to FHIR (SFTP)' });
     await expect(card, 'Templates gallery should list the EDI X12 835 to FHIR template').toBeVisible({ timeout: 5000 });
     await card.locator('.tg-use-btn').click();
 
@@ -158,7 +158,7 @@ test('EDI X12 835 to FHIR template: Test Pipeline against the real eMedNY multi-
     await page.click('a[href="#templates"]');
     await page.waitForSelector('.tg-card', { timeout: 15000 });
 
-    const card = page.locator('.tg-card', { hasText: 'EDI X12 835 to FHIR' });
+    const card = page.locator('.tg-card', { hasText: 'EDI X12 835 to FHIR (SFTP)' });
     await expect(card, 'Templates gallery should list the EDI X12 835 to FHIR template').toBeVisible({ timeout: 5000 });
     await card.locator('.tg-use-btn').click();
 

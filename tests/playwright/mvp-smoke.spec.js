@@ -290,10 +290,11 @@ test.describe('MVP-S5 HL7→File', () => {
 test.describe('MVP-S6 UI Smoke', () => {
     test('MVP-S6-001 MVP_SMOKE interfaces appear on the Interfaces page', async ({ page }) => {
         await page.goto('/interfaces.html');
-        await page.waitForLoadState('load');
-        await page.waitForTimeout(2500);
-        const text = await page.locator('body').innerText();
-        expect(text).toContain('MVP_SMOKE');
+        await page.waitForSelector('.interface-card, [data-interface-id]', { timeout: 15000 });
+        // The list is paginated (25/page); on a populated install the seeded
+        // interfaces need not land on page 1, so find them via the page's own search.
+        await page.fill('#interfaceSearchInput', 'MVP_SMOKE');
+        await expect(page.locator('body')).toContainText('MVP_SMOKE', { timeout: 10000 });
     });
 
     test('MVP-S6-002 Interface cards have status badges', async ({ page }) => {
