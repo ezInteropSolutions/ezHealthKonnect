@@ -25,3 +25,12 @@ func TestDumpArgs_OnlyPgDumpOptions(t *testing.T) {
 		t.Fatal("backup must use the custom format (pg_restore --list verifies it)")
 	}
 }
+
+// The first E2E rollback failed with `schema "public" does not exist`.
+func TestRestorePreamble_RecreatesPublicSchema(t *testing.T) {
+	drop := strings.Index(restorePreamble, "DROP OWNED BY CURRENT_USER;")
+	create := strings.Index(restorePreamble, "CREATE SCHEMA IF NOT EXISTS public;")
+	if drop < 0 || create < drop {
+		t.Fatalf("preamble must drop owned objects, then recreate public: %q", restorePreamble)
+	}
+}

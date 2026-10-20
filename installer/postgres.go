@@ -143,6 +143,13 @@ func (t PgTools) VerifyDump(file string) error {
 	return nil
 }
 
+// restorePreamble empties the database of everything the application user
+// owns before the dump is replayed (in the same transaction). On PostgreSQL
+// 15+ the database owner — the application user — also owns the "public"
+// schema, so DROP OWNED removes it, and pg_dump never emits CREATE SCHEMA
+// public; recreate it or every restored object fails.
+const restorePreamble = "DROP OWNED BY CURRENT_USER;\nCREATE SCHEMA IF NOT EXISTS public;\n"
+
 // Restore replaces the database's contents with a backup, all-or-nothing:
 // every object owned by the application's role is dropped and the backup is
 // replayed in ONE transaction — if anything fails, the database is left
@@ -153,7 +160,7 @@ func (t PgTools) Restore(c PgConn, file string) error {
 		return err
 	}
 	defer os.Remove(script.Name())
-	if _, err := script.WriteString("DROP OWNED BY CURRENT_USER;\n"); err != nil {
+	if _, err := script.WriteString(restorePreamble); err != nil {
 		script.Close()
 		return err
 	}
