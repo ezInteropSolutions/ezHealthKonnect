@@ -62,6 +62,34 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
              (this.config.connectorType || '').includes('mllp'));
     }
 
+    // True when the inbound connector answers each message with an HL7 ACK:
+    // the TCP/MLLP listener, or the RS232 serial connector in its HL7 (MLLP)
+    // protocol mode. Host-query stays TCP-only (isMLLPInbound).
+    get sendsHL7Ack() {
+        if (this.isMLLPInbound) return true;
+        return this.direction === 'inbound' &&
+            this.config.connectorType === 'serial_inbound' &&
+            this._currentSerialProtocol() === 'hl7_mllp';
+    }
+
+    _currentSerialProtocol() {
+        const field = this.container && this.container.querySelector('.connector-config-field[data-field="protocol"]');
+        if (field) return field.value;
+        return (this.config.config && this.config.config.protocol) || '';
+    }
+
+    _refreshAckTabVisibility() {
+        const ackTabBtn = this.container && this.container.querySelector('#ackTabBtn');
+        if (!ackTabBtn) return;
+        const show = this.sendsHL7Ack;
+        ackTabBtn.style.display = show ? '' : 'none';
+        // Leaving a hidden tab selected would show an empty panel.
+        if (!show && ackTabBtn.classList.contains('active')) {
+            const first = this.container.querySelector('.connector-tab[data-tab]');
+            if (first && first !== ackTabBtn) first.click();
+        }
+    }
+
     render() {
         this.clear();
         this.container.classList.add('connector-config-builder');
@@ -346,7 +374,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
     _buildACKPanel() {
         const ack = (this.config.config && this.config.config.ack) || {};
         const mode = ack.mode || 'immediate';
-        const onError = ack.on_error || 'suppress';
+        const onError = ack.on_error || 'nack';
         const sendingApp = ack.sending_app || '';
         const sendingFacility = ack.sending_facility || '';
         const textSuccess = ack.text_success || '';
@@ -376,10 +404,10 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                     <div class="form-group">
                         <label>On Error</label>
                         <select class="form-control form-control-sm ack-field" data-ack-field="on_error">
-                            <option value="suppress" ${onError === 'suppress' ? 'selected' : ''}>Suppress — Sender always gets AA (handle errors internally)</option>
-                            <option value="nack" ${onError === 'nack' ? 'selected' : ''}>NACK — Send AE so sender can retry</option>
+                            <option value="nack" ${onError === 'nack' ? 'selected' : ''}>NACK (recommended) — Send AE so the sender retries</option>
+                            <option value="suppress" ${onError === 'suppress' ? 'selected' : ''}>Suppress — Send AA anyway; the message is DROPPED and not retried</option>
                         </select>
-                        <small class="form-text text-muted">Applies when the message queue is full or a critical error occurs</small>
+                        <small class="form-text text-muted">Applies when a valid message cannot be queued (queue full). A frame that is not HL7 at all is always rejected with AR.</small>
                     </div>
                 </div>
             </div>
@@ -1470,10 +1498,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         this.config.connectorType = typeName;
 
         // Update ACK / Host Query tab visibility immediately — isMLLPInbound is pure (no API dependency)
-        const ackTabBtn = this.container.querySelector('#ackTabBtn');
-        if (ackTabBtn) {
-            ackTabBtn.style.display = this.isMLLPInbound ? '' : 'none';
-        }
+        this._refreshAckTabVisibility();
         const hostQueryTabBtn = this.container.querySelector('#hostQueryTabBtn');
         if (hostQueryTabBtn) {
             hostQueryTabBtn.style.display = this.isMLLPInbound ? '' : 'none';
@@ -1653,6 +1678,9 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
 
         // Add embedded builders for special types (conditionally)
         this.addEmbeddedBuilders(container, existingConfig);
+
+        // The ACK tab can depend on a rendered field (serial "protocol").
+        this._refreshAckTabVisibility();
     }
 
     // ========================================
@@ -3536,6 +3564,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
     }
 
     onChange() {
+        this._refreshAckTabVisibility();
         const event = new CustomEvent('connectorConfigChanged', {
             detail: { config: this.getConfig() }
         });

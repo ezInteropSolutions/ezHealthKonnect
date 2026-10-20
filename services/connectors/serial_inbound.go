@@ -3,8 +3,9 @@
 // (like one SSH session, mirroring sftp_inbound.go's DIAL pattern — NOT
 // tcp_mllp_inbound.go's LISTEN pattern, since a serial port is a single
 // resource, never something to bind/accept connections on) and continuously
-// plays ASTM's RECEIVER role against it via astm_framing.ReceiveMessage: the
-// instrument calls (sends ENQ) whenever it has data, this connector answers.
+// receives messages in the configured protocol (serial_protocols.go): ASTM
+// E1394-97 (default — the instrument sends ENQ whenever it has data) or HL7 v2
+// with MLLP framing, answered with an HL7 ACK on the same line.
 //
 // Requires the confirmed "co-located process" deployment topology — this
 // connector (or the whole ezHealthKonnect process) must run on a machine
@@ -17,8 +18,12 @@
 //	data_bits          int     5-8 (default: 8)
 //	parity             string  "none" | "odd" | "even" | "mark" | "space" (default: "none")
 //	stop_bits          string  "1" | "1.5" | "2" (default: "1")
-//	checksum_severity  string  "error" | "warning" (default: "error") — see
+//	protocol           string  "astm" (default) | "hl7_mllp"
+//	checksum_severity  string  ASTM only: "error" | "warning" (default: "error") — see
 //	                           ASTMFramingConfig's own doc comment
+//	ack                object  HL7 only: same ACK settings as tcp_mllp_inbound
+//	                           (on_error, sending_app, text_*, script)
+//	max_message_size_mb int    HL7 only: frame size cap (default 10)
 package connectors
 
 import (
@@ -35,14 +40,14 @@ import (
 	"go.bug.st/serial"
 )
 
-// SerialInboundConnector continuously reads ASTM messages off one open COM
-// port.
+// SerialInboundConnector continuously reads messages (ASTM or HL7 v2) off one
+// open COM port.
 type SerialInboundConnector struct {
 	*BaseInboundConnector
 
 	portName string
 	mode     *serial.Mode
-	framing  ASTMFramingConfig
+	protocol serialProtocol
 
 	mu       sync.Mutex
 	port     serial.Port
@@ -54,7 +59,7 @@ type SerialInboundConnector struct {
 func NewSerialInboundConnector() InboundConnector {
 	metadata := ConnectorMetadata{
 		TypeName:           "serial_inbound",
-		DisplayName:        "RS232 Serial (ASTM) Inbound",
+		DisplayName:        "RS232 Serial (ASTM / HL7) Inbound",
 		Version:            "1.0.0",
 		Category:           "inbound",
 		Mode:               "pull",
@@ -102,11 +107,15 @@ func (c *SerialInboundConnector) Initialize(config []byte) error {
 		StopBits: stopBits,
 	}
 
-	c.framing = ASTMFramingConfig{
-		ChecksumSeverity: cfg.GetString("checksum_severity"),
+	protocol, err := newSerialProtocol(cfg.GetString("protocol"), &cfg,
+		serialPortInfo{PortName: c.portName, BaudRate: baudRate})
+	if err != nil {
+		return NewConnectorError(c.GetMetadata().TypeName, "initialize", err, false)
 	}
+	c.protocol = protocol
 
 	c.SetMetadata("port_name", c.portName)
+	c.SetMetadata("protocol", protocol.Name())
 	c.SetMetadata("baud_rate", fmt.Sprintf("%d", baudRate))
 	return nil
 }
@@ -167,8 +176,7 @@ func (c *SerialInboundConnector) TestConnection(ctx context.Context) error {
 }
 
 // Start opens the configured COM port once and launches a goroutine that
-// continuously waits for the instrument to initiate (ENQ), answering each
-// message via astm_framing.ReceiveMessage.
+// continuously receives messages in the configured protocol.
 func (c *SerialInboundConnector) Start(ctx context.Context, messageChan chan<- *models.InboundMessage) error {
 	port, err := serial.Open(c.portName, c.mode)
 	if err != nil {
@@ -183,7 +191,7 @@ func (c *SerialInboundConnector) Start(ctx context.Context, messageChan chan<- *
 
 	c.SetState(StateRunning)
 	c.SetConnected(true)
-	log.Printf("📟 Serial Inbound: Listening on %s (baud=%d)", c.portName, c.mode.BaudRate)
+	log.Printf("📟 Serial Inbound: Listening on %s (baud=%d, protocol=%s)", c.portName, c.mode.BaudRate, c.protocol.Name())
 
 	go c.readLoop(port, messageChan)
 	return nil
@@ -196,7 +204,7 @@ func (c *SerialInboundConnector) readLoop(port serial.Port, messageChan chan<- *
 	// the NEXT message (a real, found-and-fixed deadlock, not theoretical).
 	bufReader := bufio.NewReader(port)
 	for {
-		content, err := ReceiveMessage(bufReader, port, c.framing)
+		delivered, err := c.protocol.ReceiveOne(bufReader, port, messageChan)
 		if err != nil {
 			c.mu.Lock()
 			stopping := c.stopping
@@ -209,20 +217,9 @@ func (c *SerialInboundConnector) readLoop(port serial.Port, messageChan chan<- *
 			time.Sleep(time.Second) // avoid a hot error loop if the port itself is in a bad state
 			continue
 		}
-
-		msg := &models.InboundMessage{
-			MessageID:      generateASTMMessageID("serial"),
-			Content:        content,
-			SourceType:     "serial",
-			SourceEndpoint: c.portName,
-			ReceivedAt:     time.Now(),
-			SourceMetadata: map[string]string{
-				"serial_port": c.portName,
-				"baud_rate":   fmt.Sprintf("%d", c.mode.BaudRate),
-			},
+		if delivered {
+			c.IncrementMessagesReceived()
 		}
-		messageChan <- msg
-		c.IncrementMessagesReceived()
 	}
 }
 
