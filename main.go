@@ -105,6 +105,11 @@ func enforceNoPubliclyKnownSecrets() {
 }
 
 func main() {
+	// `go-api migrate ...` applies database migrations and exits; see migrate_command.go.
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		os.Exit(runMigrateCommand(os.Args[2:], os.Stdout, os.Stderr))
+	}
+
 	// Register the shutdown-signal channel FIRST, before any other
 	// initialization work — deliberately ahead of even .env loading below.
 	//

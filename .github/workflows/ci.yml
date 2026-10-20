@@ -114,22 +114,16 @@ jobs:
             chmod -R a+rX schemas/
           done
 
-      - name: Run Flyway migrations
-        # Mirrors docker-compose.yml's flyway service (same URL shape, user/
-        # password, baselineOnMigrate/placeholderReplacement flags, repair+
-        # migrate command) — pointed at localhost since GitHub Actions service
-        # containers publish ports directly to the runner host, unlike the
-        # docker-compose network where services address each other by name.
-        run: |
-          docker run --rm --network host \
-            -v ${{ github.workspace }}/database/migrations:/flyway/sql \
-            flyway/flyway:latest \
-            -url=jdbc:postgresql://localhost:5432/ezhealthkonnect \
-            -user=ezhealth_user \
-            -password=secure_password_change_me \
-            -baselineOnMigrate=true \
-            -placeholderReplacement=false \
-            repair migrate
+      - name: Run database migrations
+        # The app's own migration engine (go-api migrate, services/migrator) —
+        # the same one the installer and docker-compose.yml use.
+        env:
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_NAME: ezhealthkonnect
+          DB_USER: ezhealth_user
+          DB_PASSWORD: secure_password_change_me
+        run: go run . migrate
 
       - name: Run Go test suite
         env:
@@ -340,7 +334,7 @@ jobs:
           done
 
       - name: Start app stack
-        # Deliberately starts only postgres/minio/ollama/flyway/app — skips
+        # Deliberately starts only postgres/minio/ollama/migrate/app — skips
         # ollama-init, which pulls llama3.2:3b + nomic-embed-text (multi-GB) on
         # every cold start with no pre-warmed volume. Confirmed via
         # docker-compose.yml: app's own `depends_on` only requires
@@ -359,7 +353,7 @@ jobs:
           DB_PASSWORD=$(grep '^DB_PASSWORD=' .env | cut -d= -f2-)
           echo "::add-mask::$DB_PASSWORD"
           echo "DATABASE_URL=postgres://ezhealth_user:${DB_PASSWORD}@localhost:5432/ezhealthkonnect?sslmode=disable" >> "$GITHUB_ENV"
-          docker compose -f docker-compose.yml up -d postgres minio ollama flyway app
+          docker compose -f docker-compose.yml up -d postgres minio ollama migrate app
 
       - name: Wait for app readiness
         run: |

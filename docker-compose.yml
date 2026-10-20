@@ -118,25 +118,31 @@ services:
       - ezhealthkonnect
     restart: "no"
 
-  # Flyway handles SCHEMA migrations only (version controlled)
-  flyway:
-    image: flyway/flyway:latest
-    container_name: ezhealthkonnect-flyway
+  # Applies database/migrations with the app's built-in migration engine
+  # (`go-api migrate`, services/migrator) — the same engine the installer uses,
+  # so every local and CI start exercises it. It keeps Flyway's history table
+  # and checksums, so existing dev databases continue unchanged.
+  migrate:
+    build: .
+    image: ezhealthkonnect-app
+    container_name: ezhealthkonnect-migrate
+    entrypoint: ["./go-api", "migrate"]
     environment:
-      FLYWAY_URL: jdbc:postgresql://postgres:5432/ezhealthkonnect
-      FLYWAY_USER: ezhealth_user
-      FLYWAY_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env - see .env.example}
-      FLYWAY_BASELINE_ON_MIGRATE: true
-      FLYWAY_PLACEHOLDER_REPLACEMENT: "false"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ezhealthkonnect
+      DB_USER: ezhealth_user
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env - see .env.example}
+      DB_SSL: "false"
     volumes:
-      # Only schema migrations (no data inserts)
-      - ./database/migrations:/flyway/sql
+      # Working-tree migrations, so a new migration needs no image rebuild.
+      - ./database/migrations:/app/database/migrations:ro
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - ezhealthkonnect
-    command: ["repair", "migrate"]
+    restart: "no"
 
   # Your Application Service - FIXED VERSION
   app:
@@ -262,7 +268,7 @@ services:
 
     # Wait for PostgreSQL, MinIO, and migrations to complete
     depends_on:
-      flyway:
+      migrate:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
