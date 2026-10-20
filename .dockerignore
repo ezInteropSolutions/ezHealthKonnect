@@ -33,7 +33,7 @@ dist/
 *.md
 connectivity/
 *.txt
-# architecture/*.md, docs/*.md, installer/ONE_CLICK_INSTALLER_GUIDE.md, and
+# architecture/*.md, docs/*.md, installer/INSTALLER_ARCHITECTURE.md, and
 # SYSTEM_DOCUMENTATION.md ARE read at runtime by
 # services/ai/knowledge_ingestion.go's IngestAppDocs (AI knowledge-base
 # ingestion) — re-included here despite the blanket *.md/installer/ rules
@@ -45,7 +45,7 @@ connectivity/
 !architecture/**/*.md
 !architecture/**/*.json
 !docs/**/*.md
-!installer/ONE_CLICK_INSTALLER_GUIDE.md
+!installer/INSTALLER_ARCHITECTURE.md
 !SYSTEM_DOCUMENTATION.md
 *.log
 *.docx
