@@ -286,6 +286,11 @@ services:
     # worst case.
     stop_grace_period: 60s
     restart: unless-stopped
+    # Lets the app reach services on the host as host.docker.internal on Linux
+    # too (Docker Desktop provides it already) - used by E2E specs whose test
+    # receiver runs on the host, e.g. device-ventilator-hl7-e2e.spec.js.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - ezhealthkonnect
 

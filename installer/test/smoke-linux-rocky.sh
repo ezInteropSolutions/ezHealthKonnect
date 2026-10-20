@@ -41,6 +41,16 @@ ok "PGDG RPM URL: $PGDG_RPM"
 # ── 3. PGDG repo install ───────────────────────────────────────────────────────
 hdr "PGDG RPM Repo"
 dnf install -y -q "$PGDG_RPM" && ok "PGDG repo RPM installed" || fail "PGDG repo RPM install failed"
+# Exercise the installer's own fix (installer/install.sh configure_pgdg_repos):
+# keep only pgdg15 + pgdg-common and use PGDG's major-only directories.
+INSTALL_SH="$(dirname "$0")/../install.sh"
+if [ -f "$INSTALL_SH" ]; then
+  eval "$(sed -n '/^configure_pgdg_repos()/,/^}/p' "$INSTALL_SH")"
+  configure_pgdg_repos 15 && ok "PGDG repos configured by installer function" || fail "configure_pgdg_repos failed"
+else
+  fail "installer/install.sh not found next to the smoke test"
+fi
+dnf repolist -q 2>/dev/null | grep -q '^pgdg15' && ok "PGDG limited to pgdg15" || fail "pgdg15 repo not enabled"
 dnf -qy module disable postgresql 2>/dev/null && ok "postgresql module disabled" || skip "module disable (not applicable)"
 
 # ── 4. PostgreSQL install ──────────────────────────────────────────────────────

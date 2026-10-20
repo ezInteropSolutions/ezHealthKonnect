@@ -10,14 +10,24 @@
  */
 const { test, expect } = require('@playwright/test');
 
+// Opens the ATNA section and waits until the page has loaded the saved
+// settings into the form. Opening the section fires an async GET whose
+// handler overwrites every field; interacting before it lands (a fixed wait
+// was not enough on slower CI runners) loses the test's own edits.
+async function openATNASection(page) {
+    await page.waitForLoadState('domcontentloaded');
+    const loaded = page.waitForResponse(r => r.url().includes('/api/system/settings/atna-syslog') && r.request().method() === 'GET');
+    await page.locator('.settings-nav-item[data-section="atna"]').click();
+    await (await loaded).finished();
+    await page.evaluate(() => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0))));
+    await expect(page.locator('#section-atna')).toBeVisible();
+}
+
 test.describe('Settings — ATNA Audit Export', () => {
 
     test.beforeEach(async ({ page }) => {
         await page.goto('/settings.html');
-        await page.waitForLoadState('domcontentloaded');
-        await page.waitForTimeout(1000);
-        await page.locator('.settings-nav-item[data-section="atna"]').click();
-        await expect(page.locator('#section-atna')).toBeVisible();
+        await openATNASection(page);
     });
 
     test('TC-ATNA-001 section renders with all expected fields', async ({ page }) => {
@@ -77,10 +87,7 @@ test.describe('Settings — ATNA Audit Export', () => {
         // Reload the page fresh and re-open the section to confirm real persistence,
         // not just in-memory form state.
         await page.reload();
-        await page.waitForLoadState('domcontentloaded');
-        await page.waitForTimeout(1000);
-        await page.locator('.settings-nav-item[data-section="atna"]').click();
-        await expect(page.locator('#section-atna')).toBeVisible();
+        await openATNASection(page);
 
         await expect(page.locator('#atnaEnabled')).not.toBeChecked();
         await expect(page.locator('#atnaHost')).toHaveValue('pw-test-arr.example.internal');

@@ -196,6 +196,27 @@ install_base_deps() {
   ok "Base packages ready"
 }
 
+# The PGDG repo RPM (2026-10: pgdg-redhat-repo 42.0-70) has two problems:
+#  - it enables a repo for EVERY PostgreSQL major version, so one unrelated
+#    version's broken mirror makes every dnf/yum command fail;
+#  - its baseurls use the OS MINOR version (rhel-9.3-x86_64), but PGDG only
+#    publishes current minor releases plus a major-only directory
+#    (rhel-9-x86_64), so a server not on a current minor release gets 404s.
+# Keep only the version we install (plus pgdg-common) and point them at the
+# major-only directory, which serves every minor release.
+configure_pgdg_repos() {
+  local keep="pgdg${1}" f
+  for f in /etc/yum.repos.d/pgdg-redhat*.repo; do
+    [[ -f "$f" ]] || continue
+    awk -v keep="$keep" '
+      /^\[/ { sec = substr($0, 2, length($0) - 2) }
+      sec ~ /^pgdg[0-9]+$/ && sec != keep && /^enabled[ \t]*=/ { $0 = "enabled=0" }
+      /^baseurl[ \t]*=/ { gsub(/\$releasever_major\.\$releasever_minor/, "$releasever_major") }
+      { print }
+    ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+  done
+}
+
 install_postgres() {
   # Already installed?
   if command -v psql &>/dev/null; then
@@ -223,6 +244,7 @@ https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
     $PKG_MGR install -y -q \
       "https://download.postgresql.org/pub/repos/yum/reporpms/EL-${major_ver}-x86_64/pgdg-redhat-repo-latest.noarch.rpm" \
       2>/dev/null || true
+    configure_pgdg_repos 15
     $PKG_MGR module disable -y postgresql 2>/dev/null || true
     $PKG_MGR install -y -q postgresql15-server postgresql15
     /usr/pgsql-15/bin/postgresql-15-setup initdb 2>/dev/null || true
