@@ -190,6 +190,12 @@ before running it. It drops the database only when the installer created it
 (`dbMode: local`) and `--keep-database` is not given. An existing database
 (`dbMode: external`) is never dropped. PostgreSQL itself is not removed.
 
+On Windows, where PostgreSQL was already installed before ezHealthKonnect,
+the installer used your `postgres` password only during installation and
+never stored it. Uninstall therefore leaves the database in place and says
+so. To remove it, connect as `postgres` and run
+`DROP DATABASE ezhealthkonnect; DROP ROLE ezhealth_user;`.
+
 ---
 
 ## Day-to-day operations

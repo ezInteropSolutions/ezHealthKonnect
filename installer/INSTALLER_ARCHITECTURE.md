@@ -105,6 +105,10 @@ the installed version, then renames that backup `-restored`.
 - On Windows, `start-app.ps1` stops `go-api` forcefully when the service
   stops, so there is no graceful drain of in-flight messages.
 - Linux builds are x86_64 only.
+- On Windows with a PostgreSQL that existed before installation, the
+  customer's superuser password is used during install and deliberately not
+  stored. Uninstall therefore leaves the database in place, and the E2E
+  asserts this.
 
 ## Testing
 

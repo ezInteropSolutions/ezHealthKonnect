@@ -159,6 +159,11 @@ Pass 'rolled back to the previous version and database'
 Step 'Uninstall'
 $r = Run-Installer @('uninstall', '--dir', $Dir, '--yes')
 if ($r.Code -ne 0) { Fail 'uninstall failed' }
+# A database the installer created on its own PostgreSQL is dropped. On a
+# PostgreSQL that already existed, the installer never stores the customer's
+# superuser password, so it deliberately leaves the database in place.
+if ($PostgresMode -eq 'fresh' -and $r.Out -notmatch 'Database ezhealthkonnect removed') { Fail 'database not removed' }
+if ($PostgresMode -eq 'existing' -and $r.Out -notmatch 'left in place') { Fail 'expected the database to be left in place' }
 Start-Sleep -Seconds 8
 if (Test-Path $Dir) { Fail 'install dir still present' }
 if (Get-Service ezhealthkonnect -ErrorAction SilentlyContinue) { Fail 'service still registered' }
@@ -168,3 +173,4 @@ Pass 'uninstalled'
 
 Write-Host ''
 Write-Host 'ALL INSTALLER E2E CHECKS PASSED'
+exit 0   # native commands above (reg query) leave a non-zero $LASTEXITCODE
