@@ -292,6 +292,29 @@ test.describe('Code templates render names as text', () => {
     });
 });
 
+// A Mirth channel export is a file from another system; its names, scripts and
+// connector settings are shown in the migration preview.
+test.describe('Mirth migration preview renders channel content as text', () => {
+    test('hostile channel file', async ({ page }) => {
+        const x = (what) => `&lt;img src=x onerror="window.__ezhkXss='${MARK}-${what}'"&gt;`;
+        const channel = `<?xml version="1.0" encoding="UTF-8"?>
+<channel><id>pw-${MARK}</id><name>PW ${MARK} ${x('name')}</name><description>${x('desc')}</description><version>3.12.0</version>
+<sourceConnector><name>sourceConnector</name><transportName>TCP Listener</transportName>
+<properties class="com.mirth.connect.connectors.tcp.TcpReceiverProperties"><listenerConnectorProperties><host>${x('host')}</host><port>6661</port></listenerConnectorProperties></properties>
+<transformer><steps><step><sequenceNumber>0</sequenceNumber><name>Step ${x('step')}</name><type>JavaScript</type>
+<data class="map"><entry><string>Script</string><string>var s = '&lt;/pre&gt;${x('script')}';</string></entry></data></step></steps></transformer>
+<filter><rules/></filter></sourceConnector><destinationConnectors/></channel>`;
+        await page.goto('/migration.html');
+        await page.locator('#file-input').setInputFiles({ name: 'channel.xml', mimeType: 'text/xml', buffer: Buffer.from(channel) });
+        await expect(page.locator('#channel-info h2')).toContainText(MARK, { timeout: 15_000 });
+        expect(await page.locator('#channel-info h2').innerText()).toContain('<img src=x onerror=');
+        await expect(page.locator('pre[id^="script-pre-"]').first()).toContainText(`${MARK}-script`, { useInnerText: false });
+        await page.waitForTimeout(500);
+        expect(await page.evaluate(() => window.__ezhkXss || null)).toBeNull();
+        expect(await page.locator(`img[onerror*="${MARK}"]`).count()).toBe(0);
+    });
+});
+
 // AppDialogs is used everywhere with messages that interpolate data (names,
 // errors returned by the server). A plain string is shown as text; formatting
 // needs HtmlSafe.html (data inside stays escaped) or HtmlSafe.raw (constants).

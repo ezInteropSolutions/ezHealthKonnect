@@ -101,7 +101,7 @@ async function fetchPreview(xmlText) {
 function setUploadZoneLoading(loading) {
     const zone = document.getElementById('upload-zone');
     if (loading) {
-        zone.innerHTML = `<div><i class="fas fa-spinner fa-spin" style="font-size:32px;color:#6b7280"></i></div>
+        zone.innerHTML = HtmlSafe.html`<div><i class="fas fa-spinner fa-spin" style="font-size:32px;color:#6b7280"></i></div>
             <h3 style="margin-top:12px">Analysing channel…</h3>`;
     }
 }
@@ -112,30 +112,30 @@ function renderPreview(p) {
     document.getElementById('btn-reset').style.display = 'inline-flex';
 
     // Channel info
-    document.getElementById('channel-info').innerHTML = `
-        <h2>${esc(p.channelName)}</h2>
-        ${p.description ? `<p style="font-size:13px;color:#6b7280;margin:4px 0 0">${esc(p.description)}</p>` : ''}
+    document.getElementById('channel-info').innerHTML = HtmlSafe.html`
+        <h2>${p.channelName}</h2>
+        ${p.description ? HtmlSafe.html`<p style="font-size:13px;color:#6b7280;margin:4px 0 0">${p.description}</p>` : ''}
         <div class="channel-meta">
-            <div class="channel-meta-item"><i class="fas fa-tag"></i> Channel ID: <strong>${esc(p.channelId)}</strong></div>
-            <div class="channel-meta-item"><i class="fas fa-code-branch"></i> Mirth Version: <strong>${esc(p.mirthVersion || 'unknown')}</strong></div>
+            <div class="channel-meta-item"><i class="fas fa-tag"></i> Channel ID: <strong>${p.channelId}</strong></div>
+            <div class="channel-meta-item"><i class="fas fa-code-branch"></i> Mirth Version: <strong>${p.mirthVersion || 'unknown'}</strong></div>
             <div class="channel-meta-item"><i class="fas fa-toggle-${p.enabled ? 'on' : 'off'}"></i> Status: <strong>${p.enabled ? 'Enabled' : 'Disabled'}</strong></div>
         </div>`;
 
     // Summary badges
     const s = p.summary;
-    document.getElementById('summary-row').innerHTML = `
+    document.getElementById('summary-row').innerHTML = HtmlSafe.html`
         <div class="summary-badge auto"><i class="fas fa-check-circle"></i> ${s.autoMapped} auto-mapped</div>
         <div class="summary-badge review"><i class="fas fa-exclamation-circle"></i> ${s.needsReview} need review</div>
-        ${s.unsupported ? `<div class="summary-badge unsupported"><i class="fas fa-times-circle"></i> ${s.unsupported} unsupported</div>` : ''}
+        ${s.unsupported ? HtmlSafe.html`<div class="summary-badge unsupported"><i class="fas fa-times-circle"></i> ${s.unsupported} unsupported</div>` : ''}
         <div class="summary-badge" style="background:#f3f4f6;color:#374151"><i class="fas fa-list"></i> ${s.totalSteps} steps</div>`;
 
     // Source connector
-    document.getElementById('source-body').innerHTML = renderConnectorRow(p.source);
+    document.getElementById('source-body').innerHTML = HtmlSafe.html`${renderConnectorRow(p.source)}`;
 
     // Destinations
     if (p.destinations && p.destinations.length > 0) {
         document.getElementById('destinations-body').innerHTML =
-            p.destinations.map(d => renderConnectorRow(d)).join('');
+            HtmlSafe.html`${p.destinations.map(d => renderConnectorRow(d))}`;
     } else {
         document.getElementById('destinations-body').innerHTML =
             '<p style="font-size:13px;color:#9ca3af;margin:0">No destination connectors found.</p>';
@@ -145,7 +145,7 @@ function renderPreview(p) {
     document.getElementById('steps-badge').textContent =
         `— ${p.steps.length} step${p.steps.length !== 1 ? 's' : ''}`;
     const tbody = document.getElementById('steps-tbody');
-    tbody.innerHTML = p.steps.map((st, i) => renderStepRow(st, i)).join('');
+    tbody.innerHTML = HtmlSafe.html`${p.steps.map((st, i) => renderStepRow(st, i))}`;
 
     // Import form
     const nameInput = document.getElementById('input-interface-name');
@@ -165,16 +165,16 @@ function renderConnectorRow(c) {
         ? Object.entries(c.config).map(([k, v]) => `${k}: ${v}`).join(' · ')
         : '';
 
-    return `
+    return HtmlSafe.html`
         <div class="connector-row">
-            <div class="connector-mirth"><i class="fas fa-plug" style="color:#9ca3af"></i> ${esc(c.mirthTransport)}</div>
+            <div class="connector-mirth"><i class="fas fa-plug" style="color:#9ca3af"></i> ${c.mirthTransport}</div>
             <div class="connector-arrow"><i class="fas fa-arrow-right"></i></div>
             <div>
-                <div class="connector-ezhk">${esc(c.ezHKConnectorType || '—')}</div>
-                ${configPreview ? `<div class="connector-config-preview">${esc(configPreview)}</div>` : ''}
+                <div class="connector-ezhk">${c.ezHKConnectorType || '—'}</div>
+                ${configPreview ? HtmlSafe.html`<div class="connector-config-preview">${configPreview}</div>` : ''}
             </div>
             <span class="pill ${pillClass}">${pillLabel}</span>
-            ${c.note ? `<span style="font-size:11px;color:#9ca3af;max-width:220px">${esc(c.note)}</span>` : ''}
+            ${c.note ? HtmlSafe.html`<span style="font-size:11px;color:#9ca3af;max-width:220px">${c.note}</span>` : ''}
         </div>`;
 }
 
@@ -184,27 +184,27 @@ function renderStepRow(st, idx) {
 
     // Badge HTML based on conversion state
     function convBadge(state) {
-        if (state === 'auto')   return '<span class="conv-badge conv-auto"><i class="fas fa-check"></i> Auto-converted</span>';
-        if (state === 'ai')     return '<span class="conv-badge conv-ai"><i class="fas fa-robot"></i> AI-rewritten</span>';
+        if (state === 'auto')   return HtmlSafe.raw('<span class="conv-badge conv-auto"><i class="fas fa-check"></i> Auto-converted</span>');
+        if (state === 'ai')     return HtmlSafe.raw('<span class="conv-badge conv-ai"><i class="fas fa-robot"></i> AI-rewritten</span>');
         return '';
     }
 
     // --- Mapper / field_mapping step ---
     if (conversion === 'auto' && st.fieldMappings && st.fieldMappings.length > 0) {
-        const rows = st.fieldMappings.map(m => `
+        const rows = st.fieldMappings.map(m => HtmlSafe.html`
             <tr>
-                <td style="font-family:monospace;font-size:11px;color:#6d28d9">${esc(m.source)}</td>
+                <td style="font-family:monospace;font-size:11px;color:#6d28d9">${m.source}</td>
                 <td style="font-size:11px;color:#9ca3af;padding:0 6px">→</td>
-                <td style="font-family:monospace;font-size:11px;color:#065f46">${esc(m.target)}</td>
-                ${m.defaultValue ? `<td style="font-size:10px;color:#9ca3af">${esc(m.defaultValue)}</td>` : '<td></td>'}
-            </tr>`).join('');
+                <td style="font-family:monospace;font-size:11px;color:#065f46">${m.target}</td>
+                ${m.defaultValue ? HtmlSafe.html`<td style="font-size:10px;color:#9ca3af">${m.defaultValue}</td>` : HtmlSafe.raw('<td></td>')}
+            </tr>`);
 
-        return `
+        return HtmlSafe.html`
             <tr id="step-row-${idx}">
                 <td><input type="checkbox" class="skip-checkbox" id="skip-${idx}" onchange="onSkipChange(${idx})"></td>
                 <td style="color:#9ca3af">${st.sequence}</td>
                 <td>
-                    <div style="font-weight:500;margin-bottom:6px">⚙️ ${esc(st.name)} ${convBadge(conversion)}</div>
+                    <div style="font-weight:500;margin-bottom:6px">⚙️ ${st.name} ${convBadge(conversion)}</div>
                     <table class="mapping-table">
                         <thead><tr>
                             <th>HL7 Field (source)</th><th></th>
@@ -214,9 +214,9 @@ function renderStepRow(st, idx) {
                         <tbody>${rows}</tbody>
                     </table>
                 </td>
-                <td><code style="font-size:11px">${esc(st.mirthType)}</code></td>
-                <td><code style="font-size:11px;color:#7c3aed">${esc(st.suggestedType)}</code></td>
-                <td style="font-size:11px;color:#6b7280;max-width:200px">${esc(st.note || '')}</td>
+                <td><code style="font-size:11px">${st.mirthType}</code></td>
+                <td><code style="font-size:11px;color:#7c3aed">${st.suggestedType}</code></td>
+                <td style="font-size:11px;color:#6b7280;max-width:200px">${st.note || ''}</td>
             </tr>`;
     }
 
@@ -226,44 +226,44 @@ function renderStepRow(st, idx) {
     const canRewrite = !aiDone && hasScript &&
         (st.mirthType === 'JavaScript' || st.mirthType === 'Message Builder' || st.mirthType === 'XSLT');
 
-    const scriptSection = hasScript ? `
+    const scriptSection = hasScript ? HtmlSafe.html`
         <div style="margin-top:6px">
             <span class="step-script-toggle" onclick="toggleScript(${idx})">
                 ${aiDone ? 'View rewritten script' : 'View script'}
             </span>
-            ${aiDone && st.originalScript ? `
+            ${aiDone && st.originalScript ? HtmlSafe.html`
                 <span class="step-script-toggle" style="margin-left:8px;color:#9ca3af"
                     onclick="toggleOriginalScript(${idx})">View original</span>` : ''}
-            <div class="step-script-block" id="script-block-${idx}"><pre id="script-pre-${idx}">${esc(st.script)}</pre></div>
-            ${aiDone && st.originalScript ? `
+            <div class="step-script-block" id="script-block-${idx}"><pre id="script-pre-${idx}">${st.script}</pre></div>
+            ${aiDone && st.originalScript ? HtmlSafe.html`
                 <div class="step-script-block" id="orig-block-${idx}">
                     <div style="font-size:10px;color:#9ca3af;margin-bottom:4px">ORIGINAL MIRTH SCRIPT:</div>
-                    <pre>${esc(st.originalScript)}</pre>
+                    <pre>${st.originalScript}</pre>
                 </div>` : ''}
         </div>` : '';
 
-    const rewriteBtn = canRewrite ? `
+    const rewriteBtn = canRewrite ? HtmlSafe.html`
         <button class="btn-rewrite" id="rewrite-btn-${idx}"
             onclick="rewriteWithAI(${idx})"
             title="Use AI to convert this Mirth script to ezHealthKonnect-compatible JavaScript">
             <i class="fas fa-robot"></i> Rewrite with AI
         </button>` : '';
 
-    return `
+    return HtmlSafe.html`
         <tr id="step-row-${idx}">
             <td><input type="checkbox" class="skip-checkbox" id="skip-${idx}" onchange="onSkipChange(${idx})"></td>
             <td style="color:#9ca3af">${st.sequence}</td>
             <td>
                 <div style="font-weight:500;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                    ${typeIcon} ${esc(st.name)}
+                    ${typeIcon} ${st.name}
                     ${convBadge(conversion)}
                     ${rewriteBtn}
                 </div>
                 ${scriptSection}
             </td>
-            <td><code style="font-size:11px">${esc(st.mirthType)}</code>${st.isFilterRule ? ' <span style="font-size:10px;color:#9ca3af">(filter)</span>' : ''}</td>
-            <td><code style="font-size:11px;color:#7c3aed">${esc(st.suggestedType)}</code></td>
-            <td style="font-size:11px;color:#6b7280;max-width:200px">${esc(st.note || '')}</td>
+            <td><code style="font-size:11px">${st.mirthType}</code>${st.isFilterRule ? HtmlSafe.raw(' <span style="font-size:10px;color:#9ca3af">(filter)</span>') : ''}</td>
+            <td><code style="font-size:11px;color:#7c3aed">${st.suggestedType}</code></td>
+            <td style="font-size:11px;color:#6b7280;max-width:200px">${st.note || ''}</td>
         </tr>`;
 }
 
@@ -321,7 +321,7 @@ async function rewriteWithAI(idx) {
         const row = document.getElementById('step-row-' + idx);
         if (row) {
             const tmp = document.createElement('tbody');
-            tmp.innerHTML = renderStepRow(st, idx);
+            tmp.innerHTML = HtmlSafe.html`${renderStepRow(st, idx)}`;
             row.replaceWith(tmp.firstElementChild);
         }
 
@@ -391,8 +391,8 @@ async function doImport() {
         showToast(`✅ Interface created! ${r.stepsCreated} steps imported.`, 'success');
 
         document.getElementById('import-status').innerHTML =
-            `Interface created: <strong>${esc(r.interfaceName)}</strong> —
-             <a href="pipeline-builder.html?interfaceId=${r.interfaceId}" style="color:var(--navy)">Open in Pipeline Builder →</a>`;
+            HtmlSafe.html`Interface created: <strong>${r.interfaceName}</strong> —
+             <a href="pipeline-builder.html?interfaceId=${encodeURIComponent(r.interfaceId)}" style="color:var(--navy)">Open in Pipeline Builder →</a>`;
 
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-download"></i> Import Channel';
@@ -422,7 +422,7 @@ async function loadHistory() {
         if (!data.success) throw new Error(data.error || 'Failed to load history');
 
         if (!data.data || data.data.length === 0) {
-            container.innerHTML = `
+            container.innerHTML = HtmlSafe.html`
                 <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:24px;text-align:center">
                     <i class="fas fa-history" style="font-size:32px;color:#d1d5db;margin-bottom:12px"></i>
                     <p style="font-size:14px;color:#6b7280;margin:0">No migrations yet. Import your first Mirth channel from the Mirth Connect tab.</p>
@@ -430,22 +430,22 @@ async function loadHistory() {
             return;
         }
 
-        const rows = data.data.map(e => `
+        const rows = data.data.map(e => HtmlSafe.html`
             <tr>
                 <td>${new Date(e.createdAt).toLocaleString()}</td>
-                <td><strong>${esc(e.channelName)}</strong><br><span style="font-size:11px;color:#9ca3af">${esc(e.channelId)}</span></td>
-                <td>${esc(e.mirthVersion || '—')}</td>
+                <td><strong>${e.channelName}</strong><br><span style="font-size:11px;color:#9ca3af">${e.channelId}</span></td>
+                <td>${e.mirthVersion || '—'}</td>
                 <td>${e.stepsCreated}</td>
                 <td>${e.stepsSkipped}</td>
                 <td>
                     ${e.interfaceId
-                        ? `<a href="pipeline-builder.html?interfaceId=${esc(e.interfaceId)}" style="color:var(--navy);font-size:12px">${esc(e.interfaceName || e.interfaceId)}</a>`
-                        : '<span style="color:#9ca3af">deleted</span>'}
+                        ? HtmlSafe.html`<a href="pipeline-builder.html?interfaceId=${encodeURIComponent(e.interfaceId)}" style="color:var(--navy);font-size:12px">${e.interfaceName || e.interfaceId}</a>`
+                        : HtmlSafe.raw('<span style="color:#9ca3af">deleted</span>')}
                 </td>
-                <td style="font-size:12px;color:#6b7280">${esc(e.migratedBy)}</td>
-            </tr>`).join('');
+                <td style="font-size:12px;color:#6b7280">${e.migratedBy}</td>
+            </tr>`);
 
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
             <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
                 <table style="width:100%;border-collapse:collapse;font-size:13px">
                     <thead style="background:#f9fafb">
@@ -463,7 +463,7 @@ async function loadHistory() {
                 </table>
             </div>`;
     } catch (err) {
-        container.innerHTML = `<p style="color:#dc2626;font-size:13px">Failed to load history: ${esc(err.message)}</p>`;
+        container.innerHTML = HtmlSafe.html`<p style="color:#dc2626;font-size:13px">Failed to load history: ${err.message}</p>`;
     }
 }
 
@@ -491,7 +491,7 @@ function resetMigration() {
     // Restore upload zone
     const zone = document.getElementById('upload-zone');
     zone.style.display = '';
-    zone.innerHTML = `
+    zone.innerHTML = HtmlSafe.html`
         <div><i class="fas fa-cloud-upload-alt"></i></div>
         <h3>Drop your Mirth channel export here</h3>
         <p>Supports Mirth Connect 3.x and NextGen Connect .xml channel exports</p>
@@ -513,19 +513,10 @@ function resetMigration() {
     document.getElementById('import-form').classList.remove('visible');
 }
 
-function esc(str) {
-    if (str == null) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
-
 function showToast(msg, type) {
     const t = document.getElementById('toast');
     t.className = 'toast ' + type;
-    t.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i> ${esc(msg)}`;
+    t.innerHTML = HtmlSafe.html`<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i> ${msg}`;
     t.style.display = 'flex';
     setTimeout(() => { t.style.display = 'none'; }, 4500);
 }
