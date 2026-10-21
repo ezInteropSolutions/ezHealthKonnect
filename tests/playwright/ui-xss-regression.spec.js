@@ -271,7 +271,40 @@ test.describe('Externally supplied message data is never rendered as HTML', () =
     });
 
     test.afterAll(async ({ request }) => {
-        if (interfaceId) await request.delete(`/api/interfaces/${interfaceId}`).catch(() => {});
+        if (!interfaceId) return;
+        const db = new Client({ connectionString: DB_URL });
+        await db.connect();
+        try { await db.query('DELETE FROM delivery_dlq WHERE interface_id = $1', [interfaceId]); } finally { await db.end(); }
+        await request.delete(`/api/interfaces/${interfaceId}`).catch(() => {});
+    });
+
+    test('dead-letter queue: link parameter, row and detail render as text', async ({ page }) => {
+        // The DLQ page is opened from a link carrying ?message_id= — a crafted
+        // link must not run script, and the failed row carries partner data.
+        const db = new Client({ connectionString: DB_URL });
+        await db.connect();
+        try {
+            await db.query(
+                `INSERT INTO delivery_dlq (message_id, interface_id, connector_type, payload, error_message, step_name, status)
+                 VALUES ($1, $2, 'http_outbound', $3, $4, $5, 'pending')
+                 ON CONFLICT DO NOTHING`,
+                [MESSAGE_ID, interfaceId, `payload ${xss('payload')}`, `Partner said ${xss('dlqerr')}`, `step ${xss('step')}`]);
+        } finally {
+            await db.end();
+        }
+        const dialogs = [];
+        page.on('dialog', d => { dialogs.push(d.message()); d.dismiss().catch(() => {}); });
+        await page.goto(`/admin-dlq.html?message_id=${encodeURIComponent(MESSAGE_ID)}`);
+        const row = page.locator('#dlqTableBody tr').filter({ hasText: MARK }).first();
+        await expect(row).toBeVisible({ timeout: 20_000 });
+        expect(await row.innerText()).toContain('<img src=x onerror=');
+        await expect(row.locator('.btn-redrive')).toHaveCount(1);
+        await row.locator('.btn-secondary').click();
+        await expect(page.locator('#drawerContent')).toContainText(`dlqerr`, { timeout: 10_000 });
+        await page.waitForTimeout(800);
+        expect(await page.evaluate(() => window.__ezhkXss || null), 'injected markup executed').toBeNull();
+        expect(dialogs).toEqual([]);
+        expect(await page.locator(`img[onerror*="${MARK}"]`).count()).toBe(0);
     });
 
     test('messages list and message detail render partner data as text', async ({ page }) => {
