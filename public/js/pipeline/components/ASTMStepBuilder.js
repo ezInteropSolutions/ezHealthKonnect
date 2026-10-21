@@ -24,20 +24,20 @@ function astmEsc(s) {
 }
 
 function astmRenderSourceOutput(idPrefix, sourceField, outputField, sourceDefault, outputDefault, sourceHint, outputHint) {
-    return `
+    return HtmlSafe.html`
         <div class="config-group" style="margin-bottom:1.1rem;">
             <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Source Field</label>
             <input id="${idPrefix}SourceField" type="text" class="form-control form-control-sm"
-                value="${astmEsc(sourceField)}" placeholder="${astmEsc(sourceDefault)}"
+                value="${sourceField}" placeholder="${sourceDefault}"
                 style="font-family:monospace;font-size:0.82rem;">
-            <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">${astmEsc(sourceHint)}</div>
+            <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">${sourceHint}</div>
         </div>
         <div class="config-group">
             <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Output Field</label>
             <input id="${idPrefix}OutputField" type="text" class="form-control form-control-sm"
-                value="${astmEsc(outputField)}" placeholder="${astmEsc(outputDefault)}"
+                value="${outputField}" placeholder="${outputDefault}"
                 style="font-family:monospace;font-size:0.82rem;">
-            <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">${astmEsc(outputHint)}</div>
+            <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">${outputHint}</div>
         </div>`;
 }
 
@@ -64,7 +64,7 @@ class AstmParseStepBuilder {
     render(step) {
         if (!step.config) step.config = {};
         const cfg = step.config;
-        return `
+        return HtmlSafe.html`
         <div class="astm-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Parse step.</strong> Converts raw ASTM E1394-97 content (H/P/O/R/C/Q/L records)
@@ -96,7 +96,7 @@ class AstmValidateStepBuilder {
     render(step) {
         if (!step.config) step.config = {};
         const cfg = step.config;
-        return `
+        return HtmlSafe.html`
         <div class="astm-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Validate step.</strong> Checks a parsed ASTM message's component fields against
@@ -127,7 +127,7 @@ class AstmBuildStepBuilder {
     render(step) {
         if (!step.config) step.config = {};
         const cfg = step.config;
-        return `
+        return HtmlSafe.html`
         <div class="astm-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Build step.</strong> Builds a complete ASTM record stream (H/P/O/R/C/Q/L) from

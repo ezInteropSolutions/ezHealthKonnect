@@ -40,8 +40,8 @@ const NCPDP_TELECOM_TRANSFORM_OPTIONS = [
 
 function ncpdpTelecomTransformOptionsHTML(selected) {
     return NCPDP_TELECOM_TRANSFORM_OPTIONS.map(o =>
-        `<option value="${ncpdpTelecomEsc(o.value)}" ${o.value === (selected || '') ? 'selected' : ''}>${ncpdpTelecomEsc(o.label)}</option>`
-    ).join('');
+        HtmlSafe.html`<option value="${o.value}" ${o.value === (selected || '') ? 'selected' : ''}>${o.label}</option>`
+    );
 }
 
 function ncpdpTelecomDirectionOptionsHTML(selected) {
@@ -51,8 +51,8 @@ function ncpdpTelecomDirectionOptionsHTML(selected) {
         { value: 'response', label: 'Response' },
     ];
     return opts.map(o =>
-        `<option value="${ncpdpTelecomEsc(o.value)}" ${o.value === (selected || '') ? 'selected' : ''}>${ncpdpTelecomEsc(o.label)}</option>`
-    ).join('');
+        HtmlSafe.html`<option value="${o.value}" ${o.value === (selected || '') ? 'selected' : ''}>${o.label}</option>`
+    );
 }
 
 // Phase 1 (B1 Claim Billing) + the documented sourcing pass that added B2
@@ -67,8 +67,8 @@ const NCPDP_TELECOM_TRANSACTION_CODES = ['B1', 'B2', 'B3', 'E1'];
 
 function ncpdpTelecomTransactionCodeOptionsHTML(selected) {
     return NCPDP_TELECOM_TRANSACTION_CODES.map(t =>
-        `<option value="${ncpdpTelecomEsc(t)}" ${t === (selected || 'B1') ? 'selected' : ''}>${ncpdpTelecomEsc(t)}</option>`
-    ).join('');
+        HtmlSafe.html`<option value="${t}" ${t === (selected || 'B1') ? 'selected' : ''}>${t}</option>`
+    );
 }
 
 // ── NcpdpTelecomParseStepBuilder ─────────────────────────────────────────────
@@ -84,10 +84,10 @@ class NcpdpTelecomParseStepBuilder {
         if (!step.config) step.config = {};
         const cfg = step.config;
 
-        const sourceField = ncpdpTelecomEsc(cfg.sourceField || 'raw');
-        const outputField = ncpdpTelecomEsc(cfg.outputField || 'parsedTelecom');
+        const sourceField = (cfg.sourceField || 'raw');
+        const outputField = (cfg.outputField || 'parsedTelecom');
 
-        return `
+        return HtmlSafe.html`
         <div class="ncpdp-telecom-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Parse step.</strong> Converts a raw NCPDP Telecommunication D.0 real-time
@@ -158,10 +158,10 @@ class NcpdpTelecomValidateStepBuilder {
         if (!step.config) step.config = {};
         const cfg = step.config;
 
-        const sourceField = ncpdpTelecomEsc(cfg.sourceField || 'parsedTelecom');
-        const outputField = ncpdpTelecomEsc(cfg.outputField || 'telecomValidation');
+        const sourceField = (cfg.sourceField || 'parsedTelecom');
+        const outputField = (cfg.outputField || 'telecomValidation');
 
-        return `
+        return HtmlSafe.html`
         <div class="ncpdp-telecom-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Validate step.</strong> Checks a parsed D.0 transmission against the schema's
@@ -225,10 +225,10 @@ class NcpdpTelecomBuildStepBuilder {
         if (!step.config) step.config = {};
         const cfg = step.config;
 
-        const sourceField = ncpdpTelecomEsc(cfg.sourceField || 'parsedTelecom');
-        const outputField = ncpdpTelecomEsc(cfg.outputField || 'ncpdpTelecom');
+        const sourceField = (cfg.sourceField || 'parsedTelecom');
+        const outputField = (cfg.outputField || 'ncpdpTelecom');
 
-        return `
+        return HtmlSafe.html`
         <div class="ncpdp-telecom-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Build step.</strong> Builds a complete NCPDP Telecommunication D.0 transmission
@@ -348,21 +348,21 @@ class NcpdpTelecomMapToCanonicalStepBuilder {
         return ['<option value="">-- Segment --</option>']
             .concat(keys.map(k => {
                 const seg = this._segmentsByKey[k];
-                return `<option value="${ncpdpTelecomEsc(k)}" ${k === selectedKey ? 'selected' : ''}>${ncpdpTelecomEsc(k)} (${ncpdpTelecomEsc(seg.identifier)})${seg.name ? ' — ' + ncpdpTelecomEsc(seg.name) : ''}</option>`;
+                return HtmlSafe.html`<option value="${k}" ${k === selectedKey ? 'selected' : ''}>${k} (${seg.identifier})${seg.name ? ' — ' + (seg.name) : ''}</option>`;
             }))
-            .join('');
+            ;
     }
 
     _fieldKeyOptionsHTML(fieldsCatalog, selectedKey) {
         return ['<option value="">-- Field --</option>']
             .concat((fieldsCatalog || []).map(f =>
-                `<option value="${ncpdpTelecomEsc(f.key)}" ${f.key === selectedKey ? 'selected' : ''}>${ncpdpTelecomEsc(f.key)}${f.required ? ' *' : ''}${f.name ? ' — ' + ncpdpTelecomEsc(f.name) : ''}</option>`))
-            .join('');
+                HtmlSafe.html`<option value="${f.key}" ${f.key === selectedKey ? 'selected' : ''}>${f.key}${f.required ? ' *' : ''}${f.name ? ' — ' + (f.name) : ''}</option>`))
+            ;
     }
 
     _renderAll() {
         const cfg = this._step.config;
-        return `
+        return HtmlSafe.html`
         <div id="ncpdpTelecomMapToCanonicalBuilder" class="ncpdp-telecom-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Map to Canonical step.</strong> No-code field mapping from any source shape
@@ -374,7 +374,7 @@ class NcpdpTelecomMapToCanonicalStepBuilder {
             <div class="config-group" style="margin-bottom:1.1rem;">
                 <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Output Field</label>
                 <input id="ncpdpTelecomMapOutputField" type="text" class="form-control form-control-sm"
-                    value="${ncpdpTelecomEsc(cfg.outputField)}" placeholder="parsedTelecom"
+                    value="${cfg.outputField}" placeholder="parsedTelecom"
                     style="font-family:monospace;font-size:0.82rem;">
             </div>
             <div style="display:flex;gap:0.75rem;margin-bottom:1.1rem;">
@@ -397,7 +397,7 @@ class NcpdpTelecomMapToCanonicalStepBuilder {
             <div class="config-group" style="margin:1rem 0 0.5rem;">
                 <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Transaction Group Rows Path</label>
                 <input id="ncpdpTelecomMapRowsPath" type="text" class="form-control form-control-sm"
-                    value="${ncpdpTelecomEsc(cfg.transactionGroupRowsPath || '')}" placeholder="e.g. claims (leave blank for a single transaction group from top-level data)"
+                    value="${cfg.transactionGroupRowsPath || ''}" placeholder="e.g. claims (leave blank for a single transaction group from top-level data)"
                     style="font-family:monospace;font-size:0.82rem;">
                 <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Dot-path to an array of rows, one per claim/drug being submitted — each row builds one GS-delimited transaction group.</div>
             </div>
@@ -409,10 +409,10 @@ class NcpdpTelecomMapToCanonicalStepBuilder {
 
     _renderHeaderFieldsSection() {
         if (!this._headerFieldsCatalog) {
-            return `<div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;font-size:0.78rem;color:#94a3b8;">Loading Header Fields…</div>`;
+            return HtmlSafe.html`<div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;font-size:0.78rem;color:#94a3b8;">Loading Header Fields…</div>`;
         }
         const fields = this._step.config.headerFields;
-        return `
+        return HtmlSafe.html`
         <div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.3rem;">
                 <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;">Header Fields</div>
@@ -420,8 +420,8 @@ class NcpdpTelecomMapToCanonicalStepBuilder {
                     onclick="window._ncpdpTelecomMapBuilder && window._ncpdpTelecomMapBuilder.addHeaderField()">+ Add Field</button>
             </div>
             <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.5rem;">The fixed-width wire header (BIN number, version, transaction code, service provider ID, date of service, ...). transactionCode/version default from the Transaction Code/Version above if not mapped here.</div>
-            ${fields.map((f, i) => this._renderFieldRow('header', null, f, i, this._headerFieldsCatalog)).join('')}
-            ${fields.length === 0 ? '<div style="font-size:0.78rem;color:#94a3b8;">No header fields mapped (transactionCode/version will still default correctly).</div>' : ''}
+            ${fields.map((f, i) => this._renderFieldRow('header', null, f, i, this._headerFieldsCatalog))}
+            ${fields.length === 0 ? HtmlSafe.raw('<div style="font-size:0.78rem;color:#94a3b8;">No header fields mapped (transactionCode/version will still default correctly).</div>') : ''}
         </div>`;
     }
 
@@ -429,26 +429,26 @@ class NcpdpTelecomMapToCanonicalStepBuilder {
 
     _renderSegmentsSection(configKey, label, hint, repeating) {
         if (!this._segmentsByKey) {
-            return `<div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;font-size:0.78rem;color:#94a3b8;">Loading ${ncpdpTelecomEsc(label)}…</div>`;
+            return HtmlSafe.html`<div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;font-size:0.78rem;color:#94a3b8;">Loading ${label}…</div>`;
         }
         const segments = this._step.config[configKey];
-        return `
+        return HtmlSafe.html`
         <div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.3rem;">
-                <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;">${ncpdpTelecomEsc(label)}</div>
+                <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;">${label}</div>
                 <button type="button" class="btn btn-sm btn-outline-primary" style="font-size:0.75rem;"
                     onclick="window._ncpdpTelecomMapBuilder && window._ncpdpTelecomMapBuilder.addSegment('${configKey}')">+ Add Segment</button>
             </div>
-            <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.5rem;">${ncpdpTelecomEsc(hint)}</div>
-            ${segments.map((seg, si) => this._renderSegmentCard(configKey, seg, si, repeating)).join('')}
-            ${segments.length === 0 ? '<div style="font-size:0.78rem;color:#94a3b8;">No segments mapped.</div>' : ''}
+            <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.5rem;">${hint}</div>
+            ${segments.map((seg, si) => this._renderSegmentCard(configKey, seg, si, repeating))}
+            ${segments.length === 0 ? HtmlSafe.raw('<div style="font-size:0.78rem;color:#94a3b8;">No segments mapped.</div>') : ''}
         </div>`;
     }
 
     _renderSegmentCard(configKey, seg, segIndex, repeating) {
         const fieldsCatalog = seg.segmentKey && this._segmentsByKey[seg.segmentKey] ? (this._segmentsByKey[seg.segmentKey].fields || []) : [];
         const fields = Array.isArray(seg.fields) ? seg.fields : (seg.fields = []);
-        return `
+        return HtmlSafe.html`
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:0.6rem 0.7rem;margin:0.4rem 0 0.6rem;">
             <div style="display:flex;gap:0.4rem;align-items:center;margin-bottom:0.5rem;">
                 <select style="flex:1;font-size:0.8rem;" class="form-select form-select-sm"
@@ -458,7 +458,7 @@ class NcpdpTelecomMapToCanonicalStepBuilder {
                 <button type="button" class="btn btn-sm btn-outline-danger" style="font-size:0.7rem;padding:0.1rem 0.5rem;"
                     onclick="window._ncpdpTelecomMapBuilder && window._ncpdpTelecomMapBuilder.removeSegment('${configKey}', ${segIndex})">Remove Segment</button>
             </div>
-            ${fields.map((f, fi) => this._renderFieldRow(configKey, segIndex, f, fi, fieldsCatalog)).join('')}
+            ${fields.map((f, fi) => this._renderFieldRow(configKey, segIndex, f, fi, fieldsCatalog))}
             <button type="button" class="btn btn-sm btn-outline-primary" style="font-size:0.72rem;"
                 onclick="window._ncpdpTelecomMapBuilder && window._ncpdpTelecomMapBuilder.addSegmentField('${configKey}', ${segIndex})">+ Add Field</button>
         </div>`;
@@ -475,20 +475,20 @@ class NcpdpTelecomMapToCanonicalStepBuilder {
             ? `window._ncpdpTelecomMapBuilder.removeHeaderField(${index})`
             : `window._ncpdpTelecomMapBuilder.removeSegmentField('${configKey}', ${segIndex}, ${index})`;
 
-        return `
+        return HtmlSafe.html`
         <div style="display:flex;gap:0.4rem;align-items:center;margin-bottom:0.4rem;flex-wrap:wrap;">
             <select style="flex:1;min-width:130px;font-size:0.76rem;" class="form-select form-select-sm"
                 onchange="${prefix}, 'fieldKey', this.value)">
                 ${this._fieldKeyOptionsHTML(fieldsCatalog, f.fieldKey)}
             </select>
-            <input type="text" placeholder="source path" value="${ncpdpTelecomEsc(f.sourcePath || '')}"
+            <input type="text" placeholder="source path" value="${f.sourcePath || ''}"
                 style="flex:1;min-width:100px;font-family:monospace;font-size:0.76rem;" class="form-control form-control-sm"
                 onblur="${prefix}, 'sourcePath', this.value)">
             <select style="width:130px;font-size:0.76rem;" class="form-select form-select-sm"
                 onchange="${prefix}, 'transform', this.value)">
                 ${ncpdpTelecomTransformOptionsHTML(f.transform)}
             </select>
-            <input type="text" placeholder="literal (if no source)" value="${ncpdpTelecomEsc(f.literalValue || '')}"
+            <input type="text" placeholder="literal (if no source)" value="${f.literalValue || ''}"
                 style="flex:1;min-width:90px;font-family:monospace;font-size:0.76rem;" class="form-control form-control-sm"
                 onblur="${prefix}, 'literalValue', this.value)">
             <button type="button" class="btn btn-sm btn-outline-danger" style="font-size:0.7rem;padding:0.1rem 0.4rem;"
@@ -557,7 +557,7 @@ class NcpdpTelecomMapToCanonicalStepBuilder {
     _rerender() {
         const root = document.getElementById('ncpdpTelecomMapToCanonicalBuilder');
         if (!root || !root.parentElement) return;
-        root.outerHTML = this._renderAll();
+        root.outerHTML = HtmlSafe.html`${this._renderAll()}`;
     }
 
     collectConfig(step) {
