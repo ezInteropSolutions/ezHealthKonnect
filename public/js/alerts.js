@@ -65,7 +65,7 @@ function loadActiveAlerts() {
 function filterBySeverity(sev) {
     _severityFilter = sev;
     document.querySelectorAll('.sev-chip').forEach(function(el) {
-        el.classList.toggle('active', el.getAttribute('onclick').indexOf("'" + sev + "'") !== -1);
+        el.classList.toggle('active', (el.getAttribute('onclick') || '').indexOf("'" + sev + "'") !== -1);
     });
     renderAlerts();
 }
@@ -89,24 +89,24 @@ function renderAlerts() {
         return;
     }
 
-    el.innerHTML = filtered.map(function(a) {
+    el.innerHTML = HtmlSafe.html`${filtered.map(function(a) {
         var elapsed = formatElapsed(a.elapsed_seconds);
-        return '<div class="alert-card ' + a.severity + '">' +
-            '<div class="alert-sev-dot ' + a.severity + '"></div>' +
-            '<div class="alert-body">' +
-                '<div class="alert-title">' + esc(a.alert_type.replace(/_/g,' ')) + '</div>' +
-                '<div class="alert-meta">' +
-                    '<span><i class="fas fa-network-wired"></i>' + esc(a.interface_name) + '</span>' +
-                    '<span><i class="fas fa-clock"></i>' + elapsed + '</span>' +
-                    '<span style="color:var(--muted);">' + esc(a.message) + '</span>' +
-                '</div>' +
-            '</div>' +
-            '<div class="alert-actions">' +
-                '<button class="btn-sm ack" onclick="acknowledgeAlert(\'' + a.id + '\')">Ack</button>' +
-                '<button class="btn-sm resolve" onclick="resolveAlert(\'' + a.id + '\')">Resolve</button>' +
-            '</div>' +
-        '</div>';
-    }).join('');
+        return HtmlSafe.html`<div class="alert-card ${a.severity}">
+            <div class="alert-sev-dot ${a.severity}"></div>
+            <div class="alert-body">
+                <div class="alert-title">${String(a.alert_type || '').replace(/_/g,' ')}</div>
+                <div class="alert-meta">
+                    <span><i class="fas fa-network-wired"></i>${a.interface_name}</span>
+                    <span><i class="fas fa-clock"></i>${elapsed}</span>
+                    <span style="color:var(--muted);">${a.message}</span>
+                </div>
+            </div>
+            <div class="alert-actions">
+                <button class="btn-sm ack" data-id="${a.id}" onclick="acknowledgeAlert(this.dataset.id)">Ack</button>
+                <button class="btn-sm resolve" data-id="${a.id}" onclick="resolveAlert(this.dataset.id)">Resolve</button>
+            </div>
+        </div>`;
+    })}`;
 }
 
 function updateSeverityChips() {
@@ -174,41 +174,41 @@ function renderRules() {
     var globalRules    = _rules.filter(function(r) { return !r.interface_id; });
     var interfaceRules = _rules.filter(function(r) { return  r.interface_id; });
 
-    document.getElementById('globalRulesList').innerHTML    = renderRuleCards(globalRules);
-    document.getElementById('interfaceRulesList').innerHTML = interfaceRules.length
+    document.getElementById('globalRulesList').innerHTML    = HtmlSafe.html`${renderRuleCards(globalRules)}`;
+    document.getElementById('interfaceRulesList').innerHTML = HtmlSafe.html`${interfaceRules.length
         ? renderRuleCards(interfaceRules)
-        : '<div style="font-size:13px;color:var(--muted);padding:8px 0">No per-interface rules defined. Create a rule and select a specific interface.</div>';
+        : HtmlSafe.raw('<div style="font-size:13px;color:var(--muted);padding:8px 0">No per-interface rules defined. Create a rule and select a specific interface.</div>')}`;
 }
 
 function renderRuleCards(rules) {
-    if (!rules.length) return '';
-    return rules.map(function(r) {
+    if (!rules.length) return HtmlSafe.raw('');
+    return HtmlSafe.html`${rules.map(function(r) {
         var thresholds = [];
-        if (r.threshold_warning  != null) thresholds.push('<span class="threshold-warn">⚠ ' + r.threshold_warning + '</span>');
-        if (r.threshold_critical != null) thresholds.push('<span class="threshold-crit">🔴 ' + r.threshold_critical + '</span>');
+        if (r.threshold_warning  != null) thresholds.push(HtmlSafe.html`<span class="threshold-warn">⚠ ${r.threshold_warning}</span> `);
+        if (r.threshold_critical != null) thresholds.push(HtmlSafe.html`<span class="threshold-crit">🔴 ${r.threshold_critical}</span> `);
 
-        return '<div class="rule-card">' +
-            '<span class="rule-type-badge">' + esc(r.rule_type.replace(/_/g,' ')) + '</span>' +
-            '<div class="rule-info">' +
-                '<div class="rule-name">' + esc(r.name) + (r.is_system ? ' <span style="font-size:10px;color:var(--muted)">(system)</span>' : '') + '</div>' +
-                (r.interface_name ? '<div class="rule-desc">Interface: ' + esc(r.interface_name) + '</div>' : '') +
-                '<div class="rule-thresholds">' + thresholds.join(' ') +
-                    '<span style="color:var(--muted)">window: ' + r.evaluation_window_minutes + 'min</span>' +
-                    '<span style="color:var(--muted)">cooldown: ' + r.cooldown_minutes + 'min</span>' +
-                '</div>' +
-            '</div>' +
-            '<div class="rule-actions">' +
-                '<span class="channel-count-chip" onclick="openAssignChannels(\'' + r.id + '\',\'' + esc(r.name) + '\')">' +
-                    '<i class="fas fa-satellite-dish"></i> ' + (r.channel_count || 0) + '</span>' +
-                '<label class="toggle-switch" title="' + (r.is_enabled ? 'Disable' : 'Enable') + '">' +
-                    '<input type="checkbox" ' + (r.is_enabled ? 'checked' : '') + ' onchange="toggleRule(\'' + r.id + '\',this.checked)">' +
-                    '<span class="toggle-slider"></span>' +
-                '</label>' +
-                (!r.is_system ? '<button class="btn-sm" onclick="openRuleModal(\'' + r.id + '\')">Edit</button>' : '') +
-                (!r.is_system ? '<button class="btn-sm" onclick="deleteRule(\'' + r.id + '\')" style="color:#dc2626">Del</button>' : '') +
-            '</div>' +
-        '</div>';
-    }).join('');
+        return HtmlSafe.html`<div class="rule-card">
+            <span class="rule-type-badge">${String(r.rule_type || '').replace(/_/g,' ')}</span>
+            <div class="rule-info">
+                <div class="rule-name">${r.name}${r.is_system ? HtmlSafe.raw(' <span style="font-size:10px;color:var(--muted)">(system)</span>') : ''}</div>
+                ${r.interface_name ? HtmlSafe.html`<div class="rule-desc">Interface: ${r.interface_name}</div>` : ''}
+                <div class="rule-thresholds">${thresholds}
+                    <span style="color:var(--muted)">window: ${r.evaluation_window_minutes}min</span>
+                    <span style="color:var(--muted)">cooldown: ${r.cooldown_minutes}min</span>
+                </div>
+            </div>
+            <div class="rule-actions">
+                <span class="channel-count-chip" data-id="${r.id}" onclick="openAssignChannels(this.dataset.id)">
+                    <i class="fas fa-satellite-dish"></i> ${r.channel_count || 0}</span>
+                <label class="toggle-switch" title="${r.is_enabled ? 'Disable' : 'Enable'}">
+                    <input type="checkbox" ${r.is_enabled ? HtmlSafe.raw('checked') : ''} data-id="${r.id}" onchange="toggleRule(this.dataset.id, this.checked)">
+                    <span class="toggle-slider"></span>
+                </label>
+                ${!r.is_system ? HtmlSafe.html`<button class="btn-sm" data-id="${r.id}" onclick="openRuleModal(this.dataset.id)">Edit</button>` : ''}
+                ${!r.is_system ? HtmlSafe.html`<button class="btn-sm" data-id="${r.id}" onclick="deleteRule(this.dataset.id)" style="color:#dc2626">Del</button>` : ''}
+            </div>
+        </div>`;
+    })}`;
 }
 
 function openRuleModal(id) {
@@ -292,8 +292,10 @@ async function deleteRule(id) {
 }
 
 // ── Channel assignment ─────────────────────────────────────────────────────────
-function openAssignChannels(ruleId, ruleName) {
+function openAssignChannels(ruleId) {
     _assignRuleId = ruleId;
+    var rule = _rules.find(function(x) { return String(x.id) === String(ruleId); });
+    var ruleName = rule ? rule.name : '';
     document.getElementById('assignChannelsTitle').textContent = 'Channels for: ' + ruleName;
     var el = document.getElementById('assignChannelsList');
     el.innerHTML = '<div class="loading-row"><i class="fas fa-spinner fa-spin"></i></div>';
@@ -311,16 +313,16 @@ function openAssignChannels(ruleId, ruleName) {
             el.innerHTML = '<p style="font-size:13px;color:var(--muted)">No channels configured. Create a channel first.</p>';
             return;
         }
-        el.innerHTML = allChannels.map(function(ch) {
+        el.innerHTML = HtmlSafe.html`${allChannels.map(function(ch) {
             var checked = assignedIds.indexOf(ch.id) !== -1;
             var iconClass = ch.channel_type === 'email' ? 'fa-envelope' : ch.channel_type === 'slack' ? 'fa-slack' : 'fa-globe';
-            return '<label style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f3f4f6;cursor:pointer">' +
-                '<input type="checkbox" data-channel-id="' + ch.id + '" ' + (checked ? 'checked' : '') + '>' +
-                '<i class="fab ' + iconClass + '" style="width:18px;color:var(--muted)"></i>' +
-                '<span style="font-size:13px;font-weight:600">' + esc(ch.name) + '</span>' +
-                '<span style="font-size:11px;color:var(--muted);margin-left:auto">' + ch.channel_type + '</span>' +
-            '</label>';
-        }).join('');
+            return HtmlSafe.html`<label style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f3f4f6;cursor:pointer">
+                <input type="checkbox" data-channel-id="${ch.id}" ${checked ? HtmlSafe.raw('checked') : ''}>
+                <i class="fab ${iconClass}" style="width:18px;color:var(--muted)"></i>
+                <span style="font-size:13px;font-weight:600">${ch.name}</span>
+                <span style="font-size:11px;color:var(--muted);margin-left:auto">${ch.channel_type}</span>
+            </label>`;
+        })}`;
     });
 }
 
@@ -355,27 +357,27 @@ function renderChannels() {
         return;
     }
     var iconMap = { email: 'fa-envelope', webhook: 'fa-globe', slack: 'fa-slack' };
-    el.innerHTML = _channels.map(function(ch) {
+    el.innerHTML = HtmlSafe.html`${_channels.map(function(ch) {
         var icon = iconMap[ch.channel_type] || 'fa-bell';
         var testClass = ch.test_status === 'success' ? 'success' : ch.test_status === 'failure' ? 'failure' : 'untested';
         var testLabel = ch.test_status === 'success' ? '✓ Tested' : ch.test_status === 'failure' ? '✗ Failed' : 'Untested';
         var fabOrFas = ch.channel_type === 'slack' ? 'fab' : 'fas';
-        return '<div class="channel-card">' +
-            '<div class="channel-header">' +
-                '<div class="channel-icon ' + ch.channel_type + '"><i class="' + fabOrFas + ' ' + icon + '"></i></div>' +
-                '<div>' +
-                    '<div class="channel-name">' + esc(ch.name) + '</div>' +
-                    '<div class="channel-type-label">' + ch.channel_type.toUpperCase() + '</div>' +
-                '</div>' +
-                '<span class="test-badge ' + testClass + '">' + testLabel + '</span>' +
-            '</div>' +
-            '<div class="channel-footer">' +
-                '<button class="btn-sm" onclick="testChannel(\'' + ch.id + '\')"><i class="fas fa-plug-circle-check"></i> Test</button>' +
-                '<button class="btn-sm" onclick="openChannelModal(\'' + ch.id + '\')">Edit</button>' +
-                '<button class="btn-sm" onclick="deleteChannel(\'' + ch.id + '\')" style="color:#dc2626">Delete</button>' +
-            '</div>' +
-        '</div>';
-    }).join('');
+        return HtmlSafe.html`<div class="channel-card">
+            <div class="channel-header">
+                <div class="channel-icon ${ch.channel_type}"><i class="${fabOrFas} ${icon}"></i></div>
+                <div>
+                    <div class="channel-name">${ch.name}</div>
+                    <div class="channel-type-label">${String(ch.channel_type || '').toUpperCase()}</div>
+                </div>
+                <span class="test-badge ${testClass}">${testLabel}</span>
+            </div>
+            <div class="channel-footer">
+                <button class="btn-sm" data-id="${ch.id}" onclick="testChannel(this.dataset.id)"><i class="fas fa-plug-circle-check"></i> Test</button>
+                <button class="btn-sm" data-id="${ch.id}" onclick="openChannelModal(this.dataset.id)">Edit</button>
+                <button class="btn-sm" data-id="${ch.id}" onclick="deleteChannel(this.dataset.id)" style="color:#dc2626">Delete</button>
+            </div>
+        </div>`;
+    })}`;
 }
 
 function openChannelModal(id) {
@@ -402,29 +404,29 @@ function renderChannelFields(id) {
     if (ch && ch.config) {
         try { cfg = typeof ch.config === 'string' ? JSON.parse(ch.config) : ch.config; } catch(e) {}
     }
-    var html = '';
+    var fields = [];
     if (type === 'email') {
-        html = field('SMTP Host', 'chSmtpHost', cfg.smtp_host || '', 'smtp.example.com') +
-               field('SMTP Port', 'chSmtpPort', cfg.smtp_port || '587', '587', 'number') +
-               field('SMTP User', 'chSmtpUser', cfg.smtp_user || '', 'user@example.com') +
-               field('SMTP Password', 'chSmtpPass', '', '••••••••', 'password') +
-               field('From Address', 'chFrom', cfg.from || '', 'alerts@example.com') +
-               field('To (comma-separated)', 'chTo', (cfg.to || []).join(', '), 'ops@example.com, oncall@example.com');
+        fields = [field('SMTP Host', 'chSmtpHost', cfg.smtp_host || '', 'smtp.example.com'),
+                  field('SMTP Port', 'chSmtpPort', cfg.smtp_port || '587', '587', 'number'),
+                  field('SMTP User', 'chSmtpUser', cfg.smtp_user || '', 'user@example.com'),
+                  field('SMTP Password', 'chSmtpPass', '', '••••••••', 'password'),
+                  field('From Address', 'chFrom', cfg.from || '', 'alerts@example.com'),
+                  field('To (comma-separated)', 'chTo', (cfg.to || []).join(', '), 'ops@example.com, oncall@example.com')];
     } else if (type === 'webhook') {
-        html = field('Webhook URL *', 'chUrl', cfg.url || '', 'https://example.com/webhook') +
-               field('Method', 'chMethod', cfg.method || 'POST', 'POST') +
-               field('Authorization Header', 'chAuthHeader', (cfg.headers || {}).Authorization || '', 'Bearer token...');
+        fields = [field('Webhook URL *', 'chUrl', cfg.url || '', 'https://example.com/webhook'),
+                  field('Method', 'chMethod', cfg.method || 'POST', 'POST'),
+                  field('Authorization Header', 'chAuthHeader', (cfg.headers || {}).Authorization || '', 'Bearer token...')];
     } else if (type === 'slack') {
-        html = field('Slack Webhook URL *', 'chSlackUrl', cfg.webhook_url || '', 'https://hooks.slack.com/services/...') +
-               field('Channel', 'chSlackChannel', cfg.channel || '#alerts', '#alerts') +
-               field('Bot Username', 'chSlackUser', cfg.username || 'ezHealthKonnect', 'ezHealthKonnect');
+        fields = [field('Slack Webhook URL *', 'chSlackUrl', cfg.webhook_url || '', 'https://hooks.slack.com/services/...'),
+                  field('Channel', 'chSlackChannel', cfg.channel || '#alerts', '#alerts'),
+                  field('Bot Username', 'chSlackUser', cfg.username || 'ezHealthKonnect', 'ezHealthKonnect')];
     }
-    document.getElementById('channelDynamicFields').innerHTML = html;
+    document.getElementById('channelDynamicFields').innerHTML = HtmlSafe.html`${fields}`;
 }
 
 function field(label, id, val, placeholder, type) {
-    return '<div class="form-group"><label>' + label + '</label>' +
-        '<input type="' + (type || 'text') + '" id="' + id + '" value="' + esc(val) + '" placeholder="' + esc(placeholder) + '"></div>';
+    return HtmlSafe.html`<div class="form-group"><label>${label}</label>
+        <input type="${type || 'text'}" id="${id}" value="${val}" placeholder="${placeholder}"></div>`;
 }
 
 function collectChannelConfig() {
@@ -499,22 +501,17 @@ function renderSilences() {
         el.innerHTML = '<div class="empty-state"><i class="fas fa-bell-slash"></i><h3>No silences configured</h3><p>Create a silence to suppress alerts during maintenance windows.</p></div>';
         return;
     }
-    el.innerHTML = _silences.map(function(s) {
+    el.innerHTML = HtmlSafe.html`${_silences.map(function(s) {
         var isActive = s.is_active;
-        return '<div class="silence-card">' +
-            '<div class="' + (isActive ? 'silence-active-dot' : 'silence-inactive-dot') + '" title="' + (isActive ? 'Active' : 'Inactive') + '"></div>' +
-            '<div class="silence-info">' +
-                '<div class="silence-name">' + esc(s.name) + (isActive ? ' <span style="font-size:10px;background:#dcfce7;color:#166534;padding:1px 6px;border-radius:8px">ACTIVE</span>' : '') + '</div>' +
-                '<div class="silence-meta">' +
-                    (s.interface_name ? 'Interface: ' + esc(s.interface_name) + ' · ' : 'All interfaces · ') +
-                    (s.alert_rule_name ? 'Rule: ' + esc(s.alert_rule_name) + ' · ' : 'All rules · ') +
-                    formatDT(s.starts_at) + ' → ' + formatDT(s.ends_at) +
-                    (s.reason ? ' · ' + esc(s.reason) : '') +
-                '</div>' +
-            '</div>' +
-            '<button class="btn-sm" onclick="deleteSilence(\'' + s.id + '\')" style="color:#dc2626">Remove</button>' +
-        '</div>';
-    }).join('');
+        return HtmlSafe.html`<div class="silence-card">
+            <div class="${isActive ? 'silence-active-dot' : 'silence-inactive-dot'}" title="${isActive ? 'Active' : 'Inactive'}"></div>
+            <div class="silence-info">
+                <div class="silence-name">${s.name}${isActive ? HtmlSafe.raw(' <span style="font-size:10px;background:#dcfce7;color:#166534;padding:1px 6px;border-radius:8px">ACTIVE</span>') : ''}</div>
+                <div class="silence-meta">${s.interface_name ? 'Interface: ' + s.interface_name + ' · ' : 'All interfaces · '}${s.alert_rule_name ? 'Rule: ' + s.alert_rule_name + ' · ' : 'All rules · '}${formatDT(s.starts_at)} → ${formatDT(s.ends_at)}${s.reason ? ' · ' + s.reason : ''}</div>
+            </div>
+            <button class="btn-sm" data-id="${s.id}" onclick="deleteSilence(this.dataset.id)" style="color:#dc2626">Remove</button>
+        </div>`;
+    })}`;
 }
 
 function openSilenceModal() {
@@ -582,10 +579,10 @@ function renderHistory() {
         body.innerHTML = '<tr><td colspan="8" class="empty-state">No alert history found.</td></tr>';
         return;
     }
-    body.innerHTML = rows.map(function(a) {
-        var status = a.auto_resolved ? '<span style="color:#166534">Resolved</span>'
-                   : a.acknowledged  ? '<span style="color:var(--navy)">Acknowledged</span>'
-                   : '<span style="color:#dc2626">Active</span>';
+    body.innerHTML = HtmlSafe.html`${rows.map(function(a) {
+        var status = a.auto_resolved ? HtmlSafe.raw('<span style="color:#166534">Resolved</span>')
+                   : a.acknowledged  ? HtmlSafe.raw('<span style="color:var(--navy)">Acknowledged</span>')
+                   : HtmlSafe.raw('<span style="color:#dc2626">Active</span>');
         var resolvedAt = a.resolved_at ? formatDT(a.resolved_at) : '—';
         var duration   = '—';
         if (a.resolved_at && a.created_at) {
@@ -594,17 +591,17 @@ function renderHistory() {
                      : secs < 3600 ? Math.round(secs / 60) + 'm'
                      : (secs / 3600).toFixed(1) + 'h';
         }
-        return '<tr>' +
-            '<td><span class="sev-pill ' + a.severity + '">' + a.severity.toUpperCase() + '</span></td>' +
-            '<td>' + esc(a.alert_type.replace(/_/g,' ')) + '</td>' +
-            '<td>' + esc(a.interface_name || 'System') + '</td>' +
-            '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(a.message) + '">' + esc(a.message) + '</td>' +
-            '<td style="white-space:nowrap">' + formatDT(a.created_at) + '</td>' +
-            '<td style="white-space:nowrap">' + resolvedAt + '</td>' +
-            '<td style="white-space:nowrap">' + duration + '</td>' +
-            '<td>' + status + '</td>' +
-        '</tr>';
-    }).join('');
+        return HtmlSafe.html`<tr>
+            <td><span class="sev-pill ${a.severity}">${String(a.severity || '').toUpperCase()}</span></td>
+            <td>${String(a.alert_type || '').replace(/_/g,' ')}</td>
+            <td>${a.interface_name || 'System'}</td>
+            <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.message}">${a.message}</td>
+            <td style="white-space:nowrap">${formatDT(a.created_at)}</td>
+            <td style="white-space:nowrap">${resolvedAt}</td>
+            <td style="white-space:nowrap">${duration}</td>
+            <td>${status}</td>
+        </tr>`;
+    })}`;
 }
 
 function exportHistoryCSV() {
@@ -659,15 +656,15 @@ function populateInterfaceSelects() {
         .then(function(r) { return r.json(); })
         .then(function(res) {
             var interfaces = res.data || res.interfaces || [];
-            var opts = '<option value="">— Global rule (all interfaces) —</option>' +
+            var opts = HtmlSafe.html`<option value="">— Global rule (all interfaces) —</option>${
                 interfaces.map(function(i) {
-                    return '<option value="' + i.id + '">' + esc(i.name) + '</option>';
-                }).join('');
+                    return HtmlSafe.html`<option value="${i.id}">${i.name}</option>`;
+                })}`;
             ['ruleInterfaceId', 'silenceInterfaceId'].forEach(function(id) {
                 var el = document.getElementById(id);
                 if (el) {
                     var current = el.value;
-                    el.innerHTML = opts;
+                    el.innerHTML = HtmlSafe.html`${opts}`;
                     el.value = current;
                 }
             });
@@ -675,19 +672,15 @@ function populateInterfaceSelects() {
 }
 
 function populateRuleSelects() {
-    var opts = '<option value="">All rules</option>' +
+    var opts = HtmlSafe.html`<option value="">All rules</option>${
         _rules.map(function(r) {
-            return '<option value="' + r.id + '">' + esc(r.name) + '</option>';
-        }).join('');
+            return HtmlSafe.html`<option value="${r.id}">${r.name}</option>`;
+        })}`;
     var el = document.getElementById('silenceRuleId');
-    if (el) el.innerHTML = opts;
+    if (el) el.innerHTML = HtmlSafe.html`${opts}`;
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
-function esc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
 function setText(id, val) {
     var el = document.getElementById(id);
     if (el) el.textContent = val;

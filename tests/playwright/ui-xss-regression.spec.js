@@ -132,6 +132,52 @@ test.describe('User-saved templates render as text in the gallery', () => {
     });
 });
 
+// Alert rules and notification channels are named by operators and listed for
+// everyone on the Alerts page.
+test.describe('Alert rules and channels render names as text', () => {
+    const hostile = (what) => `PW ${MARK} ${what}');window.__ezhkXss='${MARK}-${what}';(' <img src=x onerror="window.__ezhkXss='${MARK}-${what}'">`;
+    let ruleId, channelId;
+
+    test.beforeAll(async ({ request }) => {
+        const r = await (await request.post('/api/alerts/rules', { data: {
+            name: hostile('rule'), rule_type: 'ERROR_RATE', threshold_warning: 5, is_enabled: false,
+        } })).json();
+        expect(r.success, JSON.stringify(r)).toBeTruthy();
+        ruleId = r.data.id;
+        const c = await (await request.post('/api/alerts/channels', { data: {
+            name: hostile('channel'), channel_type: 'webhook', config: { url: 'https://example.invalid/hook' },
+        } })).json();
+        expect(c.success, JSON.stringify(c)).toBeTruthy();
+        channelId = c.data.id;
+    });
+
+    test.afterAll(async ({ request }) => {
+        if (ruleId) await request.delete(`/api/alerts/rules/${ruleId}`).catch(() => {});
+        if (channelId) await request.delete(`/api/alerts/channels/${channelId}`).catch(() => {});
+    });
+
+    test('rules list, channel assignment and channels list', async ({ page }) => {
+        const dialogs = [];
+        page.on('dialog', d => { dialogs.push(d.message()); d.dismiss().catch(() => {}); });
+        await page.goto('/alerts.html#rules');
+        const rule = page.locator('.rule-card').filter({ hasText: `${MARK} rule` }).first();
+        await expect(rule).toBeVisible({ timeout: 15_000 });
+        expect(await rule.innerText()).toContain('<img src=x onerror=');
+        // The channel chip used to pass the rule name through an onclick string.
+        await rule.locator('.channel-count-chip').click();
+        await expect(page.locator('#assignChannelsTitle')).toContainText(`${MARK} rule`);
+        await expect(page.locator('#assignChannelsList')).toContainText(`${MARK} channel`, { timeout: 10_000 });
+
+        await page.evaluate(() => { closeModal('assignChannelsModal'); activateTab('channels'); });
+        await expect(page.locator('.channel-card').filter({ hasText: `${MARK} channel` })).toBeVisible({ timeout: 15_000 });
+
+        await page.waitForTimeout(500);
+        expect(await page.evaluate(() => window.__ezhkXss || null)).toBeNull();
+        expect(dialogs).toEqual([]);
+        expect(await page.locator(`img[onerror*="${MARK}"]`).count()).toBe(0);
+    });
+});
+
 // AppDialogs is used everywhere with messages that interpolate data (names,
 // errors returned by the server). A plain string is shown as text; formatting
 // needs HtmlSafe.html (data inside stays escaped) or HtmlSafe.raw (constants).
