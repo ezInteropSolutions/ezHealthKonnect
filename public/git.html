@@ -467,7 +467,6 @@ let repoIsCloned  = false;  // true once loadStatus() succeeds
 // Clipboard buffers — never put large JSON in onclick attributes
 let _clipBuffers  = {};
 
-const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -496,9 +495,9 @@ async function loadRepos() {
     } catch { repos = []; }
 
     const sel = document.getElementById('repoSelect');
-    sel.innerHTML = repos.map(r =>
-        `<option value="${esc(r.id)}" title="${esc(r.remote_url)}">${esc(r.name)}</option>`
-    ).join('');
+    sel.innerHTML = HtmlSafe.html`${repos.map(r =>
+        HtmlSafe.html`<option value="${r.id}" title="${r.remote_url}">${r.name}</option>`
+    )}`;
     currentRepo = repos[0] || null;
 }
 
@@ -519,11 +518,11 @@ async function loadBranches() {
         if (!body.success) return;
         document.getElementById('branchName').textContent = body.current || currentRepo.branch;
         const sel = document.getElementById('branchSelect');
-        sel.innerHTML = (body.data || []).map(b =>
-            `<option value="${esc(b)}" ${b === body.current ? 'selected' : ''}>${esc(b)}</option>`
-        ).join('');
+        sel.innerHTML = HtmlSafe.html`${(body.data || []).map(b =>
+            HtmlSafe.html`<option value="${b}" ${b === body.current ? 'selected' : ''}>${b}</option>`
+        )}`;
         if (!(body.data || []).length) {
-            sel.innerHTML = `<option value="${esc(currentRepo.branch)}">${esc(currentRepo.branch)}</option>`;
+            sel.innerHTML = HtmlSafe.html`<option value="${currentRepo.branch}">${currentRepo.branch}</option>`;
         }
     } catch { /* not cloned yet */ }
 }
@@ -704,7 +703,7 @@ function renderIfaceList() {
         el.innerHTML = '<div class="state-msg"><i class="fas fa-plug"></i>No interfaces found.</div>';
         return;
     }
-    el.innerHTML = interfaces.map(iface => {
+    el.innerHTML = HtmlSafe.html`${interfaces.map(iface => {
         const isSelected = selected.has(iface.id);
         const isActive   = iface.status === 'active' || iface.is_active;
         const msgType    = iface.message_type || iface.messageType || '';
@@ -712,29 +711,29 @@ function renderIfaceList() {
         const gitState   = statusMap[slug];
 
         const gitBadge = gitState === 'modified'
-            ? `<span class="badge badge-modified" title="Uncommitted changes — click to diff"
-                    onclick="event.stopPropagation();openDiff('${esc(iface.id)}','${esc(iface.name)}')">● modified</span>`
+            ? HtmlSafe.html`<span class="badge badge-modified" title="Uncommitted changes — click to diff"
+                    data-id="${iface.id}" onclick="event.stopPropagation();openDiff(this.dataset.id)">● modified</span>`
             : gitState === 'new'
-            ? `<span class="badge badge-new" title="Not yet committed — click to diff"
-                    onclick="event.stopPropagation();openDiff('${esc(iface.id)}','${esc(iface.name)}')">+ new</span>`
+            ? HtmlSafe.html`<span class="badge badge-new" title="Not yet committed — click to diff"
+                    data-id="${iface.id}" onclick="event.stopPropagation();openDiff(this.dataset.id)">+ new</span>`
             : '';
 
         const diffTitle  = repoIsCloned ? 'View diff vs git HEAD' : 'Pull the repository first to enable diff';
         const diffBtn    = currentRepo
-            ? `<button class="diff-btn" title="${diffTitle}" ${!repoIsCloned ? 'disabled' : ''}
-                      onclick="event.stopPropagation();openDiff('${esc(iface.id)}','${esc(iface.name)}')">
+            ? HtmlSafe.html`<button class="diff-btn" title="${diffTitle}" ${!repoIsCloned ? HtmlSafe.raw('disabled') : ''}
+                      data-id="${iface.id}" onclick="event.stopPropagation();openDiff(this.dataset.id)">
                    <i class="fas fa-code-compare"></i>
                </button>`
             : '';
 
-        return `<div class="iface-row ${isSelected ? 'selected' : ''}" onclick="toggleIface('${esc(iface.id)}')">
-            <input type="checkbox" ${isSelected ? 'checked' : ''}
-                   onclick="event.stopPropagation();toggleIface('${esc(iface.id)}')">
+        return HtmlSafe.html`<div class="iface-row ${isSelected ? 'selected' : ''}" data-id="${iface.id}" onclick="toggleIface(this.dataset.id)">
+            <input type="checkbox" ${isSelected ? HtmlSafe.raw('checked') : ''}
+                   data-id="${iface.id}" onclick="event.stopPropagation();toggleIface(this.dataset.id)">
             <div class="iface-row-info">
-                <div class="iface-row-name">${esc(iface.name)}</div>
+                <div class="iface-row-name">${iface.name}</div>
                 <div class="iface-row-meta">
-                    ${msgType ? `<code>${esc(msgType)}</code> &nbsp;·&nbsp;` : ''}
-                    ${esc(iface.source_type || iface.sourceType || '')}
+                    ${msgType ? HtmlSafe.html`<code>${msgType}</code> &nbsp;·&nbsp;` : ''}
+                    ${iface.source_type || iface.sourceType || ''}
                 </div>
             </div>
             <div class="iface-actions">
@@ -743,7 +742,7 @@ function renderIfaceList() {
                 ${diffBtn}
             </div>
         </div>`;
-    }).join('');
+    })}`;
 }
 
 function toggleIface(id) {
@@ -772,8 +771,8 @@ function updateSelectedSummary() {
     }
     const names = [...selected].map(id => { const f = interfaces.find(i => i.id === id); return f ? f.name : id; });
     el.className = 'selected-summary';
-    el.innerHTML = `<strong>${selected.size}</strong> interface${selected.size > 1 ? 's' : ''} selected: `
-        + names.map(n => `<em>${esc(n)}</em>`).join(', ');
+    el.innerHTML = HtmlSafe.html`<strong>${selected.size}</strong> interface${selected.size > 1 ? 's' : ''} selected: ${
+        names.map((n, i) => HtmlSafe.html`${i ? ', ' : ''}<em>${n}</em>`)}`;
     btn.disabled = btn2.disabled = !msg.trim();
 }
 
@@ -804,11 +803,9 @@ async function doCommit(andPush) {
         const results = body.results || [];
         const ok      = results.filter(r => !r.skipped);
         const skipped = results.filter(r => r.skipped);
-        let html = `<i class="fas fa-check-circle"></i> Committed <span class="sha">${esc(sha.slice(0,7))}</span>`;
-        if (andPush) html += ' and pushed';
-        html += ` — ${ok.length} interface${ok.length !== 1 ? 's' : ''}`;
-        if (skipped.length) html += ` &nbsp;<span style="color:#92400e">(${skipped.length} skipped)</span>`;
-        resultEl.innerHTML = html;
+        resultEl.innerHTML = HtmlSafe.html`<i class="fas fa-check-circle"></i> Committed <span class="sha">${sha.slice(0,7)}</span>${
+            andPush ? ' and pushed' : ''} — ${ok.length} interface${ok.length !== 1 ? 's' : ''}${
+            skipped.length ? HtmlSafe.html` &nbsp;<span style="color:#92400e">(${skipped.length} skipped)</span>` : ''}`;
         resultEl.className = 'commit-result show';
         document.getElementById('commitMsg').value = '';
         toast(`✓ Committed ${sha.slice(0,7)}${andPush ? ' and pushed' : ''}`, 'success');
@@ -835,18 +832,18 @@ async function loadLog() {
             el.innerHTML = '<div class="state-msg"><i class="fas fa-code-commit"></i>No commits yet. Make your first commit above.</div>';
             return;
         }
-        el.innerHTML = commits.map(c => {
+        el.innerHTML = HtmlSafe.html`${commits.map(c => {
             const ts = new Date(c.timestamp).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
-            return `<div class="log-item">
-                <span class="log-sha">${esc(c.short_sha)}</span>
+            return HtmlSafe.html`<div class="log-item">
+                <span class="log-sha">${c.short_sha}</span>
                 <div class="log-body">
-                    <div class="log-msg">${esc((c.message || '').split('\n')[0])}</div>
-                    <div class="log-meta">${esc(c.author)} · ${ts}</div>
+                    <div class="log-msg">${(c.message || '').split('\n')[0]}</div>
+                    <div class="log-meta">${c.author} · ${ts}</div>
                 </div>
             </div>`;
-        }).join('');
+        })}`;
     } catch (e) {
-        el.innerHTML = `<div class="state-msg" style="color:#dc2626"><i class="fas fa-triangle-exclamation"></i>${esc(e.message)}</div>`;
+        el.innerHTML = HtmlSafe.html`<div class="state-msg" style="color:#dc2626"><i class="fas fa-triangle-exclamation"></i>${e.message}</div>`;
     }
 }
 
@@ -857,7 +854,8 @@ async function refreshAll() {
 }
 
 // ── Diff Modal ────────────────────────────────────────────────────────────────
-async function openDiff(interfaceId, interfaceName) {
+async function openDiff(interfaceId) {
+    const interfaceName = (interfaces.find(i => String(i.id) === String(interfaceId)) || {}).name || '';
     if (!currentRepo) { toast('No repository selected.', 'error'); return; }
 
     // Guard: if repo isn't cloned yet, don't attempt diff (it would trigger a slow clone)
@@ -867,7 +865,7 @@ async function openDiff(interfaceId, interfaceName) {
     }
 
     document.getElementById('diffTitle').innerHTML =
-        `<i class="fas fa-code-compare" style="color:var(--navy);margin-right:8px"></i>${esc(interfaceName)}`;
+        HtmlSafe.html`<i class="fas fa-code-compare" style="color:var(--navy);margin-right:8px"></i>${interfaceName}`;
     document.getElementById('diffStatusBadge').textContent = '';
     document.getElementById('diffStatusBadge').className = 'diff-status-badge';
     document.getElementById('diffStats').innerHTML = '';
@@ -885,7 +883,7 @@ async function openDiff(interfaceId, interfaceName) {
         renderDiffModal(body.data);
     } catch (e) {
         document.getElementById('diffBody').innerHTML =
-            `<div class="diff-loading" style="color:#dc2626"><i class="fas fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;
+            HtmlSafe.html`<div class="diff-loading" style="color:#dc2626"><i class="fas fa-triangle-exclamation"></i> ${e.message}</div>`;
     }
 }
 
@@ -916,21 +914,21 @@ function renderDiffModal(diff) {
     if (committedJSON) {
         const result = lcsLineDiff(committedJSON.split('\n'), currentJSON.split('\n'));
         stats = result.stats;
-        committedPaneContent = `<div class="diff-pane-content">${result.committedHtml}</div>`;
-        currentPaneContent   = `<div class="diff-pane-content">${result.currentHtml}</div>`;
+        committedPaneContent = HtmlSafe.html`<div class="diff-pane-content">${result.committedHtml}</div>`;
+        currentPaneContent   = HtmlSafe.html`<div class="diff-pane-content">${result.currentHtml}</div>`;
     } else {
-        committedPaneContent = `<div class="diff-pane-content empty">
+        committedPaneContent = HtmlSafe.html`<div class="diff-pane-content empty">
             <div><i class="fas fa-file-circle-plus" style="font-size:28px;margin-bottom:10px;display:block"></i>
             Not committed yet.<br><span style="font-size:12px">This interface has never been pushed to git.</span></div>
         </div>`;
         const lines = currentJSON.split('\n');
         stats.added = lines.length;
-        currentPaneContent = `<div class="diff-pane-content">${
-            lines.map((l, i) => `<span class="dl dl-add"><span class="diff-ln">${i+1}</span>${esc(l)}</span>`).join('')
+        currentPaneContent = HtmlSafe.html`<div class="diff-pane-content">${
+            lines.map((l, i) => HtmlSafe.html`<span class="dl dl-add"><span class="diff-ln">${i+1}</span>${l}</span>`)
         }</div>`;
     }
 
-    document.getElementById('diffBody').innerHTML = `
+    document.getElementById('diffBody').innerHTML = HtmlSafe.html`
         <div class="diff-pane">
             <div class="diff-pane-header">
                 <span><i class="fab fa-git-alt" style="margin-right:5px"></i>Committed (git HEAD)</span>
@@ -950,10 +948,10 @@ function renderDiffModal(diff) {
             <div class="diff-pane-scroll">${currentPaneContent}</div>
         </div>`;
 
-    document.getElementById('diffStats').innerHTML = stats.added || stats.removed
-        ? `<span class="diff-stat-add">+${stats.added} added</span>
+    document.getElementById('diffStats').innerHTML = HtmlSafe.html`${stats.added || stats.removed
+        ? HtmlSafe.html`<span class="diff-stat-add">+${stats.added} added</span>
            <span class="diff-stat-del">−${stats.removed} removed</span>`
-        : '<span style="color:#166534">✓ No changes</span>';
+        : HtmlSafe.raw('<span style="color:#166534">✓ No changes</span>')}`;
 }
 
 // ── LCS-based line diff ───────────────────────────────────────────────────────
@@ -988,21 +986,21 @@ function lcsLineDiff(oldLines, newLines) {
     }
 
     // Render HTML — left pane shows old (del), right pane shows new (add)
-    let committedHtml = '', currentHtml = '';
+    const committedHtml = [], currentHtml = [];
     let oldLn = 1, newLn = 1;
     let added = 0, removed = 0;
 
     for (const op of ops) {
         if (op.t === '=') {
-            committedHtml += `<span class="dl dl-same"><span class="diff-ln">${oldLn++}</span>${esc(op.old)}</span>`;
-            currentHtml   += `<span class="dl dl-same"><span class="diff-ln">${newLn++}</span>${esc(op.new)}</span>`;
+            committedHtml.push(HtmlSafe.html`<span class="dl dl-same"><span class="diff-ln">${oldLn++}</span>${op.old}</span>`);
+            currentHtml.push(HtmlSafe.html`<span class="dl dl-same"><span class="diff-ln">${newLn++}</span>${op.new}</span>`);
         } else if (op.t === '-') {
-            committedHtml += `<span class="dl dl-del"><span class="diff-ln">${oldLn++}</span>${esc(op.old)}</span>`;
-            currentHtml   += `<span class="dl dl-same"><span class="diff-ln"> </span> </span>`;
+            committedHtml.push(HtmlSafe.html`<span class="dl dl-del"><span class="diff-ln">${oldLn++}</span>${op.old}</span>`);
+            currentHtml.push(HtmlSafe.html`<span class="dl dl-same"><span class="diff-ln"> </span> </span>`);
             removed++;
         } else {
-            committedHtml += `<span class="dl dl-same"><span class="diff-ln"> </span> </span>`;
-            currentHtml   += `<span class="dl dl-add"><span class="diff-ln">${newLn++}</span>${esc(op.new)}</span>`;
+            committedHtml.push(HtmlSafe.html`<span class="dl dl-same"><span class="diff-ln"> </span> </span>`);
+            currentHtml.push(HtmlSafe.html`<span class="dl dl-add"><span class="diff-ln">${newLn++}</span>${op.new}</span>`);
             added++;
         }
     }
