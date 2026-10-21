@@ -857,7 +857,7 @@
                 html += `<a class="toc-item sub" data-id="${sub.id}" onclick="docShowSection('${sub.id}')">${sub.title}</a>`;
             });
         });
-        toc.innerHTML = html;
+        toc.innerHTML = HtmlSafe.raw(html); // the app's own ALERT_DOCS content
     }
 
     function buildContent() {
@@ -875,7 +875,7 @@
                     </div>`;
             });
         });
-        el.innerHTML = html;
+        el.innerHTML = HtmlSafe.raw(html); // the app's own ALERT_DOCS content
     }
 
     window.docShowSection = function (id) {

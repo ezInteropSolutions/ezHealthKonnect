@@ -43,10 +43,6 @@ function showToast(msg, ok) {
     setTimeout(function() { t.remove(); }, 3500);
 }
 
-function esc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
 // YYYY-MM-DD using LOCAL date parts (not toISOString(), which is UTC-based
 // and can roll the date to the next/previous day for users off UTC+0) —
 // mirrors formatDateYMD in public/js/interfaces.js.
@@ -65,9 +61,9 @@ function formatDateTimeYMD(date) {
 
 function copyInterfaceId(id, btn) {
     navigator.clipboard.writeText(id).then(function() {
-        var orig = btn.innerHTML;
+        var orig = Array.prototype.slice.call(btn.childNodes);
         btn.innerHTML = '<i class="fas fa-check"></i>';
-        setTimeout(function() { btn.innerHTML = orig; }, 1500);
+        setTimeout(function() { btn.replaceChildren.apply(btn, orig); }, 1500);
     });
 }
 
@@ -89,12 +85,12 @@ function loadInterfaceHeader() {
 
             var createdText = iface.createdAt ? formatDateTimeYMD(new Date(iface.createdAt)) : 'Unknown';
             var updatedText = iface.updatedAt ? formatDateTimeYMD(new Date(iface.updatedAt)) : 'Unknown';
-            document.getElementById('interfaceMeta').innerHTML =
-                '<span>ID: <code>' + esc(iface.id) + '</code> ' +
-                '<button class="copy-id-btn" onclick="copyInterfaceId(\'' + esc(iface.id) + '\', this)" title="Copy interface ID">' +
-                '<i class="fas fa-copy"></i></button></span>' +
-                '<span>Created: ' + createdText + '</span>' +
-                '<span>Updated: ' + updatedText + '</span>';
+            document.getElementById('interfaceMeta').innerHTML = HtmlSafe.html`
+                <span>ID: <code>${iface.id}</code>
+                <button class="copy-id-btn" data-id="${iface.id}" onclick="copyInterfaceId(this.dataset.id, this)" title="Copy interface ID">
+                <i class="fas fa-copy"></i></button></span>
+                <span>Created: ${createdText}</span>
+                <span>Updated: ${updatedText}</span>`;
 
             var pill = document.getElementById('statusPill');
             // Runtime status (is it actually running right now) takes priority over
@@ -133,23 +129,22 @@ function renderErrorBanner(err) {
 
     var ts = err.timestamp ? new Date(err.timestamp).toLocaleString() : '';
     var detail = [
-        err.port      != null ? 'port ' + esc(err.port)           : '',
-        err.directory ? 'directory ' + esc(err.directory) : '',
-        err.pattern   ? 'pattern '   + esc(err.pattern)   : ''
+        err.port      != null ? 'port ' + err.port      : '',
+        err.directory ? 'directory ' + err.directory : '',
+        err.pattern   ? 'pattern '   + err.pattern   : ''
     ].filter(Boolean).join(', ');
 
-    el.innerHTML =
-        '<div class="alert-card critical" style="margin-bottom:16px">' +
-            '<div class="alert-sev-dot critical"></div>' +
-            '<div class="alert-body">' +
-                '<div class="alert-title">Interface halted' + (ts ? ' — ' + esc(ts) : '') + '</div>' +
-                '<div class="alert-meta">' + esc(err.reason || 'Unknown error') +
-                    (detail ? ' (' + detail + ')' : '') + '</div>' +
-            '</div>' +
-            '<button onclick="document.getElementById(\'interfaceErrorBanner\').style.display=\'none\'" ' +
-                'style="border:none;background:none;cursor:pointer;color:var(--muted)" title="Dismiss">' +
-                '<i class="fas fa-xmark"></i></button>' +
-        '</div>';
+    el.innerHTML = HtmlSafe.html`
+        <div class="alert-card critical" style="margin-bottom:16px">
+            <div class="alert-sev-dot critical"></div>
+            <div class="alert-body">
+                <div class="alert-title">Interface halted${ts ? ' — ' + ts : ''}</div>
+                <div class="alert-meta">${err.reason || 'Unknown error'}${detail ? ' (' + detail + ')' : ''}</div>
+            </div>
+            <button onclick="document.getElementById('interfaceErrorBanner').style.display='none'"
+                style="border:none;background:none;cursor:pointer;color:var(--muted)" title="Dismiss">
+                <i class="fas fa-xmark"></i></button>
+        </div>`;
     el.style.display = '';
 }
 
@@ -211,26 +206,29 @@ function loadOverview() {
 function renderKPIs(card) {
     var el = document.getElementById('kpiGrid');
     if (!card) {
-        el.innerHTML = kpiCard('Messages Today', '—', '') +
-                       kpiCard('Error Rate', '—', '') +
-                       kpiCard('Avg Processing', '—', '') +
-                       kpiCard('Status', _interfaceData ? (_interfaceData.interface_status || 'draft').toUpperCase() : '—', '');
+        el.innerHTML = HtmlSafe.html`${[
+            kpiCard('Messages Today', '—', ''),
+            kpiCard('Error Rate', '—', ''),
+            kpiCard('Avg Processing', '—', ''),
+            kpiCard('Status', _interfaceData ? (_interfaceData.interface_status || 'draft').toUpperCase() : '—', ''),
+        ]}`;
         return;
     }
     var errColor = card.error_rate_today > 10 ? 'color:#dc2626' : card.error_rate_today > 5 ? 'color:#d97706' : 'color:#16a34a';
-    el.innerHTML =
-        kpiCard('Messages Today', (card.messages_today || 0).toLocaleString(), 'last 24h') +
-        kpiCard('Error Rate', card.error_rate_today != null ? card.error_rate_today.toFixed(1) + '%' : '0%', '24h window', errColor) +
-        kpiCard('Avg Processing', card.avg_processing_time_ms != null ? Math.round(card.avg_processing_time_ms) + ' ms' : '—', 'last hour') +
-        kpiCard('Status', (card.status || 'unknown').toUpperCase(), '');
+    el.innerHTML = HtmlSafe.html`${[
+        kpiCard('Messages Today', (card.messages_today || 0).toLocaleString(), 'last 24h'),
+        kpiCard('Error Rate', card.error_rate_today != null ? card.error_rate_today.toFixed(1) + '%' : '0%', '24h window', errColor),
+        kpiCard('Avg Processing', card.avg_processing_time_ms != null ? Math.round(card.avg_processing_time_ms) + ' ms' : '—', 'last hour'),
+        kpiCard('Status', (card.status || 'unknown').toUpperCase(), ''),
+    ]}`;
 }
 
 function kpiCard(label, value, sub, style) {
-    return '<div class="kpi-card">' +
-        '<div class="kpi-label">' + esc(label) + '</div>' +
-        '<div class="kpi-value"' + (style ? ' style="' + style + '"' : '') + '>' + esc(value) + '</div>' +
-        (sub ? '<div class="kpi-sub">' + esc(sub) + '</div>' : '') +
-    '</div>';
+    return HtmlSafe.html`<div class="kpi-card">
+        <div class="kpi-label">${label}</div>
+        <div class="kpi-value" style="${style || ''}">${value}</div>
+        ${sub ? HtmlSafe.html`<div class="kpi-sub">${sub}</div>` : ''}
+    </div>`;
 }
 
 function renderRecentMessages(messages) {
@@ -239,17 +237,17 @@ function renderRecentMessages(messages) {
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">No messages yet</td></tr>';
         return;
     }
-    tbody.innerHTML = messages.slice(0, 10).map(function(m) {
+    tbody.innerHTML = HtmlSafe.html`${messages.slice(0, 10).map(function(m) {
         var status = (m.status || '').toLowerCase();
         var ts = m.received_at ? new Date(m.received_at).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
-        return '<tr>' +
-            '<td style="font-family:monospace;font-size:11px">' + esc((m.message_id || m.id || '').slice(0, 16)) + '…</td>' +
-            '<td>' + esc(m.message_type || '—') + '</td>' +
-            '<td><span class="status-dot ' + status + '"></span>' + esc(status) + '</td>' +
-            '<td>' + ts + '</td>' +
-            '<td>' + (m.processing_time_ms != null ? m.processing_time_ms : '—') + '</td>' +
-        '</tr>';
-    }).join('');
+        return HtmlSafe.html`<tr>
+            <td style="font-family:monospace;font-size:11px">${String(m.message_id || m.id || '').slice(0, 16)}…</td>
+            <td>${m.message_type || '—'}</td>
+            <td><span class="status-dot ${status}"></span>${status}</td>
+            <td>${ts}</td>
+            <td>${m.processing_time_ms != null ? m.processing_time_ms : '—'}</td>
+        </tr>`;
+    })}`;
 }
 
 // ── Pipeline tab ──────────────────────────────────────────────────────────────
@@ -279,16 +277,16 @@ function loadInterfaceAlerts() {
                 el.innerHTML = '<div class="empty-state"><i class="fas fa-circle-check" style="color:#22c55e;font-size:28px"></i><p>No active alerts for this interface</p></div>';
                 return;
             }
-            el.innerHTML = alerts.map(function(a) {
-                return '<div class="alert-card ' + a.severity + '">' +
-                    '<div class="alert-sev-dot ' + a.severity + '"></div>' +
-                    '<div class="alert-body">' +
-                        '<div class="alert-title">' + esc(a.alert_type.replace(/_/g,' ')) + '</div>' +
-                        '<div class="alert-meta">' + esc(a.message) + '</div>' +
-                    '</div>' +
-                    '<button onclick="ackAlert(\'' + a.id + '\')" style="padding:5px 12px;font-size:12px;border-radius:5px;cursor:pointer;border:1px solid var(--pink-mid);background:var(--pink-light);color:var(--pink)">Ack</button>' +
-                '</div>';
-            }).join('');
+            el.innerHTML = HtmlSafe.html`${alerts.map(function(a) {
+                return HtmlSafe.html`<div class="alert-card ${a.severity}">
+                    <div class="alert-sev-dot ${a.severity}"></div>
+                    <div class="alert-body">
+                        <div class="alert-title">${String(a.alert_type || '').replace(/_/g,' ')}</div>
+                        <div class="alert-meta">${a.message}</div>
+                    </div>
+                    <button data-id="${a.id}" onclick="ackAlert(this.dataset.id)" style="padding:5px 12px;font-size:12px;border-radius:5px;cursor:pointer;border:1px solid var(--pink-mid);background:var(--pink-light);color:var(--pink)">Ack</button>
+                </div>`;
+            })}`;
         })
         .catch(function() {});
 }
@@ -311,21 +309,19 @@ function loadInterfaceRules() {
                 el.innerHTML = '<div class="empty-state"><i class="fas fa-list-check"></i><p>No rules configured. Global rules apply by default.</p></div>';
                 return;
             }
-            el.innerHTML = rules.map(function(r) {
+            el.innerHTML = HtmlSafe.html`${rules.map(function(r) {
                 var thresholds = [];
                 if (r.threshold_warning  != null) thresholds.push('⚠ ' + r.threshold_warning);
                 if (r.threshold_critical != null) thresholds.push('🔴 ' + r.threshold_critical);
-                return '<div class="rule-card">' +
-                    '<span class="rule-type-badge">' + esc(r.rule_type.replace(/_/g,' ')) + '</span>' +
-                    '<div class="rule-info">' +
-                        '<div class="rule-name">' + esc(r.name) +
-                            (!r.interface_id ? ' <span style="font-size:10px;color:var(--muted)">(global)</span>' : '') +
-                        '</div>' +
-                        '<div class="rule-desc">' + thresholds.join('  ') + '  window: ' + r.evaluation_window_minutes + 'min</div>' +
-                    '</div>' +
-                    '<a href="alerts.html#rules" style="font-size:12px;color:var(--pink);text-decoration:none">Edit →</a>' +
-                '</div>';
-            }).join('');
+                return HtmlSafe.html`<div class="rule-card">
+                    <span class="rule-type-badge">${String(r.rule_type || '').replace(/_/g,' ')}</span>
+                    <div class="rule-info">
+                        <div class="rule-name">${r.name}${!r.interface_id ? HtmlSafe.raw(' <span style="font-size:10px;color:var(--muted)">(global)</span>') : ''}</div>
+                        <div class="rule-desc">${thresholds.join('  ')}  window: ${r.evaluation_window_minutes}min</div>
+                    </div>
+                    <a href="alerts.html#rules" style="font-size:12px;color:var(--pink);text-decoration:none">Edit →</a>
+                </div>`;
+            })}`;
         })
         .catch(function() {});
 }

@@ -36,6 +36,15 @@ test.describe('User-entered text is never rendered as HTML', () => {
         if (interfaceId) await request.delete(`/api/interfaces/${interfaceId}`).catch(() => {});
     });
 
+    test('/interface-detail.html renders the interface as text', async ({ page }) => {
+        await page.goto(`/interface-detail.html?interfaceId=${interfaceId}`);
+        await expect(page.locator('#interfaceName')).toContainText(MARK, { timeout: 15_000 });
+        await expect(page.locator('#interfaceMeta code')).toHaveText(interfaceId);
+        await page.waitForTimeout(1500);
+        expect(await page.evaluate(() => window.__ezhkXss || null)).toBeNull();
+        expect(await page.locator(`img[onerror*="${MARK}"], svg[onload*="${MARK}"]`).count()).toBe(0);
+    });
+
     for (const p of PAGES) {
         test(`${p.url} renders an interface name and description as text`, async ({ page }) => {
             const dialogs = [];
