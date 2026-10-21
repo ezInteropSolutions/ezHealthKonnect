@@ -524,11 +524,11 @@ class FHIRMappingStepHandler extends BaseStepHandler {
     }
 
     showResourceDetails() {
-        const details = this.availableResources.map((resource, index) => 
-            `${index + 1}. ${resource}`
-        ).join('\n');
-        
-        AppDialogs.alert(`<b>Available FHIR Resources</b><br><br>${details.replace(/\n/g,'<br>')}<br><br>Total: ${this.availableResources.length} resources<br>Message Type: ${this.getMessageTypeFromParsedData()}`, { title: 'FHIR Resources', type: 'info' });
+        const details = this.availableResources.map((resource, index) =>
+            HtmlSafe.html`${index + 1}. ${resource}<br>`
+        );
+
+        AppDialogs.alert(HtmlSafe.html`<b>Available FHIR Resources</b><br><br>${details}<br>Total: ${this.availableResources.length} resources<br>Message Type: ${this.getMessageTypeFromParsedData()}`, { title: 'FHIR Resources', type: 'info' });
     }
 
     async generateAllMappings() {

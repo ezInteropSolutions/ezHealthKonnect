@@ -67,6 +67,49 @@ test.describe('User-entered text is never rendered as HTML', () => {
     }
 });
 
+// AppDialogs is used everywhere with messages that interpolate data (names,
+// errors returned by the server). A plain string is shown as text; formatting
+// needs HtmlSafe.html (data inside stays escaped) or HtmlSafe.raw (constants).
+test.describe('Dialogs show plain-string messages as text', () => {
+    test('alert/confirm/prompt escape strings and keep HtmlSafe markup', async ({ page }) => {
+        await page.goto('/interfaces.html');
+        await page.waitForFunction(() => window.AppDialogs && window.HtmlSafe);
+        const result = await page.evaluate(async (mark) => {
+            const payload = `<img src=x onerror="window.__ezhkXss='${mark}'"> name`;
+            const read = () => {
+                const body = document.querySelector('.app-dialog-body');
+                const out = { text: body.innerText, bold: body.querySelectorAll('b').length, img: body.querySelectorAll('img').length };
+                document.querySelector('.app-dialog-overlay').remove();
+                return out;
+            };
+            const results = {};
+            AppDialogs.alert(payload, { title: payload });
+            results.alert = read();
+            AppDialogs.confirm(HtmlSafe.html`<b>Delete</b> ${payload}?`);
+            results.confirm = read();
+            AppDialogs.prompt('Reason', { defaultValue: `"><img src=x onerror="window.__ezhkXss='${mark}-v'">` });
+            results.promptValue = document.querySelector('#_appDlgInput').value;
+            results.promptImg = document.querySelectorAll('.app-dialog-overlay img').length;
+            document.querySelector('.app-dialog-overlay').remove();
+            AppDialogs.alert(HtmlSafe.raw('Help:<br><b>bold</b>'));
+            results.raw = read();
+            await new Promise(r => setTimeout(r, 300));
+            results.fired = window.__ezhkXss || null;
+            return results;
+        }, MARK);
+        expect(result.fired).toBeNull();
+        expect(result.alert.text).toContain('<img src=x onerror=');
+        expect(result.alert.img).toBe(0);
+        expect(result.confirm.bold).toBe(1);
+        expect(result.confirm.text).toContain('<img src=x');
+        expect(result.confirm.img).toBe(0);
+        expect(result.promptValue).toContain('"><img src=x');
+        expect(result.promptImg).toBe(0);
+        expect(result.raw.bold).toBe(1);
+        expect(result.raw.text).not.toContain('<b>');
+    });
+});
+
 // Clinical documents are rendered as formatted content on purpose, so they are
 // sanitized (FHIR narratives) or isolated (CDA rendering) rather than escaped.
 test.describe('Clinical document content cannot run script', () => {

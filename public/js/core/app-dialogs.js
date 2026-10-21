@@ -89,6 +89,9 @@
     }
 
     // ─── alert ────────────────────────────────────────────────────────────────
+    // `message` (and title/button text) is shown as text. To format it, build it
+    // with HtmlSafe.html (data inside stays escaped) or HtmlSafe.raw (constant
+    // help text only).
     function alert(message, opts) {
         opts = opts || {};
         ensureStyles();
@@ -96,7 +99,7 @@
         return new Promise(function (resolve) {
             const overlay = buildOverlay();
             overlay._dismiss = close;
-            overlay.innerHTML = `
+            overlay.innerHTML = HtmlSafe.html`
                 <div class="app-dialog-box">
                     <div class="app-dialog-header" style="background:${p.bg};border-bottom-color:${p.border}">
                         <span>${p.icon}</span>
@@ -124,7 +127,7 @@
         return new Promise(function (resolve) {
             const overlay = buildOverlay();
             overlay._dismiss = function () { resolve(false); overlay.remove(); };
-            overlay.innerHTML = `
+            overlay.innerHTML = HtmlSafe.html`
                 <div class="app-dialog-box">
                     <div class="app-dialog-header" style="background:${p.bg};border-bottom-color:${p.border}">
                         <span>${p.icon}</span>
@@ -155,7 +158,7 @@
         return new Promise(function (resolve) {
             const overlay = buildOverlay();
             overlay._dismiss = function () { resolve(null); overlay.remove(); };
-            overlay.innerHTML = `
+            overlay.innerHTML = HtmlSafe.html`
                 <div class="app-dialog-box">
                     <div class="app-dialog-header" style="background:${p.bg};border-bottom-color:${p.border}">
                         <span>${p.icon}</span>
@@ -164,8 +167,8 @@
                     <div class="app-dialog-body">
                         ${message}
                         <input class="app-dialog-input" id="_appDlgInput" type="text"
-                               value="${(opts.defaultValue || '').replace(/"/g,'&quot;')}"
-                               placeholder="${(opts.placeholder || '').replace(/"/g,'&quot;')}">
+                               value="${opts.defaultValue || ''}"
+                               placeholder="${opts.placeholder || ''}">
                     </div>
                     <div class="app-dialog-footer">
                         <button class="app-dialog-btn app-dialog-btn-cancel" id="_appDlgCancel">

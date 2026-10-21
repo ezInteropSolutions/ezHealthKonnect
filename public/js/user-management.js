@@ -266,7 +266,7 @@
         const u = state.users.find(x => x.id === id);
         if (!u) return;
         const name = u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : (u.name || u.email);
-        if (!await AppDialogs.confirm(`Delete user "<b>${name}</b>"? This cannot be undone.`, { title: 'Delete User', type: 'danger', confirmText: 'Delete' })) return;
+        if (!await AppDialogs.confirm(HtmlSafe.html`Delete user "<b>${name}</b>"? This cannot be undone.`, { title: 'Delete User', type: 'danger', confirmText: 'Delete' })) return;
         try {
             await api('DELETE', `/api/users/${id}`);
             showAlert('User deleted');

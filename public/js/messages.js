@@ -3396,9 +3396,9 @@ class MessageManager {
         if (count === 0) return;
 
         const typed = await AppDialogs.prompt(
-            `You are about to reprocess <strong>${count.toLocaleString()}</strong> message(s). ` +
-            `This re-runs them through the pipeline and may re-deliver to the configured destination. ` +
-            `This cannot be undone.<br><br>Type <strong>REPROCESS</strong> to confirm.`,
+            HtmlSafe.html`You are about to reprocess <strong>${count.toLocaleString()}</strong> message(s).
+            This re-runs them through the pipeline and may re-deliver to the configured destination.
+            This cannot be undone.<br><br>Type <strong>REPROCESS</strong> to confirm.`,
             { title: 'Confirm Bulk Reprocess', type: 'warning', placeholder: 'REPROCESS', okText: 'Reprocess' }
         );
         if (typed === null) return; // user cancelled

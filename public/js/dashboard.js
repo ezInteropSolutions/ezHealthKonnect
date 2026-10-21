@@ -583,7 +583,7 @@ async function previewTemplate(id, activeTab) {
 }
 
 async function deleteTemplate(id, name) {
-    const ok = await AppDialogs.confirm(`Delete template "<b>${name}</b>"?<br><br>This cannot be undone.`, { title: 'Delete Template', type: 'danger', confirmText: 'Delete' });
+    const ok = await AppDialogs.confirm(HtmlSafe.html`Delete template "<b>${name}</b>"?<br><br>This cannot be undone.`, { title: 'Delete Template', type: 'danger', confirmText: 'Delete' });
     if (!ok) return;
     try {
         const res = await fetch(`/api/interface-templates/${id}`, {

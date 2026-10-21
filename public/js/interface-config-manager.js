@@ -978,12 +978,11 @@ function testInterfaceConfiguration() {
         return;
     }
 
-    AppDialogs.alert(
-        `<b>Interface:</b> ${formData.name}<br>` +
-        `<b>Source:</b> ${formData.sourceType} (${formData.sourceConnectivity})<br>` +
-        `<b>Target:</b> ${formData.targetType} (${formData.targetConnectivity})<br>` +
-        `<b>Routing:</b> ${formData.processingRules?.routingMode || 'direct'}<br><br>` +
-        'In production, this would test connectivity and validate settings.',
+    AppDialogs.alert(HtmlSafe.html`<b>Interface:</b> ${formData.name}<br>
+        <b>Source:</b> ${formData.sourceType} (${formData.sourceConnectivity})<br>
+        <b>Target:</b> ${formData.targetType} (${formData.targetConnectivity})<br>
+        <b>Routing:</b> ${formData.processingRules?.routingMode || 'direct'}<br><br>
+        In production, this would test connectivity and validate settings.`,
         { title: '🧪 Configuration Test', type: 'info' });
 }
 

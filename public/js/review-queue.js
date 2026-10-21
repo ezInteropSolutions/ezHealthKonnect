@@ -528,7 +528,7 @@ async function rejectItem() {
     if (!rqActiveItem) return;
     const notes = document.getElementById('rqReviewNotes')?.value?.trim() || '';
 
-    if (!await AppDialogs.confirm(`Reject this message and move to DLQ?<br><br>Message: <code>${rqActiveItem.message_id || rqActiveItem.id}</code>`, { title: 'Reject Message', type: 'danger', confirmText: 'Reject' })) return;
+    if (!await AppDialogs.confirm(HtmlSafe.html`Reject this message and move to DLQ?<br><br>Message: <code>${rqActiveItem.message_id || rqActiveItem.id}</code>`, { title: 'Reject Message', type: 'danger', confirmText: 'Reject' })) return;
 
     try {
         const res = await fetch(`/api/fhir/validation-queue/${rqActiveItem.id}/reject`, {
