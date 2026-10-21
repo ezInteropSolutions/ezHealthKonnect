@@ -2075,8 +2075,6 @@
                     let _selected     = new Set();   // set of pkg.id strings
                     let _pollTimers   = {};
 
-                    const escH = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-
                     // ── Catalog load ────────────────────────────────────────────
                     // Load catalog when section is first shown
                     const origSwitch = window.switchSection;
@@ -2231,7 +2229,7 @@
                             xds:  { cls: 'xds',  icon: 'fa-share-nodes'  },
                         };
 
-                        grid.innerHTML = filtered.map(pkg => {
+                        grid.innerHTML = HtmlSafe.html`${filtered.map(pkg => {
                             const sizeMB        = pkg.size_bytes ? (pkg.size_bytes / 1048576).toFixed(0) + ' MB' : '—';
                             const isInstalled   = pkg.status === 'installed';
                             const isDownloading = pkg.status === 'downloading';
@@ -2249,41 +2247,41 @@
                                 : '';
 
                             const actions = isInstalled
-                                ? `<span class="badge-installed"><i class="fas fa-check"></i> Installed</span>
-                                   <button class="btn-remove" onclick="removeSchemaPackage('${escH(pkg.id)}')">Remove</button>`
+                                ? HtmlSafe.html`<span class="badge-installed"><i class="fas fa-check"></i> Installed</span>
+                                   <button class="btn-remove" data-pkg="${pkg.id}" onclick="removeSchemaPackage(this.dataset.pkg)">Remove</button>`
                                 : isDownloading
-                                ? `<button class="btn-install" disabled><i class="fas fa-spinner fa-spin"></i> Installing…</button>`
-                                : `<button class="btn-install" onclick="installSchemaPackage('${escH(pkg.id)}')">
+                                ? HtmlSafe.html`<button class="btn-install" disabled><i class="fas fa-spinner fa-spin"></i> Installing…</button>`
+                                : HtmlSafe.html`<button class="btn-install" data-pkg="${pkg.id}" onclick="installSchemaPackage(this.dataset.pkg)">
                                        <i class="fas fa-download"></i> Install (~${sizeMB})
                                    </button>`;
 
                             const progressBar = isDownloading
-                                ? `<div class="schema-progress-bar" id="prog-bar-${escH(pkg.id)}">
-                                       <div class="schema-progress-fill" id="prog-fill-${escH(pkg.id)}" style="width:0%"></div>
+                                ? HtmlSafe.html`<div class="schema-progress-bar" id="prog-bar-${pkg.id}">
+                                       <div class="schema-progress-fill" id="prog-fill-${pkg.id}" style="width:0%"></div>
                                    </div>`
                                 : '';
 
-                            return `<div class="schema-pkg-card ${cardClass}" id="pkg-card-${escH(pkg.id)}">
+                            return HtmlSafe.html`<div class="schema-pkg-card ${cardClass}" id="pkg-card-${pkg.id}">
                                 <div class="schema-pkg-cb-wrap">
                                     <input type="checkbox" class="schema-pkg-cb"
-                                           id="cb-pkg-${escH(pkg.id)}"
-                                           ${isSelected ? 'checked' : ''}
-                                           onchange="onPackageCheck('${escH(pkg.id)}', this.checked)">
+                                           id="cb-pkg-${pkg.id}"
+                                           ${isSelected ? HtmlSafe.raw('checked') : ''}
+                                           data-pkg="${pkg.id}" onchange="onPackageCheck(this.dataset.pkg, this.checked)">
                                 </div>
                                 <div class="schema-pkg-icon ${iconClass}"><i class="fas ${iconName}"></i></div>
                                 <div class="schema-pkg-body">
-                                    <div class="schema-pkg-name">${escH(pkg.name)}</div>
-                                    <div class="schema-pkg-desc">${escH(pkg.description)}</div>
+                                    <div class="schema-pkg-name">${pkg.name}</div>
+                                    <div class="schema-pkg-desc">${pkg.description}</div>
                                     <div class="schema-pkg-meta">
-                                        <span>v${escH(pkg.version)}</span>
-                                        <span>${escH(pkg.file_count)} files</span>
+                                        <span>v${pkg.version}</span>
+                                        <span>${pkg.file_count} files</span>
                                         <span>${sizeMB} download${installedSize}</span>
                                     </div>
                                     ${progressBar}
                                 </div>
                                 <div class="schema-pkg-actions">${actions}</div>
                             </div>`;
-                        }).join('');
+                        })}`;
 
                         syncSelectAllCheckbox();
                     }
@@ -2353,11 +2351,10 @@
 'use strict';
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
-const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 function showAlert(msg, type = 'error') {
     const c = document.getElementById('alertContainer');
-    c.innerHTML = `<div style="margin-bottom:14px;padding:10px 16px;border-radius:8px;font-size:13px;background:${type==='error'?'#fee2e2':'#dcfce7'};color:${type==='error'?'#991b1b':'#166534'};border:1px solid ${type==='error'?'#fecaca':'#bbf7d0'}">${esc(msg)}</div>`;
+    c.innerHTML = HtmlSafe.html`<div style="margin-bottom:14px;padding:10px 16px;border-radius:8px;font-size:13px;background:${type==='error'?'#fee2e2':'#dcfce7'};color:${type==='error'?'#991b1b':'#166534'};border:1px solid ${type==='error'?'#fecaca':'#bbf7d0'}">${msg}</div>`;
     setTimeout(() => c.innerHTML = '', 6000);
 }
 
@@ -2379,16 +2376,16 @@ function setTestResult(id, msg, type) {
 function setBtnLoading(id, text) {
     const el = document.getElementById(id);
     if (!el) return;
-    el._orig = el.innerHTML;
+    el._orig = Array.from(el.childNodes);
     el.disabled = true;
-    el.innerHTML = `<span class="spinner"></span>${text}`;
+    el.innerHTML = HtmlSafe.html`<span class="spinner"></span>${text}`;
 }
 
 function resetBtn(id) {
     const el = document.getElementById(id);
     if (!el) return;
     el.disabled = false;
-    if (el._orig) el.innerHTML = el._orig;
+    if (el._orig) el.replaceChildren(...el._orig);
 }
 
 function updateTime() {
@@ -2493,7 +2490,7 @@ async function saveDockerPortSettings() {
         const res  = await fetch('/api/system/settings/docker-ports', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
         const json = await res.json();
         if (!json.success) throw new Error(json.error);
-        showDockerPortStatus('success', '✅ Saved. Click Apply &amp; Restart to activate new port ranges.');
+        showDockerPortStatus('success', '✅ Saved. Click Apply & Restart to activate new port ranges.');
     } catch (e) {
         showDockerPortStatus('error', 'Save failed: ' + e.message);
     }
@@ -2502,7 +2499,7 @@ async function saveDockerPortSettings() {
 function showDockerPortStatus(type, msg) {
     const el = document.getElementById('dockerPortStatusMsg');
     el.className = 'status-msg ' + type;
-    el.innerHTML = msg;
+    el.textContent = msg;
 }
 
 async function applyAndRestart() {
@@ -2945,9 +2942,9 @@ async function loadEnvDefaults() {
             ['OBJECT_STORAGE_ENDPOINT', body.object_storage?.endpoint ?? '(not set)'],
         ];
         document.getElementById('envDefaults').innerHTML =
-            `<table style="border-collapse:collapse;width:100%">${rows.map(([k,v]) =>
-                `<tr><td style="padding:4px 12px 4px 0;font-weight:600;color:#374151;white-space:nowrap">${esc(k)}</td><td style="color:#64748b">${esc(v)}</td></tr>`
-            ).join('')}</table>`;
+            HtmlSafe.html`<table style="border-collapse:collapse;width:100%">${rows.map(([k,v]) =>
+                HtmlSafe.html`<tr><td style="padding:4px 12px 4px 0;font-weight:600;color:#374151;white-space:nowrap">${k}</td><td style="color:#64748b">${v}</td></tr>`
+            )}</table>`;
     } catch {
         document.getElementById('envDefaults').textContent = 'Unable to load environment info.';
     }
@@ -2964,7 +2961,7 @@ async function loadGitSection() {
         renderGitRepoTable(_gitRepos);
     } catch (e) {
         document.getElementById('gitRepoTableWrap').innerHTML =
-            `<div style="padding:16px;color:#dc2626">${esc(e.message)}</div>`;
+            HtmlSafe.html`<div style="padding:16px;color:#dc2626">${e.message}</div>`;
     }
 }
 
@@ -2976,31 +2973,31 @@ function renderGitRepoTable(repos) {
     }
     const rows = repos.map(r => {
         const syncBadge = r.last_sync_status === 'success'
-            ? `<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px;font-size:11px">✓ synced</span>`
+            ? HtmlSafe.html`<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px;font-size:11px">✓ synced</span>`
             : r.last_sync_status === 'error'
-            ? `<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:4px;font-size:11px">⚠ error</span>`
-            : `<span style="color:#94a3b8;font-size:11px">—</span>`;
+            ? HtmlSafe.html`<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:4px;font-size:11px">⚠ error</span>`
+            : HtmlSafe.html`<span style="color:#94a3b8;font-size:11px">—</span>`;
         const syncAt = r.last_sync_at ? new Date(r.last_sync_at).toLocaleString() : '—';
-        return `<tr style="border-bottom:1px solid #f1f5f9">
-            <td style="padding:12px 16px;font-weight:600">${esc(r.name)}</td>
-            <td style="padding:12px 16px;color:#64748b;font-size:12px;font-family:monospace">${esc(r.remote_url)}</td>
-            <td style="padding:12px 8px"><code>${esc(r.branch)}</code></td>
+        return HtmlSafe.html`<tr style="border-bottom:1px solid #f1f5f9">
+            <td style="padding:12px 16px;font-weight:600">${r.name}</td>
+            <td style="padding:12px 16px;color:#64748b;font-size:12px;font-family:monospace">${r.remote_url}</td>
+            <td style="padding:12px 8px"><code>${r.branch}</code></td>
             <td style="padding:12px 8px">${syncBadge}</td>
-            <td style="padding:12px 8px;color:#94a3b8;font-size:12px">${esc(syncAt)}</td>
+            <td style="padding:12px 8px;color:#94a3b8;font-size:12px">${syncAt}</td>
             <td style="padding:12px 16px;text-align:right">
-                <button class="btn btn-secondary btn-sm" style="margin-right:4px" onclick="testGitRepo('${r.id}')">
+                <button class="btn btn-secondary btn-sm" style="margin-right:4px" data-id="${r.id}" onclick="testGitRepo(this.dataset.id)">
                     <i class="fas fa-plug"></i>
                 </button>
-                <button class="btn btn-secondary btn-sm" style="margin-right:4px" onclick="showGitRepoForm(${JSON.stringify(r).replace(/"/g,'&quot;')})">
+                <button class="btn btn-secondary btn-sm" style="margin-right:4px" data-id="${r.id}" onclick="showGitRepoForm(_gitRepos.find(x => String(x.id) === this.dataset.id))">
                     <i class="fas fa-pen"></i>
                 </button>
-                <button class="btn btn-sm" style="background:#fee2e2;color:#dc2626;border:none" onclick="deleteGitRepo('${r.id}','${esc(r.name)}')">
+                <button class="btn btn-sm" style="background:#fee2e2;color:#dc2626;border:none" data-id="${r.id}" onclick="deleteGitRepo(this.dataset.id)">
                     <i class="fas fa-trash"></i>
                 </button>
             </td>
         </tr>`;
-    }).join('');
-    wrap.innerHTML = `<table style="width:100%;border-collapse:collapse">
+    });
+    wrap.innerHTML = HtmlSafe.html`<table style="width:100%;border-collapse:collapse">
         <thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
             <th style="padding:10px 16px;text-align:left;font-size:12px;color:#64748b">Name</th>
             <th style="padding:10px 16px;text-align:left;font-size:12px;color:#64748b">Remote URL</th>
@@ -3089,7 +3086,8 @@ async function testGitRepoForm() {
     await testGitRepo(id);
 }
 
-async function deleteGitRepo(id, name) {
+async function deleteGitRepo(id) {
+    const name = ((_gitRepos || []).find(x => String(x.id) === String(id)) || {}).name || '';
     if (!confirm(`Remove repository "${name}"? The remote repo is not affected.`)) return;
     try {
         const res = await fetch(`/api/git/${id}`, { method: 'DELETE', credentials: 'include' });
@@ -3175,9 +3173,9 @@ function updateChatModelHint(modelName) {
     if (!hint) return;
     const m = _aiCatalog.find(c => c.name === modelName);
     if (m) {
-        hint.innerHTML = `Pull: <code>ollama pull ${esc(m.name)}</code> &nbsp;·&nbsp; ~${m.ram_required_gb}GB RAM &nbsp;·&nbsp; ~${m.cpu_tokens_sec} tok/s CPU`;
+        hint.innerHTML = HtmlSafe.html`Pull: <code>ollama pull ${m.name}</code> &nbsp;·&nbsp; ~${m.ram_required_gb}GB RAM &nbsp;·&nbsp; ~${m.cpu_tokens_sec} tok/s CPU`;
     } else {
-        hint.innerHTML = `Pull: <code>ollama pull ${esc(modelName)}</code>`;
+        hint.innerHTML = HtmlSafe.html`Pull: <code>ollama pull ${modelName}</code>`;
     }
 }
 
@@ -3246,40 +3244,40 @@ function renderAvailableModels(models, selectedChat, selectedEmbed) {
         grid.innerHTML = '<p style="color:#6b7280;font-size:13px">No models found on this Ollama instance.<br>Run: <code>ollama pull llama3.2:3b &amp;&amp; ollama pull nomic-embed-text</code></p>';
         return;
     }
-    grid.innerHTML = models.map(name => {
+    grid.innerHTML = HtmlSafe.html`${models.map(name => {
         const info = _aiCatalog.find(c => c.name === name || name.startsWith(c.name.split(':')[0]));
-        const tags = info ? info.use_cases.map(u => `<span style="background:#dbeafe;color:#1e40af;font-size:10px;padding:1px 6px;border-radius:10px">${esc(u)}</span>`).join(' ') : '';
-        const ram = info ? `<span style="color:#6b7280;font-size:11px">${info.ram_required_gb}GB RAM</span>` : '';
-        const speed = (info && !info.embed_only) ? `<span style="color:#6b7280;font-size:11px">~${info.cpu_tokens_sec} tok/s CPU</span>` : '';
-        return `<div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb">
+        const tags = info ? info.use_cases.map(u => HtmlSafe.html`<span style="background:#dbeafe;color:#1e40af;font-size:10px;padding:1px 6px;border-radius:10px">${u}</span>`) : '';
+        const ram = info ? HtmlSafe.html`<span style="color:#6b7280;font-size:11px">${info.ram_required_gb}GB RAM</span>` : '';
+        const speed = (info && !info.embed_only) ? HtmlSafe.html`<span style="color:#6b7280;font-size:11px">~${info.cpu_tokens_sec} tok/s CPU</span>` : '';
+        return HtmlSafe.html`<div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb">
             <i class="fas fa-cube" style="color:#1e3a8a;font-size:14px"></i>
             <div style="flex:1">
-                <div style="font-weight:600;font-size:13px">${esc(name)}</div>
+                <div style="font-weight:600;font-size:13px">${name}</div>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:2px">${tags} ${ram} ${speed}</div>
             </div>
-            ${info?.embed_only ? '<span style="font-size:10px;color:#059669;font-weight:600">EMBED</span>' : ''}
+            ${info?.embed_only ? HtmlSafe.raw('<span style="font-size:10px;color:#059669;font-weight:600">EMBED</span>') : ''}
         </div>`;
-    }).join('');
+    })}`;
 }
 
 function renderAICatalog(catalog) {
     const grid = document.getElementById('aiCatalogGrid');
     if (!grid) return;
-    grid.innerHTML = catalog.map(m => {
-        const tags = m.use_cases.map(u => `<span style="background:#f0fdf4;color:#166534;font-size:10px;padding:1px 6px;border-radius:10px">${esc(u)}</span>`).join(' ');
-        return `<div style="padding:10px 14px;border:1px solid ${m.recommended?'#93c5fd':'#e5e7eb'};border-radius:6px;background:${m.recommended?'#eff6ff':'#fff'};font-size:12px">
+    grid.innerHTML = HtmlSafe.html`${catalog.map(m => {
+        const tags = m.use_cases.map(u => HtmlSafe.html`<span style="background:#f0fdf4;color:#166534;font-size:10px;padding:1px 6px;border-radius:10px">${u}</span>`);
+        return HtmlSafe.html`<div style="padding:10px 14px;border:1px solid ${m.recommended?'#93c5fd':'#e5e7eb'};border-radius:6px;background:${m.recommended?'#eff6ff':'#fff'};font-size:12px">
             <div style="display:flex;justify-content:space-between;align-items:center">
-                <strong style="font-size:13px">${esc(m.display_name)}</strong>
-                ${m.recommended ? '<span style="font-size:10px;color:#1d4ed8;font-weight:700">★ RECOMMENDED</span>' : ''}
-                ${m.embed_only ? '<span style="font-size:10px;color:#059669;font-weight:700">EMBED ONLY</span>' : ''}
+                <strong style="font-size:13px">${m.display_name}</strong>
+                ${m.recommended ? HtmlSafe.raw('<span style="font-size:10px;color:#1d4ed8;font-weight:700">★ RECOMMENDED</span>') : ''}
+                ${m.embed_only ? HtmlSafe.raw('<span style="font-size:10px;color:#059669;font-weight:700">EMBED ONLY</span>') : ''}
             </div>
-            <code style="font-size:11px;color:#374151">ollama pull ${esc(m.name)}</code>
+            <code style="font-size:11px;color:#374151">ollama pull ${m.name}</code>
             <div style="display:flex;gap:8px;margin:4px 0;flex-wrap:wrap">${tags}
-                ${!m.embed_only?`<span style="color:#6b7280">${m.ram_required_gb}GB RAM · ${m.cpu_tokens_sec} tok/s</span>`:''}
+                ${!m.embed_only?HtmlSafe.html`<span style="color:#6b7280">${m.ram_required_gb}GB RAM · ${m.cpu_tokens_sec} tok/s</span>`:''}
             </div>
-            <div style="color:#6b7280">${esc(m.notes)}</div>
+            <div style="color:#6b7280">${m.notes}</div>
         </div>`;
-    }).join('');
+    })}`;
 }
 
 function updateServerAdvisor() {
@@ -3300,17 +3298,17 @@ function updateServerAdvisor() {
     }
 
     result.style.display = 'block';
-    result.innerHTML = `
+    result.innerHTML = HtmlSafe.html`
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
             <div><strong>Load Tier:</strong> ${tier} (${val.toLocaleString()} msg/hr)</div>
             <div><strong>Min RAM:</strong> ${minRAM}GB &nbsp; <em style="color:#6b7280">(recommended: ${recRAM}GB)</em></div>
             <div><strong>CPU Cores:</strong> ${cores}+</div>
             <div><strong>GPU:</strong> ${gpu}</div>
             <div style="grid-column:1/-1"><strong>Recommended Chat Model:</strong>
-                <code style="background:#f3f4f6;padding:1px 6px;border-radius:4px">${esc(model)}</code>
-                <button onclick="document.getElementById('aiChatModel').value='${esc(model)}'" style="margin-left:6px;font-size:11px;padding:1px 8px;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;background:#fff">Use this model</button>
+                <code style="background:#f3f4f6;padding:1px 6px;border-radius:4px">${model}</code>
+                <button onclick="document.getElementById('aiChatModel').value='${model}'" style="margin-left:6px;font-size:11px;padding:1px 8px;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;background:#fff">Use this model</button>
             </div>
-            <div style="grid-column:1/-1;color:#374151">${esc(notes)}</div>
+            <div style="grid-column:1/-1;color:#374151">${notes}</div>
         </div>`;
 }
 
@@ -3342,19 +3340,19 @@ async function refreshLocalModels() {
             grid.innerHTML = '<p style="color:#6b7280;font-size:13px">No models installed. Download one from the catalog below.</p>';
             return;
         }
-        grid.innerHTML = models.map(name => {
+        grid.innerHTML = HtmlSafe.html`${models.map(name => {
             const isEmbed = name.includes('embed') || name.includes('nomic');
-            return `<div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border:1px solid #d1fae5;border-radius:6px;background:#f0fdf4">
+            return HtmlSafe.html`<div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border:1px solid #d1fae5;border-radius:6px;background:#f0fdf4">
                 <i class="fas fa-check-circle" style="color:#10b981;font-size:14px"></i>
-                <div style="flex:1;font-weight:600;font-size:13px">${esc(name)}</div>
-                ${isEmbed ? '<span style="font-size:10px;color:#059669;font-weight:600">EMBED</span>'
-                          : `<button onclick="setActiveModel('${esc(name)}')" style="font-size:11px;padding:2px 8px;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;background:#fff">
+                <div style="flex:1;font-weight:600;font-size:13px">${name}</div>
+                ${isEmbed ? HtmlSafe.raw('<span style="font-size:10px;color:#059669;font-weight:600">EMBED</span>')
+                          : HtmlSafe.html`<button data-model="${name}" onclick="setActiveModel(this.dataset.model)" style="font-size:11px;padding:2px 8px;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;background:#fff">
                                Set Active
                              </button>`}
             </div>`;
-        }).join('');
+        })}`;
     } catch (e) {
-        if (grid) grid.innerHTML = `<p style="color:#ef4444;font-size:13px">${esc(e.message)}</p>`;
+        if (grid) grid.innerHTML = HtmlSafe.html`<p style="color:#ef4444;font-size:13px">${e.message}</p>`;
     }
 }
 
@@ -3372,40 +3370,40 @@ function setActiveModel(modelName) {
 function renderCatalogWithDownload(catalog) {
     const grid = document.getElementById('aiCatalogGrid');
     if (!grid) return;
-    grid.innerHTML = catalog.map(m => {
+    grid.innerHTML = HtmlSafe.html`${catalog.map(m => {
         const tagHtml = (m.tags || []).map(t =>
-            `<span style="background:#dbeafe;color:#1e40af;font-size:10px;padding:1px 6px;border-radius:10px">${esc(t)}</span>`
-        ).join(' ');
+            HtmlSafe.html`<span style="background:#dbeafe;color:#1e40af;font-size:10px;padding:1px 6px;border-radius:10px">${t}</span>`
+        );
         const borderColor = m.recommended ? '#93c5fd' : '#e5e7eb';
         const bgColor     = m.recommended ? '#eff6ff' : '#fff';
-        return `<div style="padding:12px 14px;border:1px solid ${borderColor};border-radius:8px;background:${bgColor};font-size:13px">
+        return HtmlSafe.html`<div style="padding:12px 14px;border:1px solid ${borderColor};border-radius:8px;background:${bgColor};font-size:13px">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
                 <div style="flex:1;min-width:0">
                     <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
-                        <strong>${esc(m.display_name)}</strong>
-                        ${m.recommended ? '<span style="font-size:10px;color:#1d4ed8;font-weight:700;background:#dbeafe;padding:1px 6px;border-radius:10px">★ RECOMMENDED</span>' : ''}
+                        <strong>${m.display_name}</strong>
+                        ${m.recommended ? HtmlSafe.raw('<span style="font-size:10px;color:#1d4ed8;font-weight:700;background:#dbeafe;padding:1px 6px;border-radius:10px">★ RECOMMENDED</span>') : ''}
                     </div>
-                    <div style="color:#6b7280;font-size:12px;margin-bottom:5px">${esc(m.best_for)}</div>
+                    <div style="color:#6b7280;font-size:12px;margin-bottom:5px">${m.best_for}</div>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
                         ${tagHtml}
-                        <span style="color:#6b7280;font-size:11px">RAM: ${esc(m.ram_required)}</span>
-                        <span style="color:#6b7280;font-size:11px">Download: ${esc(m.disk_size)}</span>
+                        <span style="color:#6b7280;font-size:11px">RAM: ${m.ram_required}</span>
+                        <span style="color:#6b7280;font-size:11px">Download: ${m.disk_size}</span>
                     </div>
-                    <div style="color:#6b7280;font-size:11px;margin-top:4px">${esc(m.notes)}</div>
+                    <div style="color:#6b7280;font-size:11px;margin-top:4px">${m.notes}</div>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
-                    <button onclick="downloadModel('${esc(m.name)}','${esc(m.disk_size)}')"
+                    <button data-model="${m.name}" data-size="${m.disk_size}" onclick="downloadModel(this.dataset.model, this.dataset.size)"
                         style="font-size:12px;padding:4px 12px;border:1px solid #3b82f6;border-radius:6px;background:#3b82f6;color:#fff;cursor:pointer;white-space:nowrap">
                         <i class="fas fa-download"></i> Download
                     </button>
-                    <button onclick="setActiveModel('${esc(m.name)}')"
+                    <button data-model="${m.name}" onclick="setActiveModel(this.dataset.model)"
                         style="font-size:12px;padding:4px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;white-space:nowrap">
                         Set Active
                     </button>
                 </div>
             </div>
         </div>`;
-    }).join('');
+    })}`;
 }
 
 async function downloadModel(modelName, diskSize) {
@@ -3494,22 +3492,22 @@ async function loadEZCompanionSection() {
         const d  = st.data || {};
         activeModel = d.chat_model || '';
         const pill = d.provider_reachable
-            ? `<span style="background:#d1fae5;color:#065f46;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600">● Online</span>`
-            : `<span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600">● Offline</span>`;
-        const agentToolsPill = {
+            ? HtmlSafe.html`<span style="background:#d1fae5;color:#065f46;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600">● Online</span>`
+            : HtmlSafe.html`<span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600">● Offline</span>`;
+        const agentToolsPill = HtmlSafe.raw({
             supported:   '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600" title="Confirmed to support Agent Mode tool calling">🤖 Agent Mode ready</span>',
             unsupported: '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600" title="This model is not known to support tool calling — Agent Mode will not be able to propose actions">🤖 Agent Mode unsupported</span>',
             unconfirmed: '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600" title="Not in the list of models ezHealthKonnect has confirmed support tool calling — Agent Mode may or may not work">🤖 Agent Mode unconfirmed</span>',
-        }[d.agent_tools_support] || '';
-        statusRow.innerHTML = `
+        }[d.agent_tools_support] || '');
+        statusRow.innerHTML = HtmlSafe.html`
             ${pill}
             <span style="font-size:13px;color:#374151">
-                Active model: <strong>${esc(activeModel || '—')}</strong>
+                Active model: <strong>${activeModel || '—'}</strong>
             </span>
             ${agentToolsPill}
-            ${d.provider_reachable ? '' : '<span style="font-size:12px;color:#6b7280">Check Ollama host in <a href="#" onclick="switchSection(\'ai\');return false" style="color:#1e3a8a">AI Settings</a></span>'}`;
+            ${d.provider_reachable ? '' : HtmlSafe.raw('<span style="font-size:12px;color:#6b7280">Check Ollama host in <a href="#" onclick="switchSection(\'ai\');return false" style="color:#1e3a8a">AI Settings</a></span>')}`;
     } catch (_) {
-        statusRow.innerHTML = `<span style="font-size:13px;color:#ef4444">Could not reach AI status endpoint.</span>`;
+        statusRow.innerHTML = HtmlSafe.html`<span style="font-size:13px;color:#ef4444">Could not reach AI status endpoint.</span>`;
     }
 
     // Installed models
@@ -3518,31 +3516,31 @@ async function loadEZCompanionSection() {
         const body   = await resp.json();
         const models = (body.data || []).filter(m => !m.includes('embed') && !m.includes('nomic'));
         if (models.length === 0) {
-            modelList.innerHTML = `<p style="color:#6b7280;font-size:13px">No chat models installed. <a href="#" onclick="switchSection('ai');return false" style="color:#1e3a8a">Download from Model Library →</a></p>`;
+            modelList.innerHTML = HtmlSafe.html`<p style="color:#6b7280;font-size:13px">No chat models installed. <a href="#" onclick="switchSection('ai');return false" style="color:#1e3a8a">Download from Model Library →</a></p>`;
             return;
         }
-        modelList.innerHTML = models.map(name => {
+        modelList.innerHTML = HtmlSafe.html`${models.map(name => {
             const isActive = name === activeModel;
-            return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid ${isActive ? '#6ee7b7' : '#e2e8f0'};border-radius:8px;background:${isActive ? '#f0fdf4' : '#ffffff'}">
-                ${isActive ? '<i class="fas fa-check-circle" style="color:#10b981;font-size:15px"></i>' : '<i class="fas fa-cube" style="color:#94a3b8;font-size:15px"></i>'}
+            return HtmlSafe.html`<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid ${isActive ? '#6ee7b7' : '#e2e8f0'};border-radius:8px;background:${isActive ? '#f0fdf4' : '#ffffff'}">
+                ${isActive ? HtmlSafe.raw('<i class="fas fa-check-circle" style="color:#10b981;font-size:15px"></i>') : HtmlSafe.raw('<i class="fas fa-cube" style="color:#94a3b8;font-size:15px"></i>')}
                 <div style="flex:1;font-size:13px">
-                    <strong>${esc(name)}</strong>
-                    ${isActive ? '<span style="margin-left:8px;font-size:11px;color:#059669;font-weight:600">ACTIVE</span>' : ''}
+                    <strong>${name}</strong>
+                    ${isActive ? HtmlSafe.raw('<span style="margin-left:8px;font-size:11px;color:#059669;font-weight:600">ACTIVE</span>') : ''}
                 </div>
-                ${isActive ? '' : `<button onclick="ezcActivateModel('${esc(name)}')"
+                ${isActive ? '' : HtmlSafe.html`<button data-model="${name}" onclick="ezcActivateModel(this.dataset.model)"
                     style="font-size:12px;padding:4px 14px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;background:#fff;color:#1e3a8a;font-weight:600">
                     Set Active
                 </button>`}
             </div>`;
-        }).join('');
+        })}`;
     } catch (e) {
-        modelList.innerHTML = `<p style="color:#ef4444;font-size:13px">${esc(e.message)}</p>`;
+        modelList.innerHTML = HtmlSafe.html`<p style="color:#ef4444;font-size:13px">${e.message}</p>`;
     }
 }
 
 async function ezcActivateModel(modelName) {
     const statusEl = document.getElementById('ezcSwitchStatus');
-    if (statusEl) statusEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Switching to <strong>${esc(modelName)}</strong>…`;
+    if (statusEl) statusEl.innerHTML = HtmlSafe.html`<i class="fas fa-spinner fa-spin"></i> Switching to <strong>${modelName}</strong>…`;
     try {
         // Fetch current settings to preserve everything else
         const current = await apiGet('/api/system/settings/ai');
@@ -3561,10 +3559,10 @@ async function ezcActivateModel(modelName) {
             agent_mode_enabled: !!current.agent_mode_enabled,
             hybrid_retrieval_enabled: !!current.hybrid_retrieval_enabled,
         });
-        if (statusEl) statusEl.innerHTML = `<span style="color:#059669">✅ Switched to <strong>${esc(modelName)}</strong> — takes effect on next request.</span>`;
+        if (statusEl) statusEl.innerHTML = HtmlSafe.html`<span style="color:#059669">✅ Switched to <strong>${modelName}</strong> — takes effect on next request.</span>`;
         await loadEZCompanionSection();
     } catch (e) {
-        if (statusEl) statusEl.innerHTML = `<span style="color:#ef4444">❌ ${esc(e.message)}</span>`;
+        if (statusEl) statusEl.innerHTML = HtmlSafe.html`<span style="color:#ef4444">❌ ${e.message}</span>`;
     }
 }
 
@@ -3626,36 +3624,36 @@ async function loadFeedbackSummary() {
         // Build endpoint rows
         const epRows = Object.entries(s.by_endpoint || {}).map(([ep, st]) => {
             const p = st.total > 0 ? ((st.positive / st.total) * 100).toFixed(0) : '0';
-            return `<tr>
-                <td style="padding:4px 8px;font-size:12px;color:#374151">${esc(ep)}</td>
+            return HtmlSafe.html`<tr>
+                <td style="padding:4px 8px;font-size:12px;color:#374151">${ep}</td>
                 <td style="padding:4px 8px;text-align:right;font-size:12px">${st.total}</td>
                 <td style="padding:4px 8px;text-align:right;font-size:12px;color:#16a34a">${st.positive}</td>
                 <td style="padding:4px 8px;text-align:right;font-size:12px;color:#dc2626">${st.negative}</td>
                 <td style="padding:4px 8px;text-align:right;font-size:12px">${p}%</td>
             </tr>`;
-        }).join('');
+        });
 
         // Build recent negatives
         let negSection = '';
         if (s.recent_negative && s.recent_negative.length) {
-            const negRows = s.recent_negative.map(r => `
+            const negRows = s.recent_negative.map(r => HtmlSafe.html`
                 <div style="padding:8px 10px;border:1px solid #fecaca;border-radius:6px;background:#fff5f5;font-size:12px;margin-bottom:6px">
                     <div style="display:flex;justify-content:space-between;margin-bottom:3px">
-                        <span style="font-weight:600;color:#dc2626">${esc(r.endpoint)}</span>
+                        <span style="font-weight:600;color:#dc2626">${r.endpoint}</span>
                         <span style="color:#9ca3af">${r.created_at ? new Date(r.created_at).toLocaleDateString() : ''}</span>
                     </div>
-                    ${r.prompt_preview   ? `<div style="color:#374151">Q: ${esc(r.prompt_preview)}</div>`   : ''}
-                    ${r.response_preview ? `<div style="color:#6b7280">A: ${esc(r.response_preview)}</div>` : ''}
-                    ${r.comment          ? `<div style="color:#7c3aed;margin-top:3px">💬 ${esc(r.comment)}</div>` : ''}
-                </div>`).join('');
-            negSection = `
+                    ${r.prompt_preview   ? HtmlSafe.html`<div style="color:#374151">Q: ${r.prompt_preview}</div>`   : ''}
+                    ${r.response_preview ? HtmlSafe.html`<div style="color:#6b7280">A: ${r.response_preview}</div>` : ''}
+                    ${r.comment          ? HtmlSafe.html`<div style="color:#7c3aed;margin-top:3px">💬 ${r.comment}</div>` : ''}
+                </div>`);
+            negSection = HtmlSafe.html`
                 <div style="margin-top:14px">
                     <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Recent Negative Feedback</div>
                     ${negRows}
                 </div>`;
         }
 
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
             <!-- KPI bar -->
             <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px">
                 <div style="text-align:center">
@@ -3685,7 +3683,7 @@ async function loadFeedbackSummary() {
                 </div>
             </div>
             <!-- By endpoint table -->
-            ${epRows ? `<table style="width:100%;border-collapse:collapse;font-size:12px">
+            ${epRows.length ? HtmlSafe.html`<table style="width:100%;border-collapse:collapse;font-size:12px">
                 <thead><tr style="border-bottom:1px solid #e5e7eb">
                     <th style="padding:4px 8px;text-align:left;font-size:11px;color:#6b7280">Endpoint</th>
                     <th style="padding:4px 8px;text-align:right;font-size:11px;color:#6b7280">Total</th>
@@ -3697,7 +3695,7 @@ async function loadFeedbackSummary() {
             </table>` : ''}
             ${negSection}`;
     } catch (e) {
-        container.innerHTML = `<p style="color:#dc2626;font-size:13px">❌ ${esc(e.message)}</p>`;
+        container.innerHTML = HtmlSafe.html`<p style="color:#dc2626;font-size:13px">❌ ${e.message}</p>`;
     }
 }
 
