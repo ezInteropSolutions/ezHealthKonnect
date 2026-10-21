@@ -28,8 +28,8 @@ class CdaParseStepBuilder {
         const cfg = step.config;
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-        const sourceField  = esc(cfg.sourceField  || 'raw');
-        const outputField  = esc(cfg.outputField  || 'parsedCDA');
+        const sourceField  = (cfg.sourceField  || 'raw');
+        const outputField  = (cfg.outputField  || 'parsedCDA');
         const docTypeHint  = cfg.documentTypeHint || '';
 
         const docTypeOptions = [
@@ -46,9 +46,9 @@ class CdaParseStepBuilder {
             { value: 'Operative Note',    label: 'Operative Note' },
             { value: 'Procedure Note',    label: 'Procedure Note' },
             { value: 'Unstructured Document', label: 'Unstructured Document' },
-        ].map(o => `<option value="${esc(o.value)}" ${o.value === docTypeHint ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
+        ].map(o => HtmlSafe.html`<option value="${o.value}" ${o.value === docTypeHint ? 'selected' : ''}>${o.label}</option>`);
 
-        return `
+        return HtmlSafe.html`
         <div class="cda-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Parse step.</strong> Converts raw CDA/CCD XML into USCDI-keyed JSON.
@@ -143,7 +143,7 @@ class CdaToFhirStepBuilder {
         this._loadTransformDescriptions();
         this._initNarrativePicker(step.config);
 
-        return `
+        return HtmlSafe.html`
 <div id="cdaToFhirBuilder" style="font-size:0.84rem;">
     ${this._renderUpgradeBanner(step.config)}
     <div style="display:flex;gap:0;background:#1e3a8a;border-radius:8px 8px 0 0;margin-bottom:1.1rem;padding:0 0.25rem;">
@@ -311,7 +311,7 @@ class CdaToFhirStepBuilder {
 
     _renderUpgradeBanner(cfg) {
         // Banner is hidden initially; _checkOOBVersion() will show it if needed.
-        return `<div id="cdaToFhirUpgradeBanner" style="display:none;background:#fef9c3;border:1px solid #fde047;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:0.75rem;font-size:0.8rem;color:#92400e;">
+        return HtmlSafe.html`<div id="cdaToFhirUpgradeBanner" style="display:none;background:#fef9c3;border:1px solid #fde047;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:0.75rem;font-size:0.8rem;color:#92400e;">
             <strong>OOB template updated.</strong>
             <span id="cdaToFhirBannerMsg"></span>
             <div style="margin-top:0.4rem;display:flex;gap:0.5rem;">
@@ -335,7 +335,7 @@ class CdaToFhirStepBuilder {
 
     _renderTabButton(key, label) {
         const active = this._activeTab === key;
-        return `<button id="cdaToFhirTabBtn-${key}" type="button"
+        return HtmlSafe.html`<button id="cdaToFhirTabBtn-${key}" type="button"
             onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.switchTab('${key}')"
             style="padding:0.45rem 0.95rem;border:none;
                    border-bottom:3px solid ${active ? '#f9a8d4' : 'transparent'};
@@ -355,13 +355,13 @@ class CdaToFhirStepBuilder {
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
         const bundleOpts = ['collection','document','transaction'].map(v =>
-            `<option value="${v}" ${cfg.bundleType === v ? 'selected' : ''}>${v}</option>`
-        ).join('');
+            HtmlSafe.html`<option value="${v}" ${cfg.bundleType === v ? 'selected' : ''}>${v}</option>`
+        );
 
         const profileOpts = [
             { v: 'us-core', l: 'US Core R4 6.1.0' },
             { v: 'base',    l: 'Base FHIR R4 (no profile)' },
-        ].map(o => `<option value="${o.v}" ${cfg.profileMode === o.v ? 'selected' : ''}>${o.l}</option>`).join('');
+        ].map(o => HtmlSafe.html`<option value="${o.v}" ${cfg.profileMode === o.v ? 'selected' : ''}>${o.l}</option>`);
 
         const docTypeOpts = [
             { v: 'auto',               l: 'Auto-detect' },
@@ -377,7 +377,7 @@ class CdaToFhirStepBuilder {
             { v: 'Operative Note',     l: 'Operative Note' },
             { v: 'Procedure Note',     l: 'Procedure Note' },
             { v: 'Unstructured Document', l: 'Unstructured Document' },
-        ].map(o => `<option value="${o.v}" ${cfg.documentType === o.v ? 'selected' : ''}>${o.l}</option>`).join('');
+        ].map(o => HtmlSafe.html`<option value="${o.v}" ${cfg.documentType === o.v ? 'selected' : ''}>${o.l}</option>`);
 
         const lbl = `font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;
                       color:#1e3a8a;display:block;margin-bottom:0.4rem;
@@ -389,7 +389,7 @@ class CdaToFhirStepBuilder {
             border:1px solid #cbd5e1;border-radius:6px;padding:0.38rem 2rem 0.38rem 0.55rem;
             box-shadow:inset 0 1px 2px rgba(0,0,0,0.05);
             transition:border-color 0.15s,box-shadow 0.15s;outline:none;color:#1f2937;box-sizing:border-box;`;
-        const pencilBtn = id => `<button type="button"
+        const pencilBtn = id => HtmlSafe.html`<button type="button"
             onclick="document.getElementById('${id}').focus()"
             style="position:absolute;right:0.45rem;top:50%;transform:translateY(-50%);
                    background:none;border:none;cursor:pointer;color:#94a3b8;padding:0;font-size:0.8rem;
@@ -404,7 +404,7 @@ class CdaToFhirStepBuilder {
             padding-right:1.8rem;`;
         const grp = `margin-bottom:1.1rem;`;
 
-        return `
+        return HtmlSafe.html`
         <style>
             #cda2fhirSourceField:focus,#cda2fhirOutputField:focus{
                 border-color:#1e3a8a!important;box-shadow:0 0 0 2px rgba(30,58,138,0.12),inset 0 1px 2px rgba(0,0,0,0.05)!important;
@@ -414,7 +414,7 @@ class CdaToFhirStepBuilder {
             <label style="${lbl}">Source Field</label>
             <div style="${inputWrap}">
                 <input id="cda2fhirSourceField" type="text"
-                    value="${esc(cfg.sourceField)}" placeholder="parsedCDA"
+                    value="${cfg.sourceField}" placeholder="parsedCDA"
                     style="${inputStyle}">
                 ${pencilBtn('cda2fhirSourceField')}
             </div>
@@ -424,7 +424,7 @@ class CdaToFhirStepBuilder {
             <label style="${lbl}">Output Field</label>
             <div style="${inputWrap}">
                 <input id="cda2fhirOutputField" type="text"
-                    value="${esc(cfg.outputField)}" placeholder="fhirBundle"
+                    value="${cfg.outputField}" placeholder="fhirBundle"
                     style="${inputStyle}">
                 ${pencilBtn('cda2fhirOutputField')}
             </div>
@@ -457,7 +457,7 @@ class CdaToFhirStepBuilder {
 
     _renderSectionsTab(cfg) {
         if (!this._sections || this._sections.length === 0) {
-            return `<div id="cdaSectionsLoading" style="text-align:center;padding:2rem;color:#6b7280;font-size:0.8rem;">
+            return HtmlSafe.html`<div id="cdaSectionsLoading" style="text-align:center;padding:2rem;color:#6b7280;font-size:0.8rem;">
                 Loading sections from schema…
             </div>`;
         }
@@ -468,10 +468,10 @@ class CdaToFhirStepBuilder {
             const enabled     = secOverride.enabled !== false; // default true
             const modified    = this._isSectionModified(sec.key, overrides);
             const badge       = modified
-                ? `<span style="font-size:0.68rem;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:3px;padding:1px 5px;margin-left:4px;">modified</span>`
-                : `<span style="font-size:0.68rem;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:3px;padding:1px 5px;margin-left:4px;">OOB</span>`;
+                ? HtmlSafe.html`<span style="font-size:0.68rem;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:3px;padding:1px 5px;margin-left:4px;">modified</span>`
+                : HtmlSafe.html`<span style="font-size:0.68rem;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:3px;padding:1px 5px;margin-left:4px;">OOB</span>`;
             const editLabel = enabled ? 'Edit' : 'Enable';
-            return `
+            return HtmlSafe.html`
             <tr style="border-bottom:1px solid #f1f5f9;">
                 <td style="padding:0.4rem 0.5rem;width:32px;text-align:center;">
                     <input type="checkbox" class="cda-section-checkbox"
@@ -493,9 +493,9 @@ class CdaToFhirStepBuilder {
                     </button>
                 </td>
             </tr>`;
-        }).join('');
+        });
 
-        return `
+        return HtmlSafe.html`
         <div style="margin-bottom:0.75rem;display:flex;align-items:center;justify-content:space-between;">
             <span style="font-size:0.78rem;color:#64748b;">Check sections to include in the FHIR Bundle. Edit to customise field mappings.</span>
             <button type="button" onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.saveDelta()"
@@ -517,7 +517,7 @@ class CdaToFhirStepBuilder {
                       color:#1e3a8a;display:block;margin-bottom:0.5rem;
                       border-left:3px solid #f472b6;padding-left:0.45rem;`;
         const hint = `font-size:0.71rem;color:#f472b6;font-style:italic;margin-top:0.25rem;margin-left:1.35rem;`;
-        return `
+        return HtmlSafe.html`
         <div class="config-group" style="margin-bottom:1.1rem;">
             <label style="${lbl}">Code Validation</label>
             <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.83rem;color:#1f2937;">
@@ -661,7 +661,7 @@ class CdaToFhirStepBuilder {
         // actually does or see it work on a real value. <details> surfaces
         // that existing content without cluttering the default (collapsed)
         // view — click a row to see the full explanation + worked example.
-        const ruleRow = (r, isOn) => `
+        const ruleRow = (r, isOn) => HtmlSafe.html`
         <tr style="border-bottom:1px solid #f0f4ff;transition:background 0.1s;"
             onmouseover="this.style.background='#f8faff'" onmouseout="this.style.background=''">
             <td style="padding:0.45rem 0.55rem;width:36px;text-align:center;vertical-align:top;padding-top:0.55rem;">
@@ -684,7 +684,7 @@ class CdaToFhirStepBuilder {
             </td>
         </tr>`;
 
-        const group = (title, rulesArr) => `
+        const group = (title, rulesArr) => HtmlSafe.html`
         <div style="margin-bottom:1rem;">
             <div style="font-size:0.69rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;
                         color:#1e3a8a;margin-bottom:0.45rem;
@@ -692,14 +692,14 @@ class CdaToFhirStepBuilder {
             <div style="border:1px solid #dbeafe;border-radius:6px;overflow:hidden;
                         box-shadow:0 1px 3px rgba(30,58,138,0.06);">
                 <table style="width:100%;border-collapse:collapse;">
-                    <tbody>${rulesArr.map(r => ruleRow(r, on(r.key))).join('')}</tbody>
+                    <tbody>${rulesArr.map(r => ruleRow(r, on(r.key)))}</tbody>
                 </table>
             </div>
         </div>`;
 
         const poCarTarget = cfg.planOfCareEncounterTarget || '';
 
-        return `
+        return HtmlSafe.html`
         <div style="font-size:0.79rem;color:#475569;margin-bottom:0.9rem;
                     background:linear-gradient(135deg,#eff6ff 0%,#fdf2f8 100%);
                     border:1px solid #dbeafe;border-radius:6px;padding:0.6rem 0.75rem;">
@@ -737,7 +737,7 @@ class CdaToFhirStepBuilder {
     // deferred-then-populate-by-ID pattern as _loadSections()/_checkOOBVersion().
 
     _renderNarrativeTab(cfg) {
-        return `
+        return HtmlSafe.html`
         <div style="font-size:0.79rem;color:#475569;margin-bottom:0.9rem;
                     background:linear-gradient(135deg,#eff6ff 0%,#fdf2f8 100%);
                     border:1px solid #dbeafe;border-radius:6px;padding:0.6rem 0.75rem;">
@@ -816,14 +816,14 @@ class CdaToFhirStepBuilder {
 
     _renderAdvancedTab(cfg) {
         const mergeOpts = ['append','replace'].map(v =>
-            `<option value="${v}" ${cfg.mergeMode === v ? 'selected' : ''}>${v}</option>`
-        ).join('');
+            HtmlSafe.html`<option value="${v}" ${cfg.mergeMode === v ? 'selected' : ''}>${v}</option>`
+        );
         const failOpts = ['continue','fail-fast'].map(v =>
-            `<option value="${v}" ${cfg.onSectionFailure === v ? 'selected' : ''}>${v}</option>`
-        ).join('');
+            HtmlSafe.html`<option value="${v}" ${cfg.onSectionFailure === v ? 'selected' : ''}>${v}</option>`
+        );
         const logOpts = ['error','warning','info','debug'].map(v =>
-            `<option value="${v}" ${cfg.logLevel === v ? 'selected' : ''}>${v}</option>`
-        ).join('');
+            HtmlSafe.html`<option value="${v}" ${cfg.logLevel === v ? 'selected' : ''}>${v}</option>`
+        );
 
         const lbl = `font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;
                       color:#1e3a8a;display:block;margin-bottom:0.4rem;
@@ -838,7 +838,7 @@ class CdaToFhirStepBuilder {
             background-repeat:no-repeat;background-position:right 0.6rem center;background-size:8px;
             padding-right:1.8rem;`;
 
-        return `
+        return HtmlSafe.html`
         <div class="config-group" style="margin-bottom:1.1rem;">
             <label style="${lbl}">Merge Mode</label>
             <select id="cda2fhirMergeMode" style="${selectStyle}">${mergeOpts}</select>
@@ -870,7 +870,7 @@ class CdaToFhirStepBuilder {
     // ── Section field editor (inline overlay) ─────────────────────────────────
 
     _renderSectionFieldEditor() {
-        return `
+        return HtmlSafe.html`
         <div id="cdaSectionFieldEditor"
             style="display:none;position:relative;margin-top:1rem;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:1rem;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
@@ -899,7 +899,7 @@ class CdaToFhirStepBuilder {
         const inputStyle = `width:100%;padding:0.35rem 0.55rem;font-size:0.78rem;border:1px solid #cbd5e1;border-radius:5px;box-sizing:border-box;font-family:monospace;`;
         const hint = `font-size:0.68rem;color:#94a3b8;margin-top:0.25rem;`;
 
-        return `
+        return HtmlSafe.html`
         <div id="cdaAddFieldModal"
             style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10100;align-items:center;justify-content:center;">
             <div style="background:white;border-radius:8px;width:720px;max-height:88vh;overflow:auto;padding:1.25rem;box-shadow:0 20px 60px rgba(0,0,0,0.25);">
@@ -1105,18 +1105,18 @@ class CdaToFhirStepBuilder {
         if (banner) {
             const resources = [...new Set(variants.map(v => v.fhirResource).filter(Boolean))];
             const sec = (this._sections || []).find(s => s.key === sectionKey);
-            const sectionLabel = this._escAttr(sec ? (sec.displayName || sec.key) : sectionKey);
-            banner.innerHTML = resources.length
-                ? `<strong>${sectionLabel}</strong> section maps to <strong>${resources.map(r => this._escAttr(r)).join('</strong>, <strong>')}</strong>.`
-                : `<strong>${sectionLabel}</strong> section — FHIR resource could not be determined automatically.`;
+            const sectionLabel = (sec ? (sec.displayName || sec.key) : sectionKey);
+            banner.innerHTML = HtmlSafe.html`${resources.length
+                ? HtmlSafe.html`<strong>${sectionLabel}</strong> section maps to <strong>${resources.map(r => (r)).join('</strong>, <strong>')}</strong>.`
+                : HtmlSafe.html`<strong>${sectionLabel}</strong> section — FHIR resource could not be determined automatically.`}`;
         }
 
         // "Nest under" options: union of every variant's own nestable groups.
         const nestedSelect = document.getElementById('cdaAddFieldNestedUnder');
         if (nestedSelect) {
             const groups = [...new Set(variants.flatMap(v => v.nestableGroups || []))].sort();
-            nestedSelect.innerHTML = '<option value="">— top-level —</option>' +
-                groups.map(g => `<option value="${this._escAttr(g)}">${this._escAttr(g)}[]</option>`).join('');
+            nestedSelect.innerHTML = HtmlSafe.html`<option value="">— top-level —</option>${
+                groups.map(g => HtmlSafe.html`<option value="${g}">${g}[]</option>`)}`;
         }
 
         // "Applies to" checkboxes — hidden entirely when there's only one
@@ -1125,11 +1125,11 @@ class CdaToFhirStepBuilder {
         const resBox = document.getElementById('cdaAddFieldResourceCheckboxes');
         if (resGroup && resBox) {
             if (variants.length > 1) {
-                resBox.innerHTML = variants.map((v, i) => `
+                resBox.innerHTML = HtmlSafe.html`${variants.map((v, i) => HtmlSafe.html`
                     <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.76rem;cursor:pointer;">
-                        <input type="checkbox" class="cda-add-field-resource" value="${this._escAttr(v.fhirResource)}" id="cdaAddFieldRes-${i}" checked>
-                        ${this._escAttr(v.fhirResource)}${v.entryMatch ? ` <span style="color:#94a3b8;">(${this._escAttr(v.entryMatch)})</span>` : ''}
-                    </label>`).join('');
+                        <input type="checkbox" class="cda-add-field-resource" value="${v.fhirResource}" id="cdaAddFieldRes-${i}" checked>
+                        ${v.fhirResource}${v.entryMatch ? HtmlSafe.html` <span style="color:#94a3b8;">(${v.entryMatch})</span>` : ''}
+                    </label>`)}`;
                 resGroup.style.display = '';
             } else {
                 resBox.innerHTML = '';
@@ -1255,25 +1255,25 @@ class CdaToFhirStepBuilder {
             return;
         }
         const esc = this._escAttr.bind(this);
-        results.innerHTML = matches.map((f, i) => {
+        results.innerHTML = HtmlSafe.html`${matches.map((f, i) => {
             const bare = f.path && f.path.startsWith(resourceType + '.') ? f.path.slice(resourceType.length + 1) : (f.path || '');
             const { nestGroup } = this._splitNestedFhirPath(bare);
             const nestBadge = nestGroup
-                ? `<span style="font-size:0.63rem;background:#eef2ff;color:#4338ca;border-radius:3px;padding:1px 5px;margin-left:4px;">nested in ${esc(nestGroup)}[]</span>`
+                ? HtmlSafe.html`<span style="font-size:0.63rem;background:#eef2ff;color:#4338ca;border-radius:3px;padding:1px 5px;margin-left:4px;">nested in ${nestGroup}[]</span>`
                 : '';
-            return `
+            return HtmlSafe.html`
             <div class="cda-resource-field-result" data-index="${i}"
                 style="padding:0.4rem 0.6rem;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:0.75rem;">
                 <div style="font-weight:600;color:#1e293b;">
-                    ${esc(f.name || f.path)}
-                    ${f.required ? '<span style="font-size:0.63rem;background:#fee2e2;color:#991b1b;border-radius:3px;padding:1px 4px;margin-left:4px;">required</span>' : ''}
+                    ${f.name || f.path}
+                    ${f.required ? HtmlSafe.raw('<span style="font-size:0.63rem;background:#fee2e2;color:#991b1b;border-radius:3px;padding:1px 4px;margin-left:4px;">required</span>') : ''}
                     ${nestBadge}
-                    <span style="font-size:0.65rem;color:#94a3b8;font-weight:400;"> · ${esc(f.dataType || '')}</span>
+                    <span style="font-size:0.65rem;color:#94a3b8;font-weight:400;"> · ${f.dataType || ''}</span>
                 </div>
-                <div style="color:#6b7280;font-size:0.71rem;">${esc(f.description || '')}</div>
-                <div style="color:#94a3b8;font-family:monospace;font-size:0.68rem;">${esc(f.path || '')}</div>
+                <div style="color:#6b7280;font-size:0.71rem;">${f.description || ''}</div>
+                <div style="color:#94a3b8;font-family:monospace;font-size:0.68rem;">${f.path || ''}</div>
             </div>`;
-        }).join('');
+        })}`;
         results.style.display = 'block';
 
         this._currentSearchMatches = matches;
@@ -1464,10 +1464,10 @@ class CdaToFhirStepBuilder {
             const fields = this._sectionFields[this._addFieldSectionKey] || [];
             const sibling = fields.find(f => f.nestedUnder === nestedUnder);
             if (sibling) {
-                nestedHint = `
+                nestedHint = HtmlSafe.html`
                     <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:5px;padding:0.5rem 0.65rem;margin-bottom:0.65rem;font-size:0.71rem;color:#1e40af;">
-                        A sibling field already nested under "${esc(nestedUnder)}" has CDA source:
-                        <code style="word-break:break-all;">${esc(sibling.cdaSource || '')}</code> — use this as a starting point below (SourcePath is relative to that same matched node).
+                        A sibling field already nested under "${nestedUnder}" has CDA source:
+                        <code style="word-break:break-all;">${sibling.cdaSource || ''}</code> — use this as a starting point below (SourcePath is relative to that same matched node).
                     </div>`;
             }
         }
@@ -1496,7 +1496,7 @@ class CdaToFhirStepBuilder {
         // typeCode values below are the ones actually used across
         // declarative_oob_rules.go, not an invented generic list.
         if (pattern === 'direct') {
-            params.innerHTML = `
+            params.innerHTML = HtmlSafe.html`
                 <div style="position:relative;margin-bottom:0.4rem;">
                     <span style="position:absolute;left:0.55rem;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:0.75rem;pointer-events:none;">🔍</span>
                     <input id="cdaPatternDirectSearch" type="text" autocomplete="off"
@@ -1513,7 +1513,7 @@ class CdaToFhirStepBuilder {
                     style="${fieldStyle}font-family:monospace;" oninput="${onAny}">
                 <div style="font-size:0.68rem;color:#94a3b8;">A field directly on the matched entry — no relationship traversal needed. Search above or type the field name directly.</div>`;
         } else if (pattern === 'related') {
-            params.innerHTML = `
+            params.innerHTML = HtmlSafe.html`
                 <div style="display:flex;gap:0.4rem;align-items:center;margin-bottom:0.4rem;">
                     <select id="cdaPatternTypeCode" style="flex:1;padding:0.3rem 0.5rem;font-size:0.75rem;border:1px solid #cbd5e1;border-radius:4px;" onchange="${onAny}">
                         <option value="SUBJ">SUBJ — Subject/assertion</option>
@@ -1540,7 +1540,7 @@ class CdaToFhirStepBuilder {
                     style="${fieldStyle}font-family:monospace;" oninput="${onAny}">
                 <div style="font-size:0.68rem;color:#94a3b8;">A field on a related act reached via entryRelationships[typeCode=…].entry — mirrors how Allergy's "type"/"criticality" rows work.</div>`;
         } else if (pattern === 'participant') {
-            params.innerHTML = `
+            params.innerHTML = HtmlSafe.html`
                 <select id="cdaPatternTypeCode" style="${fieldStyle}" onchange="${onAny}">
                     <option value="CSM">CSM — Consumable/substance</option>
                     <option value="LOC">LOC — Location</option>
@@ -1550,7 +1550,7 @@ class CdaToFhirStepBuilder {
                     style="${fieldStyle}font-family:monospace;" oninput="${onAny}">
                 <div style="font-size:0.68rem;color:#94a3b8;">A field on a participant of the matched entry — mirrors how Allergy's "category" row works.</div>`;
         } else if (pattern === 'author') {
-            params.innerHTML = `
+            params.innerHTML = HtmlSafe.html`
                 <select id="cdaPatternAuthorRole" style="${fieldStyle}" onchange="${onAny}">
                     <option value="authors[0].assignedAuthor.assignedPerson.names[0]">Author</option>
                     <option value="performers[0].assignedEntity.assignedPerson.names[0]">Performer</option>
@@ -1611,16 +1611,16 @@ class CdaToFhirStepBuilder {
             return;
         }
         const esc = this._escAttr.bind(this);
-        results.innerHTML = matches.map((f, i) => `
+        results.innerHTML = HtmlSafe.html`${matches.map((f, i) => HtmlSafe.html`
             <div class="cda-entry-field-result" data-index="${i}"
                 style="padding:0.4rem 0.6rem;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:0.75rem;">
                 <div style="font-weight:600;color:#1e293b;">
-                    ${esc(f.name || f.path)}
-                    <span style="font-size:0.65rem;color:#94a3b8;font-weight:400;"> · ${esc(f.dataType || '')}</span>
+                    ${f.name || f.path}
+                    <span style="font-size:0.65rem;color:#94a3b8;font-weight:400;"> · ${f.dataType || ''}</span>
                 </div>
-                <div style="color:#6b7280;font-size:0.71rem;">${esc(f.description || '')}</div>
-                <div style="color:#94a3b8;font-family:monospace;font-size:0.68rem;">${esc(f.path || '')}</div>
-            </div>`).join('');
+                <div style="color:#6b7280;font-size:0.71rem;">${f.description || ''}</div>
+                <div style="color:#94a3b8;font-family:monospace;font-size:0.68rem;">${f.path || ''}</div>
+            </div>`)}`;
         results.style.display = 'block';
 
         this._currentEntryFieldMatches = matches;
@@ -1724,7 +1724,7 @@ class CdaToFhirStepBuilder {
     _renderRawPathTab() {
         const container = document.getElementById('cdaAddFieldTab-raw');
         if (!container) return;
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
             <div style="font-size:0.71rem;color:#94a3b8;margin-bottom:0.5rem;">
                 For users who already know this document's CDA structure — Scope and SourcePath as free text, no guidance.
             </div>
@@ -1879,25 +1879,25 @@ class CdaToFhirStepBuilder {
             const message = this._hasCDATestDocument()
                 ? 'The last Test Pipeline run\'s sample document has no entries for this section — try a sample that includes it, or use Build From Pattern / Advanced instead.'
                 : 'Run "Test Pipeline" with a sample document first to browse real field values here.';
-            container.innerHTML = `<div style="padding:0.75rem;text-align:center;color:#94a3b8;font-size:0.75rem;">${message}</div>`;
+            container.innerHTML = HtmlSafe.html`<div style="padding:0.75rem;text-align:center;color:#94a3b8;font-size:0.75rem;">${message}</div>`;
             return;
         }
 
         this._browseLeaves = this._walkCDAEntryLeafPaths(entries);
         if (this._browseLeaves.length === 0) {
-            container.innerHTML = `<div style="padding:0.75rem;text-align:center;color:#94a3b8;font-size:0.75rem;">No fields found in the sampled entries.</div>`;
+            container.innerHTML = HtmlSafe.html`<div style="padding:0.75rem;text-align:center;color:#94a3b8;font-size:0.75rem;">No fields found in the sampled entries.</div>`;
             return;
         }
 
         const esc = this._escAttr.bind(this);
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
             <div style="max-height:220px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:5px;">
-                ${this._browseLeaves.map((l, i) => `
+                ${this._browseLeaves.map((l, i) => HtmlSafe.html`
                     <div class="cda-browse-leaf" data-leaf-index="${i}"
                         style="padding:0.35rem 0.55rem;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:0.73rem;">
-                        <code style="color:#1e40af;word-break:break-all;">${esc(l.rawPath)}</code>
-                        <div style="color:#94a3b8;font-size:0.68rem;">${esc(String(l.value).slice(0, 80))}</div>
-                    </div>`).join('')}
+                        <code style="color:#1e40af;word-break:break-all;">${l.rawPath}</code>
+                        <div style="color:#94a3b8;font-size:0.68rem;">${String(l.value).slice(0, 80)}</div>
+                    </div>`)}
             </div>`;
         container.querySelectorAll('.cda-browse-leaf').forEach(el => {
             el.addEventListener('mouseover', () => { el.style.background = '#f0f7ff'; });
@@ -2223,7 +2223,7 @@ class CdaToFhirStepBuilder {
     // ── Translation table modal ───────────────────────────────────────────────
 
     _renderTranslationModal() {
-        return `
+        return HtmlSafe.html`
         <div id="cdaTranslationModal"
             style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10100;align-items:center;justify-content:center;">
             <div style="background:white;border-radius:8px;width:660px;max-height:80vh;overflow:auto;padding:1.25rem;box-shadow:0 20px 60px rgba(0,0,0,0.25);">
@@ -2264,7 +2264,7 @@ class CdaToFhirStepBuilder {
                 this._sections = data.sections;
                 const container = document.getElementById('cdaToFhirTab-sections');
                 if (container) {
-                    container.innerHTML = this._renderSectionsTab(this._step ? this._step.config : cfg);
+                    container.innerHTML = HtmlSafe.html`${this._renderSectionsTab(this._step ? this._step.config : cfg)}`;
                 }
             })
             .catch(() => {}); // AbortError on destroy is expected
@@ -2420,18 +2420,18 @@ class CdaToFhirStepBuilder {
         const rows = fields.map(f => {
             let caption = '';
             if (f.nestedUnder && f.nestedUnder !== lastNestedUnder) {
-                caption = `
-                <tr data-caption-group="${esc(f.nestedUnder)}" style="background:#eff6ff;">
+                caption = HtmlSafe.html`
+                <tr data-caption-group="${f.nestedUnder}" style="background:#eff6ff;">
                     <td colspan="5" style="padding:0.35rem 0.5rem;font-size:0.71rem;color:#1e3a8a;font-weight:600;letter-spacing:0.02em;">
-                        ↳ ${esc(f.nestedUnder)}[] (repeating)
+                        ↳ ${f.nestedUnder}[] (repeating)
                     </td>
                 </tr>`;
             }
             lastNestedUnder = f.nestedUnder || null;
-            return caption + this._fieldRowHtml(sectionKey, f);
-        }).join('');
+            return HtmlSafe.html`${caption}${this._fieldRowHtml(sectionKey, f)}`;
+        });
 
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
         <style>
             #cdaSectionFieldEditor table.cda-field-table tbody tr.cda-field-row:nth-of-type(even) { background:#fafbfc; }
             #cdaSectionFieldEditor table.cda-field-table tbody tr.cda-field-row:hover { background:#f0f7ff; }
@@ -2451,7 +2451,7 @@ class CdaToFhirStepBuilder {
             <div style="position:relative;flex:1;">
                 <span style="position:absolute;left:0.6rem;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:0.8rem;pointer-events:none;">🔍</span>
                 <input id="cdaFieldSearchInput" type="text"
-                    value="${esc(this._fieldSearchQuery)}"
+                    value="${this._fieldSearchQuery}"
                     placeholder="Search fields by name or clinical term… (e.g. criticality, allergy severity)"
                     oninput="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onFieldSearchInput(this.value)"
                     style="width:100%;padding:0.4rem 2rem 0.4rem 1.9rem;font-size:0.78rem;border:1px solid #cbd5e1;border-radius:6px;
@@ -2463,7 +2463,7 @@ class CdaToFhirStepBuilder {
                            background:none;border:none;cursor:pointer;color:#94a3b8;font-size:0.95rem;line-height:1;">×</button>
             </div>
             <button type="button" id="cdaAddFieldBtn"
-                onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.openAddFieldModal('${esc(sectionKey)}')"
+                onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.openAddFieldModal('${sectionKey}')"
                 style="padding:0.4rem 0.8rem;font-size:0.78rem;font-weight:600;background:#1e3a8a;color:#fff;
                        border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">
                 + Add Field
@@ -2534,11 +2534,11 @@ class CdaToFhirStepBuilder {
         const isNew = !!f.isNew;
         let badge = '';
         if (isDisabled) {
-            badge = `<span style="font-size:0.65rem;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:3px;padding:1px 4px;margin-left:4px;">removed</span>`;
+            badge = HtmlSafe.html`<span style="font-size:0.65rem;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:3px;padding:1px 4px;margin-left:4px;">removed</span>`;
         } else if (isNew) {
-            badge = `<span style="font-size:0.65rem;background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;border-radius:3px;padding:1px 4px;margin-left:4px;">new</span>`;
+            badge = HtmlSafe.html`<span style="font-size:0.65rem;background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;border-radius:3px;padding:1px 4px;margin-left:4px;">new</span>`;
         } else if (f.isModified) {
-            badge = `<span style="font-size:0.65rem;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:3px;padding:1px 4px;margin-left:4px;">modified</span>`;
+            badge = HtmlSafe.html`<span style="font-size:0.65rem;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:3px;padding:1px 4px;margin-left:4px;">modified</span>`;
         }
         const resetBtn = isNew ? '' : this._resetButtonHtml(sectionKey, f.key);
         const removeBtn = isNew
@@ -2547,40 +2547,40 @@ class CdaToFhirStepBuilder {
 
         const fhirPathRaw  = f.fhirPath  || '';
         const transformRaw = f.transform || '';
-        const fhirPath  = esc(fhirPathRaw);
-        const transform = esc(transformRaw);
+        const fhirPath  = (fhirPathRaw);
+        const transform = (transformRaw);
         const indent = f.nestedUnder ? 'padding-left:1.1rem;' : '';
         const rowMuted = isDisabled ? 'opacity:0.55;' : '';
         const nameStrike = isDisabled ? 'text-decoration:line-through;' : '';
         const disabledAttr = isDisabled ? 'disabled' : '';
-        return `
+        return HtmlSafe.html`
             <tr class="cda-field-row" style="border-bottom:1px solid #f1f5f9;vertical-align:top;${rowMuted}"
-                data-field-key="${esc(f.key)}" data-nested-under="${esc(f.nestedUnder || '')}"
-                data-conformance="${esc(f.conformance || '')}"
-                data-search="${esc(searchText)}">
+                data-field-key="${f.key}" data-nested-under="${f.nestedUnder || ''}"
+                data-conformance="${f.conformance || ''}"
+                data-search="${searchText}">
                 <td class="cda-field-name-cell" style="padding:0.4rem;font-family:monospace;font-size:0.75rem;color:#334155;${indent}${nameStrike}">
-                    ${esc(f.key)}${badge}
+                    ${f.key}${badge}
                 </td>
-                <td style="padding:0.4rem;font-size:0.72rem;color:#6b7280;font-style:italic;" title="${esc(f.cdaSource || '')}">${esc(f.cdaSource || '')}</td>
+                <td style="padding:0.4rem;font-size:0.72rem;color:#6b7280;font-style:italic;" title="${f.cdaSource || ''}">${f.cdaSource || ''}</td>
                 <td style="padding:0.4rem;">
                     <div style="position:relative;">
                         <span style="position:absolute;left:0.4rem;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:0.7rem;pointer-events:none;">📌</span>
                         <input type="text" class="cda-field-fhir-path form-control form-control-sm cda-modern-input"
-                            data-field-key="${esc(f.key)}" data-section-key="${esc(sectionKey)}"
+                            data-field-key="${f.key}" data-section-key="${sectionKey}"
                             value="${fhirPath}" title="${fhirPath}" ${disabledAttr} autocomplete="off"
                             style="width:100%;padding:0.3rem 0.4rem 0.3rem 1.4rem;font-size:0.75rem;font-family:monospace;border:1px solid #cbd5e1;border-radius:5px;box-sizing:border-box;"
                             onfocus="window._cdaToFhirBuilder && window._cdaToFhirBuilder.showPathAutocomplete(this)"
                             oninput="window._cdaToFhirBuilder && window._cdaToFhirBuilder.showPathAutocomplete(this)"
                             onblur="window._cdaToFhirBuilder && window._cdaToFhirBuilder.hideAutocompleteSoon()"
                             onkeydown="window._cdaToFhirBuilder && window._cdaToFhirBuilder.handleAutocompleteKeydown(event)"
-                            onchange="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onFieldPathChange('${esc(sectionKey)}','${esc(f.key)}',this.value)">
+                            onchange="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onFieldPathChange('${sectionKey}','${f.key}',this.value)">
                     </div>
                 </td>
                 <td style="padding:0.4rem;">
                     <div style="position:relative;">
                         <span style="position:absolute;left:0.4rem;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:0.7rem;pointer-events:none;">🔧</span>
                         <input type="text" class="cda-field-transform form-control form-control-sm cda-modern-input"
-                            data-field-key="${esc(f.key)}" data-section-key="${esc(sectionKey)}"
+                            data-field-key="${f.key}" data-section-key="${sectionKey}"
                             value="${transform}" placeholder="— none —" ${disabledAttr} autocomplete="off"
                             title="${transform || 'No transform — value passed through as-is'}"
                             style="width:100%;padding:0.3rem 0.4rem 0.3rem 1.4rem;font-size:0.75rem;font-family:monospace;border:1px solid #cbd5e1;border-radius:5px;box-sizing:border-box;"
@@ -2588,7 +2588,7 @@ class CdaToFhirStepBuilder {
                             oninput="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onTransformFieldInput(this)"
                             onblur="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onTransformFieldBlur(this)"
                             onkeydown="window._cdaToFhirBuilder && window._cdaToFhirBuilder.handleAutocompleteKeydown(event)"
-                            onchange="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onFieldTransformChange('${esc(sectionKey)}','${esc(f.key)}',this.value)">
+                            onchange="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onFieldTransformChange('${sectionKey}','${f.key}',this.value)">
                     </div>
                 </td>
                 <td class="cda-field-action-cell" style="padding:0.4rem;white-space:nowrap;text-align:center;">
@@ -2599,8 +2599,8 @@ class CdaToFhirStepBuilder {
 
     _newFieldRemoveButtonHtml(sectionKey, fieldKey) {
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        return `<button type="button"
-                onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onNewFieldRemove('${esc(sectionKey)}','${esc(fieldKey)}')"
+        return HtmlSafe.html`<button type="button"
+                onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onNewFieldRemove('${sectionKey}','${fieldKey}')"
                 title="Remove this newly-added field"
                 style="padding:0.1rem 0.4rem;font-size:0.68rem;background:#fef2f2;border:1px solid #fecaca;border-radius:3px;cursor:pointer;color:#b91c1c;">
                 Remove
@@ -2634,7 +2634,7 @@ class CdaToFhirStepBuilder {
         // A parser context of <tbody> is required for a bare "<tr>...</tr>"
         // string to be interpreted as a table row rather than dropped.
         const temp = document.createElement('tbody');
-        temp.innerHTML = this._fieldRowHtml(sectionKey, fieldDef).trim();
+        temp.innerHTML = HtmlSafe.html`${this._fieldRowHtml(sectionKey, fieldDef)}`;
         const newRow = temp.querySelector('tr.cda-field-row');
         if (!newRow) return;
 
@@ -2713,8 +2713,8 @@ class CdaToFhirStepBuilder {
 
     _resetButtonHtml(sectionKey, fieldKey) {
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        return `<button type="button"
-                onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.resetFieldToOOB('${esc(sectionKey)}','${esc(fieldKey)}')"
+        return HtmlSafe.html`<button type="button"
+                onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.resetFieldToOOB('${sectionKey}','${fieldKey}')"
                 title="Reset to OOB default"
                 style="padding:0.1rem 0.4rem;font-size:0.68rem;background:#f8fafc;border:1px solid #cbd5e1;border-radius:3px;cursor:pointer;color:#64748b;">
                 Reset
@@ -2728,15 +2728,15 @@ class CdaToFhirStepBuilder {
     _removeToggleButtonHtml(sectionKey, fieldKey, conformance, isDisabled) {
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         if (isDisabled) {
-            return `<button type="button"
-                    onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onFieldRestore('${esc(sectionKey)}','${esc(fieldKey)}')"
+            return HtmlSafe.html`<button type="button"
+                    onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onFieldRestore('${sectionKey}','${fieldKey}')"
                     title="Restore this field's mapping"
                     style="padding:0.1rem 0.4rem;font-size:0.68rem;background:#eff6ff;border:1px solid #bfdbfe;border-radius:3px;cursor:pointer;color:#1e40af;">
                     Restore
                 </button>`;
         }
-        return `<button type="button"
-                onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onFieldRemove('${esc(sectionKey)}','${esc(fieldKey)}','${esc(conformance)}')"
+        return HtmlSafe.html`<button type="button"
+                onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.onFieldRemove('${sectionKey}','${fieldKey}','${conformance}')"
                 title="Remove this field's mapping — it will not be written to the FHIR output"
                 style="padding:0.1rem 0.4rem;font-size:0.68rem;background:#fef2f2;border:1px solid #fecaca;border-radius:3px;cursor:pointer;color:#b91c1c;">
                 Remove
@@ -2790,8 +2790,8 @@ class CdaToFhirStepBuilder {
         const conformance = row.dataset.conformance || '';
         const actionCell = row.querySelector('.cda-field-action-cell > div');
         if (actionCell) {
-            actionCell.innerHTML = this._resetButtonHtml(sectionKey, fieldKey) +
-                this._removeToggleButtonHtml(sectionKey, fieldKey, conformance, isDisabled);
+            actionCell.innerHTML = HtmlSafe.html`${this._resetButtonHtml(sectionKey, fieldKey)}${
+                this._removeToggleButtonHtml(sectionKey, fieldKey, conformance, isDisabled)}`;
         }
     }
 
@@ -2975,14 +2975,14 @@ class CdaToFhirStepBuilder {
             return;
         }
 
-        dropdown.innerHTML = matches.map(c => {
+        dropdown.innerHTML = HtmlSafe.html`${matches.map(c => {
             const idx = query ? c.toLowerCase().indexOf(query) : -1;
             const label = idx >= 0
-                ? `${esc(c.slice(0, idx))}<mark style="background:#fde68a;border-radius:2px;">${esc(c.slice(idx, idx + query.length))}</mark>${esc(c.slice(idx + query.length))}`
-                : esc(c);
-            return `<div class="cda-autocomplete-item" data-suggest-value="${esc(c)}"
+                ? HtmlSafe.html`${c.slice(0, idx)}<mark style="background:#fde68a;border-radius:2px;">${c.slice(idx, idx + query.length)}</mark>${c.slice(idx + query.length)}`
+                : (c);
+            return HtmlSafe.html`<div class="cda-autocomplete-item" data-suggest-value="${c}"
                         style="padding:0.35rem 0.6rem;font-size:0.75rem;font-family:monospace;cursor:pointer;color:#1e293b;">${label}</div>`;
-        }).join('');
+        })}`;
 
         const rect = inputEl.getBoundingClientRect();
         dropdown.style.left = `${rect.left}px`;
@@ -3150,7 +3150,7 @@ class CdaToFhirStepBuilder {
             return;
         }
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
         <table style="width:100%;border-collapse:collapse;font-size:0.78rem;margin-bottom:0.5rem;">
             <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
                 <th style="padding:0.3rem 0.4rem;text-align:left;">Source System</th>
@@ -3159,18 +3159,18 @@ class CdaToFhirStepBuilder {
                 <th style="padding:0.3rem 0.4rem;text-align:left;">Target Code</th>
                 <th style="padding:0.3rem 0.4rem;width:40px;"></th>
             </tr></thead>
-            <tbody>${this._translations.map((t, i) => `
+            <tbody>${this._translations.map((t, i) => HtmlSafe.html`
             <tr style="border-bottom:1px solid #f1f5f9;">
-                <td style="padding:0.3rem 0.4rem;font-size:0.75rem;">${esc(t.source_system)}</td>
-                <td style="padding:0.3rem 0.4rem;font-family:monospace;">${esc(t.source_code)}</td>
-                <td style="padding:0.3rem 0.4rem;font-size:0.75rem;">${esc(t.target_system)}</td>
-                <td style="padding:0.3rem 0.4rem;font-family:monospace;">${esc(t.target_code)}</td>
+                <td style="padding:0.3rem 0.4rem;font-size:0.75rem;">${t.source_system}</td>
+                <td style="padding:0.3rem 0.4rem;font-family:monospace;">${t.source_code}</td>
+                <td style="padding:0.3rem 0.4rem;font-size:0.75rem;">${t.target_system}</td>
+                <td style="padding:0.3rem 0.4rem;font-family:monospace;">${t.target_code}</td>
                 <td style="padding:0.3rem 0.4rem;text-align:center;">
                     <button type="button"
                         onclick="window._cdaToFhirBuilder && window._cdaToFhirBuilder.deleteTranslation(${i})"
                         style="background:transparent;border:none;cursor:pointer;color:#ef4444;font-size:0.9rem;">×</button>
                 </td>
-            </tr>`).join('')}</tbody>
+            </tr>`)}</tbody>
         </table>`;
     }
 
@@ -3235,9 +3235,9 @@ class FHIRToCDABuilder {
         const cfg = step.config;
         const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-        const sourceField    = esc(cfg.sourceField  || 'fhirBundle');
-        const outputField    = esc(cfg.outputField  || 'cdaXML');
-        const template       = esc(cfg.template     || 'discharge_summary');
+        const sourceField    = (cfg.sourceField  || 'fhirBundle');
+        const outputField    = (cfg.outputField  || 'cdaXML');
+        const template       = (cfg.template     || 'discharge_summary');
         const includeNarrative = cfg.includeNarrative !== false;
         const prettyPrint      = cfg.prettyPrint    !== false;
 
@@ -3249,10 +3249,10 @@ class FHIRToCDABuilder {
         ];
 
         const templateOptions = templates.map(t =>
-            `<option value="${esc(t.value)}" ${template === t.value ? 'selected' : ''}>${esc(t.label)}</option>`
-        ).join('');
+            HtmlSafe.html`<option value="${t.value}" ${template === t.value ? 'selected' : ''}>${t.label}</option>`
+        );
 
-        return `
+        return HtmlSafe.html`
         <div class="cda-step-config">
             <div class="config-group" style="margin-bottom:1.1rem;">
                 <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Input FHIR Bundle Field</label>
@@ -3319,12 +3319,12 @@ class CDANormalizerBuilder {
         const cfg = step.config;
         const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-        const inputField    = esc(cfg.inputField  || '');
-        const outputField   = esc(cfg.outputField || '');
+        const inputField    = (cfg.inputField  || '');
+        const outputField   = (cfg.outputField || '');
         const strictMode    = cfg.strictMode === true;
         const logSubstitutions = cfg.logSubstitutions !== false;
 
-        return `
+        return HtmlSafe.html`
         <div class="cda-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Pre-parse step.</strong> Converts C32/HITSP template OIDs to C-CDA 2.1 equivalents on raw XML fields.
@@ -3447,7 +3447,7 @@ class CDADedupeStepBuilder {
         this._step = step;
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-        const sourceField = esc(cfg.sourceField || '');
+        const sourceField = (cfg.sourceField || '');
         const strategy = cfg.strategy === 'last' ? 'last' : 'first';
 
         // Empty/absent config.sections means "every section enabled" — matches
@@ -3460,13 +3460,13 @@ class CDADedupeStepBuilder {
         this._loadSections();
 
         const crossMessage = cfg.crossMessage === true;
-        const patientRoot = esc(cfg.patientIdentifierRoot || '');
+        const patientRoot = (cfg.patientIdentifierRoot || '');
         // nil/omitted (undefined here, since JSON round-trips absent keys as
         // undefined) means "on" — matches the executor's own default; only an
         // explicit false opts out.
         const trackSuppressionLineage = cfg.trackSuppressionLineage !== false;
 
-        return `
+        return HtmlSafe.html`
         <div class="cda-step-config">
             <div style="background:#fdf2f8;border:1px solid #fbcfe8;border-left:3px solid #f472b6;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e3a8a;">
                 <strong>Dedupe step.</strong> Finds and removes duplicate clinical entries — like the same allergy or medication listed twice — by comparing the fields you check below, not the raw text. Place it after <code>cda.parse</code> (so there's a parsed document to clean up) and before <code>cda.to_fhir</code>/<code>cda.section_to_csv</code> (so they see the cleaned-up result instead of the duplicates).
@@ -3531,7 +3531,7 @@ class CDADedupeStepBuilder {
                 this._sections = data.sections;
                 this._initCheckedFields();
                 const list = document.getElementById('cdaDedupeSectionsList');
-                if (list) list.innerHTML = this._renderSectionsList();
+                if (list) list.innerHTML = HtmlSafe.html`${this._renderSectionsList()}`;
             })
             .catch(() => {}); // AbortError on destroy is expected
     }
@@ -3614,9 +3614,9 @@ class CDADedupeStepBuilder {
 
     _renderSectionsList() {
         if (!this._sections.length) {
-            return `<div style="text-align:center;padding:1.5rem;color:#6b7280;font-size:0.8rem;">Loading sections…</div>`;
+            return HtmlSafe.html`<div style="text-align:center;padding:1.5rem;color:#6b7280;font-size:0.8rem;">Loading sections…</div>`;
         }
-        return this._sections.map(sec => this._renderSectionRow(sec)).join('');
+        return this._sections.map(sec => this._renderSectionRow(sec));
     }
 
     _renderSectionRow(sec) {
@@ -3634,11 +3634,11 @@ class CDADedupeStepBuilder {
         // would otherwise satisfy vacuously (e.g. a section like
         // admissionMedications that has no OOB identity rule at all).
         const badge = checked.size === 0
-            ? `<span style="font-size:0.65rem;background:#fee2e2;color:#b91c1c;border-radius:3px;padding:1px 5px;white-space:nowrap;">no fields — skipped</span>`
+            ? HtmlSafe.html`<span style="font-size:0.65rem;background:#fee2e2;color:#b91c1c;border-radius:3px;padding:1px 5px;white-space:nowrap;">no fields — skipped</span>`
             : isDefault
-                ? `<span style="font-size:0.65rem;background:#f1f5f9;color:#64748b;border-radius:3px;padding:1px 5px;white-space:nowrap;">OOB default</span>`
-                : `<span style="font-size:0.65rem;background:#fef3c7;color:#92400e;border-radius:3px;padding:1px 5px;white-space:nowrap;">${checked.size}/${sec.fields.length} custom</span>`;
-        return `
+                ? HtmlSafe.html`<span style="font-size:0.65rem;background:#f1f5f9;color:#64748b;border-radius:3px;padding:1px 5px;white-space:nowrap;">OOB default</span>`
+                : HtmlSafe.html`<span style="font-size:0.65rem;background:#fef3c7;color:#92400e;border-radius:3px;padding:1px 5px;white-space:nowrap;">${checked.size}/${sec.fields.length} custom</span>`;
+        return HtmlSafe.html`
         <div id="cdaDedupeSectionRow-${key}" style="border:1px solid #e2e8f0;border-radius:6px;margin-bottom:0.4rem;overflow:hidden;">
             <div id="cdaDedupeSectionHeader-${key}" style="display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0.6rem;background:${expanded ? '#fdf2f8' : '#fff'};cursor:pointer;"
                 onclick="window._cdaDedupeBuilder && window._cdaDedupeBuilder.toggleSection('${key}')">
@@ -3647,7 +3647,7 @@ class CDADedupeStepBuilder {
                     onclick="event.stopPropagation()"
                     onchange="window._cdaDedupeBuilder && window._cdaDedupeBuilder.setSectionEnabled('${key}', this.checked)"
                     style="accent-color:#1e3a8a;width:14px;height:14px;flex-shrink:0;">
-                <span style="font-weight:${enabled ? '500' : '400'};color:${enabled ? '#1e293b' : '#94a3b8'};flex:1;">${esc(sec.displayName || key)}</span>
+                <span style="font-weight:${enabled ? '500' : '400'};color:${enabled ? '#1e293b' : '#94a3b8'};flex:1;">${sec.displayName || key}</span>
                 ${badge}
                 <span id="cdaDedupeSectionCaret-${key}" style="color:#94a3b8;">${expanded ? '▾' : '▸'}</span>
             </div>
@@ -3665,7 +3665,7 @@ class CDADedupeStepBuilder {
         const caret  = document.getElementById('cdaDedupeSectionCaret-' + key);
         if (!detail) return;
         if (this._sectionExpanded[key]) {
-            detail.innerHTML = this._renderSectionDetail(sec);
+            detail.innerHTML = HtmlSafe.html`${this._renderSectionDetail(sec)}`;
             detail.style.display = 'block';
             if (caret) caret.textContent = '▾';
         } else {
@@ -3683,7 +3683,7 @@ class CDADedupeStepBuilder {
         // Replace the WHOLE row (header + detail) — the "N/M custom" badge
         // lives in the header, outside the detail area that changed.
         const row = document.getElementById('cdaDedupeSectionRow-' + key);
-        if (row) row.outerHTML = this._renderSectionRow(sec);
+        if (row) row.outerHTML = HtmlSafe.html`${this._renderSectionRow(sec)}`;
     }
 
     // ── Section detail: identity-field checkboxes ────────────────────────
@@ -3692,37 +3692,37 @@ class CDADedupeStepBuilder {
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         const escAttr = s => esc(s).replace(/'/g, '&#39;');
         const checked = this._checkedFields[sec.sectionKey] || new Set();
-        const rows = sec.fields.map(f => `
+        const rows = sec.fields.map(f => HtmlSafe.html`
             <tr style="border-bottom:1px solid #f1f5f9;">
                 <td style="padding:0.35rem 0.5rem;width:28px;text-align:center;">
-                    <input type="checkbox" class="cda-dedupe-field-checkbox" data-section-key="${sec.sectionKey}" data-path="${esc(f.path)}"
+                    <input type="checkbox" class="cda-dedupe-field-checkbox" data-section-key="${sec.sectionKey}" data-path="${f.path}"
                         ${checked.has(f.path) ? 'checked' : ''}
-                        onchange="window._cdaDedupeBuilder && window._cdaDedupeBuilder.toggleField('${sec.sectionKey}', '${escAttr(f.path)}', this.checked)"
+                        onchange="window._cdaDedupeBuilder && window._cdaDedupeBuilder.toggleField('${sec.sectionKey}', '${f.path}', this.checked)"
                         style="accent-color:#1e3a8a;width:14px;height:14px;">
                 </td>
-                <td style="padding:0.35rem 0.5rem;font-weight:500;color:#1e293b;white-space:nowrap;">${esc(f.name)}${f.default ? ' <span style="font-size:0.62rem;color:#94a3b8;">(OOB)</span>' : ''}</td>
-                <td style="padding:0.35rem 0.5rem;font-family:monospace;font-size:0.72rem;color:#475569;word-break:break-all;">${esc(f.path)}</td>
+                <td style="padding:0.35rem 0.5rem;font-weight:500;color:#1e293b;white-space:nowrap;">${f.name}${f.default ? HtmlSafe.raw(' <span style="font-size:0.62rem;color:#94a3b8;">(OOB)</span>') : ''}</td>
+                <td style="padding:0.35rem 0.5rem;font-family:monospace;font-size:0.72rem;color:#475569;word-break:break-all;">${f.path}</td>
                 <td></td>
-            </tr>`).join('');
+            </tr>`);
 
         const customFields = this._customFields[sec.sectionKey] || [];
-        const customRows = customFields.map(f => `
+        const customRows = customFields.map(f => HtmlSafe.html`
             <tr style="border-bottom:1px solid #f1f5f9;background:#fffbeb;">
                 <td style="padding:0.35rem 0.5rem;width:28px;text-align:center;">
-                    <input type="checkbox" class="cda-dedupe-field-checkbox" data-section-key="${sec.sectionKey}" data-path="${esc(f.path)}"
+                    <input type="checkbox" class="cda-dedupe-field-checkbox" data-section-key="${sec.sectionKey}" data-path="${f.path}"
                         ${checked.has(f.path) ? 'checked' : ''}
-                        onchange="window._cdaDedupeBuilder && window._cdaDedupeBuilder.toggleField('${sec.sectionKey}', '${escAttr(f.path)}', this.checked)"
+                        onchange="window._cdaDedupeBuilder && window._cdaDedupeBuilder.toggleField('${sec.sectionKey}', '${f.path}', this.checked)"
                         style="accent-color:#1e3a8a;width:14px;height:14px;">
                 </td>
-                <td style="padding:0.35rem 0.5rem;font-weight:500;color:#92400e;white-space:nowrap;">${esc(f.name)} <span style="font-size:0.62rem;background:#fef3c7;color:#92400e;border-radius:3px;padding:0 4px;">custom</span></td>
-                <td style="padding:0.35rem 0.5rem;font-family:monospace;font-size:0.72rem;color:#92400e;word-break:break-all;">${esc(f.path)}</td>
+                <td style="padding:0.35rem 0.5rem;font-weight:500;color:#92400e;white-space:nowrap;">${f.name} <span style="font-size:0.62rem;background:#fef3c7;color:#92400e;border-radius:3px;padding:0 4px;">custom</span></td>
+                <td style="padding:0.35rem 0.5rem;font-family:monospace;font-size:0.72rem;color:#92400e;word-break:break-all;">${f.path}</td>
                 <td style="padding:0.35rem 0.5rem;text-align:right;white-space:nowrap;">
-                    <button type="button" onclick="window._cdaDedupeBuilder && window._cdaDedupeBuilder.removeCustomField('${sec.sectionKey}', '${escAttr(f.path)}')"
+                    <button type="button" onclick="window._cdaDedupeBuilder && window._cdaDedupeBuilder.removeCustomField('${sec.sectionKey}', '${f.path}')"
                         style="padding:0.1rem 0.45rem;font-size:0.68rem;background:#fff;border:1px solid #fca5a5;color:#b91c1c;border-radius:4px;cursor:pointer;">Remove</button>
                 </td>
-            </tr>`).join('');
+            </tr>`);
 
-        return `
+        return HtmlSafe.html`
         <div style="overflow:auto;max-height:280px;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:0.5rem;">
             <table style="width:100%;border-collapse:collapse;">
                 <thead>
@@ -3853,7 +3853,7 @@ class CDABuildStepBuilder {
 
         this._loadRequirements(step.config.documentType);
 
-        return `
+        return HtmlSafe.html`
 <div id="cdaBuildBuilder" style="font-size:0.84rem;">
     <div style="display:flex;gap:0;background:#1e3a8a;border-radius:8px 8px 0 0;margin-bottom:1.1rem;padding:0 0.25rem;">
         ${this._renderTabButton('general', 'General')}
@@ -3902,7 +3902,7 @@ class CDABuildStepBuilder {
 
     _renderTabButton(key, label) {
         const active = this._activeTab === key;
-        return `<button id="cdaBuildTabBtn-${key}" type="button"
+        return HtmlSafe.html`<button id="cdaBuildTabBtn-${key}" type="button"
             onclick="window._cdaBuildBuilder && window._cdaBuildBuilder.switchTab('${key}')"
             style="padding:0.45rem 0.95rem;border:none;
                    border-bottom:3px solid ${active ? '#f9a8d4' : 'transparent'};
@@ -3917,26 +3917,26 @@ class CDABuildStepBuilder {
     _renderGeneralTab(cfg) {
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-        const sourceField  = esc(cfg.sourceField  || 'parsedCDA');
+        const sourceField  = (cfg.sourceField  || 'parsedCDA');
         const inputFormat  = cfg.inputFormat || 'canonical';
-        const outputField  = esc(cfg.outputField  || 'cdaXML');
+        const outputField  = (cfg.outputField  || 'cdaXML');
         const documentType = cfg.documentType || 'CCD';
         const orgName      = esc(cfg.orgName || '');
-        const timezoneOffset = esc(cfg.timezoneOffset || '');
+        const timezoneOffset = (cfg.timezoneOffset || '');
 
         const formatOptions = [
             { value: 'canonical',   label: 'Canonical JSON (from cda.parse or cda.map_to_canonical)' },
             { value: 'fhir_bundle', label: 'FHIR R4 Bundle' },
-        ].map(o => `<option value="${o.value}" ${inputFormat === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
+        ].map(o => HtmlSafe.html`<option value="${o.value}" ${inputFormat === o.value ? 'selected' : ''}>${o.label}</option>`);
 
         const docTypeOptions = [
             'CCD', 'Discharge Summary', 'Referral Note',
             'History and Physical', 'Consultation Note', 'Progress Note',
             'Care Plan', 'Transfer Summary', 'Diagnostic Imaging Report',
             'Operative Note', 'Procedure Note', 'Unstructured Document',
-        ].map(dt => `<option value="${esc(dt)}" ${documentType === dt ? 'selected' : ''}>${esc(dt)}</option>`).join('');
+        ].map(dt => HtmlSafe.html`<option value="${dt}" ${documentType === dt ? 'selected' : ''}>${dt}</option>`);
 
-        return `
+        return HtmlSafe.html`
         <div class="cda-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Build step.</strong> Converts canonical JSON or a FHIR Bundle into a full C-CDA 2.1 document,
@@ -4002,7 +4002,7 @@ class CDABuildStepBuilder {
     _renderRequirementsTab(cfg) {
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         if (!this._requirements) {
-            return `<div style="padding:1rem;color:#94a3b8;font-size:0.8rem;">Loading requirements for ${esc(cfg.documentType || 'CCD')}…</div>`;
+            return HtmlSafe.html`<div style="padding:1rem;color:#94a3b8;font-size:0.8rem;">Loading requirements for ${cfg.documentType || 'CCD'}…</div>`;
         }
 
         const sourceStep = (typeof CDARequirementsHelper !== 'undefined') ? CDARequirementsHelper.findMapToCanonicalStep(this._panel) : null;
@@ -4014,10 +4014,10 @@ class CDABuildStepBuilder {
             // likely cda.parse, whose completeness depends on the runtime
             // document, not static config) — show the static reference list.
             const sectionRows = this._requirements.sections.map(s =>
-                `<tr><td>${esc(s.displayName || s.key)}</td><td>${badge(s.conformance)}</td></tr>`).join('');
-            return `
+                HtmlSafe.html`<tr><td>${s.displayName || s.key}</td><td>${badge(s.conformance)}</td></tr>`);
+            return HtmlSafe.html`
             <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#92400e;">
-                No <code>cda.map_to_canonical</code> step found in this pipeline to check live completeness against — showing the static requirements for ${esc(cfg.documentType || 'CCD')} instead. If your source is <code>cda.parse</code>, completeness depends on the parsed document itself; use Test Pipeline's compliance report to check a real message.
+                No <code>cda.map_to_canonical</code> step found in this pipeline to check live completeness against — showing the static requirements for ${cfg.documentType || 'CCD'} instead. If your source is <code>cda.parse</code>, completeness depends on the parsed document itself; use Test Pipeline's compliance report to check a real message.
             </div>
             ${uscdiSummary}
             <table class="mapping-table" style="width:100%;">
@@ -4037,16 +4037,16 @@ class CDABuildStepBuilder {
             .map(s => s.sectionKey));
         const sectionRows = this._requirements.sections.map(s => {
             const configured = mappedSectionKeys.has(s.key);
-            return `<tr>
-                <td>${esc(s.displayName || s.key)}</td>
+            return HtmlSafe.html`<tr>
+                <td>${s.displayName || s.key}</td>
                 <td>${badge(s.conformance)}</td>
-                <td>${configured ? '<i class="fas fa-circle-check" style="color:#16a34a;"></i> Configured' : '<span style="color:#94a3b8;">Not configured</span>'}</td>
+                <td>${configured ? HtmlSafe.raw('<i class="fas fa-circle-check" style="color:#16a34a;"></i> Configured') : HtmlSafe.raw('<span style="color:#94a3b8;">Not configured</span>')}</td>
             </tr>`;
-        }).join('');
+        });
 
-        return `
+        return HtmlSafe.html`
         <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
-            Live status of "<strong>${esc(CDARequirementsHelper.stepDisplayName(sourceStep) || 'Map to Canonical')}</strong>" — this pipeline's upstream <code>cda.map_to_canonical</code> step — against ${esc(cfg.documentType || 'CCD')}'s requirements.
+            Live status of "<strong>${CDARequirementsHelper.stepDisplayName(sourceStep) || 'Map to Canonical'}</strong>" — this pipeline's upstream <code>cda.map_to_canonical</code> step — against ${cfg.documentType || 'CCD'}'s requirements.
         </div>
         ${banner}
         ${uscdiSummary}
@@ -4071,19 +4071,19 @@ class CDABuildStepBuilder {
         const badge = key => (reqByKey[key] && typeof CDARequirementsHelper !== 'undefined')
             ? CDARequirementsHelper.renderConformanceBadge(reqByKey[key].conformance) : '';
 
-        const field = (id, label, value, key, placeholder) => `
+        const field = (id, label, value, key, placeholder) => HtmlSafe.html`
             <div class="config-group" style="margin-bottom:0.9rem;">
-                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem;">${esc(label)} ${badge(key)}</label>
-                <input id="${id}" type="text" class="form-control form-control-sm" value="${esc(value)}" placeholder="${esc(placeholder || '')}" style="font-size:0.82rem;">
+                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem;">${label} ${badge(key)}</label>
+                <input id="${id}" type="text" class="form-control form-control-sm" value="${value}" placeholder="${placeholder || ''}" style="font-size:0.82rem;">
             </div>`;
 
-        return `
+        return HtmlSafe.html`
         <div class="cda-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Custodian.</strong> The organization responsible for this document — deployment-level config (who ezHealthKonnect is sending on behalf of), not per-message source data. Address/Phone are optional — the C-CDA schema this app validates against only requires Name and ID.
             </div>
             ${field('cdaBuildCustOrgName', 'Organization Name', cust.orgName, 'name', cfg.orgName || 'ezHealthKonnect')}
-            ${!cust.orgName && cfg.orgName ? `<div style="font-size:0.72rem;color:#94a3b8;margin-top:-0.6rem;margin-bottom:0.9rem;">Not set here yet — currently falls back to this step's previously-saved Organization Name (<code>${esc(cfg.orgName)}</code>). Fill this in to take control of it explicitly.</div>` : ''}
+            ${!cust.orgName && cfg.orgName ? HtmlSafe.html`<div style="font-size:0.72rem;color:#94a3b8;margin-top:-0.6rem;margin-bottom:0.9rem;">Not set here yet — currently falls back to this step's previously-saved Organization Name (<code>${cfg.orgName}</code>). Fill this in to take control of it explicitly.</div>` : ''}
             <div style="display:flex;gap:0.6rem;">
                 <div style="flex:1;">${field('cdaBuildCustIdRoot', 'Organization ID Root (OID)', cust.idRoot, 'id', '2.16.840.1.113883.19.5')}</div>
                 <div style="flex:1;">${field('cdaBuildCustIdExtension', 'Organization ID Extension', cust.idExtension, 'id', 'e.g. NPI or internal org id')}</div>
@@ -4110,13 +4110,13 @@ class CDABuildStepBuilder {
         const badge = key => (reqByKey[key] && typeof CDARequirementsHelper !== 'undefined')
             ? CDARequirementsHelper.renderConformanceBadge(reqByKey[key].conformance) : '';
 
-        const field = (id, label, value, key, placeholder) => `
+        const field = (id, label, value, key, placeholder) => HtmlSafe.html`
             <div class="config-group" style="margin-bottom:0.9rem;">
-                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem;">${esc(label)} ${badge(key)}</label>
-                <input id="${id}" type="text" class="form-control form-control-sm" value="${esc(value)}" placeholder="${esc(placeholder || '')}" style="font-size:0.82rem;">
+                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem;">${label} ${badge(key)}</label>
+                <input id="${id}" type="text" class="form-control form-control-sm" value="${value}" placeholder="${placeholder || ''}" style="font-size:0.82rem;">
             </div>`;
 
-        return `
+        return HtmlSafe.html`
         <div class="cda-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Legal Authenticator.</strong> The person who legally attests to this document's content — genuinely optional (SHOULD, 0..1). Leave Given Name and Family Name blank to omit this element entirely; once a name is provided, Address and Phone (if configured) are written as required children.
@@ -4199,7 +4199,7 @@ class CDABuildStepBuilder {
     _rerender() {
         const root = document.getElementById('cdaBuildBuilder');
         if (!root || !root.parentElement) return;
-        root.outerHTML = this.render(this._step);
+        root.outerHTML = HtmlSafe.html`${this.render(this._step)}`;
     }
 
     collectConfig(step) {

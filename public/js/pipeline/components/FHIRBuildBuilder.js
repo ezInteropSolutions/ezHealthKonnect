@@ -107,17 +107,17 @@ class FHIRBuildBuilder {
         const esc = FHIRBuildBuilder._esc;
 
         const resourceOptions = this._resourceTypes
-            .map(rt => `<option value="${esc(rt)}" ${rt === cfg.resourceType ? 'selected' : ''}>${esc(rt)}</option>`)
-            .join('');
+            .map(rt => HtmlSafe.html`<option value="${rt}" ${rt === cfg.resourceType ? 'selected' : ''}>${rt}</option>`)
+            ;
         const profileOptions = (this._profiles.length ? this._profiles : [cfg.profile])
-            .map(p => `<option value="${esc(p)}" ${p === cfg.profile ? 'selected' : ''}>${esc(p)}</option>`)
-            .join('');
+            .map(p => HtmlSafe.html`<option value="${p}" ${p === cfg.profile ? 'selected' : ''}>${p}</option>`)
+            ;
 
         const missingRequired = (typeof FHIRRequirementsHelper !== 'undefined')
             ? FHIRRequirementsHelper.computeMissingRequired(this._fieldCatalog, cfg.fields, cfg.repeatingGroups)
             : { total: 0, satisfied: 0, missing: [] };
 
-        return `
+        return HtmlSafe.html`
         <div id="fhirBuildBuilder" class="cda-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>FHIR Resource Builder step.</strong> Maps CSV/DB/JSON fields directly onto one FHIR R4 resource.
@@ -140,7 +140,7 @@ class FHIRBuildBuilder {
                 <div style="flex:1 1 160px;">
                     <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Resource Type</label>
                     <select id="fbbResourceType" class="form-select form-select-sm">
-                        ${resourceOptions || `<option value="${esc(cfg.resourceType)}">${esc(cfg.resourceType)}</option>`}
+                        ${resourceOptions || HtmlSafe.html`<option value="${cfg.resourceType}">${cfg.resourceType}</option>`}
                     </select>
                 </div>
                 <div style="flex:1 1 120px;">
@@ -151,12 +151,12 @@ class FHIRBuildBuilder {
                 </div>
                 <div style="flex:0 0 100px;">
                     <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Version</label>
-                    <input id="fbbVersion" type="text" class="form-control form-control-sm" value="${esc(cfg.version)}">
+                    <input id="fbbVersion" type="text" class="form-control form-control-sm" value="${cfg.version}">
                 </div>
                 <div style="flex:1 1 200px;">
                     <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Output Field</label>
                     <input id="fbbOutputField" type="text" class="form-control form-control-sm"
-                        value="${esc(cfg.outputField)}" placeholder="fhirResource"
+                        value="${cfg.outputField}" placeholder="fhirResource"
                         style="font-family:monospace;font-size:0.82rem;">
                 </div>
             </div>
@@ -183,13 +183,13 @@ class FHIRBuildBuilder {
                         const bits = [];
                         if (f.required) bits.push('required');
                         if (f.bindingStrength) bits.push(f.bindingStrength + ' binding');
-                        return `<option value="${esc(f.key)}">${esc(f.label || f.key)}${bits.length ? ' (' + bits.join(', ') + ')' : ''}</option>`;
-                    }).join('')}
+                        return HtmlSafe.html`<option value="${f.key}">${f.label || f.key}${bits.length ? ' (' + bits.join(', ') + ')' : ''}</option>`;
+                    })}
                 </datalist>
                 <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">Flat/single-value element paths, e.g. <code>birthDate</code>, <code>identifier[0].value</code>.</div>
                 <div id="fbbFieldsContainer">
                     ${cfg.fields.length === 0
-                        ? `<div style="text-align:center;padding:1rem;color:#94a3b8;font-size:0.8rem;border:1px dashed #cbd5e1;border-radius:6px;">No fields mapped yet.</div>`
+                        ? HtmlSafe.html`<div style="text-align:center;padding:1rem;color:#94a3b8;font-size:0.8rem;border:1px dashed #cbd5e1;border-radius:6px;">No fields mapped yet.</div>`
                         : this._renderFieldsTable(cfg.fields, 'fbbFieldTargets', '-1', this._validateIssueByRowKey)}
                 </div>
             </div>
@@ -205,8 +205,8 @@ class FHIRBuildBuilder {
                 <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">For repeating elements (<code>identifier[]</code>, <code>name[]</code>, <code>telecom[]</code>) — one sub-object is built per source row, so multiple fields from the same row stay aligned. A group can itself contain nested groups (e.g. <code>item[].adjudication[]</code>) — a nested group's Rows Path resolves relative to its own parent row, and its own rows are appended after any fields the parent row already wrote at the same Target Path (e.g. two fixed entries), never overwriting them.</div>
                 <div id="fbbGroupsContainer">
                     ${cfg.repeatingGroups.length === 0
-                        ? `<div style="text-align:center;padding:1.2rem;color:#94a3b8;font-size:0.8rem;border:1px dashed #cbd5e1;border-radius:6px;">No repeating groups configured yet.</div>`
-                        : cfg.repeatingGroups.map((rg, i) => this._renderGroupCard(rg, [i])).join('')}
+                        ? HtmlSafe.html`<div style="text-align:center;padding:1.2rem;color:#94a3b8;font-size:0.8rem;border:1px dashed #cbd5e1;border-radius:6px;">No repeating groups configured yet.</div>`
+                        : cfg.repeatingGroups.map((rg, i) => this._renderGroupCard(rg, [i]))}
                 </div>
             </div>
 
@@ -228,12 +228,12 @@ class FHIRBuildBuilder {
 
     _renderNarrativeFieldsSection(cfg) {
         const esc = FHIRBuildBuilder._esc;
-        return `
+        return HtmlSafe.html`
         <div class="config-group" style="margin-top:1.1rem;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
-                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;margin:0;">Narrative Fields — ${esc(cfg.resourceType)}</label>
+                <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;margin:0;">Narrative Fields — ${cfg.resourceType}</label>
             </div>
-            <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">Controls which fields appear in this resource's human-readable summary (<code>resource.text.div</code>). Every populated field shows by default — uncheck fields to hide them for this interface's ${esc(cfg.resourceType)} resources.</div>
+            <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">Controls which fields appear in this resource's human-readable summary (<code>resource.text.div</code>). Every populated field shows by default — uncheck fields to hide them for this interface's ${cfg.resourceType} resources.</div>
             <div id="fbbNarrFieldsSections" style="display:flex;flex-direction:column;gap:6px;"></div>
             <div style="margin-top:10px;">
                 <button type="button" id="fbbNarrFieldsSaveBtn" class="btn btn-sm btn-outline-secondary" style="font-size:0.72rem;padding:0.15rem 0.5rem;">
@@ -284,9 +284,9 @@ class FHIRBuildBuilder {
         const esc = FHIRBuildBuilder._esc;
         const names = Object.keys(this._transformCatalog).sort();
         const opts = names.map(name =>
-            `<option value="${esc(name)}" title="${esc(this._transformCatalog[name])}" ${name === selectedName ? 'selected' : ''}>${esc(name)}</option>`
-        ).join('');
-        return `<option value="">— none (raw value) —</option>${opts}`;
+            HtmlSafe.html`<option value="${name}" title="${this._transformCatalog[name]}" ${name === selectedName ? 'selected' : ''}>${name}</option>`
+        );
+        return HtmlSafe.html`<option value="">— none (raw value) —</option>${opts}`;
     }
 
     // catalogFor scopes the flat resource-level field catalog to one repeating
@@ -319,27 +319,27 @@ class FHIRBuildBuilder {
             const issues = (issuesByRowKey || {})[rowKey];
             const hasError = issues && issues.some(i => i.severity === 'error');
             const badge = issues && issues.length
-                ? `<span title="${esc(issues.map(i => i.message).join('; '))}" style="color:${hasError ? '#dc2626' : '#d97706'};margin-left:4px;cursor:help;">${hasError ? '❌' : '⚠️'}</span>`
+                ? HtmlSafe.html`<span title="${issues.map(i => i.message).join('; ')}" style="color:${hasError ? '#dc2626' : '#d97706'};margin-left:4px;cursor:help;">${hasError ? '❌' : '⚠️'}</span>`
                 : '';
             const condOpen = this._conditionPanelOpen.has(rowKey) || !!f.condition;
-            return `
+            return HtmlSafe.html`
             <tr data-field-index="${fi}">
                 <td>
                     <input type="text" class="form-control form-control-sm fbb-field-target"
-                        value="${esc(f.targetPath)}" list="${datalistId}" placeholder="e.g. birthDate" autocomplete="off">${badge}
+                        value="${f.targetPath}" list="${datalistId}" placeholder="e.g. birthDate" autocomplete="off">${badge}
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm fbb-field-source"
-                        value="${esc(f.sourcePath)}" placeholder="e.g. dob" autocomplete="off">
+                        value="${f.sourcePath}" placeholder="e.g. dob" autocomplete="off">
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm fbb-field-fallback"
-                        value="${esc((f.fallbackPaths || []).join(', '))}" placeholder="alt1, alt2" autocomplete="off"
+                        value="${(f.fallbackPaths || []).join(', ')}" placeholder="alt1, alt2" autocomplete="off"
                         title="Comma-separated fallback source paths, tried in order if Source Path is empty">
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm fbb-field-literal"
-                        value="${esc(f.literalValue)}" placeholder="(fixed value)" autocomplete="off"
+                        value="${f.literalValue}" placeholder="(fixed value)" autocomplete="off"
                         title="Used only when no source/fallback path resolves">
                 </td>
                 <td>
@@ -350,27 +350,27 @@ class FHIRBuildBuilder {
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm fbb-field-valuemap"
-                        value="${esc(FHIRBuildBuilder._valueMapToText(f.valueMap))}" placeholder="A=active, R=resolved" autocomplete="off"
+                        value="${FHIRBuildBuilder._valueMapToText(f.valueMap)}" placeholder="A=active, R=resolved" autocomplete="off"
                         title="Comma-separated raw=value translations, passed into the Transform">
                 </td>
                 <td style="width:70px;text-align:center;white-space:nowrap;">
                     <button type="button" class="btn btn-sm ${f.condition ? 'btn-warning' : 'btn-outline-secondary'}"
-                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.toggleFieldConditionPanel('${esc(groupIndex)}', ${fi})"
+                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.toggleFieldConditionPanel('${groupIndex}', ${fi})"
                         title="Populate only if a condition holds">⚡</button>
                     <button type="button" class="btn btn-sm btn-danger"
-                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.removeField('${esc(groupIndex)}', ${fi})"
+                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.removeField('${groupIndex}', ${fi})"
                         title="Remove field"><i class="fas fa-trash"></i></button>
                 </td>
             </tr>
-            ${condOpen ? `
+            ${condOpen ? HtmlSafe.html`
             <tr class="fbb-field-condition-row" data-field-index="${fi}">
                 <td colspan="7" style="padding-top:0;padding-bottom:0.4rem;">
                     ${this._renderConditionEditor(f.condition, 'field', groupIndex, fi, 'INCLUDE THIS FIELD ONLY IF')}
                 </td>
             </tr>` : ''}`;
-        }).join('');
+        });
 
-        return `
+        return HtmlSafe.html`
         <div style="overflow-x:auto;">
             <table class="mapping-table" style="width:100%;min-width:760px;">
                 <thead><tr>
@@ -412,11 +412,11 @@ class FHIRBuildBuilder {
     _renderExtensionPanel() {
         if (!this._extPanelOpen) return '';
         const esc = FHIRBuildBuilder._esc;
-        return `
+        return HtmlSafe.html`
         <div style="border:1px dashed #94a3b8;border-radius:6px;padding:0.6rem 0.7rem;margin-bottom:0.6rem;background:#fafafa;">
             <div style="font-size:0.72rem;color:#64748b;margin-bottom:0.4rem;">Search FHIR extensions (e.g. "race", "birth sex", "organ donor") — picking one adds a Fields row with the target path pre-filled; set its Source Path like any other field.</div>
             <input id="fbbExtSearch" type="text" class="form-control form-control-sm"
-                placeholder="Search extensions…" value="${esc(this._extSearchText)}" autocomplete="off"
+                placeholder="Search extensions…" value="${this._extSearchText}" autocomplete="off"
                 oninput="window._fhirBuildBuilder && window._fhirBuildBuilder.onExtensionSearch(this.value)"
                 style="margin-bottom:0.5rem;">
             <div id="fbbExtResults" style="max-height:220px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;background:white;">
@@ -431,7 +431,7 @@ class FHIRBuildBuilder {
         const cfg = this._step.config;
         const results = FhirExtensionCatalog.search(this._extSearchText || '');
         if (results.length === 0) {
-            return `<div style="padding:0.75rem;text-align:center;color:#94a3b8;font-size:0.8rem;">No extensions match.</div>`;
+            return HtmlSafe.html`<div style="padding:0.75rem;text-align:center;color:#94a3b8;font-size:0.8rem;">No extensions match.</div>`;
         }
         // Matches for the current resource type first — never hard-excludes
         // others, since some catalog entries are resource-agnostic.
@@ -440,16 +440,16 @@ class FHIRBuildBuilder {
             const bMatch = (b.resources || []).includes(cfg.resourceType) ? 0 : 1;
             return aMatch - bMatch;
         });
-        return sorted.map(ext => `
+        return sorted.map(ext => HtmlSafe.html`
             <div class="fbb-ext-row" style="padding:0.5rem 0.7rem;cursor:pointer;border-bottom:1px solid #f1f5f9;display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;"
-                onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addExtensionField('${esc(ext.id)}')"
+                onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addExtensionField('${ext.id}')"
                 onmouseover="this.style.background='#f0f9ff'" onmouseout="this.style.background=''">
                 <div style="flex:1;min-width:0;">
-                    <div style="font-size:0.82rem;font-weight:600;color:#1e3a8a;">${esc(ext.name)}</div>
-                    <div style="font-size:0.72rem;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(ext.url)}">${esc(ext.url)}</div>
+                    <div style="font-size:0.82rem;font-weight:600;color:#1e3a8a;">${ext.name}</div>
+                    <div style="font-size:0.72rem;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${ext.url}">${ext.url}</div>
                 </div>
-                <code style="background:#dbeafe;padding:2px 6px;border-radius:3px;font-size:0.7rem;color:#1e3a8a;white-space:nowrap;flex-shrink:0;">${esc(ext.valueType)}</code>
-            </div>`).join('');
+                <code style="background:#dbeafe;padding:2px 6px;border-radius:3px;font-size:0.7rem;color:#1e3a8a;white-space:nowrap;flex-shrink:0;">${ext.valueType}</code>
+            </div>`);
     }
 
     onExtensionSearch(text) {
@@ -457,7 +457,7 @@ class FHIRBuildBuilder {
         // replace would steal the search input's focus on every keystroke.
         this._extSearchText = text;
         const results = document.getElementById('fbbExtResults');
-        if (results) results.innerHTML = this._renderExtensionResults();
+        if (results) results.innerHTML = HtmlSafe.html`${this._renderExtensionResults()}`;
     }
 
     addExtensionField(extId) {
@@ -500,25 +500,25 @@ class FHIRBuildBuilder {
             const color = clean ? '#166534' : '#991b1b';
             const icon = clean ? 'fa-circle-check' : 'fa-triangle-exclamation';
             const unattached = r.unattached || [];
-            resultHtml = `
+            resultHtml = HtmlSafe.html`
             <div style="background:${bg};border:1px solid ${border};border-radius:6px;padding:0.55rem 0.75rem;margin-top:0.5rem;font-size:0.78rem;color:${color};">
                 <div style="font-weight:600;"><i class="fas ${icon}"></i> ${r.errorCount} error(s), ${r.warningCount} warning(s) against the sample</div>
-                ${r.errorCount + r.warningCount > 0 ? `<div style="margin-top:0.3rem;font-weight:400;">Errors/warnings tied to a specific field are flagged on that row below.${unattached.length > 0 ? ' Resource-level findings with no single row:' : ''}</div>` : ''}
-                ${unattached.length > 0 ? `<div style="margin-top:0.2rem;">${unattached.map(u => `<div>${u.severity === 'error' ? '❌' : '⚠️'} ${esc(u.message)}${u.path ? ` <code>(${esc(u.path)})</code>` : ''}</div>`).join('')}</div>` : ''}
+                ${r.errorCount + r.warningCount > 0 ? HtmlSafe.html`<div style="margin-top:0.3rem;font-weight:400;">Errors/warnings tied to a specific field are flagged on that row below.${unattached.length > 0 ? ' Resource-level findings with no single row:' : ''}</div>` : ''}
+                ${unattached.length > 0 ? HtmlSafe.html`<div style="margin-top:0.2rem;">${unattached.map(u => HtmlSafe.html`<div>${u.severity === 'error' ? '❌' : '⚠️'} ${u.message}${u.path ? HtmlSafe.html` <code>(${u.path})</code>` : ''}</div>`)}</div>` : ''}
             </div>`;
         }
 
-        return `
+        return HtmlSafe.html`
         <div style="border:1px dashed #94a3b8;border-radius:6px;padding:0.6rem 0.7rem;margin-top:0.6rem;background:#fafafa;">
             <div style="font-size:0.72rem;color:#64748b;margin-bottom:0.4rem;">Paste ONE sample message — a JSON object, not an array (this runs the resource through fhir.build once, then validates the result).</div>
             <textarea id="fbbValidateSample" class="form-control form-control-sm" rows="4"
                 placeholder='{"dob":"1980-05-20","sexCode":"F"}'
-                style="font-family:monospace;font-size:0.78rem;margin-bottom:0.4rem;">${esc(this._validateSampleText || '')}</textarea>
+                style="font-family:monospace;font-size:0.78rem;margin-bottom:0.4rem;">${this._validateSampleText || ''}</textarea>
             <div style="display:flex;align-items:center;gap:0.6rem;">
                 <button type="button" class="btn btn-sm btn-primary" style="font-size:0.72rem;"
                     onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.runValidateSample()">Validate</button>
-                ${this._validateError ? `<span style="font-size:0.72rem;color:#dc2626;">${esc(this._validateError)}</span>` : ''}
-                ${this._validateBusy ? `<span style="font-size:0.72rem;color:#64748b;">Running fhir.build + fhir_validation…</span>` : ''}
+                ${this._validateError ? HtmlSafe.html`<span style="font-size:0.72rem;color:#dc2626;">${this._validateError}</span>` : ''}
+                ${this._validateBusy ? HtmlSafe.html`<span style="font-size:0.72rem;color:#64748b;">Running fhir.build + fhir_validation…</span>` : ''}
             </div>
             ${resultHtml}
         </div>`;
@@ -703,17 +703,17 @@ class FHIRBuildBuilder {
     _renderSuggestPanel() {
         if (!this._suggestPanelOpen) return '';
         const esc = FHIRBuildBuilder._esc;
-        return `
+        return HtmlSafe.html`
         <div style="border:1px dashed #94a3b8;border-radius:6px;padding:0.6rem 0.7rem;margin-bottom:0.6rem;background:#fafafa;">
             <div style="font-size:0.72rem;color:#64748b;margin-bottom:0.4rem;">Paste sample source rows (a JSON array of objects) — suggestions are added to the Fields table below for you to review, never saved automatically.</div>
             <textarea id="fbbSuggestSampleRows" class="form-control form-control-sm" rows="4"
                 placeholder='[{"firstName":"Jane","dob":"1980-05-20"}]'
-                style="font-family:monospace;font-size:0.78rem;margin-bottom:0.4rem;">${esc(this._suggestSampleRowsText || '')}</textarea>
+                style="font-family:monospace;font-size:0.78rem;margin-bottom:0.4rem;">${this._suggestSampleRowsText || ''}</textarea>
             <div style="display:flex;align-items:center;gap:0.6rem;">
                 <button type="button" class="btn btn-sm btn-primary" style="font-size:0.72rem;"
                     onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.runSuggestMappings()">Suggest</button>
-                ${this._suggestError ? `<span style="font-size:0.72rem;color:#dc2626;">${esc(this._suggestError)}</span>` : ''}
-                ${this._suggestBusy ? `<span style="font-size:0.72rem;color:#64748b;">Asking the local model…</span>` : ''}
+                ${this._suggestError ? HtmlSafe.html`<span style="font-size:0.72rem;color:#dc2626;">${this._suggestError}</span>` : ''}
+                ${this._suggestBusy ? HtmlSafe.html`<span style="font-size:0.72rem;color:#64748b;">Asking the local model…</span>` : ''}
             </div>
         </div>`;
     }
@@ -815,23 +815,23 @@ class FHIRBuildBuilder {
         const valueText = isListOp
             ? (Array.isArray(cond.value) ? cond.value.join(', ') : '')
             : (cond.value !== undefined && cond.value !== null ? cond.value : '');
-        const fieldIndexAttr = fieldIndex === undefined || fieldIndex === null ? '' : ` data-field-index="${fieldIndex}"`;
+        const fieldIndexAttr = fieldIndex === undefined || fieldIndex === null ? '' : HtmlSafe.html` data-field-index="${fieldIndex}"`;
         const fieldIndexArg = fieldIndex === undefined || fieldIndex === null ? 'null' : fieldIndex;
 
-        return `
-        <div class="fbb-condition-editor" data-kind="${esc(kind)}" data-group-path="${esc(groupPathStr)}"${fieldIndexAttr}
+        return HtmlSafe.html`
+        <div class="fbb-condition-editor" data-kind="${kind}" data-group-path="${groupPathStr}"${fieldIndexAttr}
             style="display:flex;gap:0.3rem;align-items:center;flex-wrap:wrap;background:#fffbeb;border:1px dashed #f0c36d;border-radius:5px;padding:0.35rem 0.5rem;margin-bottom:0.4rem;">
-            <span style="font-size:0.66rem;color:#92400e;font-weight:600;white-space:nowrap;">${esc(badgeText)}</span>
+            <span style="font-size:0.66rem;color:#92400e;font-weight:600;white-space:nowrap;">${badgeText}</span>
             <input type="text" class="form-control form-control-sm fbb-condition-field" style="flex:1 1 140px;font-family:monospace;font-size:0.75rem;"
-                value="${esc(cond.field)}" placeholder="field path (e.g. reasonCode)" autocomplete="off">
+                value="${cond.field}" placeholder="field path (e.g. reasonCode)" autocomplete="off">
             <select class="form-select form-select-sm fbb-condition-operator" style="flex:0 0 160px;font-size:0.75rem;"
-                onchange="window._fhirBuildBuilder && window._fhirBuildBuilder.onConditionOperatorChange('${esc(kind)}', '${esc(groupPathStr)}', ${fieldIndexArg}, this.value)">
-                ${FHIR_CONDITION_OPERATORS.map(op => `<option value="${op.value}" ${op.value === operator ? 'selected' : ''}>${op.label}</option>`).join('')}
+                onchange="window._fhirBuildBuilder && window._fhirBuildBuilder.onConditionOperatorChange('${kind}', '${groupPathStr}', ${fieldIndexArg}, this.value)">
+                ${FHIR_CONDITION_OPERATORS.map(op => HtmlSafe.html`<option value="${op.value}" ${op.value === operator ? 'selected' : ''}>${op.label}</option>`)}
             </select>
-            ${needsValue ? `<input type="text" class="form-control form-control-sm fbb-condition-value" style="flex:1 1 120px;font-size:0.75rem;"
-                value="${esc(valueText)}" placeholder="${isListOp ? 'val1, val2' : 'value'}" autocomplete="off">` : ''}
+            ${needsValue ? HtmlSafe.html`<input type="text" class="form-control form-control-sm fbb-condition-value" style="flex:1 1 120px;font-size:0.75rem;"
+                value="${valueText}" placeholder="${isListOp ? 'val1, val2' : 'value'}" autocomplete="off">` : ''}
             <button type="button" class="btn btn-sm btn-outline-danger"
-                onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.removeCondition('${esc(kind)}', '${esc(groupPathStr)}', ${fieldIndexArg})"
+                onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.removeCondition('${kind}', '${groupPathStr}', ${fieldIndexArg})"
                 title="Remove condition">×</button>
         </div>`;
     }
@@ -961,60 +961,60 @@ class FHIRBuildBuilder {
         const groupCatalog = this._catalogFor(this._accumulatedTargetPath(path));
         const nested = Array.isArray(rg.repeatingGroups) ? rg.repeatingGroups : [];
 
-        return `
-        <div class="fbb-group-card" data-group-path="${esc(pathStr)}"
+        return HtmlSafe.html`
+        <div class="fbb-group-card" data-group-path="${pathStr}"
             style="border:1px solid #e2e8f0;border-radius:8px;padding:0.7rem 0.8rem;margin-bottom:0.8rem;background:#fafbfc;">
             <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.55rem;">
                 <input type="text" class="form-control form-control-sm fbb-group-target"
-                    value="${esc(rg.targetPath)}" placeholder="e.g. identifier"
+                    value="${rg.targetPath}" placeholder="e.g. identifier"
                     style="flex:0 0 220px;font-family:monospace;font-size:0.82rem;"
-                    onchange="window._fhirBuildBuilder && window._fhirBuildBuilder.onGroupTargetChange('${esc(pathStr)}', this.value)">
-                <input type="text" class="form-control form-control-sm fbb-group-rowspath" data-search-kind="rowspath" data-group-path="${esc(pathStr)}"
-                    value="${esc(rg.rowsPath)}" placeholder="e.g. patientIdentifiers"
+                    onchange="window._fhirBuildBuilder && window._fhirBuildBuilder.onGroupTargetChange('${pathStr}', this.value)">
+                <input type="text" class="form-control form-control-sm fbb-group-rowspath" data-search-kind="rowspath" data-group-path="${pathStr}"
+                    value="${rg.rowsPath}" placeholder="e.g. patientIdentifiers"
                     style="flex:1;font-family:monospace;font-size:0.8rem;">
                 <button type="button" class="btn btn-sm btn-outline-danger"
-                    onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.removeRepeatingGroup('${esc(pathStr)}')"
+                    onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.removeRepeatingGroup('${pathStr}')"
                     title="Remove group"><i class="fas fa-trash"></i></button>
             </div>
-            <div id="fbbGroupCond-${esc(pathStr)}" style="margin-bottom:0.4rem;">
+            <div id="fbbGroupCond-${pathStr}" style="margin-bottom:0.4rem;">
                 ${rg.groupCondition
                     ? this._renderConditionEditor(rg.groupCondition, 'group', pathStr, null, 'ONLY BUILD THIS LIST AT ALL IF')
-                    : `<button type="button" class="btn btn-sm btn-link" style="font-size:0.7rem;padding:0.1rem 0;"
-                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addCondition('group', '${esc(pathStr)}')">+ Add condition (only build this list at all if…)</button>`}
+                    : HtmlSafe.html`<button type="button" class="btn btn-sm btn-link" style="font-size:0.7rem;padding:0.1rem 0;"
+                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addCondition('group', '${pathStr}')">+ Add condition (only build this list at all if…)</button>`}
             </div>
             <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">
                 Target Path: the repeating element on the resource, relative to this group's own parent (e.g. <code>identifier</code>, or <code>adjudication</code> inside an <code>item</code> group).
                 Rows Path: the array of source rows for this group, relative to its parent's own row (top-level: relative to the pipeline data). Supports a <code>[*]</code> segment to flatten a nested source array (e.g. <code>CAS[*].adjustments</code>).
             </div>
             <datalist id="${datalistId}">
-                ${groupCatalog.map(f => `<option value="${esc(f.key)}">${esc(f.label || f.key)}</option>`).join('')}
+                ${groupCatalog.map(f => HtmlSafe.html`<option value="${f.key}">${f.label || f.key}</option>`)}
             </datalist>
-            <div id="fbbGroupRowCond-${esc(pathStr)}" style="margin-bottom:0.4rem;">
+            <div id="fbbGroupRowCond-${pathStr}" style="margin-bottom:0.4rem;">
                 ${rg.condition
                     ? this._renderConditionEditor(rg.condition, 'row', pathStr, null, 'INCLUDE EACH ROW ONLY IF')
-                    : `<button type="button" class="btn btn-sm btn-link" style="font-size:0.7rem;padding:0.1rem 0;"
-                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addCondition('row', '${esc(pathStr)}')">+ Add row condition (skip a row if…)</button>`}
+                    : HtmlSafe.html`<button type="button" class="btn btn-sm btn-link" style="font-size:0.7rem;padding:0.1rem 0;"
+                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addCondition('row', '${pathStr}')">+ Add row condition (skip a row if…)</button>`}
             </div>
             <div id="${ownFieldsId}">
                 ${(rg.fields || []).length === 0
-                    ? `<div style="font-size:0.74rem;color:#94a3b8;margin-bottom:0.4rem;">No fields mapped yet.</div>`
+                    ? HtmlSafe.html`<div style="font-size:0.74rem;color:#94a3b8;margin-bottom:0.4rem;">No fields mapped yet.</div>`
                     : this._renderFieldsTable(rg.fields, datalistId, pathStr, this._validateIssueByRowKey)}
             </div>
             <button type="button" class="btn btn-sm btn-outline-primary"
-                onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addGroupField('${esc(pathStr)}')"
+                onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addGroupField('${pathStr}')"
                 style="font-size:0.72rem;padding:0.15rem 0.5rem;margin-top:0.4rem;">+ Add Field</button>
 
             <div style="margin-top:0.7rem;padding:0.6rem 0 0 0.9rem;border-left:2px solid #e2e8f0;">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;">
                     <label style="font-size:0.7rem;font-weight:600;text-transform:uppercase;color:#94a3b8;margin:0;">Nested Groups</label>
                     <button type="button" class="btn btn-sm btn-outline-primary"
-                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addRepeatingGroup('${esc(pathStr)}')"
+                        onclick="window._fhirBuildBuilder && window._fhirBuildBuilder.addRepeatingGroup('${pathStr}')"
                         style="font-size:0.7rem;padding:0.1rem 0.45rem;">+ Add Nested Group</button>
                 </div>
-                <div id="fbbNestedGroups-${esc(pathStr)}">
+                <div id="fbbNestedGroups-${pathStr}">
                     ${nested.length === 0
-                        ? `<div style="font-size:0.72rem;color:#cbd5e1;">None — this group's own rows are the entries built.</div>`
-                        : nested.map((child, ci) => this._renderGroupCard(child, [...path, ci])).join('')}
+                        ? HtmlSafe.html`<div style="font-size:0.72rem;color:#cbd5e1;">None — this group's own rows are the entries built.</div>`
+                        : nested.map((child, ci) => this._renderGroupCard(child, [...path, ci]))}
                 </div>
             </div>
         </div>`;
@@ -1190,7 +1190,7 @@ class FHIRBuildBuilder {
         const root = document.getElementById('fhirBuildBuilder');
         if (!root || !root.parentElement) return;
         this._destroyFieldSearches();
-        root.outerHTML = this._renderAll();
+        root.outerHTML = HtmlSafe.html`${this._renderAll()}`;
         setTimeout(() => this._attachFieldSearches(), 0);
         this._wireTopLevelChangeHandlers();
     }

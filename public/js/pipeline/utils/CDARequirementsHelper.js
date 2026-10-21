@@ -128,7 +128,7 @@ const CDARequirementsHelper = {
         const labels = { SHALL: 'Required', SHOULD: 'Recommended', MAY: 'Optional' };
         const style = styles[conformance] || styles.MAY;
         const label = labels[conformance] || conformance || '';
-        return `<span style="${style}font-size:0.65rem;font-weight:600;padding:0.1rem 0.4rem;border-radius:10px;white-space:nowrap;">${label}</span>`;
+        return HtmlSafe.html`<span style="${style}font-size:0.65rem;font-weight:600;padding:0.1rem 0.4rem;border-radius:10px;white-space:nowrap;">${label}</span>`;
     },
 
     /**
@@ -168,14 +168,13 @@ const CDARequirementsHelper = {
      * type so far).
      */
     renderUSCDISummary(requirements) {
-        const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         const { classes } = this.summarizeUSCDICoverage(requirements);
         if (classes.length === 0) return '';
 
-        return `
+        return HtmlSafe.html`
         <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.5rem 0.75rem;margin-bottom:0.75rem;font-size:0.75rem;color:#1e40af;">
             <i class="fas fa-clipboard-check" style="margin-right:0.35rem;"></i>
-            <strong>USCDI v3:</strong> represents ${classes.length} class${classes.length === 1 ? '' : 'es'} — ${classes.map(esc).join(', ')}
+            <strong>USCDI v3:</strong> represents ${classes.length} class${classes.length === 1 ? '' : 'es'} — ${classes.join(', ')}
         </div>`;
     },
 
@@ -184,7 +183,6 @@ const CDARequirementsHelper = {
      * guided UIs. `missing` is computeMissingShall's return value.
      */
     renderCompletenessBanner(missing) {
-        const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         if (missing.shallTotal === 0) return '';
 
         const complete = missing.shallSatisfied === missing.shallTotal;
@@ -194,17 +192,17 @@ const CDARequirementsHelper = {
         const icon = complete ? 'fa-circle-check' : 'fa-triangle-exclamation';
 
         const missingList = [
-            ...missing.missingSections.map(s => `Section: ${esc(s.displayName || s.key)}`),
-            ...missing.missingHeaderFields.map(f => `${esc(f.group)}.${esc(f.key)} (${esc(f.label || f.key)})`),
+            ...missing.missingSections.map(s => `Section: ${s.displayName || s.key}`),
+            ...missing.missingHeaderFields.map(f => `${f.group}.${f.key} (${f.label || f.key})`),
         ];
 
-        return `
+        return HtmlSafe.html`
         <div style="background:${bg};border:1px solid ${border};border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:${color};">
             <div style="display:flex;align-items:center;gap:0.4rem;font-weight:600;">
                 <i class="fas ${icon}"></i>
                 ${missing.shallSatisfied} of ${missing.shallTotal} required (SHALL) items configured
             </div>
-            ${missingList.length > 0 ? `<div style="margin-top:0.4rem;font-weight:400;">Still missing: ${missingList.join(', ')}</div>` : ''}
+            ${missingList.length > 0 ? HtmlSafe.html`<div style="margin-top:0.4rem;font-weight:400;">Still missing: ${missingList.join(', ')}</div>` : ''}
         </div>`;
     },
 };
