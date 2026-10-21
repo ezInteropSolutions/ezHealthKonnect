@@ -72,9 +72,7 @@ class ExtensionBuilder {
 
     _buildOverlay() {
         var self = this;
-        var esc = function(s) {
-            return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        };
+        var esc = HtmlSafe.escapeHtml;
 
         var overlay = document.createElement('div');
         overlay.id = 'extBuilderOverlay';
@@ -107,7 +105,7 @@ class ExtensionBuilder {
             ? ('<code style="background:#dbeafe;padding:2px 8px;border-radius:4px;color:#1e3a8a;font-size:0.82rem;">' + esc(this._hl7Field) + '</code>')
             : '<em style="color:#94a3b8;">no source field</em>';
 
-        overlay.innerHTML = [
+        overlay.innerHTML = HtmlSafe.raw([ // every value below goes through esc()
             '<div style="',
                 'background:white;border-radius:12px;width:660px;max-width:95vw;',
                 'max-height:90vh;display:flex;flex-direction:column;',
@@ -297,7 +295,7 @@ class ExtensionBuilder {
             '</div>',
 
             '</div>', // modal card
-        ].join('');
+        ].join(''));
 
         this._overlay = overlay;
         this._attachOverlayEvents();
@@ -385,9 +383,7 @@ class ExtensionBuilder {
         var container = this._overlay.querySelector('#extBuilderCatalog');
         if (!container) return;
 
-        var esc = function(s) {
-            return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        };
+        var esc = HtmlSafe.escapeHtml;
 
         var html = [];
 
@@ -427,7 +423,7 @@ class ExtensionBuilder {
             });
         }
 
-        container.innerHTML = html.join('');
+        container.innerHTML = HtmlSafe.raw(html.join('')); // rows built with esc()
 
         // Wire row clicks
         container.querySelectorAll('.ext-row').forEach(function(row) {
@@ -550,15 +546,15 @@ class ExtensionBuilder {
 
         var parts = [];
         if (this._hl7DataType && this._selectedVT === suggested) {
-            parts.push('✓ Auto-selected from HL7 type <strong>' + hl7Label + '</strong>.');
+            parts.push(HtmlSafe.html`✓ Auto-selected from HL7 type <strong>${hl7Label}</strong>.`);
         } else if (this._hl7DataType && this._selectedVT !== suggested) {
-            parts.push('ℹ️ HL7 type <strong>' + hl7Label + '</strong> — overridden from suggested <code>' + suggested + '</code>.');
+            parts.push(HtmlSafe.html`ℹ️ HL7 type <strong>${hl7Label}</strong> — overridden from suggested <code>${suggested}</code>.`);
         }
         if (plain) {
-            parts.push('This type ' + plain + '.');
+            parts.push(HtmlSafe.html`This type ${plain}.`);
         }
 
-        hint.innerHTML = parts.join(' ');
+        hint.innerHTML = HtmlSafe.html`${parts.map((x, i) => HtmlSafe.html`${i ? ' ' : ''}${x}`)}`;
         hint.style.display = parts.length > 0 ? '' : 'none';
     }
 
@@ -679,7 +675,7 @@ class ExtensionBuilder {
 
     _openCustomForm() {
         var self = this;
-        var esc = function(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+        var esc = HtmlSafe.escapeHtml;
 
         // Slug helper — "Interpreter Required" → "interpreter-required"
         var toSlug = function(s) {
@@ -712,7 +708,7 @@ class ExtensionBuilder {
 
         var formOverlay = document.createElement('div');
         formOverlay.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;';
-        formOverlay.innerHTML = [
+        formOverlay.innerHTML = HtmlSafe.raw([ // every value below goes through esc()
             '<div style="background:white;border-radius:10px;width:520px;max-width:95vw;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,0.25);overflow:hidden;">',
 
                 // Header
@@ -810,7 +806,7 @@ class ExtensionBuilder {
                 '</div>',
 
             '</div>',
-        ].join('');
+        ].join(''));
 
         document.body.appendChild(formOverlay);
 
