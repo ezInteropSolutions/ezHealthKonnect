@@ -345,6 +345,36 @@ test.describe('Connection forms keep stored settings inside their fields', () =>
     });
 });
 
+// Report rows carry interface names and message fields.
+test.describe('Reports render result rows as text', () => {
+    test('table, bar chart and metric cards; a real report still runs', async ({ page }) => {
+        await page.goto('/reports.html');
+        await expect(page.locator('.report-card').first()).toBeVisible({ timeout: 15_000 });
+        await expect(page.locator('.rc-value strong').first()).toBeVisible(); // app help text keeps its markup
+        const result = await page.evaluate((mark) => {
+            const bad = `<img src=x onerror="window.__ezhkXss='${mark}-report'">`;
+            const data = { rows: [{ interface_name: bad, total: 3 }], columns: ['interface_name', 'total'], total_rows: 1, query_time_ms: 1 };
+            const panel = document.createElement('div');
+            document.body.appendChild(panel);
+            const out = {};
+            for (const viz of ['table', 'bar', 'metric_cards']) {
+                renderResults(panel, data, { visualization: viz, data_source: bad });
+                out[viz] = { imgs: panel.querySelectorAll('img').length, text: panel.innerText.includes('<img src=x'), cells: panel.querySelectorAll('td, .bar-col, .mc-card').length };
+            }
+            return out;
+        }, MARK);
+        for (const [viz, r] of Object.entries(result)) {
+            expect(r.imgs, viz).toBe(0);
+            expect(r.text, viz).toBe(true);
+            expect(r.cells, viz).toBeGreaterThan(0);
+        }
+        await page.locator('.report-card .run-btn').first().click();
+        await expect(page.locator('#resultsPanel .res-head, #resultsPanel .empty').first()).toBeVisible({ timeout: 20_000 });
+        await page.waitForTimeout(300);
+        expect(await page.evaluate(() => window.__ezhkXss || null)).toBeNull();
+    });
+});
+
 // AppDialogs is used everywhere with messages that interpolate data (names,
 // errors returned by the server). A plain string is shown as text; formatting
 // needs HtmlSafe.html (data inside stays escaped) or HtmlSafe.raw (constants).

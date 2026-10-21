@@ -616,30 +616,26 @@ function renderGallery(reports) {
     }
     const grouped = {};
     reports.forEach(r => { (grouped[r.category] = grouped[r.category] || []).push(r); });
-    let html = '';
-    for (const [cat, items] of Object.entries(grouped)) {
-        html += `<div class="cat-label">${esc(CAT_LABELS[cat] || cat)}</div><div class="report-grid">`;
-        items.forEach(r => {
+    document.getElementById('galleryContent').innerHTML = HtmlSafe.html`${Object.entries(grouped).map(([cat, items]) => HtmlSafe.html`
+        <div class="cat-label">${CAT_LABELS[cat] || cat}</div><div class="report-grid">${items.map(r => {
+            // REPORT_VALUE holds the app's own help text (with <strong> markup)
             const vd = REPORT_VALUE[r.slug] || REPORT_VALUE[r.category] || { value: 'Click <strong>Run</strong> to execute this report.' };
-            html += `
+            return HtmlSafe.html`
             <div class="report-card">
                 <div class="rc-head">
-                    <span class="rc-title">${esc(r.name)}</span>
-                    <span class="rc-viz" title="${esc(r.visualization)}">${VIZ_ICON[r.visualization] || '📋'}</span>
+                    <span class="rc-title">${r.name}</span>
+                    <span class="rc-viz" title="${r.visualization}">${VIZ_ICON[r.visualization] || '📋'}</span>
                 </div>
-                <div class="rc-desc">${esc(r.description)}</div>
-                <div class="rc-value"><i class="far fa-lightbulb" style="margin-right:4px;color:var(--pink)"></i>${vd.value}</div>
+                <div class="rc-desc">${r.description}</div>
+                <div class="rc-value"><i class="far fa-lightbulb" style="margin-right:4px;color:var(--pink)"></i>${HtmlSafe.raw(vd.value)}</div>
                 <div class="rc-foot">
                     <span class="tag tag-sys">System</span>
-                    <span class="tag">${esc(r.category)}</span>
-                    ${r.run_count ? `<span style="font-size:10px;color:var(--muted)">${r.run_count} runs</span>` : ''}
-                    <button class="run-btn" onclick="runOOB('${r.id}')">Run →</button>
+                    <span class="tag">${r.category}</span>
+                    ${r.run_count ? HtmlSafe.html`<span style="font-size:10px;color:var(--muted)">${r.run_count} runs</span>` : ''}
+                    <button class="run-btn" data-id="${r.id}" onclick="runOOB(this.dataset.id)">Run →</button>
                 </div>
             </div>`;
-        });
-        html += '</div>';
-    }
-    document.getElementById('galleryContent').innerHTML = html;
+        })}</div>`)}`;
 }
 
 /* ── Run OOB report ─────────────────────────────────────────────────────────── */
@@ -690,8 +686,8 @@ function updateDSHint() {
 function updateMetrics() {
     const ds = document.getElementById('bldDS').value;
     const metrics = METRICS[ds] || [];
-    document.getElementById('metricGrid').innerHTML = metrics.map(m => `
-        <label class="mc"><input type="checkbox" value="${m}" checked><span>${m.replace(/_/g,' ')}</span></label>`).join('');
+    document.getElementById('metricGrid').innerHTML = HtmlSafe.html`${metrics.map(m => HtmlSafe.html`
+        <label class="mc"><input type="checkbox" value="${m}" checked><span>${m.replace(/_/g,' ')}</span></label>`)}`;
 }
 
 function getConfig() {
@@ -724,7 +720,7 @@ async function runBuilder() {
         if (!resp.ok || error) throw new Error(error || resp.statusText);
         renderResults(panel, data, cfg);
     } catch (e) {
-        panel.innerHTML = `<div class="empty"><i class="far fa-triangle-exclamation"></i><p>${esc(e.message)}</p></div>`;
+        panel.innerHTML = HtmlSafe.html`<div class="empty"><i class="far fa-triangle-exclamation"></i><p>${e.message}</p></div>`;
     } finally {
         btn.disabled = false; btn.innerHTML = '<i class="far fa-play"></i> Run Report';
     }
@@ -757,23 +753,18 @@ async function loadSaved() {
             cont.innerHTML = `<div class="empty"><i class="far fa-floppy-disk" style="color:var(--pink-mid)"></i><p>No saved reports yet.<br>Build one in the <strong>Ad-hoc Builder</strong> and click <strong>Save Report</strong>.</p></div>`;
             return;
         }
-        let html = '<div class="report-grid">';
-        mine.forEach(r => {
-            html += `
+        cont.innerHTML = HtmlSafe.html`<div class="report-grid">${mine.map(r => HtmlSafe.html`
             <div class="report-card">
-                <div class="rc-head"><span class="rc-title">${esc(r.name)}</span><span class="rc-viz">${VIZ_ICON[r.visualization]||'📋'}</span></div>
-                <div class="rc-desc">${esc(r.description || r.data_source)}</div>
+                <div class="rc-head"><span class="rc-title">${r.name}</span><span class="rc-viz">${VIZ_ICON[r.visualization]||'📋'}</span></div>
+                <div class="rc-desc">${r.description || r.data_source}</div>
                 <div class="rc-foot">
-                    <span class="tag">${esc(r.category)}</span>
-                    <button class="run-btn" onclick="runOOB('${r.id}')">Run →</button>
-                    <button class="del-btn" onclick="deleteReport('${r.id}')"><i class="far fa-trash-can"></i></button>
+                    <span class="tag">${r.category}</span>
+                    <button class="run-btn" data-id="${r.id}" onclick="runOOB(this.dataset.id)">Run →</button>
+                    <button class="del-btn" data-id="${r.id}" onclick="deleteReport(this.dataset.id)"><i class="far fa-trash-can"></i></button>
                 </div>
-            </div>`;
-        });
-        html += '</div>';
-        cont.innerHTML = html;
+            </div>`)}</div>`;
     } catch (e) {
-        cont.innerHTML = `<div class="empty"><i class="far fa-triangle-exclamation"></i><p>${esc(e.message)}</p></div>`;
+        cont.innerHTML = HtmlSafe.html`<div class="empty"><i class="far fa-triangle-exclamation"></i><p>${e.message}</p></div>`;
     }
 }
 
@@ -791,14 +782,14 @@ async function deleteReport(id) {
 /* ── Render results ────────────────────────────────────────────────────────── */
 function renderResults(panel, result, cfg) {
     const meta = `${result.total_rows} rows · ${result.query_time_ms}ms${result.cache_hit ? ' · cached' : ''}`;
-    let body = '';
+    let body;
     if (cfg.visualization === 'metric_cards') body = renderMetricCards(result);
-    else if (['bar','line'].includes(cfg.visualization)) body = renderBar(result) + renderTable(result);
+    else if (['bar','line'].includes(cfg.visualization)) body = [renderBar(result), renderTable(result)];
     else body = renderTable(result);
 
-    panel.innerHTML = `
+    panel.innerHTML = HtmlSafe.html`
         <div class="res-head">
-            <h3>Results — ${esc(cfg.data_source)}</h3>
+            <h3>Results — ${cfg.data_source}</h3>
             <span class="res-meta">${meta}</span>
             <button class="export-btn" onclick="exportCSV()" title="Export as CSV"><i class="far fa-file-arrow-down"></i> Export CSV</button>
         </div>
@@ -808,16 +799,16 @@ function renderResults(panel, result, cfg) {
 }
 
 function renderTable(result) {
-    if (!result.rows?.length) return `<div class="empty"><i class="far fa-inbox"></i><p>No data for this query and time range.</p></div>`;
+    if (!result.rows?.length) return HtmlSafe.raw('<div class="empty"><i class="far fa-inbox"></i><p>No data for this query and time range.</p></div>');
     const cols = result.columns || Object.keys(result.rows[0]);
-    return `<table class="data-table">
-        <thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
-        <tbody>${result.rows.map(row => `<tr>${cols.map(c => `<td>${fmt(row[c])}</td>`).join('')}</tr>`).join('')}</tbody>
+    return HtmlSafe.html`<table class="data-table">
+        <thead><tr>${cols.map(c => HtmlSafe.html`<th>${c}</th>`)}</tr></thead>
+        <tbody>${result.rows.map(row => HtmlSafe.html`<tr>${cols.map(c => HtmlSafe.html`<td>${fmt(row[c])}</td>`)}</tr>`)}</tbody>
     </table>`;
 }
 
 function renderBar(result) {
-    if (!result.rows?.length) return '';
+    if (!result.rows?.length) return HtmlSafe.raw('');
     const rows = result.rows.slice(0, 20);
     const cols = result.columns || Object.keys(result.rows[0]);
     const labelCol = cols[0];
@@ -826,16 +817,16 @@ function renderBar(result) {
     const bars = rows.map(r => {
         const v = parseFloat(r[valCol]) || 0;
         const pct = Math.max((v / maxV) * 140, 2);
-        return `<div class="bar-col"><span class="bar-val">${fmt(r[valCol])}</span><div class="bar" style="height:${pct}px"></div><span class="bar-lbl">${esc(String(r[labelCol]||''))}</span></div>`;
-    }).join('');
-    return `<div class="chart-wrap">${bars}</div>`;
+        return HtmlSafe.html`<div class="bar-col"><span class="bar-val">${fmt(r[valCol])}</span><div class="bar" style="height:${pct}px"></div><span class="bar-lbl">${String(r[labelCol]||'')}</span></div>`;
+    });
+    return HtmlSafe.html`<div class="chart-wrap">${bars}</div>`;
 }
 
 function renderMetricCards(result) {
-    if (!result.rows?.length) return `<div class="empty"><i class="far fa-gauge"></i><p>No data</p></div>`;
+    if (!result.rows?.length) return HtmlSafe.raw('<div class="empty"><i class="far fa-gauge"></i><p>No data</p></div>');
     const row = result.rows[0];
     const cols = result.columns || Object.keys(row);
-    return `<div class="mc-grid">${cols.map(c => `<div class="mc-card"><div class="mc-val">${fmt(row[c])}</div><div class="mc-lbl">${esc(c.replace(/_/g,' '))}</div></div>`).join('')}</div>`;
+    return HtmlSafe.html`<div class="mc-grid">${cols.map(c => HtmlSafe.html`<div class="mc-card"><div class="mc-val">${fmt(row[c])}</div><div class="mc-lbl">${c.replace(/_/g,' ')}</div></div>`)}</div>`;
 }
 
 /* ── Export CSV ─────────────────────────────────────────────────────────────── */
@@ -890,7 +881,6 @@ function fmt(v) {
     if (!isNaN(n) && String(v).trim() !== '') return Number.isInteger(n) ? n.toLocaleString() : n.toFixed(2);
     return String(v);
 }
-const esc = s => { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; };
 function toast(msg, err = false) {
     const t = document.getElementById('toast');
     t.textContent = msg; t.className = err ? 'show err' : 'show';
