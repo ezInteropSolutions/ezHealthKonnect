@@ -205,7 +205,7 @@ function renderTable() {
         return;
     }
 
-    tbody.innerHTML = page.map(item => renderRow(item)).join('');
+    tbody.innerHTML = HtmlSafe.html`${page.map(item => renderRow(item))}`;
     setText('rqInfo', `Showing ${start + 1}–${Math.min(start + rqPageSize, total)} of ${total}`);
     renderPagination(total);
 }
@@ -218,24 +218,24 @@ function renderRow(item) {
     const chips = [];
     failures.slice(0, 3).forEach(f => {
         const cls = (f.severity === 'warning') ? 'failure-chip warn' : 'failure-chip';
-        chips.push(`<span class="${cls}">${esc(f.field || f.fhir_path || 'unknown')}</span>`);
+        chips.push(HtmlSafe.html`<span class="${cls}">${f.field || f.fhir_path || 'unknown'}</span>`);
     });
     if (failures.length > 3) {
-        chips.push(`<span class="failure-chip" style="background:#f1f5f9;color:#64748b;border-color:#e2e8f0;">+${failures.length - 3} more</span>`);
+        chips.push(HtmlSafe.html`<span class="failure-chip" style="background:#f1f5f9;color:#64748b;border-color:#e2e8f0;">+${failures.length - 3} more</span>`);
     }
 
     const badge = statusBadge(item.status);
     const ts    = item.received_at ? relTime(item.received_at) : '—';
 
-    return `<tr onclick="openRQModal('${esc(item.id)}')" title="Click to review">
+    return HtmlSafe.html`<tr data-id="${item.id}" onclick="openRQModal(this.dataset.id)" title="Click to review">
         <td>
-            <div style="font-weight:600;font-size:12px;color:#1e293b;">${esc(item.interface_name || item.interface_id || '—')}</div>
-            <div style="font-size:10px;color:#94a3b8;margin-top:1px;">${esc(item.message_id || '')}</div>
+            <div style="font-weight:600;font-size:12px;color:#1e293b;">${item.interface_name || item.interface_id || '—'}</div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:1px;">${item.message_id || ''}</div>
         </td>
-        <td><span style="font-family:monospace;font-size:12px;">${esc(item.message_type || '—')}</span></td>
+        <td><span style="font-family:monospace;font-size:12px;">${item.message_type || '—'}</span></td>
         <td style="font-size:12px;color:#64748b;white-space:nowrap;">${ts}</td>
         <td>
-            <div class="failure-chips">${chips.join('')}</div>
+            <div class="failure-chips">${chips}</div>
             <div style="font-size:10px;color:#94a3b8;margin-top:3px;">
                 ${errorCount > 0 ? `${errorCount} required` : ''}
                 ${warnCount  > 0 ? `${warnCount} warning${warnCount > 1 ? 's' : ''}` : ''}
@@ -244,10 +244,10 @@ function renderRow(item) {
         <td>${badge}</td>
         <td>
             <div class="rq-actions" onclick="event.stopPropagation()">
-                <button class="rq-btn rq-btn-primary" onclick="openRQModal('${esc(item.id)}')">
+                <button class="rq-btn rq-btn-primary" data-id="${item.id}" onclick="openRQModal(this.dataset.id)">
                     <i class="far fa-pen-to-square" style="margin-right:3px;"></i>Review
                 </button>
-                <button class="rq-btn rq-btn-danger" onclick="quickReject('${esc(item.id)}')">
+                <button class="rq-btn rq-btn-danger" data-id="${item.id}" onclick="quickReject(this.dataset.id)">
                     <i class="far fa-ban"></i>
                 </button>
             </div>
@@ -265,7 +265,7 @@ function statusBadge(status) {
         rejected:          ['rq-badge-rejected', 'Rejected'],
     };
     const [cls, label] = map[status] || ['rq-badge-pending', status || 'Unknown'];
-    return `<span class="rq-badge ${cls}">${label}</span>`;
+    return HtmlSafe.html`<span class="rq-badge ${cls}">${label}</span>`;
 }
 
 // ── Pagination ────────────────────────────────────────────────────────────────
@@ -282,22 +282,22 @@ function renderPagination(total) {
         for (let i = 1; i <= pages; i++) btns.push(pageBtn(i, i, false, i === rqPage));
     } else {
         btns.push(pageBtn(1, 1, false, rqPage === 1));
-        if (rqPage > 3)       btns.push('<span style="padding:3px 6px;color:#94a3b8;">…</span>');
+        if (rqPage > 3)       btns.push(HtmlSafe.raw('<span style="padding:3px 6px;color:#94a3b8;">…</span>'));
         const start = Math.max(2, rqPage - 1);
         const end   = Math.min(pages - 1, rqPage + 1);
         for (let i = start; i <= end; i++) btns.push(pageBtn(i, i, false, i === rqPage));
-        if (rqPage < pages - 2) btns.push('<span style="padding:3px 6px;color:#94a3b8;">…</span>');
+        if (rqPage < pages - 2) btns.push(HtmlSafe.raw('<span style="padding:3px 6px;color:#94a3b8;">…</span>'));
         btns.push(pageBtn(pages, pages, false, rqPage === pages));
     }
 
     btns.push(pageBtn('›', rqPage + 1, rqPage === pages));
-    document.getElementById('rqPagination').innerHTML = btns.join('');
+    document.getElementById('rqPagination').innerHTML = HtmlSafe.html`${btns}`;
 }
 
 function pageBtn(label, page, disabled, active = false) {
     const cls = 'rq-page-btn' + (active ? ' active' : '');
-    const dis = disabled ? 'disabled style="opacity:0.4;cursor:default;"' : `onclick="goRQPage(${page})"`;
-    return `<button class="${cls}" ${dis}>${label}</button>`;
+    const dis = disabled ? HtmlSafe.raw('disabled style="opacity:0.4;cursor:default;"') : HtmlSafe.html`onclick="goRQPage(${Number(page)})"`;
+    return HtmlSafe.html`<button class="${cls}" ${dis}>${label}</button>`;
 }
 
 function goRQPage(page) {
@@ -402,13 +402,13 @@ function renderFailureList(failures) {
     if (!list) return;
 
     if (failures.length === 0) {
-        list.innerHTML = `<div style="text-align:center;padding:20px;color:#94a3b8;font-size:13px;">
+        list.innerHTML = HtmlSafe.html`<div style="text-align:center;padding:20px;color:#94a3b8;font-size:13px;">
             No validation failures recorded.
         </div>`;
         return;
     }
 
-    list.innerHTML = failures.map((f, idx) => {
+    list.innerHTML = HtmlSafe.html`${failures.map((f, idx) => {
         const isWarn = f.severity === 'warning';
         const rowCls = isWarn ? 'failure-row warn' : 'failure-row';
         const icoCls = isWarn ? 'far fa-triangle-exclamation' : 'fas fa-circle-xmark';
@@ -416,16 +416,16 @@ function renderFailureList(failures) {
         const desc   = f.message || f.description || `Missing required field: ${field}`;
         const policy = f.on_missing || f.onMissing || 'queue_review';
 
-        return `<div class="${rowCls}" id="failure-row-${idx}">
+        return HtmlSafe.html`<div class="${rowCls}" id="failure-row-${idx}">
             <div class="failure-row-icon"><i class="${icoCls}"></i></div>
             <div class="failure-row-body">
-                <div class="failure-row-field">${esc(field)}</div>
-                <div class="failure-row-detail">${esc(desc)}</div>
+                <div class="failure-row-field">${field}</div>
+                <div class="failure-row-detail">${desc}</div>
                 ${renderOnMissingBadge(policy)}
                 <div class="override-input">
                     <input type="text"
                            id="override-val-${idx}"
-                           data-field="${esc(field)}"
+                           data-field="${field}"
                            placeholder="Enter value to provide for this field…">
                     <button class="rq-btn rq-btn-primary"
                             style="padding:3px 8px;font-size:10px;"
@@ -433,7 +433,7 @@ function renderFailureList(failures) {
                 </div>
             </div>
         </div>`;
-    }).join('');
+    })}`;
 }
 
 function renderOnMissingBadge(policy) {
@@ -445,7 +445,7 @@ function renderOnMissingBadge(policy) {
         default:      ['#64748b', '#f8fafc', 'default'],
     };
     const [color, bg, label] = labels[policy] || labels.default;
-    return `<div style="margin-top:3px;">
+    return HtmlSafe.html`<div style="margin-top:3px;">
         <span style="font-size:9px;background:${bg};color:${color};border-radius:4px;padding:1px 5px;border:1px solid ${color}33;font-weight:600;">
             policy: ${label}
         </span>
@@ -597,15 +597,6 @@ function val(id) {
 function setText(id, text) {
     const el = document.getElementById(id);
     if (el) el.textContent = String(text);
-}
-
-function esc(s) {
-    return String(s || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
 }
 
 async function safeText(res) {

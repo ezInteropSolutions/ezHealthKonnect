@@ -255,6 +255,43 @@ test.describe('ezCompanion renders model output as text', () => {
     });
 });
 
+// Code templates are shared by every pipeline author.
+test.describe('Code templates render names as text', () => {
+    const tName = `PW ${MARK} tpl');window.__ezhkXss='${MARK}-ct';(' <img src=x onerror="window.__ezhkXss='${MARK}-ctimg'">`;
+    let ctId;
+
+    test.beforeAll(async ({ request }) => {
+        const r = await (await request.post('/api/code-templates', { data: {
+            name: tName, code: 'function x(){}', category: 'general', scope: 'global',
+            description: `<svg onload="window.__ezhkXss='${MARK}-ctdesc'">`,
+            function_signatures: [`<img src=x onerror="window.__ezhkXss='${MARK}-sig'">`],
+        } })).json();
+        expect(r.success, JSON.stringify(r)).toBeTruthy();
+        ctId = r.data.id;
+    });
+
+    test.afterAll(async ({ request }) => {
+        if (ctId) await request.delete(`/api/code-templates/${ctId}`).catch(() => {});
+    });
+
+    test('card, edit modal and delete confirm', async ({ page }) => {
+        await page.goto('/code-templates.html');
+        await page.locator('#searchInput').fill(MARK);
+        const card = page.locator('.ct-card').filter({ hasText: MARK }).first();
+        await expect(card).toBeVisible({ timeout: 15_000 });
+        expect(await card.innerText()).toContain('<img src=x onerror=');
+        await card.locator('.btn-ghost').click();
+        await expect(page.locator('#f-name')).toHaveValue(tName);
+        await page.evaluate(() => typeof closeModal === 'function' && closeModal());
+        await card.locator('.btn-danger').click();
+        await expect(page.locator('.app-dialog-body')).toContainText(MARK);
+        await page.locator('#_appDlgCancel').click();
+        await page.waitForTimeout(500);
+        expect(await page.evaluate(() => window.__ezhkXss || null)).toBeNull();
+        expect(await page.locator(`img[onerror*="${MARK}"], svg[onload*="${MARK}"]`).count()).toBe(0);
+    });
+});
+
 // AppDialogs is used everywhere with messages that interpolate data (names,
 // errors returned by the server). A plain string is shown as text; formatting
 // needs HtmlSafe.html (data inside stays escaped) or HtmlSafe.raw (constants).

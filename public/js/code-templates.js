@@ -123,42 +123,49 @@ function buildCard(t) {
     const sigs = (t.function_signatures || []).slice(0, 5);
     const moreSigs = (t.function_signatures || []).length - 5;
 
-    card.innerHTML = `
+    card.innerHTML = HtmlSafe.html`
         <div class="ct-card-header">
             <div class="ct-card-icon"><i class="fas fa-${icon}"></i></div>
             <div style="flex:1;min-width:0">
-                <div class="ct-card-title" title="${esc(t.name)}">${esc(t.name)}</div>
+                <div class="ct-card-title" title="${t.name}">${t.name}</div>
                 <div class="ct-card-meta">
-                    <span class="ct-badge ct-badge-cat">${esc(t.category.replace('_', ' '))}</span>
+                    <span class="ct-badge ct-badge-cat">${String(t.category || '').replace('_', ' ')}</span>
                     <span class="ct-badge ${t.scope === 'global' ? 'ct-badge-glob' : 'ct-badge-iface'}">
                         ${t.scope === 'global' ? '🌐 global' : '🔗 interface'}
                     </span>
-                    ${t.is_system ? '<span class="ct-badge ct-badge-sys">system</span>' : ''}
-                    ${!t.is_active ? '<span class="ct-badge ct-badge-off">inactive</span>' : ''}
+                    ${t.is_system ? HtmlSafe.raw('<span class="ct-badge ct-badge-sys">system</span>') : ''}
+                    ${!t.is_active ? HtmlSafe.raw('<span class="ct-badge ct-badge-off">inactive</span>') : ''}
                 </div>
             </div>
         </div>
-        ${t.description ? `<div class="ct-description">${esc(t.description)}</div>` : ''}
-        ${sigs.length > 0 ? `
+        ${t.description ? HtmlSafe.html`<div class="ct-description">${t.description}</div>` : ''}
+        ${sigs.length > 0 ? HtmlSafe.html`
         <div class="ct-sigs">
-            ${sigs.map(s => `<span class="ct-sig">${esc(s)}</span>`).join('')}
-            ${moreSigs > 0 ? `<span class="ct-sig" style="color:#6b7280">+${moreSigs} more</span>` : ''}
+            ${sigs.map(s => HtmlSafe.html`<span class="ct-sig">${s}</span>`)}
+            ${moreSigs > 0 ? HtmlSafe.html`<span class="ct-sig" style="color:#6b7280">+${moreSigs} more</span>` : ''}
         </div>` : ''}
         <div class="ct-card-footer">
             <span class="ct-usage">${t.usage_count || 0} use${t.usage_count !== 1 ? 's' : ''}</span>
             <span class="spacer"></span>
-            <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px" onclick="openModal(${esc(JSON.stringify(JSON.stringify(t)))})">
+            <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px" data-id="${t.id}" onclick="openModal(templateJson(this.dataset.id))">
                 <i class="fas fa-pencil-alt"></i> Edit
             </button>
-            ${!t.is_system ? `
-            <button class="btn btn-danger" style="padding:5px 10px;font-size:12px" onclick="deleteTemplate('${esc(t.id)}','${esc(t.name)}')">
+            ${!t.is_system ? HtmlSafe.html`
+            <button class="btn btn-danger" style="padding:5px 10px;font-size:12px" data-id="${t.id}" onclick="deleteTemplate(this.dataset.id)">
                 <i class="fas fa-trash"></i>
             </button>` : ''}
         </div>`;
     return card;
 }
 
-const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// Handlers receive only a template id; the record is looked up here.
+function templateById(id) {
+    return allTemplates.find(t => String(t.id) === String(id)) || null;
+}
+function templateJson(id) {
+    const t = templateById(id);
+    return t ? JSON.stringify(t) : null;
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // MODAL
@@ -224,7 +231,7 @@ function renderSigTags(sigs) {
         const tag = document.createElement('div');
         tag.className = 'sig-tag';
         tag.dataset.sig = sig;
-        tag.innerHTML = `<code>${esc(sig)}</code><button type="button" onclick="removeSig(this)" title="Remove">&times;</button>`;
+        tag.innerHTML = HtmlSafe.html`<code>${sig}</code><button type="button" onclick="removeSig(this)" title="Remove">&times;</button>`;
         container.appendChild(tag);
     });
 }
@@ -267,7 +274,7 @@ function renderIfaceChips() {
         const name = Array.from(sel.options).find(o => o.value === id)?.text || id;
         const chip = document.createElement('div');
         chip.className = 'iface-chip';
-        chip.innerHTML = `${esc(name)}<button type="button" onclick="removeIfaceChip('${esc(id)}')">&times;</button>`;
+        chip.innerHTML = HtmlSafe.html`${name}<button type="button" data-id="${id}" onclick="removeIfaceChip(this.dataset.id)">&times;</button>`;
         container.appendChild(chip);
     });
 }
@@ -324,7 +331,8 @@ async function saveTemplate() {
 // ──────────────────────────────────────────────────────────────────────────────
 // DELETE
 // ──────────────────────────────────────────────────────────────────────────────
-async function deleteTemplate(id, name) {
+async function deleteTemplate(id) {
+    const name = (templateById(id) || {}).name || '';
     if (!await AppDialogs.confirm(HtmlSafe.html`Delete code template "<b>${name}</b>"? This cannot be undone.`, { title: 'Delete Template', type: 'danger', confirmText: 'Delete' })) return;
     try {
         const res = await fetch(`/api/code-templates/${id}`, { method: 'DELETE' });

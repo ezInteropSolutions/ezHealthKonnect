@@ -8,8 +8,6 @@
     let _currentInterfaceId = '';
     let _currentPatientKey = '';
 
-    const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
-        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const el = id => document.getElementById(id);
 
     function fmtDate(iso) {
@@ -31,27 +29,27 @@
             const body = await res.json();
             const list = body.data || body.interfaces || body || [];
             const select = el('searchInterface');
-            select.innerHTML = '<option value="">Select an interface…</option>' +
-                list.map(i => `<option value="${esc(i.id)}">${esc(i.name || i.id)}</option>`).join('');
+            select.innerHTML = HtmlSafe.html`<option value="">Select an interface…</option>${
+                list.map(i => HtmlSafe.html`<option value="${i.id}">${i.name || i.id}</option>`)}`;
         } catch (_) { /* non-fatal — user can still paste a patient key once an interface loads */ }
     }
 
     function renderRows(rows) {
         const tbody = el('registryTableBody');
         if (!rows.length) {
-            tbody.innerHTML = `<tr><td colspan="7" class="empty-state"><i class="fas fa-circle-check" style="color:#22c55e;"></i><br>No matching registry entries.</td></tr>`;
+            tbody.innerHTML = HtmlSafe.html`<tr><td colspan="7" class="empty-state"><i class="fas fa-circle-check" style="color:#22c55e;"></i><br>No matching registry entries.</td></tr>`;
             return;
         }
-        tbody.innerHTML = rows.map(r => `
+        tbody.innerHTML = HtmlSafe.html`${rows.map(r => HtmlSafe.html`
             <tr>
-                <td>${esc(r.sectionKey)}</td>
-                <td class="mono">${esc(r.identityKey)}</td>
+                <td>${r.sectionKey}</td>
+                <td class="mono">${r.identityKey}</td>
                 <td>${fmtDate(r.firstSeenAt)}</td>
                 <td>${fmtDate(r.lastSeenAt)}</td>
-                <td>${esc(r.seenCount)}</td>
-                <td class="mono">${esc(r.firstSeenMessageId || '—')}</td>
-                <td class="mono">${esc(r.lastSeenMessageId || '—')}</td>
-            </tr>`).join('');
+                <td>${r.seenCount}</td>
+                <td class="mono">${r.firstSeenMessageId || '—'}</td>
+                <td class="mono">${r.lastSeenMessageId || '—'}</td>
+            </tr>`)}`;
     }
 
     async function load() {
@@ -64,11 +62,11 @@
         purgeBtn.disabled = !(interfaceId && patientKey);
 
         if (!interfaceId) {
-            el('registryTableBody').innerHTML = `<tr><td colspan="7" class="empty-state"><i class="fas fa-fingerprint"></i><br>Select an interface and search to view registry entries.</td></tr>`;
+            el('registryTableBody').innerHTML = HtmlSafe.html`<tr><td colspan="7" class="empty-state"><i class="fas fa-fingerprint"></i><br>Select an interface and search to view registry entries.</td></tr>`;
             return;
         }
 
-        el('registryTableBody').innerHTML = `<tr class="loading-row"><td colspan="7"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>`;
+        el('registryTableBody').innerHTML = HtmlSafe.html`<tr class="loading-row"><td colspan="7"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>`;
         try {
             const params = new URLSearchParams({ interfaceId });
             if (patientKey) params.set('patientKey', patientKey);
@@ -78,13 +76,13 @@
             });
             const body = await res.json();
             if (!res.ok || !body.success) {
-                el('registryTableBody').innerHTML = `<tr><td colspan="7" class="empty-state">${esc(body.error || ('Request failed (' + res.status + ')'))}</td></tr>`;
+                el('registryTableBody').innerHTML = HtmlSafe.html`<tr><td colspan="7" class="empty-state">${body.error || ('Request failed (' + res.status + ')')}</td></tr>`;
                 return;
             }
             _rows = body.data || [];
             renderRows(_rows);
         } catch (e) {
-            el('registryTableBody').innerHTML = `<tr><td colspan="7" class="empty-state">Network error: ${esc(e.message)}</td></tr>`;
+            el('registryTableBody').innerHTML = HtmlSafe.html`<tr><td colspan="7" class="empty-state">Network error: ${e.message}</td></tr>`;
         }
     }
 
