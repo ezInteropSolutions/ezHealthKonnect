@@ -125,23 +125,23 @@ class ZSegmentCardStrategy {
 
     _resourceDropdown(selectedId, id) {
         const opts = FHIR_RESOURCE_OPTIONS.map(r =>
-            `<option value="${r}" ${r === selectedId ? 'selected' : ''}>${r}</option>`
-        ).join('');
-        return `<select id="${id}" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;width:100%;">${opts}</select>`;
+            HtmlSafe.html`<option value="${r}" ${r === selectedId ? 'selected' : ''}>${r}</option>`
+        );
+        return HtmlSafe.html`<select id="${id}" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;width:100%;">${opts}</select>`;
     }
 
     _transformDropdown(selected, id) {
         const opts = TRANSFORM_OPTIONS.map(t =>
-            `<option value="${t.code}" ${t.code === selected ? 'selected' : ''}>${t.label}</option>`
-        ).join('');
-        return `<select id="${id}" style="padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">${opts}</select>`;
+            HtmlSafe.html`<option value="${t.code}" ${t.code === selected ? 'selected' : ''}>${t.label}</option>`
+        );
+        return HtmlSafe.html`<select id="${id}" style="padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">${opts}</select>`;
     }
 
     _roleDropdown(selected, id) {
         const opts = RESOURCE_ROLE_OPTIONS.map(r =>
-            `<option value="${r.code}" ${r.code === selected ? 'selected' : ''}>${r.label}</option>`
-        ).join('');
-        return `<select id="${id}" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;width:100%;">${opts}</select>`;
+            HtmlSafe.html`<option value="${r.code}" ${r.code === selected ? 'selected' : ''}>${r.label}</option>`
+        );
+        return HtmlSafe.html`<select id="${id}" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;width:100%;">${opts}</select>`;
     }
 
     /** Render the field mapping table (shared by both strategies) */
@@ -152,49 +152,48 @@ class ZSegmentCardStrategy {
             const fhirId    = `${this.panelId}-fhir-${i}`;
             const transformId = `${this.panelId}-tr-${i}`;
             const reqId     = `${this.panelId}-req-${i}`;
-            const esc       = s => String(s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
             const rawBadge  = fm.rawValue
-                ? `<span style="font-size:10px;color:#0369a1;background:#e0f2fe;padding:1px 5px;border-radius:8px;font-family:monospace;max-width:120px;overflow:hidden;text-overflow:ellipsis;display:inline-block;white-space:nowrap;" title="${esc(fm.rawValue)}">${esc(fm.rawValue.substring(0, 20))}${fm.rawValue.length > 20 ? '…' : ''}</span>`
-                : '<span style="font-size:10px;color:#9ca3af;">—</span>';
+                ? HtmlSafe.html`<span style="font-size:10px;color:#0369a1;background:#e0f2fe;padding:1px 5px;border-radius:8px;font-family:monospace;max-width:120px;overflow:hidden;text-overflow:ellipsis;display:inline-block;white-space:nowrap;" title="${fm.rawValue}">${fm.rawValue.substring(0, 20)}${fm.rawValue.length > 20 ? '…' : ''}</span>`
+                : HtmlSafe.raw('<span style="font-size:10px;color:#9ca3af;">—</span>');
 
-            return `
+            return HtmlSafe.html`
             <tr data-row="${i}" style="border-bottom:1px solid #f1f5f9;">
                 <td style="padding:6px 8px;font-family:monospace;font-size:12px;font-weight:600;color:#1d4ed8;white-space:nowrap;">
-                    ${esc(fm.position)}</td>
+                    ${fm.position}</td>
                 <td style="padding:6px 8px;">${rawBadge}</td>
                 <td style="padding:6px 8px;">
                     ${readonly
-                        ? `<span style="font-size:12px;color:#374151;">${esc(fm.fieldLabel)}</span>`
-                        : `<input id="${labelId}" type="text" value="${esc(fm.fieldLabel)}" style="width:100%;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;">`
+                        ? HtmlSafe.html`<span style="font-size:12px;color:#374151;">${fm.fieldLabel}</span>`
+                        : HtmlSafe.html`<input id="${labelId}" type="text" value="${fm.fieldLabel}" style="width:100%;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;">`
                     }
                 </td>
                 <td style="padding:6px 8px;">
                     ${readonly
-                        ? `<span style="font-size:12px;font-family:monospace;color:#059669;">${esc(fm.fhirPath)}</span>`
-                        : `<input id="${fhirId}" type="text" value="${esc(fm.fhirPath)}" placeholder="e.g. Organization.name" style="width:100%;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;font-family:monospace;">`
+                        ? HtmlSafe.html`<span style="font-size:12px;font-family:monospace;color:#059669;">${fm.fhirPath}</span>`
+                        : HtmlSafe.html`<input id="${fhirId}" type="text" value="${fm.fhirPath}" placeholder="e.g. Organization.name" style="width:100%;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;font-family:monospace;">`
                     }
                 </td>
                 <td style="padding:6px 8px;">
                     ${readonly
-                        ? `<span style="font-size:11px;background:#f3f4f6;padding:2px 6px;border-radius:8px;">${esc(fm.transform)}</span>`
+                        ? HtmlSafe.html`<span style="font-size:11px;background:#f3f4f6;padding:2px 6px;border-radius:8px;">${fm.transform}</span>`
                         : this._transformDropdown(fm.transform, transformId)
                     }
                 </td>
                 <td style="padding:6px 8px;text-align:center;">
                     <input type="checkbox" id="${reqId}" ${fm.isRequired ? 'checked' : ''} ${readonly ? 'disabled' : ''}>
                 </td>
-                ${readonly ? '' : `<td style="padding:6px 8px;text-align:center;">
+                ${readonly ? '' : HtmlSafe.html`<td style="padding:6px 8px;text-align:center;">
                     <button data-delete-row="${i}" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer;">✕</button>
                 </td>`}
             </tr>`;
-        }).join('');
+        });
 
-        const addRowBtn = readonly ? '' : `
+        const addRowBtn = readonly ? '' : HtmlSafe.html`
             <tr><td colspan="7" style="padding:6px 8px;">
                 <button id="${this.panelId}-add-row" style="font-size:11px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:4px;padding:4px 10px;cursor:pointer;">+ Add field mapping</button>
             </td></tr>`;
 
-        return `
+        return HtmlSafe.html`
         <table style="width:100%;border-collapse:collapse;font-size:12px;">
             <thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
                 <th style="padding:6px 8px;text-align:left;color:#374151;font-weight:600;">Position</th>
@@ -203,7 +202,7 @@ class ZSegmentCardStrategy {
                 <th style="padding:6px 8px;text-align:left;color:#374151;font-weight:600;">FHIR path</th>
                 <th style="padding:6px 8px;text-align:left;color:#374151;font-weight:600;">Transform</th>
                 <th style="padding:6px 8px;text-align:center;color:#374151;font-weight:600;">Required</th>
-                ${readonly ? '' : '<th style="padding:6px 8px;"></th>'}
+                ${readonly ? '' : HtmlSafe.raw('<th style="padding:6px 8px;"></th>')}
             </tr></thead>
             <tbody id="${this.panelId}-tbody">${rows}${addRowBtn}</tbody>
         </table>`;
@@ -237,13 +236,12 @@ class OobStrategy extends ZSegmentCardStrategy {
 
     renderBody() {
         const oob = (this.segData.suggestedTemplates || []).find(t => t.isSystem);
-        const esc = s => String(s || '').replace(/</g, '&lt;');
-        return `
+        return HtmlSafe.html`
         <!-- Mode toggle -->
         <div style="display:flex;gap:8px;margin-bottom:14px;">
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border:2px solid #3b82f6;border-radius:6px;background:#eff6ff;font-size:12px;font-weight:600;color:#1d4ed8;">
                 <input type="radio" name="${this.panelId}-mode" value="accept" checked>
-                ✅ Use OOB default — <em style="font-weight:400;">${esc(oob.templateName)}</em>
+                ✅ Use OOB default — <em style="font-weight:400;">${oob.templateName}</em>
             </label>
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border:2px solid #d1d5db;border-radius:6px;background:#fafafa;font-size:12px;color:#374151;">
                 <input type="radio" name="${this.panelId}-mode" value="customize">
@@ -275,7 +273,7 @@ class OobStrategy extends ZSegmentCardStrategy {
             this._mode = r.value;
             const tableDiv = document.getElementById(`${this.panelId}-field-table`);
             if (tableDiv) {
-                tableDiv.innerHTML = this._renderFieldTable(this._mode === 'accept');
+                tableDiv.innerHTML = HtmlSafe.html`${this._renderFieldTable(this._mode === 'accept')}`;
                 this._attachFieldTableEvents();
             }
         }));
@@ -300,7 +298,7 @@ class OobStrategy extends ZSegmentCardStrategy {
                 this._draft.fieldMappings.splice(row, 1);
                 const tableDiv = document.getElementById(`${this.panelId}-field-table`);
                 if (tableDiv) {
-                    tableDiv.innerHTML = this._renderFieldTable(false);
+                    tableDiv.innerHTML = HtmlSafe.html`${this._renderFieldTable(false)}`;
                     this._attachFieldTableEvents();
                 }
             });
@@ -321,7 +319,7 @@ class OobStrategy extends ZSegmentCardStrategy {
             });
             const tableDiv = document.getElementById(`${this.panelId}-field-table`);
             if (tableDiv) {
-                tableDiv.innerHTML = this._renderFieldTable(false);
+                tableDiv.innerHTML = HtmlSafe.html`${this._renderFieldTable(false)}`;
                 this._attachFieldTableEvents();
             }
         });
@@ -368,11 +366,10 @@ class OobStrategy extends ZSegmentCardStrategy {
 
 class CustomStrategy extends ZSegmentCardStrategy {
     renderBody() {
-        const esc = s => String(s || '').replace(/</g, '&lt;');
         const hasFields = this._draft.fieldMappings.length > 0;
-        return `
+        return HtmlSafe.html`
         <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#92400e;">
-            ⚠️ No OOB template found for <strong>${esc(this.segData.segmentId)}</strong>.
+            ⚠️ No OOB template found for <strong>${this.segData.segmentId}</strong>.
             ${hasFields
                 ? `${this._draft.fieldMappings.length} field${this._draft.fieldMappings.length > 1 ? 's' : ''} detected from your sample message.`
                 : 'No fields detected — add them manually below.'}
@@ -414,7 +411,7 @@ class CustomStrategy extends ZSegmentCardStrategy {
                 this._draft.fieldMappings.splice(row, 1);
                 const tableDiv = document.getElementById(`${this.panelId}-field-table`);
                 if (tableDiv) {
-                    tableDiv.innerHTML = this._renderFieldTable(false);
+                    tableDiv.innerHTML = HtmlSafe.html`${this._renderFieldTable(false)}`;
                     this._attachFieldTableEvents();
                 }
             });
@@ -434,7 +431,7 @@ class CustomStrategy extends ZSegmentCardStrategy {
             });
             const tableDiv = document.getElementById(`${this.panelId}-field-table`);
             if (tableDiv) {
-                tableDiv.innerHTML = this._renderFieldTable(false);
+                tableDiv.innerHTML = HtmlSafe.html`${this._renderFieldTable(false)}`;
                 this._attachFieldTableEvents();
             }
         });
@@ -504,7 +501,7 @@ class ZSegmentConfigPanel {
                 : 'background:#92400e;color:#fff;';
             const badgeLabel = seg.hasOobTemplate ? 'OOB Template' : 'Custom';
 
-            return `
+            return HtmlSafe.html`
             <div id="${panelId}-card" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:12px;">
                 <!-- Card header -->
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
@@ -512,7 +509,7 @@ class ZSegmentConfigPanel {
                         <span style="font-family:monospace;font-size:15px;font-weight:700;color:#1e3a5f;">${seg.segmentId}</span>
                         <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:9px;${badgeStyle}">${badgeLabel}</span>
                         ${seg.parsedFields && seg.parsedFields[0]
-                            ? `<span style="font-size:11px;color:#6b7280;">${seg.parsedFields[0].length} field${seg.parsedFields[0].length !== 1 ? 's' : ''} in sample message</span>`
+                            ? HtmlSafe.html`<span style="font-size:11px;color:#6b7280;">${seg.parsedFields[0].length} field${seg.parsedFields[0].length !== 1 ? 's' : ''} in sample message</span>`
                             : ''
                         }
                     </div>
@@ -526,9 +523,9 @@ class ZSegmentConfigPanel {
                     ${strategy.renderBody()}
                 </div>
             </div>`;
-        }).join('');
+        });
 
-        return `
+        return HtmlSafe.html`
         <div id="zseg-config-panel" style="margin-top:24px;">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
                 <span style="font-size:18px;">🔧</span>

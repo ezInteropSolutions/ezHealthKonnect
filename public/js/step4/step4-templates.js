@@ -20,7 +20,7 @@ class Step4Templates {
         const status = data?.success !== false ? 'Success' : 'Has Issues';
         const processingTime = data?.performance?.totalTime || '0ms';
 
-        return `
+        return HtmlSafe.html`
             <div class="transformation-summary">
                 <div class="summary-header-compact">
                     <h3 class="summary-title">
@@ -100,7 +100,7 @@ class Step4Templates {
     }
 
     getResourcesSectionTemplate() {
-        return `
+        return HtmlSafe.html`
             <div class="resources-section" id="resourcesSection">
                 <!-- Resources will be populated dynamically -->
             </div>
@@ -112,7 +112,7 @@ class Step4Templates {
         const description = this.getResourceDescription(resource);
         const mappingCount = this.countResourceMappings(resource);
 
-        return `
+        return HtmlSafe.html`
             <div class="fhir-resource-card" data-index="${index}" id="resource-${index}">
                 <div class="resource-header">
                     <div class="resource-title">
@@ -143,10 +143,10 @@ class Step4Templates {
         const mappings = this.extractMappings(resource);
         
         if (!mappings || mappings.length === 0) {
-            return '<p style="color: #6b7280; font-style: italic; padding: 12px;">No mappings configured</p>';
+            return HtmlSafe.raw('<p style="color: #6b7280; font-style: italic; padding: 12px;">No mappings configured</p>');
         }
 
-        return mappings.map(mapping => `
+        return mappings.map(mapping => HtmlSafe.html`
             <div class="mapping-row">
                 <div class="mapping-hl7">
                     <div class="field-info">
@@ -170,7 +170,7 @@ class Step4Templates {
                     </button>
                 </div>
             </div>
-        `).join('');
+        `);
     }
 
     getModalsTemplate() {
@@ -183,7 +183,7 @@ class Step4Templates {
     }
 
     getJsonViewerModalTemplate() {
-        return `
+        return HtmlSafe.html`
             <div class="json-viewer-overlay" id="jsonViewerOverlay">
                 <div class="json-viewer-modal">
                     <div class="modal-header">
@@ -219,7 +219,7 @@ class Step4Templates {
     }
 
     getValidationSidebarTemplate() {
-        return `
+        return HtmlSafe.html`
             <div class="validation-sidebar" id="validationSidebar">
                 <div style="position: fixed; right: 0; top: 0; bottom: 0; width: 400px; background: white; box-shadow: -4px 0 20px rgba(0,0,0,0.1); padding: 20px; overflow-y: auto;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -235,7 +235,7 @@ class Step4Templates {
     }
 
     getConfigSaveModalTemplate() {
-        return `
+        return HtmlSafe.html`
             <div class="config-save-overlay" id="configSaveOverlay">
                 <div style="background: white; border-radius: 16px; width: 90%; max-width: 600px; padding: 0; overflow: hidden;">
                     <div class="modal-header">
@@ -265,7 +265,7 @@ class Step4Templates {
     }
 
     getEditMappingModalTemplate() {
-        return `
+        return HtmlSafe.html`
             <div class="edit-mapping-overlay" id="editMappingOverlay">
                 <!-- Edit mapping modal will be populated dynamically -->
             </div>

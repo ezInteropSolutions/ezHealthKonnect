@@ -29,6 +29,6 @@ class Step4Modals {
         if (!content) return;
 
         const validation = this.handler.validation.getValidationResults();
-        content.innerHTML = validation.html;
+        content.innerHTML = HtmlSafe.html`${validation.html}`;
     }
 }

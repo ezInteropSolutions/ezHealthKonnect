@@ -55,7 +55,7 @@ class Step4JsonViewer {
 
         if (jsonOutput && content) {
             this.currentJson = content;
-            jsonOutput.innerHTML = this.renderCollapsibleJson(content);
+            jsonOutput.innerHTML = HtmlSafe.html`${this.renderCollapsibleJson(content)}`;
             this.attachJsonEventListeners();
         }
     }
@@ -134,46 +134,46 @@ class Step4JsonViewer {
     }
 
     renderCollapsibleJson(obj, indent = 0) {
-        if (obj === null) return '<span class="json-null">null</span>';
-        if (obj === undefined) return '<span class="json-null">undefined</span>';
+        if (obj === null) return HtmlSafe.raw('<span class="json-null">null</span>');
+        if (obj === undefined) return HtmlSafe.raw('<span class="json-null">undefined</span>');
         
         const type = typeof obj;
         
         if (type === 'string') {
-            return `<span class="json-string">"${this.escapeHtml(obj)}"</span>`;
+            return HtmlSafe.html`<span class="json-string">"${obj}"</span>`;
         }
         
         if (type === 'number') {
-            return `<span class="json-number">${obj}</span>`;
+            return HtmlSafe.html`<span class="json-number">${obj}</span>`;
         }
         
         if (type === 'boolean') {
-            return `<span class="json-boolean">${obj}</span>`;
+            return HtmlSafe.html`<span class="json-boolean">${obj}</span>`;
         }
         
         if (Array.isArray(obj)) {
             if (obj.length === 0) return '[]';
             
             const id = `json-array-${Math.random().toString(36).substr(2, 9)}`;
-            let html = `<span class="json-key json-expanded" data-target="${id}">[</span>`;
-            html += `<div class="json-container" id="${id}">`;
+            const html = [HtmlSafe.html`<span class="json-key json-expanded" data-target="${id}">[</span>`];
+            html.push(HtmlSafe.html`<div class="json-container" id="${id}">`);
             
             obj.forEach((item, index) => {
                 const isLast = index === obj.length - 1;
-                html += `<div style="margin: 2px 0;">`;
+                html.push(HtmlSafe.html`<div style="margin: 2px 0;">`);
                 
                 // Add index for arrays of objects
                 if (typeof item === 'object' && item !== null) {
-                    html += `<span style="color: #6b7280; margin-right: 8px;">[${index}]</span>`;
+                    html.push(HtmlSafe.html`<span style="color: #6b7280; margin-right: 8px;">[${index}]</span>`);
                 }
                 
-                html += this.renderCollapsibleJson(item, indent + 1);
-                if (!isLast) html += ',';
-                html += '</div>';
+                html.push(this.renderCollapsibleJson(item, indent + 1));
+                if (!isLast) html.push(HtmlSafe.raw(','));
+                html.push(HtmlSafe.raw('</div>'));
             });
             
-            html += '</div>]';
-            return html;
+            html.push(HtmlSafe.raw('</div>]'));
+            return HtmlSafe.html`${html}`;
         }
         
         if (type === 'object') {
@@ -183,20 +183,20 @@ class Step4JsonViewer {
             const id = `json-object-${Math.random().toString(36).substr(2, 9)}`;
             const isExpanded = indent < 2; // Auto-expand first 2 levels
             
-            let html = `<span class="json-key ${isExpanded ? 'json-expanded' : 'json-collapsed'}" data-target="${id}">{</span>`;
-            html += `<div class="json-container ${isExpanded ? '' : 'json-hidden'}" id="${id}">`;
+            const html = [HtmlSafe.html`<span class="json-key ${isExpanded ? 'json-expanded' : 'json-collapsed'}" data-target="${id}">{</span>`];
+            html.push(HtmlSafe.html`<div class="json-container ${isExpanded ? '' : 'json-hidden'}" id="${id}">`);
             
             keys.forEach((key, index) => {
                 const isLast = index === keys.length - 1;
-                html += `<div style="margin: 2px 0;">`;
-                html += `<span class="json-key">"${key}"</span>: `;
-                html += this.renderCollapsibleJson(obj[key], indent + 1);
-                if (!isLast) html += ',';
-                html += '</div>';
+                html.push(HtmlSafe.html`<div style="margin: 2px 0;">`);
+                html.push(HtmlSafe.html`<span class="json-key">"${key}"</span>: `);
+                html.push(this.renderCollapsibleJson(obj[key], indent + 1));
+                if (!isLast) html.push(HtmlSafe.raw(','));
+                html.push(HtmlSafe.raw('</div>'));
             });
             
-            html += '</div>}';
-            return html;
+            html.push(HtmlSafe.raw('</div>}'));
+            return HtmlSafe.html`${html}`;
         }
         
         return String(obj);

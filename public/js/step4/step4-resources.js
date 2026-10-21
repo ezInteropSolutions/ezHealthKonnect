@@ -30,7 +30,7 @@ class Step4Resources {
         card.className = 'fhir-resource-card';
         card.dataset.index = index;
         
-        card.innerHTML = `
+        card.innerHTML = HtmlSafe.html`
             <div class="resource-header">
                 <div class="resource-title">
                     <div class="resource-icon">${this.getResourceIcon(resource.resourceType)}</div>
@@ -69,7 +69,7 @@ class Step4Resources {
 
     renderResourceMappings(resource) {
         // Simplified mapping display
-        return '<p>Mapping details...</p>';
+        return HtmlSafe.raw('<p>Mapping details...</p>');
     }
 
     toggleResource(index) {

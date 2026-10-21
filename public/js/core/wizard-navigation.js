@@ -621,7 +621,7 @@ async validateCurrentStep() {
                         circle.style.background = '#22c55e';
                         circle.style.color = 'white';
                     } else {
-                        circle.innerHTML = i;
+                        circle.innerHTML = HtmlSafe.html`${i}`;
                         circle.style.background = i === this.currentStep ? 'white' : 'rgba(255, 255, 255, 0.1)';
                         circle.style.color = i === this.currentStep ? '#1e3a8a' : 'rgba(255, 255, 255, 0.7)';
                     }

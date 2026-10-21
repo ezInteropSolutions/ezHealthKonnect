@@ -261,7 +261,7 @@
             const resourcesHtml = this.generateResourcesSection();
             const modalsHtml = this.generateModals();
             
-            step4Element.innerHTML = `
+            step4Element.innerHTML = HtmlSafe.html`
                 <div class="step-header">
                     <div class="step-progress">STEP 4 OF 5</div>
                     <h3 class="step-title">HL7 → FHIR Transformation</h3>
@@ -297,7 +297,7 @@
                 Math.round((mappingsCount / (mappingsCount + validationErrors)) * 100) + '%' : 
                 '0%';
             
-            return `
+            return HtmlSafe.html`
                 <div style="background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%); border: 2px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                         <h4 style="margin: 0; font-size: 16px; font-weight: 600; color: #1e3a8a;">Transformation Summary</h4>
@@ -351,18 +351,18 @@
 
         generateResourcesSection() {
             if (!this.fhirTransformResult || !this.fhirTransformResult.fhirResources) {
-                return '<div style="text-align: center; padding: 40px; color: #6b7280;">No resources to display</div>';
+                return HtmlSafe.raw('<div style="text-align: center; padding: 40px; color: #6b7280;">No resources to display</div>');
             }
 
-            let html = '<div id="resourcesContainer" style="space-y: 16px;">';
+            const html = [HtmlSafe.raw('<div id="resourcesContainer" style="space-y: 16px;">')];
             
             this.fhirTransformResult.fhirResources.forEach((resource, index) => {
                 const mappings = this.atomicMappings.filter(m => m.resourceType === resource.resourceType);
-                html += this.generateResourceCard(resource, mappings, index);
+                html.push(this.generateResourceCard(resource, mappings, index));
             });
             
-            html += '</div>';
-            return html;
+            html.push(HtmlSafe.raw('</div>'));
+            return HtmlSafe.html`${html}`;
         }
 
         generateResourceCard(resource, mappings, index) {
@@ -370,7 +370,7 @@
             const icon = this.getResourceIcon(resourceType);
             const mappingCount = mappings.length;
             
-            return `
+            return HtmlSafe.html`
                 <div style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; margin-bottom: 16px;">
                     <div onclick="window.step4Handler.toggleResource(${index})" style="padding: 16px; background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%); cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
                         <div style="display: flex; align-items: center; gap: 12px;">
@@ -392,19 +392,19 @@
 
         generateMappingsTable(mappings) {
             if (mappings.length === 0) {
-                return '<div style="text-align: center; color: #6b7280; padding: 20px;">No mappings found</div>';
+                return HtmlSafe.raw('<div style="text-align: center; color: #6b7280; padding: 20px;">No mappings found</div>');
             }
 
-            let html = '<div style="overflow-x: auto;">';
-            html += '<table style="width: 100%; border-collapse: collapse;">';
-            html += '<thead><tr style="border-bottom: 2px solid #e2e8f0;">';
-            html += '<th style="text-align: left; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">HL7 Field</th>';
-            html += '<th style="text-align: center; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">→</th>';
-            html += '<th style="text-align: left; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">FHIR Path</th>';
-            html += '<th style="text-align: left; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">Value</th>';
-            html += '<th style="text-align: center; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">Actions</th>';
-            html += '</tr></thead>';
-            html += '<tbody>';
+            const html = [HtmlSafe.raw('<div style="overflow-x: auto;">')];
+            html.push(HtmlSafe.raw('<table style="width: 100%; border-collapse: collapse;">'));
+            html.push(HtmlSafe.raw('<thead><tr style="border-bottom: 2px solid #e2e8f0;">'));
+            html.push(HtmlSafe.raw('<th style="text-align: left; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">HL7 Field</th>'));
+            html.push(HtmlSafe.raw('<th style="text-align: center; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">→</th>'));
+            html.push(HtmlSafe.raw('<th style="text-align: left; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">FHIR Path</th>'));
+            html.push(HtmlSafe.raw('<th style="text-align: left; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">Value</th>'));
+            html.push(HtmlSafe.raw('<th style="text-align: center; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">Actions</th>'));
+            html.push(HtmlSafe.raw('</tr></thead>'));
+            html.push(HtmlSafe.raw('<tbody>'));
             
             mappings.forEach((mapping, idx) => {
                 const hl7Parts = mapping.hl7Field.split('.');
@@ -412,7 +412,7 @@
                 const statusColor = mapping.validated === false ? '#ef4444' : '#10b981';
                 const statusLabel = mapping.validated === false ? 'Invalid' : 'Direct';
                 
-                html += `
+                html.push(HtmlSafe.html`
                     <tr style="border-bottom: 1px solid #f3f4f6;">
                         <td style="padding: 12px;">
                             <div style="font-family: monospace; font-size: 12px; color: #4b5563;">${hl7Display}</div>
@@ -439,15 +439,15 @@
                             </div>
                         </td>
                     </tr>
-                `;
+                `);
             });
             
-            html += '</tbody></table></div>';
-            return html;
+            html.push(HtmlSafe.raw('</tbody></table></div>'));
+            return HtmlSafe.html`${html}`;
         }
 
         generateModals() {
-            return `
+            return HtmlSafe.html`
                 <!-- Enhanced Edit Modal -->
                 <div id="editMappingModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000;">
                     <div style="background: white; border-radius: 12px; margin: 50px auto; max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto;">
@@ -723,7 +723,7 @@
             if (isExpandable) {
                 const keyElement = document.createElement('span');
                 keyElement.className = 'json-tree-key';
-                keyElement.innerHTML = `
+                keyElement.innerHTML = HtmlSafe.html`
                     <span class="json-tree-toggle">▼</span>
                     ${key}: ${Array.isArray(value) ? `[${value.length}]` : '{...}'}
                 `;
@@ -751,7 +751,7 @@
                                   typeof value === 'number' ? 'json-tree-number' :
                                   typeof value === 'boolean' ? 'json-tree-boolean' : '';
                 
-                node.innerHTML = `
+                node.innerHTML = HtmlSafe.html`
                     <span class="json-tree-key">${key}:</span>
                     <span class="${valueClass}"> ${JSON.stringify(value)}</span>
                 `;
@@ -851,7 +851,7 @@
                 return;
             }
             
-            content.innerHTML = `
+            content.innerHTML = HtmlSafe.html`
                 <div style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">HL7 Field: ${hl7Field}</label>
                     <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">FHIR Path: ${fhirPath}</label>
@@ -1040,7 +1040,7 @@
         showError(message) {
             const step4Element = document.getElementById('step4');
             if (step4Element) {
-                step4Element.innerHTML = `
+                step4Element.innerHTML = HtmlSafe.html`
                     <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 24px; text-align: center;">
                         <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
                         <div style="font-weight: 600; color: #dc2626; margin-bottom: 8px;">Error Loading FHIR Mapping</div>

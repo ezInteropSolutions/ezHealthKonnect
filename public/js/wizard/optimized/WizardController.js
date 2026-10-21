@@ -308,10 +308,10 @@ class WizardController extends EventTarget {
                 // Populate deployment settings panel
                 const deploymentContainer = document.getElementById('wizardDeploymentSettingsContainer');
                 if (deploymentContainer && window.InterfaceConfigComponents) {
-                    deploymentContainer.innerHTML = InterfaceConfigComponents.getDeploymentSettingsPanel(
+                    deploymentContainer.innerHTML = HtmlSafe.html`${InterfaceConfigComponents.getDeploymentSettingsPanel(
                         this.model.data || {},
                         '' // Wizard uses empty prefix
-                    );
+                    )}`;
                     // Initialize event handlers for deployment settings
                     InterfaceConfigComponents.initDeploymentSettingsEvents(document, '');
                     console.log('✅ Deployment settings panel populated for Step 5');
@@ -866,14 +866,14 @@ class WizardController extends EventTarget {
         const rows = (entries || []).map((e, i) => {
             const mt = e.data?.messageType?.name || e.data?.messageType?.code || '—';
             const status = e.success
-                ? `<span style="color:#16a34a;">✓ OK</span>`
-                : `<span style="color:#dc2626;">✗ ${e.error || 'parse error'}</span>`;
-            return `<tr>
+                ? HtmlSafe.html`<span style="color:#16a34a;">✓ OK</span>`
+                : HtmlSafe.html`<span style="color:#dc2626;">✗ ${e.error || 'parse error'}</span>`;
+            return HtmlSafe.html`<tr>
                 <td style="padding:3px 8px;border:1px solid #bbf7d0;">${i + 1}</td>
                 <td style="padding:3px 8px;border:1px solid #bbf7d0;font-family:monospace;">${mt}</td>
                 <td style="padding:3px 8px;border:1px solid #bbf7d0;">${status}</td>
             </tr>`;
-        }).join('');
+        });
 
         const banner = document.createElement('div');
         banner.className = 'hl7-batch-banner';
@@ -881,7 +881,7 @@ class WizardController extends EventTarget {
             background:#f0fdf4; border:2px solid #86efac; border-radius:10px;
             padding:14px 18px; margin-bottom:16px; font-size:13px;
         `;
-        banner.innerHTML = `
+        banner.innerHTML = HtmlSafe.html`
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
                 <span style="font-size:20px;">📦</span>
                 <div>
@@ -920,22 +920,22 @@ class WizardController extends EventTarget {
             const hasOOB = detail.hasOobTemplate || false;
             const oobTmpl = (detail.suggestedTemplates || []).find(t => t.isSystem);
             const badge = hasOOB
-                ? `<span style="background:#166534;color:#fff;padding:1px 7px;border-radius:10px;font-size:11px;">OOB Template</span>`
-                : `<span style="background:#6b7280;color:#fff;padding:1px 7px;border-radius:10px;font-size:11px;">Custom</span>`;
+                ? HtmlSafe.html`<span style="background:#166534;color:#fff;padding:1px 7px;border-radius:10px;font-size:11px;">OOB Template</span>`
+                : HtmlSafe.html`<span style="background:#6b7280;color:#fff;padding:1px 7px;border-radius:10px;font-size:11px;">Custom</span>`;
             const note = hasOOB
-                ? `Will auto-apply <em>${esc(oobTmpl?.templateName || 'OOB template')}</em> → ${esc(oobTmpl?.targetFhirResource || '')}`
+                ? HtmlSafe.html`Will auto-apply <em>${oobTmpl?.templateName || 'OOB template'}</em> → ${oobTmpl?.targetFhirResource || ''}`
                 : `No OOB template — configure manually in Interface Settings after creation`;
-            return `<tr>
+            return HtmlSafe.html`<tr>
                 <td style="padding:4px 10px;border:1px solid #a5f3fc;font-family:monospace;font-weight:700;">
-                    ${esc(segId)}</td>
+                    ${segId}</td>
                 <td style="padding:4px 10px;border:1px solid #a5f3fc;">${badge}</td>
                 <td style="padding:4px 10px;border:1px solid #a5f3fc;font-size:12px;color:#164e63;">${note}</td>
             </tr>`;
-        }).join('');
+        });
 
         const oobCount = segmentData.filter(d => d.hasOobTemplate).length;
         const autoNote = oobCount > 0
-            ? `<strong>${oobCount} OOB template${oobCount > 1 ? 's' : ''} will be applied automatically</strong> when you finish the wizard.`
+            ? HtmlSafe.html`<strong>${oobCount} OOB template${oobCount > 1 ? 's' : ''} will be applied automatically</strong> when you finish the wizard.`
             : `No OOB templates available — configure Z-segments manually after the interface is created.`;
 
         const banner = document.createElement('div');
@@ -944,7 +944,7 @@ class WizardController extends EventTarget {
             background:#ecfeff; border:2px solid #67e8f9; border-radius:10px;
             padding:14px 18px; margin-bottom:16px; font-size:13px;
         `;
-        banner.innerHTML = `
+        banner.innerHTML = HtmlSafe.html`
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
                 <span style="font-size:20px;">🔧</span>
                 <div>
@@ -1081,7 +1081,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||`
     displayTransformationPreview(fhirBundle) {
         const previewContainer = document.getElementById('fhirPreview');
         if (previewContainer && fhirBundle) {
-            previewContainer.innerHTML = `
+            previewContainer.innerHTML = HtmlSafe.html`
                 <pre class="json-preview">${JSON.stringify(fhirBundle, null, 2)}</pre>
             `;
         }
@@ -1593,12 +1593,12 @@ function _updateCoverageBar(atomicMappings, validationErrors) {
     const med    = atomicMappings.filter(m => m.confidence != null && m.confidence >= 0.75 && m.confidence < 0.90).length;
     const low    = atomicMappings.filter(m => m.confidence != null && m.confidence < 0.75).length;
     const errors = (validationErrors || []).length;
-    bar.innerHTML = `
+    bar.innerHTML = HtmlSafe.html`
         <span style="font-weight:600;">📊 ${total} fields mapped</span>
         <span style="color:#d1d5db;">|</span>
-        ${high > 0 ? `<span style="color:#16a34a;">● ${high} high</span>` : ''}
-        ${med  > 0 ? `<span style="color:#d97706;">● ${med} medium</span>` : ''}
-        ${low  > 0 ? `<span style="color:#dc2626;">● ${low} low</span>` : ''}
+        ${high > 0 ? HtmlSafe.html`<span style="color:#16a34a;">● ${high} high</span>` : ''}
+        ${med  > 0 ? HtmlSafe.html`<span style="color:#d97706;">● ${med} medium</span>` : ''}
+        ${low  > 0 ? HtmlSafe.html`<span style="color:#dc2626;">● ${low} low</span>` : ''}
         <span style="color:#d1d5db;">|</span>
         <span style="${errors > 0 ? 'color:#dc2626;font-weight:600;' : 'color:#16a34a;'}">
             ${errors > 0 ? `⚠ ${errors} validation issue${errors > 1 ? 's' : ''}` : '✓ No validation issues'}
@@ -1616,8 +1616,8 @@ function _updateResourceFilter(atomicMappings) {
             return match ? match[1] : null;
         }).filter(Boolean)
     )];
-    filterSelect.innerHTML = '<option value="all">All Resources</option>'
-        + names.map(r => `<option value="${r}">${r}</option>`).join('');
+    filterSelect.innerHTML = HtmlSafe.html`<option value="all">All Resources</option>${
+        names.map(r => HtmlSafe.html`<option value="${r}">${r}</option>`)}`;
 }
 // AbortController for the currently in-flight fetch pair
 window._mappingPreviewAbort = null;
@@ -1628,14 +1628,14 @@ window._mappingPreviewAbort = null;
  * doesn't jump when the real content arrives.
  */
 function _mappingSkeletonHTML(messageType) {
-    const rows = Array(8).fill(0).map(() => `
+    const rows = Array(8).fill(0).map(() => HtmlSafe.html`
         <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:8px;display:flex;gap:12px;align-items:center;">
             <div class="skshimmer" style="width:110px;height:13px;border-radius:4px;flex-shrink:0;"></div>
             <div class="skshimmer" style="width:20px;height:13px;border-radius:4px;flex-shrink:0;"></div>
             <div class="skshimmer" style="width:170px;height:13px;border-radius:4px;"></div>
             <div class="skshimmer" style="width:55px;height:20px;border-radius:4px;margin-left:auto;flex-shrink:0;"></div>
-        </div>`).join('');
-    return `
+        </div>`);
+    return HtmlSafe.html`
         <style>
             .skshimmer{background:linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%);background-size:200% 100%;animation:skwave 1.4s infinite linear;}
             @keyframes skwave{0%{background-position:200% 0}100%{background-position:-200% 0}}
@@ -1696,7 +1696,7 @@ window._previewMappingForType = async function(messageType, btnEl, options = {})
                 fhirTransformResult: cached.transformResult,
                 previewHL7Version: cached.hl7Version
             };
-            mappingContainer.innerHTML = ctrl.view.getFHIRMappingContent(previewData);
+            mappingContainer.innerHTML = HtmlSafe.html`${ctrl.view.getFHIRMappingContent(previewData)}`;
             const countEl = document.getElementById('mapping-count');
             if (countEl) countEl.textContent = cached.transformResult.atomicMappings.length;
             const typeEl = document.getElementById('fhir-message-type');
@@ -1724,7 +1724,7 @@ window._previewMappingForType = async function(messageType, btnEl, options = {})
         // Visible load: cancel any previous in-flight visible request and show skeleton
         if (loadingEl) loadingEl.style.display = 'inline';
         if (mappingContainer) {
-            mappingContainer.innerHTML = _mappingSkeletonHTML(messageType);
+            mappingContainer.innerHTML = HtmlSafe.html`${_mappingSkeletonHTML(messageType)}`;
         }
         if (window._mappingPreviewAbort) {
             window._mappingPreviewAbort.abort();
@@ -1868,7 +1868,7 @@ window._previewMappingForType = async function(messageType, btnEl, options = {})
                     fhirTransformResult: transformResult,
                     previewHL7Version: hl7Version
                 };
-                mappingContainer.innerHTML = ctrl.view.getFHIRMappingContent(previewData);
+                mappingContainer.innerHTML = HtmlSafe.html`${ctrl.view.getFHIRMappingContent(previewData)}`;
 
                 const countEl = document.getElementById('mapping-count');
                 if (countEl) countEl.textContent = atomicMappings.length;
@@ -1893,7 +1893,7 @@ window._previewMappingForType = async function(messageType, btnEl, options = {})
         if (err.name === 'AbortError') return; // Superseded by a newer pill click — silently discard
         console.error('❌ _previewMappingForType error:', err);
         if (mappingContainer) {
-            mappingContainer.innerHTML = `<div style="padding:40px;text-align:center;color:#dc2626;font-size:14px;">Failed to load ${messageType} mapping preview: ${err.message}</div>`;
+            mappingContainer.innerHTML = HtmlSafe.html`<div style="padding:40px;text-align:center;color:#dc2626;font-size:14px;">Failed to load ${messageType} mapping preview: ${err.message}</div>`;
         }
     } finally {
         if (loadingEl) loadingEl.style.display = 'none';

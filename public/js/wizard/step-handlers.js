@@ -269,11 +269,11 @@ class ConfigurationStepHandler extends BaseStepHandler {
         }
         
         container.style.display = 'block';
-        let html = '<label>Source Configuration</label><div style="background: var(--gray-50); padding: 16px; border-radius: 8px; border: 1px solid var(--pink-200);">';
+        const html = [HtmlSafe.raw('<label>Source Configuration</label><div style="background: var(--gray-50); padding: 16px; border-radius: 8px; border: 1px solid var(--pink-200);">')];
         
         switch (sourceType) {
             case 'file':
-                html += `
+                html.push(HtmlSafe.html`
                     <div class="form-row">
                         <div class="form-group">
                             <label>Input Directory</label>
@@ -283,10 +283,10 @@ class ConfigurationStepHandler extends BaseStepHandler {
                             <label>File Pattern</label>
                             <input type="text" class="form-control" placeholder="*.hl7" value="*.hl7">
                         </div>
-                    </div>`;
+                    </div>`);
                 break;
             case 'tcp':
-                html += `
+                html.push(HtmlSafe.html`
                     <div class="form-row">
                         <div class="form-group">
                             <label>Host</label>
@@ -296,30 +296,30 @@ class ConfigurationStepHandler extends BaseStepHandler {
                             <label>Port</label>
                             <input type="number" class="form-control" placeholder="2575" value="2575">
                         </div>
-                    </div>`;
+                    </div>`);
                 break;
             case 'http':
-                html += `
+                html.push(HtmlSafe.html`
                     <div class="form-group">
                         <label>Endpoint Path</label>
                         <input type="text" class="form-control" placeholder="/api/hl7/receive" value="/api/hl7/receive">
-                    </div>`;
+                    </div>`);
                 break;
             case 'manual':
-                html += `<div style="color: var(--gray-500); font-size: 14px; text-align: center; padding: 20px;">
+                html.push(HtmlSafe.html`<div style="color: var(--gray-500); font-size: 14px; text-align: center; padding: 20px;">
                     <div style="font-size: 24px; margin-bottom: 8px;">✋</div>
                     <strong>Manual Input Mode</strong><br>
                     Messages will be processed on-demand through the interface dashboard
-                </div>`;
+                </div>`);
                 break;
             default:
-                html += `<div style="color: var(--gray-500); text-align: center; padding: 20px;">
+                html.push(HtmlSafe.html`<div style="color: var(--gray-500); text-align: center; padding: 20px;">
                     Select a source type to view configuration options
-                </div>`;
+                </div>`);
         }
         
-        html += '</div>';
-        container.innerHTML = html;
+        html.push(HtmlSafe.raw('</div>'));
+        container.innerHTML = HtmlSafe.html`${html}`;
     }
     
     /**
@@ -336,11 +336,11 @@ class ConfigurationStepHandler extends BaseStepHandler {
         }
         
         container.style.display = 'block';
-        let html = '<label>Target Configuration</label><div style="background: var(--gray-50); padding: 16px; border-radius: 8px; border: 1px solid var(--blue-200);">';
+        const html = [HtmlSafe.raw('<label>Target Configuration</label><div style="background: var(--gray-50); padding: 16px; border-radius: 8px; border: 1px solid var(--blue-200);">')];
         
         switch (targetType) {
             case 'fhir-r4':
-                html += `
+                html.push(HtmlSafe.html`
                     <div class="form-row">
                         <div class="form-group">
                             <label>FHIR Server Endpoint</label>
@@ -354,10 +354,10 @@ class ConfigurationStepHandler extends BaseStepHandler {
                                 <option value="basic">Basic Auth</option>
                             </select>
                         </div>
-                    </div>`;
+                    </div>`);
                 break;
             case 'json':
-                html += `
+                html.push(HtmlSafe.html`
                     <div class="form-row">
                         <div class="form-group">
                             <label>Output Directory</label>
@@ -371,10 +371,10 @@ class ConfigurationStepHandler extends BaseStepHandler {
                                 <option value="uuid">UUID</option>
                             </select>
                         </div>
-                    </div>`;
+                    </div>`);
                 break;
             case 'api':
-                html += `
+                html.push(HtmlSafe.html`
                     <div class="form-row">
                         <div class="form-group">
                             <label>API Endpoint</label>
@@ -387,16 +387,16 @@ class ConfigurationStepHandler extends BaseStepHandler {
                                 <option value="PUT">PUT</option>
                             </select>
                         </div>
-                    </div>`;
+                    </div>`);
                 break;
             default:
-                html += `<div style="color: var(--gray-500); text-align: center; padding: 20px;">
+                html.push(HtmlSafe.html`<div style="color: var(--gray-500); text-align: center; padding: 20px;">
                     Select a target type to view configuration options
-                </div>`;
+                </div>`);
         }
         
-        html += '</div>';
-        container.innerHTML = html;
+        html.push(HtmlSafe.raw('</div>'));
+        container.innerHTML = HtmlSafe.html`${html}`;
     }
 
     /**
@@ -672,7 +672,7 @@ but the controller correctly returns just `success: false` when duplicates exist
             const fileInfo = this.getElement('fileInfo');
             if (!fileInfo) return;
             
-            fileInfo.innerHTML = `
+            fileInfo.innerHTML = HtmlSafe.html`
                 <div class="file-info-card">
                     <div class="file-icon">📄</div>
                     <div class="file-details">
@@ -851,7 +851,7 @@ getWizardNavigation() {
 
             // Show empty state if no parsed data available
             if (!this.wizard.parsedHL7Data) {
-                container.innerHTML = this.getEmptyStateHTML();
+                container.innerHTML = HtmlSafe.html`${this.getEmptyStateHTML()}`;
                 return;
             }
 
@@ -865,12 +865,12 @@ getWizardNavigation() {
                 this.wizard.segmentViewer.renderSegmentList(this.wizard.parsedHL7Data, 'parsedDataReview');
             } else {
                 // Fallback simple display
-                container.innerHTML = this.getFallbackDisplayHTML();
+                container.innerHTML = HtmlSafe.html`${this.getFallbackDisplayHTML()}`;
             }
         }
 
         getEmptyStateHTML() {
-            return `
+            return HtmlSafe.html`
                 <div class="review-placeholder">
                     <div style="text-align: center; padding: 40px; color: #6b7280;">
                         <div style="font-size: 48px; margin-bottom: 16px;">📋</div>
@@ -882,7 +882,7 @@ getWizardNavigation() {
         }
 
         getFallbackDisplayHTML() {
-            return `
+            return HtmlSafe.html`
                 <div class="parsed-data-summary">
                     <h4>Parsed HL7 Message</h4>
                     <p><strong>Type:</strong> ${this.wizard.parsedHL7Data.data?.messageType?.name || 'Unknown'}</p>
@@ -895,7 +895,7 @@ getWizardNavigation() {
         reset() {
             const container = this.getElement('parsedDataReview');
             if (container) {
-                container.innerHTML = this.getEmptyStateHTML();
+                container.innerHTML = HtmlSafe.html`${this.getEmptyStateHTML()}`;
             }
         }
     }
@@ -991,7 +991,7 @@ getWizardNavigation() {
                 const messageType = this.getMessageTypeFromParsedData();
                 const segmentCount = Object.keys(this.wizard.parsedHL7Data?.data?.enhancedSegments || {}).length;
                 
-                demoContent.innerHTML = `
+                demoContent.innerHTML = HtmlSafe.html`
                     <div class="fhir-transform-interface">
                         <div class="transform-header">
                             <h4>🔄 HL7 to FHIR Transformation</h4>
@@ -1065,7 +1065,7 @@ getWizardNavigation() {
             const demoContent = step4Element?.querySelector('.demo-content');
             
             if (demoContent) {
-                demoContent.innerHTML = `
+                demoContent.innerHTML = HtmlSafe.html`
                     <div class="step-placeholder">
                         <div style="text-align: center; padding: 40px; color: #6b7280;">
                             <div style="font-size: 48px; margin-bottom: 16px;">⚙️</div>

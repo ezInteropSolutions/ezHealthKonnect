@@ -46,21 +46,21 @@ class Step4Mapping {
         const parsedData = this.getParsedHL7Data();
         if (!parsedData?.enhancedSegments) return;
 
-        let options = '<option value="">Select HL7 Field...</option>';
+        const options = [HtmlSafe.raw('<option value="">Select HL7 Field...</option>')];
         
         Object.entries(parsedData.enhancedSegments).forEach(([segment, data]) => {
             if (data.fields) {
-                options += `<optgroup label="${segment} Segment">`;
+                options.push(HtmlSafe.html`<optgroup label="${segment} Segment">`);
                 Object.entries(data.fields).forEach(([fieldId, field]) => {
                     const path = `${segment}.${fieldId}`;
                     const desc = field.description || field.name || '';
-                    options += `<option value="${path}">${path} - ${desc}</option>`;
+                    options.push(HtmlSafe.html`<option value="${path}">${path} - ${desc}</option>`);
                 });
-                options += '</optgroup>';
+                options.push(HtmlSafe.raw('</optgroup>'));
             }
         });
 
-        select.innerHTML = options;
+        select.innerHTML = HtmlSafe.html`${options}`;
     }
 
     populateFHIRFields() {
@@ -97,17 +97,17 @@ class Step4Mapping {
             ]
         };
 
-        let options = '<option value="">Select FHIR Field...</option>';
+        const options = [HtmlSafe.raw('<option value="">Select FHIR Field...</option>')];
         
         Object.entries(fhirFields).forEach(([resource, fields]) => {
-            options += `<optgroup label="${resource}">`;
+            options.push(HtmlSafe.html`<optgroup label="${resource}">`);
             fields.forEach(field => {
-                options += `<option value="${field.path}">${field.path} - ${field.desc}</option>`;
+                options.push(HtmlSafe.html`<option value="${field.path}">${field.path} - ${field.desc}</option>`);
             });
-            options += '</optgroup>';
+            options.push(HtmlSafe.raw('</optgroup>'));
         });
 
-        select.innerHTML = options;
+        select.innerHTML = HtmlSafe.html`${options}`;
     }
 
     async saveMapping() {

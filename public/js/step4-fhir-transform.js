@@ -147,7 +147,7 @@ class Step4FHIRTransform {
         const resultsContainer = document.getElementById('fhir-transformation-results');
         if (!resultsContainer) return;
 
-        resultsContainer.innerHTML = `
+        resultsContainer.innerHTML = HtmlSafe.html`
             <div class="transformation-loading">
                 <div style="text-align: center; padding: 60px 20px;">
                     <div style="position: relative; display: inline-block; margin-bottom: 24px;">
@@ -189,7 +189,7 @@ class Step4FHIRTransform {
 
         this.refreshNarrativeFieldsFromResult(resources);
 
-        resultsContainer.innerHTML = `
+        resultsContainer.innerHTML = HtmlSafe.html`
             <div class="transformation-success">
                 <!-- Summary Header -->
                 <div style="background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%); border: 2px solid #bbf7d0; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
@@ -218,18 +218,18 @@ class Step4FHIRTransform {
 
                 <!-- FHIR Resources Grid -->
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 24px;">
-                    ${resources.map((resource, index) => this.renderFHIRResourceCard(resource, index)).join('')}
+                    ${resources.map((resource, index) => this.renderFHIRResourceCard(resource, index))}
                 </div>
 
                 <!-- Field Mappings Summary -->
-                ${atomicMappings.length > 0 ? `
+                ${atomicMappings.length > 0 ? HtmlSafe.html`
                     <div style="background: white; border: 2px solid #f8bbd9; border-radius: 12px; overflow: hidden;">
                         <div style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: white; padding: 16px;">
                             <h5 style="margin: 0; font-size: 16px; font-weight: 600;">🔗 Field Mappings Applied</h5>
                             <p style="margin: 4px 0 0 0; font-size: 14px; opacity: 0.9;">${atomicMappings.length} HL7 fields successfully mapped to FHIR elements</p>
                         </div>
                         <div style="max-height: 300px; overflow-y: auto;">
-                            ${atomicMappings.slice(0, 8).map(mapping => `
+                            ${atomicMappings.slice(0, 8).map(mapping => HtmlSafe.html`
                                 <div style="padding: 12px 16px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;">
                                     <div style="flex: 1; font-family: monospace;">
                                         <div style="font-size: 13px; font-weight: 600; color: #1e293b;">${mapping.hl7Path}</div>
@@ -241,8 +241,8 @@ class Step4FHIRTransform {
                                         <div style="font-size: 11px; color: #64748b; margin-top: 2px;">"${(mapping.fhirValue || '').substring(0, 30)}${(mapping.fhirValue || '').length > 30 ? '...' : ''}"</div>
                                     </div>
                                 </div>
-                            `).join('')}
-                            ${atomicMappings.length > 8 ? `
+                            `)}
+                            ${atomicMappings.length > 8 ? HtmlSafe.html`
                                 <div style="padding: 12px 16px; text-align: center; color: #6b7280; font-size: 12px; font-style: italic;">
                                     ... and ${atomicMappings.length - 8} more mappings
                                 </div>
@@ -272,7 +272,7 @@ class Step4FHIRTransform {
         const icon = this.getFHIRResourceIcon(resourceType);
         const summary = this.getFHIRResourceSummary(resource);
 
-        return `
+        return HtmlSafe.html`
             <div class="fhir-resource-card" style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; overflow: hidden; transition: all 0.3s ease;">
                 <div style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: white; padding: 16px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -318,7 +318,7 @@ class Step4FHIRTransform {
             case 'Patient':
                 const name = resource.name?.[0];
                 const nameStr = name ? `${name.given?.[0] || ''} ${name.family || ''}`.trim() : 'N/A';
-                return `
+                return HtmlSafe.html`
                     <div style="space-y: 8px;">
                         <div style="margin-bottom: 8px;"><strong>Name:</strong> ${nameStr}</div>
                         <div style="margin-bottom: 8px;"><strong>Gender:</strong> ${resource.gender || 'N/A'}</div>
@@ -327,7 +327,7 @@ class Step4FHIRTransform {
                     </div>
                 `;
             case 'Encounter':
-                return `
+                return HtmlSafe.html`
                     <div style="space-y: 8px;">
                         <div style="margin-bottom: 8px;"><strong>Status:</strong> ${resource.status || 'N/A'}</div>
                         <div style="margin-bottom: 8px;"><strong>Class:</strong> ${resource.class?.code || 'N/A'}</div>
@@ -336,7 +336,7 @@ class Step4FHIRTransform {
                     </div>
                 `;
             case 'Observation':
-                return `
+                return HtmlSafe.html`
                     <div style="space-y: 8px;">
                         <div style="margin-bottom: 8px;"><strong>Status:</strong> ${resource.status || 'N/A'}</div>
                         <div style="margin-bottom: 8px;"><strong>Code:</strong> ${resource.code?.coding?.[0]?.display || resource.code?.coding?.[0]?.code || 'N/A'}</div>
@@ -345,7 +345,7 @@ class Step4FHIRTransform {
                     </div>
                 `;
             default:
-                return `
+                return HtmlSafe.html`
                     <div style="color: #6b7280; font-style: italic;">
                         ${resource.resourceType} resource with ${Object.keys(resource).length} properties
                     </div>
@@ -396,7 +396,7 @@ class Step4FHIRTransform {
             document.body.appendChild(modal);
         }
 
-        modal.innerHTML = `
+        modal.innerHTML = HtmlSafe.html`
             <div style="background: white; border-radius: 12px; max-width: 90%; width: 900px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;">
                 <div style="padding: 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
                     <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #1e3a8a;">${title}</h3>
@@ -431,7 +431,7 @@ class Step4FHIRTransform {
         const resultsContainer = document.getElementById('fhir-transformation-results');
         if (!resultsContainer) return;
 
-        resultsContainer.innerHTML = `
+        resultsContainer.innerHTML = HtmlSafe.html`
             <div class="transformation-error">
                 <div style="text-align: center; padding: 60px 20px;">
                     <div style="font-size: 64px; margin-bottom: 24px; color: #dc2626;">⚠️</div>
@@ -502,16 +502,16 @@ class Step4FHIRTransform {
             badge.style.display = enabledCount > 0 ? '' : 'none';
         }
 
-        container.innerHTML = blocks.map(b => `
+        container.innerHTML = HtmlSafe.html`${blocks.map(b => HtmlSafe.html`
             <label style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid #e0e7ff;border-radius:6px;cursor:pointer;background:#fff">
-                <input type="checkbox" data-optkey="${this._esc(b.key)}" ${b.enabled ? 'checked' : ''}
+                <input type="checkbox" data-optkey="${b.key}" ${b.enabled ? 'checked' : ''}
                     style="margin-top:2px;accent-color:#1e3a8a">
                 <span>
-                    <strong style="font-size:12px;color:#111827">${this._esc(b.displayName)}</strong>
-                    <br><span style="font-size:11px;color:#6b7280;line-height:1.5">${this._esc(b.description)}</span>
+                    <strong style="font-size:12px;color:#111827">${b.displayName}</strong>
+                    <br><span style="font-size:11px;color:#6b7280;line-height:1.5">${b.description}</span>
                 </span>
             </label>
-        `).join('');
+        `)}`;
     }
 
     saveOptionalSegments() {

@@ -208,10 +208,10 @@ class WizardFHIRTransform {
                                 });
 
                                 const newContent = window.wizardController.view.getFHIRMappingContent(currentData);
-                                console.log('📄 Generated content length:', newContent.length, 'chars');
-                                console.log('📄 Content preview:', newContent.substring(0, 200));
+                                console.log('📄 Generated content length:', String(newContent).length, 'chars');
+                                console.log('📄 Content preview:', String(newContent).substring(0, 200));
 
-                                mappingContainer.innerHTML = newContent;
+                                mappingContainer.innerHTML = HtmlSafe.html`${newContent}`;
                                 console.log('✅ Mapping container innerHTML updated successfully');
 
                                 // Rebuild the resource filter dropdown options from the actual mappings
@@ -225,8 +225,8 @@ class WizardFHIRTransform {
                                             return match ? match[1] : null;
                                         }).filter(Boolean)
                                     )];
-                                    filterSelect.innerHTML = '<option value="all">All Resources</option>' +
-                                        resourceNames.map(r => `<option value="${r}">${r}</option>`).join('');
+                                    filterSelect.innerHTML = HtmlSafe.html`<option value="all">All Resources</option>${
+                                        resourceNames.map(r => HtmlSafe.html`<option value="${r}">${r}</option>`)}`;
                                 }
 
                                 // Force browser repaint to ensure visual update
@@ -293,7 +293,7 @@ class WizardFHIRTransform {
         const resultsContainer = document.getElementById('optimized-fhir-transformation-results');
         if (!resultsContainer) return;
 
-        resultsContainer.innerHTML = `
+        resultsContainer.innerHTML = HtmlSafe.html`
             <div style="text-align: center; padding: 60px 20px;">
                 <div style="position: relative; display: inline-block; margin-bottom: 24px;">
                     <div style="width: 60px; height: 60px; border: 4px solid #e2e8f0; border-top: 4px solid #1e3a8a; border-radius: 50%; animation: spin 1s linear infinite;"></div>
@@ -330,10 +330,10 @@ class WizardFHIRTransform {
 
         // Use the WizardView method to render the results
         if (window.wizardView && typeof window.wizardView.getFHIRTransformationResults === 'function') {
-            resultsContainer.innerHTML = window.wizardView.getFHIRTransformationResults(fhirResult);
+            resultsContainer.innerHTML = HtmlSafe.html`${window.wizardView.getFHIRTransformationResults(fhirResult)}`;
         } else {
             console.warn('⚠️ WizardView FHIR methods not available, using fallback');
-            resultsContainer.innerHTML = this.getFallbackResultsHTML(fhirResult);
+            resultsContainer.innerHTML = HtmlSafe.html`${this.getFallbackResultsHTML(fhirResult)}`;
         }
     }
 
@@ -342,7 +342,7 @@ class WizardFHIRTransform {
         const resources = fhirResult.fhirResources || [];
         const atomicMappings = fhirResult.atomicMappings || [];
 
-        return `
+        return HtmlSafe.html`
             <div style="padding: 20px;">
                 <div style="background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%); border: 2px solid #bbf7d0; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
                     <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
@@ -359,7 +359,7 @@ class WizardFHIRTransform {
                 </div>
 
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px;">
-                    ${resources.map((resource, index) => `
+                    ${resources.map((resource, index) => HtmlSafe.html`
                         <div style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
                             <div style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: white; padding: 16px;">
                                 <h5 style="margin: 0; font-size: 16px; font-weight: 600;">${resource.resourceType}</h5>
@@ -369,7 +369,7 @@ class WizardFHIRTransform {
                                 <div style="color: #6b7280;">ID: ${resource.id || 'N/A'}</div>
                             </div>
                         </div>
-                    `).join('')}
+                    `)}
                 </div>
             </div>
         `;
@@ -461,7 +461,7 @@ class WizardFHIRTransform {
         const resultsContainer = document.getElementById('optimized-fhir-transformation-results');
         if (!resultsContainer) return;
 
-        resultsContainer.innerHTML = `
+        resultsContainer.innerHTML = HtmlSafe.html`
             <div style="text-align: center; padding: 60px 20px;">
                 <div style="font-size: 64px; margin-bottom: 24px; color: #dc2626;">⚠️</div>
                 <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #dc2626;">Transformation Failed</div>
@@ -553,7 +553,7 @@ class WizardFHIRTransform {
             document.body.appendChild(modal);
         }
 
-        modal.innerHTML = `
+        modal.innerHTML = HtmlSafe.html`
             <div style="background: white; border-radius: 12px; max-width: 90%; width: 900px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;">
                 <div style="padding: 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
                     <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #1e3a8a;">${title}</h3>
@@ -626,7 +626,7 @@ class WizardFHIRTransform {
                 background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 10px;
                 margin-bottom: 20px; overflow: hidden; font-size: 14px;
             `;
-            panel.innerHTML = `
+            panel.innerHTML = HtmlSafe.html`
                 <div class="oob-guide-header" style="
                     display: flex; justify-content: space-between; align-items: center;
                     padding: 12px 16px; cursor: pointer; user-select: none;
@@ -664,7 +664,9 @@ class WizardFHIRTransform {
     // Handles: ## headings, **bold**, | tables |, `code`, --- horizontal rules, bullet lists.
     _renderGuideMarkdown(md) {
         if (!md) return '';
-        const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        // Every piece of text goes through esc()/_inlineFormat() before fixed
+        // tags are added around it; the result is returned as reviewed markup.
+        const esc = s => HtmlSafe.escapeHtml(s);
         let html = '';
         const lines = md.split('\n');
         let inTable = false, inList = false;
@@ -718,15 +720,19 @@ class WizardFHIRTransform {
         }
         if (inTable) html += '</tbody></table>';
         if (inList)  html += '</ul>';
-        return html;
+        return HtmlSafe.raw(html);
     }
 
     _inlineFormat(s) {
-        const esc = t => t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        return esc(s)
+        // Escape first (quotes included; backticks restored, they delimit code),
+        // then add fixed tags. Links only to http(s)/mailto targets.
+        return HtmlSafe.escapeHtml(s).replace(/&#96;/g, '`')
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/`([^`]+)`/g, '<code style="background:#e0f2fe;padding:1px 4px;border-radius:3px;font-size:12px;">$1</code>')
-            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:#2563eb;">$1</a>');
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, text, url) =>
+                /^(https?:|mailto:)/i.test(url.trim())
+                    ? '<a href="' + url + '" target="_blank" rel="noopener noreferrer" style="color:#2563eb;">' + text + '</a>'
+                    : text);
     }
 }
 

@@ -108,7 +108,7 @@
                 existingModal.remove();
             }
 
-            const modalHTML = `
+            const modalHTML = HtmlSafe.html`
                 <div id="enhancedMappingOverlay" class="mapping-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); display: flex; justify-content: center; align-items: center; z-index: 10000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0.3s ease;">
                     <div class="mapping-modal enhanced" style="background: white; border-radius: 12px; width: 90%; max-width: 900px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2); transform: translateY(-20px); transition: transform 0.3s ease;">
                         <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid #e5e7eb; background: #f8fafc; border-radius: 12px 12px 0 0;">
@@ -271,11 +271,11 @@
             const parsedData = this.handler.wizard?.parsedHL7Data?.data;
             if (!parsedData?.enhancedSegments) return;
 
-            let options = '<option value="">Choose HL7 field...</option>';
+            const options = [HtmlSafe.raw('<option value="">Choose HL7 field...</option>')];
             
             Object.entries(parsedData.enhancedSegments).forEach(([segmentName, segment]) => {
                 if (segment.fields && Object.keys(segment.fields).length > 0) {
-                    options += `<optgroup label="${segmentName} Segment">`;
+                    options.push(HtmlSafe.html`<optgroup label="${segmentName} Segment">`);
                     
                     Object.entries(segment.fields).forEach(([fieldId, field]) => {
                         const fieldPath = `${segmentName}.${fieldId}`;
@@ -283,18 +283,18 @@
                         const description = field.description || field.name || 'No description';
                         const dataType = field.dataType || 'Unknown';
                         
-                        options += `<option value="${fieldPath}" 
+                        options.push(HtmlSafe.html`<option value="${fieldPath}" 
                                           data-type="${dataType}" 
                                           data-value="${value}" 
                                           data-description="${description}">
                                     ${fieldPath} - ${description} (${dataType})
-                                    </option>`;
+                                    </option>`);
                     });
-                    options += '</optgroup>';
+                    options.push(HtmlSafe.raw('</optgroup>'));
                 }
             });
 
-            dropdown.innerHTML = options;
+            dropdown.innerHTML = HtmlSafe.html`${options}`;
         }
 
         /**
@@ -334,21 +334,21 @@
                 ]
             };
 
-            let options = '<option value="">Choose FHIR field...</option>';
+            const options = [HtmlSafe.raw('<option value="">Choose FHIR field...</option>')];
             
             Object.entries(fhirFieldsByResource).forEach(([resourceType, fields]) => {
-                options += `<optgroup label="${resourceType} Resource">`;
+                options.push(HtmlSafe.html`<optgroup label="${resourceType} Resource">`);
                 fields.forEach(field => {
-                    options += `<option value="${field.path}" 
+                    options.push(HtmlSafe.html`<option value="${field.path}" 
                                       data-type="${field.type}" 
                                       data-description="${field.desc}">
                                 ${field.path} - ${field.desc} (${field.type})
-                                </option>`;
+                                </option>`);
                 });
-                options += '</optgroup>';
+                options.push(HtmlSafe.raw('</optgroup>'));
             });
 
-            dropdown.innerHTML = options;
+            dropdown.innerHTML = HtmlSafe.html`${options}`;
         }
 
         /**
@@ -392,42 +392,42 @@
             const resultsContainer = document.getElementById('validationResults');
             if (!resultsContainer) return;
 
-            let html = '';
+            const html = [];
 
             if (validation.valid) {
-                html += '<div class="validation-success">✅ Mapping is valid</div>';
+                html.push(HtmlSafe.raw('<div class="validation-success">✅ Mapping is valid</div>'));
             } else {
-                html += '<div class="validation-error">❌ Mapping has issues</div>';
+                html.push(HtmlSafe.raw('<div class="validation-error">❌ Mapping has issues</div>'));
             }
 
             if (validation.errors && validation.errors.length > 0) {
-                html += '<div class="validation-errors">';
-                html += '<h5>Errors:</h5>';
+                html.push(HtmlSafe.raw('<div class="validation-errors">'));
+                html.push(HtmlSafe.raw('<h5>Errors:</h5>'));
                 validation.errors.forEach(error => {
-                    html += `<div class="error-item">• ${error}</div>`;
+                    html.push(HtmlSafe.html`<div class="error-item">• ${error}</div>`);
                 });
-                html += '</div>';
+                html.push(HtmlSafe.raw('</div>'));
             }
 
             if (validation.warnings && validation.warnings.length > 0) {
-                html += '<div class="validation-warnings">';
-                html += '<h5>Warnings:</h5>';
+                html.push(HtmlSafe.raw('<div class="validation-warnings">'));
+                html.push(HtmlSafe.raw('<h5>Warnings:</h5>'));
                 validation.warnings.forEach(warning => {
-                    html += `<div class="warning-item">• ${warning}</div>`;
+                    html.push(HtmlSafe.html`<div class="warning-item">• ${warning}</div>`);
                 });
-                html += '</div>';
+                html.push(HtmlSafe.raw('</div>'));
             }
 
             if (validation.suggestions && validation.suggestions.length > 0) {
-                html += '<div class="validation-suggestions">';
-                html += '<h5>Suggestions:</h5>';
+                html.push(HtmlSafe.raw('<div class="validation-suggestions">'));
+                html.push(HtmlSafe.raw('<h5>Suggestions:</h5>'));
                 validation.suggestions.forEach(suggestion => {
-                    html += `<div class="suggestion-item">💡 ${suggestion}</div>`;
+                    html.push(HtmlSafe.html`<div class="suggestion-item">💡 ${suggestion}</div>`);
                 });
-                html += '</div>';
+                html.push(HtmlSafe.raw('</div>'));
             }
 
-            resultsContainer.innerHTML = html;
+            resultsContainer.innerHTML = HtmlSafe.html`${html}`;
         }
 
         /**
