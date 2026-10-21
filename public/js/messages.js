@@ -1117,7 +1117,7 @@ class MessageManager {
                     // partial, honest subset — absence here is correct, not a
                     // bug, and must never be shown as "0% USCDI coverage."
                     const uscdiBadge = (cat.uscdiClasses && cat.uscdiClasses.length > 0)
-                        ? HtmlSafe.html`<span style="display:inline-block;margin-left:0.5rem;font-size:0.68rem;font-weight:600;color:#1e40af;background:#dbeafe;padding:0.05rem 0.45rem;border-radius:10px;white-space:nowrap;" title="Real USCDI v3 data class(es) this category maps to">USCDI v3: ${cat.uscdiClasses.map(c => this.escapeHtml(c)).join(', ')}</span>`
+                        ? HtmlSafe.html`<span style="display:inline-block;margin-left:0.5rem;font-size:0.68rem;font-weight:600;color:#1e40af;background:#dbeafe;padding:0.05rem 0.45rem;border-radius:10px;white-space:nowrap;" title="Real USCDI v3 data class(es) this category maps to">USCDI v3: ${cat.uscdiClasses.join(', ')}</span>`
                         : '';
                     return HtmlSafe.html`
                         <div style="margin-bottom:0.5rem;">
