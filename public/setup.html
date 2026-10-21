@@ -352,16 +352,16 @@
     pwInput.addEventListener('input', () => {
         const { score, label } = pwStrength(pwInput.value);
         const bar = document.getElementById('pw-strength');
-        bar.innerHTML = pwInput.value
-            ? `<div class="pw-bar"><div class="pw-fill pw-fill--${score}" style="width:${score * 20}%"></div></div><span>${label}</span>`
-            : '';
+        bar.innerHTML = HtmlSafe.html`${pwInput.value
+            ? HtmlSafe.html`<div class="pw-bar"><div class="pw-fill pw-fill--${score}" style="width:${score * 20}%"></div></div><span>${label}</span>`
+            : ''}`;
         updateRequirements(pwInput.value);
     });
 
     // ── Alerts ───────────────────────────────────────────────────────────────
     function showAlert(containerId, msg, type = 'error') {
         const el = document.getElementById(containerId);
-        if (el) el.innerHTML = `<div class="alert alert-${type}">${msg.replace(/</g, '&lt;')}</div>`;
+        if (el) el.innerHTML = HtmlSafe.html`<div class="alert alert-${type}">${msg}</div>`;
     }
     function clearAlert(containerId) {
         const el = document.getElementById(containerId);
@@ -405,9 +405,8 @@
             // Update success message with the chosen email
             const emailEl = document.getElementById('success-msg');
             if (emailEl) {
-                const esc = s => s.replace(/</g,'&lt;').replace(/>/g,'&gt;');
                 emailEl.innerHTML =
-                    `Your administrator account has been created for <strong>${esc(data.email || email)}</strong>.<br>
+                    HtmlSafe.html`Your administrator account has been created for <strong>${data.email || email}</strong>.<br>
                      You can now log in and start configuring your interfaces.`;
             }
 

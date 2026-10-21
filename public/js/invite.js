@@ -15,7 +15,7 @@
     function showAlert(msg, type = 'error') {
         const area = document.getElementById('alert-area');
         if (!area) return;
-        area.innerHTML = `<div class="alert alert-${type}">${msg.replace(/</g, '&lt;')}</div>`;
+        area.innerHTML = HtmlSafe.html`<div class="alert alert-${type}">${msg}</div>`;
     }
 
     // Password strength
@@ -37,9 +37,9 @@
     if (pwInput && pwBar) {
         pwInput.addEventListener('input', () => {
             const { score, label } = pwStrength(pwInput.value);
-            pwBar.innerHTML = pwInput.value
-                ? `<div class="pw-bar"><div class="pw-fill pw-fill--${score}" style="width:${score * 20}%"></div></div><span>${label}</span>`
-                : '';
+            pwBar.innerHTML = HtmlSafe.html`${pwInput.value
+                ? HtmlSafe.html`<div class="pw-bar"><div class="pw-fill pw-fill--${score}" style="width:${score * 20}%"></div></div><span>${label}</span>`
+                : ''}`;
         });
     }
 
