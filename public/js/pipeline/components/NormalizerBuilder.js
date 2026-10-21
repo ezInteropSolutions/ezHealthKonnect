@@ -67,7 +67,7 @@ class NormalizerBuilder {
         const cfg = step.config;
         const op  = cfg.operation || 'normalize';
 
-        return `
+        return HtmlSafe.html`
 <div class="nrm-builder">
 <style>
 .nrm-builder { font-size:13px; }
@@ -200,13 +200,13 @@ class NormalizerBuilder {
 <div class="nrm-card">
   <div class="nrm-card-title"><i class="fas fa-th-large"></i> Operation</div>
   <div class="nrm-ops">
-    ${NormalizerBuilder.OPERATIONS.map(o => `
+    ${NormalizerBuilder.OPERATIONS.map(o => HtmlSafe.html`
     <button type="button" class="nrm-op-btn${op === o.value ? ' active' : ''}"
             data-op="${o.value}" title="${o.tooltip}">
       <span class="nrm-op-icon">${o.icon}</span>
       <span class="nrm-op-name">${o.name}</span>
       <span class="nrm-op-desc">${o.desc}</span>
-    </button>`).join('')}
+    </button>`)}
   </div>
 </div>
 
@@ -363,33 +363,32 @@ class NormalizerBuilder {
     // ─── Private: chip input HTML ────────────────────────────────────────────
 
     _buildChipInput(id, values, placeholder) {
-        const chips = values.map(v => this._chipTag(v)).join('');
-        return `
+        const chips = values.map(v => this._chipTag(v));
+        return HtmlSafe.html`
 <div class="nrm-chip-wrap" id="${id}Wrap">
   ${chips}
   <input class="nrm-chip-input" id="${id}Input" type="text" placeholder="${placeholder}">
-  <input type="hidden" id="${id}Json" value="${this._esc(JSON.stringify(values))}">
+  <input type="hidden" id="${id}Json" value="${JSON.stringify(values)}">
 </div>`;
     }
 
     _chipTag(value) {
-        const esc = this._esc(value);
-        return `<span class="nrm-chip" data-val="${esc}">${esc}<span class="nrm-chip-x" title="Remove">×</span></span>`;
+        return HtmlSafe.html`<span class="nrm-chip" data-val="${value}">${value}<span class="nrm-chip-x" title="Remove">×</span></span>`;
     }
 
     // ─── Private: rename map HTML ────────────────────────────────────────────
 
     _buildRenameRows(map) {
         if (!map || Object.keys(map).length === 0) return '';
-        return Object.entries(map).map(([from, to]) => this._renameRow(from, to)).join('');
+        return Object.entries(map).map(([from, to]) => this._renameRow(from, to));
     }
 
     _renameRow(from = '', to = '') {
-        return `
+        return HtmlSafe.html`
 <div class="nrm-rename-row">
-  <input class="nrm-input nrm-rename-from" type="text" value="${this._esc(from)}" placeholder="old name">
+  <input class="nrm-input nrm-rename-from" type="text" value="${from}" placeholder="old name">
   <span class="nrm-rename-sep">→</span>
-  <input class="nrm-input nrm-rename-to"  type="text" value="${this._esc(to)}"   placeholder="new name">
+  <input class="nrm-input nrm-rename-to"  type="text" value="${to}"   placeholder="new name">
   <button type="button" class="nrm-rm-btn" title="Remove">×</button>
 </div>`;
     }
@@ -435,7 +434,7 @@ class NormalizerBuilder {
         if (addBtn) {
             addBtn.addEventListener('click', () => {
                 const container = document.getElementById('nrmRenameRows');
-                if (container) container.insertAdjacentHTML('beforeend', this._renameRow('', ''));
+                if (container) container.insertAdjacentHTML('beforeend', HtmlSafe.html`${this._renameRow('', '')}`);
                 this._wireRenameRemove();
             });
         }
@@ -514,7 +513,7 @@ class NormalizerBuilder {
         const span = document.createElement('span');
         span.className = 'nrm-chip';
         span.dataset.val = val;
-        span.innerHTML = `${this._esc(val)}<span class="nrm-chip-x" title="Remove">×</span>`;
+        span.innerHTML = HtmlSafe.html`${val}<span class="nrm-chip-x" title="Remove">×</span>`;
         return span;
     }
 
@@ -642,7 +641,7 @@ class NormalizerBuilder {
             matches.forEach(col => {
                 const item = document.createElement('div');
                 item.className = 'nrm-col-suggest-item';
-                item.innerHTML = `<span>${this._esc(col)}</span><span class="nrm-col-tag">col</span>`;
+                item.innerHTML = HtmlSafe.html`<span>${col}</span><span class="nrm-col-tag">col</span>`;
                 item.addEventListener('mousedown', e => {
                     e.preventDefault();
                     el.value = col;
@@ -722,7 +721,7 @@ class NormalizerBuilder {
             matches.forEach(col => {
                 const item = document.createElement('div');
                 item.className = 'nrm-col-suggest-item';
-                item.innerHTML = `<span>${this._esc(col)}</span><span class="nrm-col-tag">col</span>`;
+                item.innerHTML = HtmlSafe.html`<span>${col}</span><span class="nrm-col-tag">col</span>`;
                 item.addEventListener('mousedown', e => {
                     e.preventDefault();
                     addChip(col);

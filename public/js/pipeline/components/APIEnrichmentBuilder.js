@@ -101,7 +101,7 @@ class APIEnrichmentBuilder {
         const hasHdr = Object.keys(cfg.headers       || {}).length > 0;
         const hasQP  = Object.keys(cfg.queryParams   || {}).length > 0;
 
-        return `
+        return HtmlSafe.html`
 <div class="aeb-builder">
 <style>
 .aeb-builder { font-size:13px; color:#1e3a5f; }
@@ -167,7 +167,7 @@ class APIEnrichmentBuilder {
     <div class="aeb-row">
       <div class="aeb-col grow">
         <span class="aeb-label">Endpoint URL *</span>
-        <input id="aebEndpoint" class="aeb-inp" value="${esc(cfg.endpoint)}"
+        <input id="aebEndpoint" class="aeb-inp" value="${cfg.endpoint}"
                placeholder="https://api.example.com/patients/{patientId}">
         <span class="aeb-hint">Use {paramName} for dynamic values from Field Mappings below</span>
       </div>
@@ -175,7 +175,7 @@ class APIEnrichmentBuilder {
         <span class="aeb-label">Method</span>
         <select id="aebMethod" class="aeb-sel">
           ${['GET','POST','PUT','PATCH','DELETE'].map(m =>
-            `<option value="${m}"${method===m?' selected':''}>${m}</option>`).join('')}
+            HtmlSafe.html`<option value="${m}"${method===m?' selected':''}>${m}</option>`)}
         </select>
       </div>
     </div>
@@ -183,17 +183,17 @@ class APIEnrichmentBuilder {
       <div class="aeb-col">
         <span class="aeb-label">Timeout (ms)</span>
         <input id="aebTimeoutMs" class="aeb-inp" type="number" min="100" max="60000"
-               value="${esc(cfg.timeoutMs ?? 5000)}" style="width:100px">
+               value="${cfg.timeoutMs ?? 5000}" style="width:100px">
       </div>
       <div class="aeb-col">
         <span class="aeb-label">Retries</span>
         <input id="aebRetryCount" class="aeb-inp" type="number" min="0" max="10"
-               value="${esc(cfg.retryCount ?? 0)}" style="width:70px">
+               value="${cfg.retryCount ?? 0}" style="width:70px">
       </div>
       <div class="aeb-col">
         <span class="aeb-label">Retry Delay (ms)</span>
         <input id="aebRetryDelayMs" class="aeb-inp" type="number" min="100" max="30000"
-               value="${esc(cfg.retryDelayMs ?? 1000)}" style="width:100px">
+               value="${cfg.retryDelayMs ?? 1000}" style="width:100px">
       </div>
     </div>
   </div>
@@ -202,7 +202,7 @@ class APIEnrichmentBuilder {
 <!-- ② Auth -->
 <div class="aeb-section">
   <div class="aeb-shdr${at==='none'?' collapsed':''}" data-aeb-sec="aebSAuth">
-    🔑 Authentication${at!=='none'?` <span class="aeb-badge">${esc(at)}</span>`:''} <span class="aeb-caret">▾</span>
+    🔑 Authentication${at!=='none'?HtmlSafe.html` <span class="aeb-badge">${at}</span>`:''} <span class="aeb-caret">▾</span>
   </div>
   <div class="aeb-sbody" id="aebSAuth">
     <div class="aeb-col" style="margin-bottom:10px">
@@ -210,7 +210,7 @@ class APIEnrichmentBuilder {
       <select id="aebAuthType" class="aeb-sel" style="max-width:220px">
         ${[['none','None'],['basic','Basic (Username / Password)'],['bearer','Bearer Token'],
            ['apikey','API Key'],['oauth2','OAuth 2.0 (Client Credentials)']].map(
-          ([v,l]) => `<option value="${v}"${at===v?' selected':''}>${l}</option>`).join('')}
+          ([v,l]) => HtmlSafe.html`<option value="${v}"${at===v?' selected':''}>${l}</option>`)}
       </select>
     </div>
 
@@ -222,11 +222,11 @@ class APIEnrichmentBuilder {
       <div class="aeb-irow">
         <div class="aeb-col">
           <span class="aeb-label">Username</span>
-          <input id="aebUsername" class="aeb-inp" value="${esc(cfg.username)}" placeholder="user@example.com">
+          <input id="aebUsername" class="aeb-inp" value="${cfg.username}" placeholder="user@example.com">
         </div>
         <div class="aeb-col">
           <span class="aeb-label">Password</span>
-          <input id="aebPassword" class="aeb-inp" type="password" value="${esc(cfg.password)}" placeholder="••••••••">
+          <input id="aebPassword" class="aeb-inp" type="password" value="${cfg.password}" placeholder="••••••••">
         </div>
       </div>
     </div>
@@ -234,7 +234,7 @@ class APIEnrichmentBuilder {
     <div id="aebAuthBearer" class="aeb-auth-pnl${at==='bearer'?' active':''}">
       <div class="aeb-col">
         <span class="aeb-label">Bearer Token</span>
-        <input id="aebBearerToken" class="aeb-inp" value="${esc(cfg.bearerToken)}" placeholder="eyJhbGciOi...">
+        <input id="aebBearerToken" class="aeb-inp" value="${cfg.bearerToken}" placeholder="eyJhbGciOi...">
         <span class="aeb-hint">Sent as: Authorization: Bearer {token}</span>
       </div>
     </div>
@@ -242,7 +242,7 @@ class APIEnrichmentBuilder {
     <div id="aebAuthApikey" class="aeb-auth-pnl${at==='apikey'?' active':''}">
       <div class="aeb-col">
         <span class="aeb-label">API Key</span>
-        <input id="aebApiKey" class="aeb-inp" value="${esc(cfg.apiKey)}" placeholder="sk-...">
+        <input id="aebApiKey" class="aeb-inp" value="${cfg.apiKey}" placeholder="sk-...">
         <span class="aeb-hint">Sent as: X-API-Key: {key}</span>
       </div>
     </div>
@@ -251,35 +251,35 @@ class APIEnrichmentBuilder {
       <div class="aeb-row">
         <div class="aeb-col grow">
           <span class="aeb-label">Token URL *</span>
-          <input id="aebOAuth2TokenUrl" class="aeb-inp" value="${esc(cfg.oauth2TokenUrl)}"
+          <input id="aebOAuth2TokenUrl" class="aeb-inp" value="${cfg.oauth2TokenUrl}"
                  placeholder="https://auth.example.com/oauth/token">
         </div>
         <div class="aeb-col" style="width:175px">
           <span class="aeb-label">Grant Type</span>
           <select id="aebOAuth2GrantType" class="aeb-sel">
             ${[['client_credentials','Client Credentials'],['password','Password'],['refresh_token','Refresh Token']].map(
-              ([v,l]) => `<option value="${v}"${(cfg.oauth2GrantType||'client_credentials')===v?' selected':''}>${l}</option>`).join('')}
+              ([v,l]) => HtmlSafe.html`<option value="${v}"${(cfg.oauth2GrantType||'client_credentials')===v?' selected':''}>${l}</option>`)}
           </select>
         </div>
       </div>
       <div class="aeb-irow">
         <div class="aeb-col">
           <span class="aeb-label">Client ID *</span>
-          <input id="aebOAuth2ClientId" class="aeb-inp" value="${esc(cfg.oauth2ClientId)}" placeholder="client_id">
+          <input id="aebOAuth2ClientId" class="aeb-inp" value="${cfg.oauth2ClientId}" placeholder="client_id">
         </div>
         <div class="aeb-col">
           <span class="aeb-label">Client Secret *</span>
-          <input id="aebOAuth2ClientSecret" class="aeb-inp" type="password" value="${esc(cfg.oauth2ClientSecret)}" placeholder="••••••••">
+          <input id="aebOAuth2ClientSecret" class="aeb-inp" type="password" value="${cfg.oauth2ClientSecret}" placeholder="••••••••">
         </div>
       </div>
       <div class="aeb-irow">
         <div class="aeb-col">
           <span class="aeb-label">Scope</span>
-          <input id="aebOAuth2Scope" class="aeb-inp" value="${esc(cfg.oauth2Scope)}" placeholder="read:patients openid">
+          <input id="aebOAuth2Scope" class="aeb-inp" value="${cfg.oauth2Scope}" placeholder="read:patients openid">
         </div>
         <div class="aeb-col">
           <span class="aeb-label">Audience</span>
-          <input id="aebOAuth2Audience" class="aeb-inp" value="${esc(cfg.oauth2Audience)}" placeholder="https://api.example.com/">
+          <input id="aebOAuth2Audience" class="aeb-inp" value="${cfg.oauth2Audience}" placeholder="https://api.example.com/">
         </div>
       </div>
     </div>
@@ -297,7 +297,7 @@ class APIEnrichmentBuilder {
       <span>API Param Name</span><span>Pipeline Field Path</span><span></span>
     </div>
     <div id="aebFMTable">
-      ${Object.entries(cfg.fieldMappings || {}).map(([p, f]) => this._fmRow(p, f, esc)).join('')}
+      ${Object.entries(cfg.fieldMappings || {}).map(([p, f]) => this._fmRow(p, f, esc))}
     </div>
     <button class="aeb-add" id="aebAddFM" type="button">+ Add Mapping</button>
   </div>
@@ -313,7 +313,7 @@ class APIEnrichmentBuilder {
       <span>Header Name</span><span>Value</span><span></span>
     </div>
     <div id="aebHdrTable">
-      ${Object.entries(cfg.headers || {}).map(([k, v]) => this._kvRow(k, v, esc)).join('')}
+      ${Object.entries(cfg.headers || {}).map(([k, v]) => this._kvRow(k, v, esc))}
     </div>
     <button class="aeb-add" id="aebAddHdr" type="button">+ Add Header</button>
   </div>
@@ -330,7 +330,7 @@ class APIEnrichmentBuilder {
       <span>Parameter</span><span>Value</span><span></span>
     </div>
     <div id="aebQPTable">
-      ${Object.entries(cfg.queryParams || {}).map(([k, v]) => this._kvRow(k, v, esc)).join('')}
+      ${Object.entries(cfg.queryParams || {}).map(([k, v]) => this._kvRow(k, v, esc))}
     </div>
     <button class="aeb-add" id="aebAddQP" type="button">+ Add Parameter</button>
   </div>
@@ -343,7 +343,7 @@ class APIEnrichmentBuilder {
   </div>
   <div class="aeb-sbody" id="aebSBody">
     <p class="aeb-hint" style="margin:0 0 6px">JSON template. Use {paramName} from Field Mappings for dynamic values.</p>
-    <textarea id="aebRequestBody" class="aeb-ta">${esc(cfg.requestBody ? JSON.stringify(cfg.requestBody, null, 2) : '')}</textarea>
+    <textarea id="aebRequestBody" class="aeb-ta">${cfg.requestBody ? JSON.stringify(cfg.requestBody, null, 2) : ''}</textarea>
   </div>
 </div>
 
@@ -358,13 +358,13 @@ class APIEnrichmentBuilder {
       <div class="aeb-col">
         <span class="aeb-label">Failure Threshold</span>
         <input id="aebFailureThreshold" class="aeb-inp" type="number" min="1" max="100"
-               value="${esc(cfg.failureThreshold ?? 5)}" style="width:90px">
+               value="${cfg.failureThreshold ?? 5}" style="width:90px">
         <span class="aeb-hint">consecutive failures</span>
       </div>
       <div class="aeb-col">
         <span class="aeb-label">Open Duration</span>
         <input id="aebOpenDurationSeconds" class="aeb-inp" type="number" min="1" max="3600"
-               value="${esc(cfg.openDurationSeconds ?? 60)}" style="width:90px">
+               value="${cfg.openDurationSeconds ?? 60}" style="width:90px">
         <span class="aeb-hint">seconds</span>
       </div>
     </div>
@@ -382,13 +382,13 @@ class APIEnrichmentBuilder {
       <div class="aeb-col">
         <span class="aeb-label">Cache TTL</span>
         <input id="aebCacheTtlSeconds" class="aeb-inp" type="number" min="0" max="86400"
-               value="${esc(cfg.cacheTtlSeconds ?? 0)}" style="width:100px">
+               value="${cfg.cacheTtlSeconds ?? 0}" style="width:100px">
         <span class="aeb-hint">seconds (0 = disabled)</span>
       </div>
       <div class="aeb-col">
         <span class="aeb-label">Max Entries</span>
         <input id="aebCacheMaxEntries" class="aeb-inp" type="number" min="1" max="100000"
-               value="${esc(cfg.cacheMaxEntries ?? 1000)}" style="width:100px">
+               value="${cfg.cacheMaxEntries ?? 1000}" style="width:100px">
       </div>
     </div>
   </div>
@@ -400,9 +400,9 @@ class APIEnrichmentBuilder {
 
     _kvRow(k, v, esc) {
         if (!esc) esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-        return `<div class="aeb-kv-row">
-            <input class="aeb-inp aeb-kv-key" value="${esc(k)}" placeholder="Name">
-            <input class="aeb-inp aeb-kv-val" value="${esc(v)}" placeholder="Value">
+        return HtmlSafe.html`<div class="aeb-kv-row">
+            <input class="aeb-inp aeb-kv-key" value="${k}" placeholder="Name">
+            <input class="aeb-inp aeb-kv-val" value="${v}" placeholder="Value">
             <button class="aeb-rm" type="button" title="Remove">×</button>
         </div>`;
     }
@@ -410,9 +410,9 @@ class APIEnrichmentBuilder {
     _fmRow(param, field, esc) {
         if (!esc) esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
         const uid = `aebFmF_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        return `<div class="aeb-fm-row">
-            <input class="aeb-inp aeb-fm-param" value="${esc(param)}" placeholder="paramName (e.g. patientId)">
-            <input class="aeb-inp aeb-fm-field" id="${uid}" value="${esc(field)}" placeholder="e.g. PID.3">
+        return HtmlSafe.html`<div class="aeb-fm-row">
+            <input class="aeb-inp aeb-fm-param" value="${param}" placeholder="paramName (e.g. patientId)">
+            <input class="aeb-inp aeb-fm-field" id="${uid}" value="${field}" placeholder="e.g. PID.3">
             <button class="aeb-rm" type="button" title="Remove">×</button>
         </div>`;
     }
@@ -452,7 +452,7 @@ class APIEnrichmentBuilder {
             const table = document.querySelector('#aebFMTable');
             if (!table) return;
             const div = document.createElement('div');
-            div.innerHTML = this._fmRow('', '');
+            div.innerHTML = HtmlSafe.html`${this._fmRow('', '')}`;
             const row = div.firstElementChild;
             table.appendChild(row);
             this._wireRemoveBtn(row);
@@ -492,7 +492,7 @@ class APIEnrichmentBuilder {
         const table = document.querySelector(tableSelector);
         if (!table) return;
         const div = document.createElement('div');
-        div.innerHTML = this._kvRow('', '');
+        div.innerHTML = HtmlSafe.html`${this._kvRow('', '')}`;
         const row = div.firstElementChild;
         this._wireRemoveBtn(row);
         table.appendChild(row);

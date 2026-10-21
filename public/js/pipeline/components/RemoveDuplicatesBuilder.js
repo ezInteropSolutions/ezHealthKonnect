@@ -71,8 +71,8 @@ class RemoveDuplicatesBuilder {
         const maxInputRecords = step.config.maxInputRecords  || 0;
 
         const chipsHtml = keyFields.map(f =>
-            `<span class="rd-field-chip">${esc(f)}<button type="button" class="rd-chip-remove" data-field="${esc(f)}" title="Remove">&#x00D7;</button></span>`
-        ).join('');
+            HtmlSafe.html`<span class="rd-field-chip">${f}<button type="button" class="rd-chip-remove" data-field="${f}" title="Remove">&#x00D7;</button></span>`
+        );
 
         const strategyOptions = [
             { value: 'first', title: 'Keep First',   desc: 'Discard later duplicates — preserves original order' },
@@ -81,18 +81,18 @@ class RemoveDuplicatesBuilder {
         ];
 
         const radioGroup = (name, options, selected) => options.map(o =>
-            `<label class="rd-radio-option${selected === o.value ? ' active' : ''}">
+            HtmlSafe.html`<label class="rd-radio-option${selected === o.value ? ' active' : ''}">
                 <input type="radio" name="${name}" value="${o.value}"${selected === o.value ? ' checked' : ''}>
                 <div class="rd-radio-content">
-                    <span class="rd-radio-title">${esc(o.title)}</span>
-                    <span class="rd-radio-desc">${esc(o.desc)}</span>
+                    <span class="rd-radio-title">${o.title}</span>
+                    <span class="rd-radio-desc">${o.desc}</span>
                 </div>
             </label>`
-        ).join('');
+        );
 
         const section = document.createElement('div');
         section.className = 'form-section';
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
             <div class="form-group">
                 <label class="form-label">Source Step <span style="color:#ef4444">*</span></label>
                 <select id="rdSourceStep" class="form-control">
@@ -104,7 +104,7 @@ class RemoveDuplicatesBuilder {
                            placeholder="e.g. rows, records (blank = full output)" style="flex:1;max-width:260px">
                 </div>
                 <div id="rdComputedPath" style="margin-top:4px;font-size:11px;font-family:monospace;color:var(--text-muted,#9ca3af)"></div>
-                <input type="hidden" id="rdSourceField" value="${esc(sourceField)}">
+                <input type="hidden" id="rdSourceField" value="${sourceField}">
                 <div class="field-help">Pick the upstream step that produces the array to deduplicate.</div>
             </div>
 
@@ -113,7 +113,7 @@ class RemoveDuplicatesBuilder {
                     Key Fields
                     <span style="font-weight:400;color:var(--text-muted,#6b7280);font-size:11px;margin-left:4px">(empty = deduplicate on entire record)</span>
                 </label>
-                <div id="rdKeyChips" class="rd-chips-container">${chipsHtml || '<span style="color:var(--text-muted,#9ca3af);font-size:12px;align-self:center">No key fields — full-record dedup</span>'}</div>
+                <div id="rdKeyChips" class="rd-chips-container">${chipsHtml || HtmlSafe.raw('<span style="color:var(--text-muted,#9ca3af);font-size:12px;align-self:center">No key fields — full-record dedup</span>')}</div>
                 <input type="hidden" id="rdKeyFieldsJson" value='${JSON.stringify(keyFields)}'>
                 <div class="rd-chip-input-row">
                     <input type="text" id="rdKeyFieldInput" class="form-control form-control-sm"
@@ -144,7 +144,7 @@ class RemoveDuplicatesBuilder {
             <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
                 <div class="form-group" style="flex:1;min-width:160px">
                     <label class="form-label">Output Field <span style="font-weight:400;color:var(--text-muted,#6b7280)">(optional)</span></label>
-                    <input type="text" id="rdOutputField" class="form-control" value="${esc(outputField)}"
+                    <input type="text" id="rdOutputField" class="form-control" value="${outputField}"
                            placeholder="(update source field in-place)" autocomplete="off">
                     <div class="field-help">Write result to a different field, keeping the original array intact</div>
                 </div>
@@ -168,7 +168,7 @@ class RemoveDuplicatesBuilder {
             </details>
         `;
 
-        return section.outerHTML;
+        return HtmlSafe.raw(section.outerHTML);
     }
 
     // ── Private: event wiring ────────────────────────────────────────────────
@@ -211,14 +211,13 @@ class RemoveDuplicatesBuilder {
         const upstream = allSteps.filter(s => s.id !== currentId);
 
         // Populate dropdown options
-        select.innerHTML = '<option value="">— select a step —</option>' +
+        select.innerHTML = HtmlSafe.html`<option value="">— select a step —</option>${
             upstream.map(s => {
                 const ns    = this._computeNamespace(s);
                 const type  = (s.stepType || s.step_type || '').split('.').pop();
                 const label = `${s.stepName || s.step_name || 'Unnamed'} (${type})`;
-                const esc   = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                return `<option value="${esc(ns)}" data-step-type="${esc(s.stepType || s.step_type || '')}">${esc(label)}</option>`;
-            }).join('');
+                return HtmlSafe.html`<option value="${ns}" data-step-type="${s.stepType || s.step_type || ''}">${label}</option>`;
+            })}`;
 
         // Re-compute the full path and update hint + hidden field
         const updatePath = () => {
@@ -281,9 +280,9 @@ class RemoveDuplicatesBuilder {
         const getFields  = () => { try { return JSON.parse(keyFieldsJson.value) || []; } catch { return []; } };
         const setFields  = fields => { keyFieldsJson.value = JSON.stringify(fields); };
         const renderChips = fields => {
-            chipsContainer.innerHTML = fields.length
-                ? fields.map(f => `<span class="rd-field-chip">${esc(f)}<button type="button" class="rd-chip-remove" data-field="${esc(f)}" title="Remove">&#x00D7;</button></span>`).join('')
-                : '<span style="color:var(--text-muted,#9ca3af);font-size:12px;align-self:center">No key fields — full-record dedup</span>';
+            chipsContainer.innerHTML = HtmlSafe.html`${fields.length
+                ? fields.map(f => HtmlSafe.html`<span class="rd-field-chip">${f}<button type="button" class="rd-chip-remove" data-field="${f}" title="Remove">&#x00D7;</button></span>`)
+                : HtmlSafe.raw('<span style="color:var(--text-muted,#9ca3af);font-size:12px;align-self:center">No key fields — full-record dedup</span>')}`;
             chipsContainer.querySelectorAll('.rd-chip-remove').forEach(btn => {
                 btn.addEventListener('click', () => { setFields(getFields().filter(f => f !== btn.dataset.field)); renderChips(getFields()); });
             });
@@ -527,7 +526,7 @@ class RemoveDuplicatesBuilder {
         const dialog = document.createElement('div');
         dialog.style.cssText = `background:white;border-radius:12px;box-shadow:0 20px 40px rgba(0,0,0,0.2);
             max-width:440px;width:90%;overflow:hidden;`;
-        dialog.innerHTML = `
+        dialog.innerHTML = HtmlSafe.html`
             <div style="padding:14px 20px;background:rgba(30,58,138,0.07);border-bottom:1px solid rgba(30,58,138,0.12);display:flex;align-items:center;gap:10px;">
                 <span style="font-size:16px;">🔑</span>
                 <span style="font-weight:600;color:#1e3a8a;font-size:14px;">Enter Field Names</span>
@@ -582,15 +581,15 @@ class RemoveDuplicatesBuilder {
         popover.id = 'rdFieldCandidatesPopover';
         popover.className = 'rd-candidates-popover';
 
-        popover.innerHTML = `
+        popover.innerHTML = HtmlSafe.html`
             <div class="rd-pop-header">
                 <span>Detected fields — click to add</span>
                 <button type="button" class="rd-pop-header-close" id="rdCloseCandidates" title="Close">&times;</button>
             </div>
             <div class="rd-pop-items">
                 ${candidates.map(c =>
-                    `<button type="button" class="rd-candidate-pill" data-field="${esc(c)}">${esc(c)}</button>`
-                ).join('')}
+                    HtmlSafe.html`<button type="button" class="rd-candidate-pill" data-field="${c}">${c}</button>`
+                )}
             </div>
         `;
 

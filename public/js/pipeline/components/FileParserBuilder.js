@@ -135,21 +135,21 @@ class FileParserBuilder {
         const isDelimited = !isFixedWidth && !isBinary && !isAuto;
 
         const templateOptions = template
-            ? `<option value="${template}" selected>${template}</option>`
+            ? HtmlSafe.html`<option value="${template}" selected>${template}</option>`
             : '';
 
         let columnRowsHtml = columns.map((col, idx) =>
-            `<tr data-col-idx="${idx}">
+            HtmlSafe.html`<tr data-col-idx="${idx}">
                 <td><input type="text" class="form-control form-control-sm fp-col-name" value="${col.name || ''}" placeholder="Column name"></td>
                 <td><input type="number" class="form-control form-control-sm fp-col-start" value="${col.start || 1}" min="1" style="width:70px"></td>
                 <td><input type="number" class="form-control form-control-sm fp-col-length" value="${col.length || 1}" min="1" style="width:70px"></td>
                 <td><button type="button" class="btn btn-sm btn-outline-danger fp-remove-col-btn" title="Remove column">&times;</button></td>
             </tr>`
-        ).join('');
+        );
 
         const section = document.createElement('div');
         section.className = 'form-section';
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
             <h4><i class="fas fa-file-csv" style="color: var(--primary-color, #007bff); margin-right: 6px;"></i>File Parser Configuration</h4>
 
             <div class="form-group">
@@ -183,7 +183,7 @@ class FileParserBuilder {
                         placeholder="${isFieldAsPath ? 'steps.s3_connector.file_uri' : 'enriched.connector_result.content'}">
                     <small id="fpSourceFieldHelp" class="form-text text-muted">${
                         isFieldAsPath
-                            ? 'Field containing a file URI — resolved at runtime. Supported: <code>s3://bucket/key</code>, <code>https://host/file</code>, <code>/data/file.csv</code>.'
+                            ? HtmlSafe.raw('Field containing a file URI — resolved at runtime. Supported: <code>s3://bucket/key</code>, <code>https://host/file</code>, <code>/data/file.csv</code>.')
                             : 'Field containing raw file content (bytes/string from inbound connector)'
                     }</small>
                 </div>
@@ -392,7 +392,7 @@ class FileParserBuilder {
             </div>
         `;
 
-        return section.outerHTML;
+        return HtmlSafe.raw(section.outerHTML);
     }
 
     // ── Private: event wiring (runs inside setTimeout after DOM insertion) ───
@@ -413,9 +413,9 @@ class FileParserBuilder {
                 const helpEl    = document.getElementById('fpSourceFieldHelp');
                 const srcFieldEl = document.getElementById('fpSourceField');
                 if (helpEl) {
-                    helpEl.innerHTML = isURI
-                        ? 'Field containing a file URI — resolved at runtime. Supported: <code>s3://bucket/key</code>, <code>https://host/file</code>, <code>/data/file.csv</code>.'
-                        : 'Field containing raw file content (bytes/string from inbound connector)';
+                    helpEl.innerHTML = HtmlSafe.html`${isURI
+                        ? HtmlSafe.raw('Field containing a file URI — resolved at runtime. Supported: <code>s3://bucket/key</code>, <code>https://host/file</code>, <code>/data/file.csv</code>.')
+                        : 'Field containing raw file content (bytes/string from inbound connector)'}`;
                 }
                 if (srcFieldEl && !srcFieldEl.value) {
                     srcFieldEl.placeholder = isURI ? 'steps.s3_connector.file_uri' : 'enriched.connector_result.content';
@@ -511,7 +511,7 @@ class FileParserBuilder {
                 const idx = tbody.rows.length;
                 const tr = document.createElement('tr');
                 tr.setAttribute('data-col-idx', idx);
-                tr.innerHTML = `
+                tr.innerHTML = HtmlSafe.html`
                     <td><input type="text" class="form-control form-control-sm fp-col-name" placeholder="Column name"></td>
                     <td><input type="number" class="form-control form-control-sm fp-col-start" value="1" min="1" style="width:70px"></td>
                     <td><input type="number" class="form-control form-control-sm fp-col-length" value="1" min="1" style="width:70px"></td>
@@ -548,7 +548,7 @@ class FileParserBuilder {
             const tbody = document.getElementById('fpTemplateColumnsBody');
             if (tbody && tpl.columns) {
                 const maxEnd = tpl.columns.length ? Math.max(...tpl.columns.map(c => (c.start || 1) + (c.length || 1) - 1)) : 0;
-                tbody.innerHTML = tpl.columns.map((col, i) => `
+                tbody.innerHTML = HtmlSafe.html`${tpl.columns.map((col, i) => HtmlSafe.html`
                     <tr style="background:${i % 2 === 0 ? '#fff' : '#f9fafb'};">
                         <td style="padding:4px 8px; border-bottom:1px solid #f3f4f6; color:#9ca3af; font-size:0.75rem;">${i + 1}</td>
                         <td style="padding:4px 8px; border-bottom:1px solid #f3f4f6; font-family:monospace; color:#059669; font-weight:600; font-size:0.8rem;">${col.name}</td>
@@ -556,7 +556,7 @@ class FileParserBuilder {
                         <td style="padding:4px 8px; border-bottom:1px solid #f3f4f6; text-align:right; color:#4b5563; font-size:0.8rem;">${col.length}</td>
                         <td style="padding:4px 8px; border-bottom:1px solid #f3f4f6; text-align:right; color:#6b7280; font-size:0.8rem;">${(col.start || 1) + (col.length || 1) - 1}</td>
                     </tr>
-                `).join('') + `
+                `)}
                     <tr style="background:#f3f4f6;">
                         <td colspan="2" style="padding:4px 8px; font-size:0.75rem; color:#4b5563; font-weight:600;">${tpl.columns.length} columns</td>
                         <td colspan="3" style="padding:4px 8px; text-align:right; font-size:0.75rem; color:#4b5563; font-weight:600;">Record width: ${maxEnd} chars</td>
@@ -569,14 +569,14 @@ class FileParserBuilder {
         const populateColumnsFromTemplate = (tpl) => {
             const tbody = document.getElementById('fpColumnsBody');
             if (!tbody || !tpl.columns || !tpl.columns.length) return;
-            tbody.innerHTML = tpl.columns.map((col, idx) => `
+            tbody.innerHTML = HtmlSafe.html`${tpl.columns.map((col, idx) => HtmlSafe.html`
                 <tr data-col-idx="${idx}">
                     <td><input type="text" class="form-control form-control-sm fp-col-name" value="${col.name || ''}" placeholder="Column name"></td>
                     <td><input type="number" class="form-control form-control-sm fp-col-start" value="${col.start || 1}" min="1" style="width:70px"></td>
                     <td><input type="number" class="form-control form-control-sm fp-col-length" value="${col.length || 1}" min="1" style="width:70px"></td>
                     <td><button type="button" class="btn btn-sm btn-outline-danger fp-remove-col-btn" title="Remove column">&times;</button></td>
                 </tr>
-            `).join('');
+            `)}`;
             tbody.querySelectorAll('.fp-remove-col-btn').forEach(btn => {
                 btn.addEventListener('click', () => btn.closest('tr').remove());
             });
@@ -631,7 +631,7 @@ class FileParserBuilder {
         const fpBrowseBtn = document.getElementById('fpBrowseBtn');
         if (fpBrowseBtn) {
             if (!document.getElementById('fpFileBrowserModal')) {
-                document.body.insertAdjacentHTML('beforeend', `
+                document.body.insertAdjacentHTML('beforeend', HtmlSafe.html`
                     <div id="fpFileBrowserModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; z-index:10050; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
                         <div style="background:#fff; width:680px; max-width:96vw; max-height:78vh; border-radius:8px; display:flex; flex-direction:column; box-shadow:0 4px 24px rgba(0,0,0,0.35);">
                             <div style="padding:11px 16px; border-bottom:1px solid #dee2e6; display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
@@ -679,14 +679,14 @@ class FileParserBuilder {
 
             const renderSidebar = shortcuts => {
                 const rows = shortcuts.map(s =>
-                    `<div class="fp-br-shortcut" data-path="${s.path}" style="padding:6px 12px; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; gap:6px; border-radius:4px; margin:1px 4px;">
+                    HtmlSafe.html`<div class="fp-br-shortcut" data-path="${s.path}" style="padding:6px 12px; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; gap:6px; border-radius:4px; margin:1px 4px;">
                         <span>${s.icon || '📁'}</span><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${s.name}</span>
                     </div>`
-                ).join('');
+                );
                 const header = sidebarEl.querySelector('div');
                 sidebarEl.innerHTML = '';
                 if (header) sidebarEl.appendChild(header);
-                sidebarEl.insertAdjacentHTML('beforeend', rows);
+                sidebarEl.insertAdjacentHTML('beforeend', HtmlSafe.html`${rows}`);
                 sidebarEl.querySelectorAll('.fp-br-shortcut').forEach(el => {
                     el.addEventListener('mouseenter', () => el.style.background = '#e9ecef');
                     el.addEventListener('mouseleave', () => el.style.background = '');
@@ -702,10 +702,10 @@ class FileParserBuilder {
                     const rawText = await resp.text();
                     let data;
                     try { data = JSON.parse(rawText); } catch (_e) {
-                        listEl.innerHTML = `<div style="padding:14px 16px; color:#dc3545;"><strong>Cannot reach browse endpoint</strong><br><span style="font-size:0.82rem;">HTTP ${resp.status} — Go backend may need to be restarted.</span></div>`;
+                        listEl.innerHTML = HtmlSafe.html`<div style="padding:14px 16px; color:#dc3545;"><strong>Cannot reach browse endpoint</strong><br><span style="font-size:0.82rem;">HTTP ${resp.status} — Go backend may need to be restarted.</span></div>`;
                         return;
                     }
-                    if (!data.success) { listEl.innerHTML = `<div style="padding:14px 16px; color:#dc3545;">${data.error}</div>`; return; }
+                    if (!data.success) { listEl.innerHTML = HtmlSafe.html`<div style="padding:14px 16px; color:#dc3545;">${data.error}</div>`; return; }
                     if (data.serverOS && data.serverOS !== _serverOS) {
                         _serverOS = data.serverOS;
                         const osLabels = { linux: '🐧 Linux', windows: '🪟 Windows', darwin: '🍎 macOS' };
@@ -716,20 +716,20 @@ class FileParserBuilder {
                     const rows = [];
                     if (data.parent !== undefined && data.parent !== null && data.parent !== '') {
                         const upLabel = (_serverOS === 'windows' && data.parent === '/') ? 'Drives' : '..';
-                        rows.push(`<div class="fp-br-entry fp-br-nav" data-path="${data.parent}" style="padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:9px; border-bottom:1px solid #f0f0f0;"><span style="width:18px; text-align:center; font-size:0.9rem;">⬆</span><span style="color:#6c757d; font-size:0.82rem;">${upLabel}</span></div>`);
+                        rows.push(HtmlSafe.html`<div class="fp-br-entry fp-br-nav" data-path="${data.parent}" style="padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:9px; border-bottom:1px solid #f0f0f0;"><span style="width:18px; text-align:center; font-size:0.9rem;">⬆</span><span style="color:#6c757d; font-size:0.82rem;">${upLabel}</span></div>`);
                     }
                     if (data.path && data.path !== '/') {
-                        rows.push(`<div class="fp-br-entry fp-br-sel" data-path="${data.path}" style="padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:9px; background:#fffbea; border-bottom:1px solid #ffe082;"><span style="width:18px; text-align:center;">📂</span><span style="color:#856404; font-size:0.82rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Use this folder</span></div>`);
+                        rows.push(HtmlSafe.html`<div class="fp-br-entry fp-br-sel" data-path="${data.path}" style="padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:9px; background:#fffbea; border-bottom:1px solid #ffe082;"><span style="width:18px; text-align:center;">📂</span><span style="color:#856404; font-size:0.82rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Use this folder</span></div>`);
                     }
                     (data.entries || []).filter(e => e.isDir).forEach(e => {
-                        rows.push(`<div class="fp-br-entry fp-br-nav" data-path="${e.path}" style="padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:9px; border-bottom:1px solid #f8f9fa;"><span style="width:18px; text-align:center;">${e.icon || '📁'}</span><span style="flex:1;">${e.name}</span><span style="font-size:0.72rem; color:#adb5bd;">folder</span></div>`);
+                        rows.push(HtmlSafe.html`<div class="fp-br-entry fp-br-nav" data-path="${e.path}" style="padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:9px; border-bottom:1px solid #f8f9fa;"><span style="width:18px; text-align:center;">${e.icon || '📁'}</span><span style="flex:1;">${e.name}</span><span style="font-size:0.72rem; color:#adb5bd;">folder</span></div>`);
                     });
                     (data.entries || []).filter(e => !e.isDir).forEach(e => {
                         const isLarge = e.size > 50 * 1024 * 1024;
-                        rows.push(`<div class="fp-br-entry fp-br-sel" data-path="${e.path}" style="padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:9px; border-bottom:1px solid #f8f9fa;${isLarge ? ' background:#fffbea;' : ''}"><span style="width:18px; text-align:center;">📄</span><span style="flex:1;">${e.name}</span><span style="font-size:0.72rem; color:${isLarge ? '#856404' : '#adb5bd'}; white-space:nowrap;">${fmtBytes(e.size)}${isLarge ? ' ⚠' : ''}</span></div>`);
+                        rows.push(HtmlSafe.html`<div class="fp-br-entry fp-br-sel" data-path="${e.path}" style="padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:9px; border-bottom:1px solid #f8f9fa;${isLarge ? ' background:#fffbea;' : ''}"><span style="width:18px; text-align:center;">📄</span><span style="flex:1;">${e.name}</span><span style="font-size:0.72rem; color:${isLarge ? '#856404' : '#adb5bd'}; white-space:nowrap;">${fmtBytes(e.size)}${isLarge ? ' ⚠' : ''}</span></div>`);
                     });
-                    if (!rows.length) rows.push('<div style="padding:14px 16px; color:#adb5bd; font-style:italic;">Empty directory</div>');
-                    listEl.innerHTML = rows.join('');
+                    if (!rows.length) rows.push(HtmlSafe.raw('<div style="padding:14px 16px; color:#adb5bd; font-style:italic;">Empty directory</div>'));
+                    listEl.innerHTML = HtmlSafe.html`${rows}`;
                     listEl.querySelectorAll('.fp-br-nav').forEach(el => {
                         el.addEventListener('mouseenter', () => el.style.background = '#f0f4f8');
                         el.addEventListener('mouseleave', () => el.style.background = '');
@@ -741,7 +741,7 @@ class FileParserBuilder {
                         el.addEventListener('click', () => setSelected(el.dataset.path));
                     });
                 } catch (err) {
-                    listEl.innerHTML = `<div style="padding:14px 16px; color:#dc3545;">Error: ${err.message}</div>`;
+                    listEl.innerHTML = HtmlSafe.html`<div style="padding:14px 16px; color:#dc3545;">Error: ${err.message}</div>`;
                 }
             };
 
@@ -821,8 +821,8 @@ class FileParserBuilder {
                     if (resultEl && columns && records) {
                         const head = document.getElementById('fpPreviewHead');
                         const body = document.getElementById('fpPreviewBody');
-                        if (head) head.innerHTML = `<tr>${columns.map(c => `<th>${c}</th>`).join('')}</tr>`;
-                        if (body) body.innerHTML = records.map(r => `<tr>${columns.map(c => `<td>${r[c] ?? ''}</td>`).join('')}</tr>`).join('');
+                        if (head) head.innerHTML = HtmlSafe.html`<tr>${columns.map(c => HtmlSafe.html`<th>${c}</th>`)}</tr>`;
+                        if (body) body.innerHTML = HtmlSafe.html`${records.map(r => HtmlSafe.html`<tr>${columns.map(c => HtmlSafe.html`<td>${r[c] ?? ''}</td>`)}</tr>`)}`;
                         resultEl.style.display = 'block';
                     }
                 } catch (e) {
