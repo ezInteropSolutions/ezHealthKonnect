@@ -206,7 +206,7 @@ class PropertiesPanel {
         } else {
             console.log('⚠️  Step not found in pipeline - showing preview message');
             // Step not yet added to pipeline (preview mode)
-            container.innerHTML = `
+            container.innerHTML = HtmlSafe.html`
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px; text-align: center;">
                     <div style="font-size: 48px; opacity: 0.3; margin-bottom: 16px;">ℹ️</div>
                     <p style="color: #6b7280; margin: 0;">Add this step to the pipeline first</p>
@@ -236,7 +236,7 @@ class PropertiesPanel {
 
         const accordion = document.createElement('div');
         accordion.style.cssText = 'border-top:1px solid #e5e7eb;margin-top:16px;';
-        accordion.innerHTML = `
+        accordion.innerHTML = HtmlSafe.html`
             <div style="padding:10px 16px;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;background:#f8fafc;"
                  onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none';this.querySelector('.ct-toggle').textContent=this.nextElementSibling.style.display===''?'▾':'▸'">
                 <i class="fas fa-code" style="color:#1e3a8a;font-size:13px;"></i>
@@ -263,7 +263,7 @@ class PropertiesPanel {
                     if (sigs.length === 0) return;
                     const group = document.createElement('div');
                     group.style.cssText = 'margin-bottom:10px;';
-                    group.innerHTML = `<div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:5px;font-family:monospace;">${t.name}</div>`;
+                    group.innerHTML = HtmlSafe.html`<div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:5px;font-family:monospace;">${t.name}</div>`;
                     sigs.forEach(sig => {
                         const chip = document.createElement('div');
                         chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:11px;font-family:monospace;padding:3px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;color:#334155;cursor:pointer;margin:2px 3px 2px 0;';
@@ -457,7 +457,7 @@ class PropertiesPanel {
         }
 
         // DEFAULT HANDLING: Regular form for other step types
-        const actionButtons = isPreview ? `
+        const actionButtons = isPreview ? HtmlSafe.html`
             <div class="form-actions" style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
                 <button class="btn btn-primary" id="addToPipelineBtn">
                     <i class="fas fa-plus"></i> Add to Pipeline
@@ -466,7 +466,7 @@ class PropertiesPanel {
                     <i class="fas fa-times"></i> Close
                 </button>
             </div>
-        ` : `
+        ` : HtmlSafe.html`
             <div class="form-actions" style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
                 <button class="btn btn-primary" id="saveStepBtn">
                     <i class="fas fa-save"></i> Save
@@ -477,7 +477,7 @@ class PropertiesPanel {
             </div>
         `;
 
-        form.innerHTML = `
+        form.innerHTML = HtmlSafe.html`
             <h3 style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
                 <i class="${step.icon}"></i>
                 <span>Form Configuration</span>
@@ -686,7 +686,7 @@ class PropertiesPanel {
         // Step-type-aware placeholder shown after the user clears the textarea
         const jsonPlaceholder = this._getJSONPlaceholder(step.stepType || '');
 
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
             <div class="json-editor-wrapper">
 
                 <!-- Header Section -->
@@ -771,7 +771,7 @@ class PropertiesPanel {
 
                 <!-- Action Buttons -->
                 <div class="json-actions">
-                    ${isPreview ? `
+                    ${isPreview ? HtmlSafe.html`
                         <button class="btn btn-primary btn-large" id="importJsonBtn">
                             <i class="fas fa-file-import"></i>
                             <span>Import & Add to Pipeline</span>
@@ -780,7 +780,7 @@ class PropertiesPanel {
                             <i class="fas fa-times"></i>
                             <span>Close</span>
                         </button>
-                    ` : `
+                    ` : HtmlSafe.html`
                         <button class="btn btn-primary btn-large" id="importJsonBtn">
                             <i class="fas fa-file-import"></i>
                             <span>Import & Update</span>
@@ -850,7 +850,7 @@ class PropertiesPanel {
 
         const docs = this.getStepDocumentation(step.stepType);
 
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
             <div style="padding: 1rem;">
                 <h3 style="margin-bottom: 1rem; color: #1e3a8a;">
                     <i class="${step.icon}"></i> ${step.stepName}
@@ -868,7 +868,7 @@ class PropertiesPanel {
                         <i class="fas fa-lightbulb"></i> Use Cases
                     </h4>
                     <ul style="color: #4b5563; line-height: 1.8; padding-left: 1.5rem;">
-                        ${docs.useCases.map(uc => `<li>${uc}</li>`).join('')}
+                        ${docs.useCases.map(uc => HtmlSafe.html`<li>${uc}</li>`)}
                     </ul>
                 </div>
 
@@ -879,46 +879,46 @@ class PropertiesPanel {
                     <pre style="background: #f3f4f6; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.875rem;"><code>${this.formatExampleForDisplay(docs.example, step.stepType)}</code></pre>
                 </div>
 
-                ${docs.examples ? `
+                ${docs.examples ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-copy"></i> Examples
                     </h4>
                     <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 1rem;">Click an example to expand the full configuration.</p>
-                    ${docs.examples.map(ex => `
+                    ${docs.examples.map(ex => HtmlSafe.html`
                         <details style="margin-bottom: 0.75rem; border: 1px solid #e5e7eb; border-radius: 6px; background: #f9fafb;">
                             <summary style="padding: 0.75rem; cursor: pointer; font-weight: 600; color: #1e3a8a; display: flex; align-items: center; gap: 0.5rem;">
                                 <i class="fas fa-chevron-right" style="font-size: 0.75rem;"></i>
                                 ${ex.label}
                             </summary>
                             <div style="padding: 1rem; background: white; border-top: 1px solid #e5e7eb;">
-                                ${ex.description ? `<p style="color:#4b5563;font-size:0.85rem;margin-bottom:0.75rem;">${ex.description}</p>` : ''}
+                                ${ex.description ? HtmlSafe.html`<p style="color:#4b5563;font-size:0.85rem;margin-bottom:0.75rem;">${ex.description}</p>` : ''}
                                 <pre style="background: #f3f4f6; padding: 0.75rem; border-radius: 4px; font-size: 0.8rem; overflow-x: auto; line-height: 1.6;"><code>${JSON.stringify(ex.config, null, 2).replace(/\\n/g, '\n').replace(/\\t/g, '  ')}</code></pre>
                             </div>
                         </details>
-                    `).join('')}
+                    `)}
                 </div>
                 ` : ''}
 
-                ${docs.connectorTypeCards ? `
+                ${docs.connectorTypeCards ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;" id="connectorTypeDocsSection">
                     <h4 style="color: #2563eb; margin-bottom: 0.75rem;">
                         <i class="fas fa-plug"></i> Connector Type Reference
                     </h4>
                     <select id="connectorTypeDocSelect" style="width:100%;padding:0.5rem;border:1px solid #d1d5db;border-radius:6px;font-size:0.875rem;margin-bottom:0.75rem;background:#fff;">
                         <option value="">— Select a connector type to view its documentation —</option>
-                        ${docs.connectorTypeCards.map(ct => `<option value="${ct.typeName}">${ct.icon} ${ct.displayName} (${ct.typeName})</option>`).join('')}
+                        ${docs.connectorTypeCards.map(ct => HtmlSafe.html`<option value="${ct.typeName}">${ct.icon} ${ct.displayName} (${ct.typeName})</option>`)}
                     </select>
                     <div id="connectorTypeDocDetail" style="display:none;"></div>
                 </div>
                 ` : ''}
 
-                ${docs.validationTypes ? `
+                ${docs.validationTypes ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-check-circle"></i> Validation Types
                     </h4>
-                    ${docs.validationTypes.map(vt => `
+                    ${docs.validationTypes.map(vt => HtmlSafe.html`
                         <div style="margin-bottom: 1rem; padding: 1rem; background: #f9fafb; border-left: 4px solid #3b82f6; border-radius: 4px;">
                             <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 0.5rem;">
                                 <code style="background: #e0e7ff; padding: 0.25rem 0.5rem; border-radius: 3px;">${vt.type}</code>
@@ -930,11 +930,11 @@ class PropertiesPanel {
                                 <pre style="background: #fff; padding: 0.75rem; border-radius: 4px; margin-top: 0.5rem; font-size: 0.8rem; overflow-x: auto;"><code>${JSON.stringify(vt.example, null, 2)}</code></pre>
                             </details>
                         </div>
-                    `).join('')}
+                    `)}
                 </div>
                 ` : ''}
 
-                ${docs.fieldExamples ? `
+                ${docs.fieldExamples ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-list"></i> Common Field Paths
@@ -948,19 +948,19 @@ class PropertiesPanel {
                             </tr>
                         </thead>
                         <tbody>
-                            ${docs.fieldExamples.map(f => `
+                            ${docs.fieldExamples.map(f => HtmlSafe.html`
                                 <tr>
                                     <td style="padding: 0.6rem; border: 1px solid #e5e7eb;"><code style="background: #e0e7ff; padding: 0.2rem 0.4rem; border-radius: 3px;">${f.field}</code></td>
                                     <td style="padding: 0.6rem; border: 1px solid #e5e7eb;">${f.description}</td>
                                     <td style="padding: 0.6rem; border: 1px solid #e5e7eb; font-family: monospace; font-size: 0.75rem; color: #059669;">${f.path}</td>
                                 </tr>
-                            `).join('')}
+                            `)}
                         </tbody>
                     </table>
                 </div>
                 ` : ''}
 
-                ${docs.databaseConfigs ? `
+                ${docs.databaseConfigs ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-database"></i> Database-Specific Configuration
@@ -968,7 +968,7 @@ class PropertiesPanel {
                     <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 1rem;">Click a database to see connection string format, query syntax, and special features.</p>
                     ${Object.keys(docs.databaseConfigs).map(dbType => {
                         const db = docs.databaseConfigs[dbType];
-                        return `
+                        return HtmlSafe.html`
                         <details style="margin-bottom: 0.75rem; border: 1px solid #e5e7eb; border-radius: 6px; background: #f9fafb;">
                             <summary style="padding: 0.75rem; cursor: pointer; font-weight: 600; color: #1e3a8a; display: flex; align-items: center; gap: 0.5rem;">
                                 <i class="fas fa-chevron-right" style="font-size: 0.75rem; transition: transform 0.2s;"></i>
@@ -980,34 +980,34 @@ class PropertiesPanel {
                                     <pre style="background: #f3f4f6; padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem; font-size: 0.8rem; overflow-x: auto;"><code>${db.connectionFormat}</code></pre>
                                     <pre style="background: #e0e7ff; padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem; font-size: 0.8rem; overflow-x: auto; color: #1e3a8a;"><code>${db.example}</code></pre>
                                 </div>
-                                ${db.queryFormat ? `
+                                ${db.queryFormat ? HtmlSafe.html`
                                 <div style="margin-bottom: 1rem;">
                                     <strong style="color: #4b5563;">Query Parameter Format:</strong>
                                     <p style="color: #6b7280; font-size: 0.875rem; margin-top: 0.5rem;">${db.queryFormat}</p>
                                     <pre style="background: #f3f4f6; padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem; font-size: 0.8rem; overflow-x: auto;"><code>${db.queryExample}</code></pre>
                                 </div>
                                 ` : ''}
-                                ${db.features && db.features.length > 0 ? `
+                                ${db.features && db.features.length > 0 ? HtmlSafe.html`
                                 <div>
                                     <strong style="color: #4b5563;">Special Features:</strong>
                                     <ul style="margin-top: 0.5rem; padding-left: 1.5rem; color: #6b7280; font-size: 0.875rem;">
-                                        ${db.features.map(f => `<li>${f}</li>`).join('')}
+                                        ${db.features.map(f => HtmlSafe.html`<li>${f}</li>`)}
                                     </ul>
                                 </div>
                                 ` : ''}
                             </div>
                         </details>
                         `;
-                    }).join('')}
+                    })}
                 </div>
                 ` : ''}
 
-                ${docs.noCodeFeatures ? `
+                ${docs.noCodeFeatures ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-magic"></i> NO-CODE Features
                     </h4>
-                    ${docs.noCodeFeatures.map(feature => `
+                    ${docs.noCodeFeatures.map(feature => HtmlSafe.html`
                         <div style="margin-bottom: 1rem; padding: 1rem; background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%); border-left: 4px solid #667eea; border-radius: 4px;">
                             <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 0.5rem;">
                                 ${feature.feature}
@@ -1016,32 +1016,32 @@ class PropertiesPanel {
                             <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 0.5rem;"><strong>How:</strong> ${feature.howTo}</p>
                             <p style="color: #059669; font-size: 0.875rem;"><strong>Benefit:</strong> ${feature.benefit}</p>
                         </div>
-                    `).join('')}
+                    `)}
                 </div>
                 ` : ''}
 
-                ${docs.workflow ? `
+                ${docs.workflow ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-list-ol"></i> Configuration Workflow
                     </h4>
                     <ol style="padding-left: 1.5rem; color: #4b5563; line-height: 2;">
-                        ${docs.workflow.map(w => `
+                        ${docs.workflow.map(w => HtmlSafe.html`
                             <li>
                                 <strong style="color: #1e3a8a;">${w.action}</strong>
                                 <div style="color: #6b7280; font-size: 0.875rem; margin-top: 0.25rem;">${w.description}</div>
                             </li>
-                        `).join('')}
+                        `)}
                     </ol>
                 </div>
                 ` : ''}
 
-                ${docs.bestPractices ? `
+                ${docs.bestPractices ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-star"></i> Best Practices
                     </h4>
-                    ${docs.bestPractices.map(bp => `
+                    ${docs.bestPractices.map(bp => HtmlSafe.html`
                         <div style="margin-bottom: 1rem; padding: 1rem; background: #ecfdf5; border-left: 4px solid #10b981; border-radius: 4px;">
                             <div style="font-weight: 600; color: #065f46; margin-bottom: 0.5rem;">
                                 ${bp.practice}
@@ -1049,16 +1049,16 @@ class PropertiesPanel {
                             <p style="color: #4b5563; margin-bottom: 0.5rem; font-size: 0.875rem;"><strong>Why:</strong> ${bp.reason}</p>
                             <p style="color: #6b7280; font-size: 0.875rem;"><strong>Example:</strong> ${bp.example}</p>
                         </div>
-                    `).join('')}
+                    `)}
                 </div>
                 ` : ''}
 
-                ${docs.troubleshooting ? `
+                ${docs.troubleshooting ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-wrench"></i> Troubleshooting
                     </h4>
-                    ${docs.troubleshooting.map(t => `
+                    ${docs.troubleshooting.map(t => HtmlSafe.html`
                         <details style="margin-bottom: 0.75rem; border: 1px solid #fee2e2; border-radius: 6px; background: #fef2f2;">
                             <summary style="padding: 0.75rem; cursor: pointer; font-weight: 600; color: #991b1b;">
                                 ${t.issue}
@@ -1068,16 +1068,16 @@ class PropertiesPanel {
                                 <p style="color: #059669; font-size: 0.875rem;"><strong>Fix:</strong> ${t.fix}</p>
                             </div>
                         </details>
-                    `).join('')}
+                    `)}
                 </div>
                 ` : ''}
 
-                ${docs.securityNotes ? `
+                ${docs.securityNotes ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-shield-alt"></i> Security Notes
                     </h4>
-                    ${docs.securityNotes.map(sn => `
+                    ${docs.securityNotes.map(sn => HtmlSafe.html`
                         <div style="margin-bottom: 1rem; padding: 1rem; background: #fff7ed; border-left: 4px solid #f97316; border-radius: 4px;">
                             <div style="font-weight: 600; color: #9a3412; margin-bottom: 0.5rem;">
                                 ${sn.note}
@@ -1085,16 +1085,16 @@ class PropertiesPanel {
                             <p style="color: #4b5563; margin-bottom: 0.5rem; font-size: 0.875rem;">${sn.detail}</p>
                             <p style="color: #059669; font-size: 0.875rem;"><strong>Recommendation:</strong> ${sn.recommendation}</p>
                         </div>
-                    `).join('')}
+                    `)}
                 </div>
                 ` : ''}
 
-                ${docs.accessMethods ? `
+                ${docs.accessMethods ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-code-branch"></i> Access Methods
                     </h4>
-                    ${docs.accessMethods.map(am => `
+                    ${docs.accessMethods.map(am => HtmlSafe.html`
                         <div style="margin-bottom: 1rem; padding: 1rem; background: #f0f9ff; border-left: 4px solid #0284c7; border-radius: 4px;">
                             <div style="font-weight: 600; color: #075985; margin-bottom: 0.5rem;">
                                 ${am.method}
@@ -1104,15 +1104,15 @@ class PropertiesPanel {
                             <details style="margin-top: 0.5rem;">
                                 <summary style="cursor: pointer; color: #0284c7; font-size: 0.875rem; font-weight: 600;">View Examples</summary>
                                 <ul style="margin-top: 0.5rem; padding-left: 1.5rem; font-size: 0.875rem;">
-                                    ${am.examples.map(ex => `<li><code style="background: white; padding: 0.2rem 0.5rem; border-radius: 3px;">${ex}</code></li>`).join('')}
+                                    ${am.examples.map(ex => HtmlSafe.html`<li><code style="background: white; padding: 0.2rem 0.5rem; border-radius: 3px;">${ex}</code></li>`)}
                                 </ul>
                             </details>
                         </div>
-                    `).join('')}
+                    `)}
                 </div>
                 ` : ''}
 
-                ${docs.stepOutputStructure ? `
+                ${docs.stepOutputStructure ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-sitemap"></i> Step Output Structure Examples
@@ -1120,7 +1120,7 @@ class PropertiesPanel {
                     <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 1rem;">Click to expand and see the data structure for each step type.</p>
                     ${Object.keys(docs.stepOutputStructure).map(stepType => {
                         const structure = docs.stepOutputStructure[stepType];
-                        return `
+                        return HtmlSafe.html`
                         <details style="margin-bottom: 0.75rem; border: 1px solid #e5e7eb; border-radius: 6px; background: #f9fafb;">
                             <summary style="padding: 0.75rem; cursor: pointer; font-weight: 600; color: #1e3a8a;">
                                 ${stepType.replace(/_/g, ' ').toUpperCase()}
@@ -1130,11 +1130,11 @@ class PropertiesPanel {
                             </div>
                         </details>
                         `;
-                    }).join('')}
+                    })}
                 </div>
                 ` : ''}
 
-                ${docs.oobTemplates ? `
+                ${docs.oobTemplates ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-table"></i> Built-in Templates
@@ -1149,19 +1149,19 @@ class PropertiesPanel {
                             </tr>
                         </thead>
                         <tbody>
-                            ${docs.oobTemplates.map(t => `
+                            ${docs.oobTemplates.map(t => HtmlSafe.html`
                                 <tr>
                                     <td style="padding: 0.6rem; border: 1px solid #e5e7eb;"><code style="background: #e0e7ff; padding: 0.2rem 0.4rem; border-radius: 3px;">${t.key}</code></td>
                                     <td style="padding: 0.6rem; border: 1px solid #e5e7eb; font-weight: 500;">${t.name}</td>
                                     <td style="padding: 0.6rem; border: 1px solid #e5e7eb; color: #6b7280;">${t.note}</td>
                                 </tr>
-                            `).join('')}
+                            `)}
                         </tbody>
                     </table>
                 </div>
                 ` : ''}
 
-                ${docs.oobTemplatesLive ? `
+                ${docs.oobTemplatesLive ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-table"></i> Built-in Templates
@@ -1182,7 +1182,7 @@ class PropertiesPanel {
                 </div>
                 ` : ''}
 
-                ${docs.stepOutput ? `
+                ${docs.stepOutput ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-poll"></i> Step Output Variables
@@ -1197,19 +1197,19 @@ class PropertiesPanel {
                             </tr>
                         </thead>
                         <tbody>
-                            ${docs.stepOutput.fields.map(f => `
+                            ${docs.stepOutput.fields.map(f => HtmlSafe.html`
                                 <tr>
                                     <td style="padding: 0.6rem; border: 1px solid #e5e7eb;"><code style="background: #dcfce7; padding: 0.2rem 0.4rem; border-radius: 3px; color: #166534;">${f.name}</code></td>
                                     <td style="padding: 0.6rem; border: 1px solid #e5e7eb;"><code style="font-size: 0.8rem;">${f.type}</code></td>
                                     <td style="padding: 0.6rem; border: 1px solid #e5e7eb; color: #4b5563;">${f.description}</td>
                                 </tr>
-                            `).join('')}
+                            `)}
                         </tbody>
                     </table>
                 </div>
                 ` : ''}
 
-                ${docs.parameters ? `
+                ${docs.parameters ? HtmlSafe.html`
                 <div class="doc-section">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-cog"></i> Field Reference
@@ -1230,20 +1230,20 @@ class PropertiesPanel {
                                 const nameColor = depth === 0 ? '#059669' : depth === 1 ? '#0891b2' : '#7c3aed';
                                 const prefix = depth > 0 ? '└ ' : '';
                                 const rowBg = depth > 0 ? 'background: #fafafa;' : '';
-                                return `
+                                return HtmlSafe.html`
                                 <tr style="${rowBg}">
                                     <td style="${indent} padding-top: 0.6rem; padding-bottom: 0.6rem; border: 1px solid #e5e7eb; font-family: monospace; color: ${nameColor}; white-space: nowrap;">${prefix}${p.name}</td>
                                     <td style="padding: 0.6rem 0.75rem; border: 1px solid #e5e7eb;"><code style="font-size: 0.85rem;">${p.type}</code></td>
                                     <td style="padding: 0.6rem 0.75rem; border: 1px solid #e5e7eb; text-align: center;">${p.required ? '✓' : '-'}</td>
                                     <td style="padding: 0.6rem 0.75rem; border: 1px solid #e5e7eb; line-height: 1.5;">${p.description}</td>
                                 </tr>`;
-                            }).join('')}
+                            })}
                         </tbody>
                     </table>
                 </div>
                 ` : ''}
 
-                ${docs.assemblyRulesDoc ? `
+                ${docs.assemblyRulesDoc ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-microscope"></i> Assembly Rules Reference
@@ -1267,39 +1267,39 @@ class PropertiesPanel {
                                 const isObs = r.key.startsWith('obs_');
                                 const bg = i % 2 === 0 ? '' : 'background:#fafafa;';
                                 const groupBorder = !isObs && docs.assemblyRulesDoc[i-1]?.key.startsWith('obs_') ? 'border-top: 2px solid #e5e7eb;' : '';
-                                return `<tr style="${bg}${groupBorder}">
+                                return HtmlSafe.html`<tr style="${bg}${groupBorder}">
                                     <td style="padding: 0.55rem 0.75rem; border: 1px solid #e5e7eb; font-family: monospace; font-size: 0.78rem; color: #7c3aed; white-space: nowrap;">${r.key}</td>
                                     <td style="padding: 0.55rem 0.75rem; border: 1px solid #e5e7eb; white-space: nowrap;"><code style="background:#dbeafe;padding:1px 5px;border-radius:3px;color:#1e3a8a;font-size:0.78rem;">${r.src}</code></td>
                                     <td style="padding: 0.55rem 0.75rem; border: 1px solid #e5e7eb; white-space: nowrap;"><code style="background:#fce7f3;padding:1px 5px;border-radius:3px;color:#831843;font-size:0.78rem;">${r.fhir}</code></td>
                                     <td style="padding: 0.55rem 0.75rem; border: 1px solid #e5e7eb; line-height: 1.5; color: #374151;">${r.desc}</td>
                                 </tr>`;
-                            }).join('')}
+                            })}
                         </tbody>
                     </table>
                 </div>
                 ` : ''}
 
-                ${docs.actions ? `
+                ${docs.actions ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-bolt"></i> Available Actions
                     </h4>
                     <div style="display: grid; gap: 0.75rem;">
-                        ${docs.actions.map(a => `
+                        ${docs.actions.map(a => HtmlSafe.html`
                             <div style="padding: 1rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;">
                                 <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
                                     <code style="background: #3b82f6; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600;">${a.action}</code>
                                 </div>
                                 <p style="color: #475569; font-size: 0.875rem; margin-bottom: 0.5rem;">${a.description}</p>
                                 <p style="color: #64748b; font-size: 0.8rem;"><strong>Use for:</strong> ${a.usedFor}</p>
-                                ${a.parameters ? `<p style="color: #64748b; font-size: 0.8rem;"><strong>Parameters:</strong> ${a.parameters}</p>` : ''}
+                                ${a.parameters ? HtmlSafe.html`<p style="color: #64748b; font-size: 0.8rem;"><strong>Parameters:</strong> ${a.parameters}</p>` : ''}
                             </div>
-                        `).join('')}
+                        `)}
                     </div>
                 </div>
                 ` : ''}
 
-                ${docs.multiStepRouting ? `
+                ${docs.multiStepRouting ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-route"></i> ${docs.multiStepRouting.title}
@@ -1309,11 +1309,11 @@ class PropertiesPanel {
                     <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
                         <h5 style="color: #0369a1; margin-bottom: 0.5rem;">How to Use</h5>
                         <ol style="padding-left: 1.5rem; color: #0369a1; font-size: 0.875rem; line-height: 1.8;">
-                            ${docs.multiStepRouting.howToUse.map(step => `<li>${step}</li>`).join('')}
+                            ${docs.multiStepRouting.howToUse.map(step => HtmlSafe.html`<li>${step}</li>`)}
                         </ol>
                     </div>
 
-                    ${docs.multiStepRouting.example ? `
+                    ${docs.multiStepRouting.example ? HtmlSafe.html`
                     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 1rem;">
                         <h5 style="color: #334155; margin-bottom: 0.5rem;">Example: ${docs.multiStepRouting.example.scenario}</h5>
                         <pre style="background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 4px; font-size: 0.8rem; overflow-x: auto;"><code>${JSON.stringify(docs.multiStepRouting.example.config, null, 2)}</code></pre>
@@ -1323,12 +1323,12 @@ class PropertiesPanel {
                 </div>
                 ` : ''}
 
-                ${docs.comparisonWithIfThenElse ? `
+                ${docs.comparisonWithIfThenElse ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-balance-scale"></i> ${docs.comparisonWithIfThenElse.title}
                     </h4>
-                    ${docs.comparisonWithIfThenElse.description ? `<p style="color: #4b5563; margin-bottom: 1rem;">${docs.comparisonWithIfThenElse.description}</p>` : ''}
+                    ${docs.comparisonWithIfThenElse.description ? HtmlSafe.html`<p style="color: #4b5563; margin-bottom: 1rem;">${docs.comparisonWithIfThenElse.description}</p>` : ''}
                     <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
                         <thead>
                             <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
@@ -1338,16 +1338,16 @@ class PropertiesPanel {
                             </tr>
                         </thead>
                         <tbody>
-                            ${docs.comparisonWithIfThenElse.comparison.map((row, i) => `
+                            ${docs.comparisonWithIfThenElse.comparison.map((row, i) => HtmlSafe.html`
                                 <tr style="background: ${i % 2 === 0 ? '#f8fafc' : 'white'};">
                                     <td style="padding: 0.75rem; border: 1px solid #e5e7eb; font-weight: 600; color: #334155;">${row.feature}</td>
                                     <td style="padding: 0.75rem; border: 1px solid #e5e7eb; color: #059669;">${row.switchCase}</td>
                                     <td style="padding: 0.75rem; border: 1px solid #e5e7eb; color: #7c3aed;">${row.ifThenElse}</td>
                                 </tr>
-                            `).join('')}
+                            `)}
                         </tbody>
                     </table>
-                    ${docs.comparisonWithIfThenElse.recommendation ? `
+                    ${docs.comparisonWithIfThenElse.recommendation ? HtmlSafe.html`
                     <div style="margin-top: 1rem; padding: 0.75rem; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px;">
                         <p style="color: #92400e; font-size: 0.875rem; margin: 0;"><strong>Recommendation:</strong> ${docs.comparisonWithIfThenElse.recommendation}</p>
                     </div>
@@ -1355,7 +1355,7 @@ class PropertiesPanel {
                 </div>
                 ` : ''}
 
-                ${docs.transformReference ? `
+                ${docs.transformReference ? HtmlSafe.html`
                 <div class="doc-section" style="margin-bottom: 1.5rem;">
                     <h4 style="color: #2563eb; margin-bottom: 0.5rem;">
                         <i class="fas fa-exchange-alt"></i> Available Transforms
@@ -1381,7 +1381,7 @@ class PropertiesPanel {
                     if (!ct) { detail.style.display = 'none'; return; }
                     const scriptRows = ct.example && JSON.stringify(ct.example, null, 2).replace(/\\n/g, '\n');
                     detail.style.display = '';
-                    detail.innerHTML = `
+                    detail.innerHTML = HtmlSafe.html`
                         <div style="border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;overflow:hidden;">
                             <div style="padding:0.7rem 1rem;background:#1e3a8a;color:white;display:flex;align-items:center;gap:0.6rem;">
                                 <span style="font-size:1.1rem;">${ct.icon}</span>
@@ -1391,12 +1391,12 @@ class PropertiesPanel {
                             </div>
                             <div style="padding:0.75rem 1rem;">
                                 <p style="color:#4b5563;font-size:0.875rem;margin-bottom:0.6rem;">${ct.description}</p>
-                                ${ct.notes ? `<p style="color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:4px;padding:0.4rem 0.7rem;font-size:0.8rem;margin-bottom:0.6rem;"><strong>⚠ Note:</strong> ${ct.notes}</p>` : ''}
+                                ${ct.notes ? HtmlSafe.html`<p style="color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:4px;padding:0.4rem 0.7rem;font-size:0.8rem;margin-bottom:0.6rem;"><strong>⚠ Note:</strong> ${ct.notes}</p>` : ''}
                                 <div style="margin-bottom:0.75rem;">
                                     <strong style="font-size:0.8rem;color:#374151;">Required fields: </strong>
-                                    ${ct.required.map(f => `<code style="background:#fee2e2;color:#991b1b;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.75rem;margin-right:3px;">${f}</code>`).join('')}
+                                    ${ct.required.map(f => HtmlSafe.html`<code style="background:#fee2e2;color:#991b1b;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.75rem;margin-right:3px;">${f}</code>`)}
                                 </div>
-                                ${ct.keyFields && ct.keyFields.length ? `
+                                ${ct.keyFields && ct.keyFields.length ? HtmlSafe.html`
                                 <table style="width:100%;border-collapse:collapse;font-size:0.8rem;margin-bottom:0.75rem;">
                                     <thead><tr style="background:#f3f4f6;">
                                         <th style="padding:0.4rem 0.6rem;text-align:left;border:1px solid #e5e7eb;">Field</th>
@@ -1404,12 +1404,12 @@ class PropertiesPanel {
                                         <th style="padding:0.4rem 0.6rem;text-align:left;border:1px solid #e5e7eb;">Default</th>
                                         <th style="padding:0.4rem 0.6rem;text-align:left;border:1px solid #e5e7eb;">Notes</th>
                                     </tr></thead>
-                                    <tbody>${ct.keyFields.map(f => `<tr>
-                                        <td style="padding:0.4rem 0.6rem;border:1px solid #e5e7eb;font-family:monospace;color:#0891b2;">${f.name}${f.required?' <span style="color:#ef4444">*</span>':''}</td>
+                                    <tbody>${ct.keyFields.map(f => HtmlSafe.html`<tr>
+                                        <td style="padding:0.4rem 0.6rem;border:1px solid #e5e7eb;font-family:monospace;color:#0891b2;">${f.name}${f.required?HtmlSafe.raw(' <span style="color:#ef4444">*</span>'):''}</td>
                                         <td style="padding:0.4rem 0.6rem;border:1px solid #e5e7eb;"><code>${f.type}</code></td>
                                         <td style="padding:0.4rem 0.6rem;border:1px solid #e5e7eb;color:#6b7280;">${f.default || '—'}</td>
                                         <td style="padding:0.4rem 0.6rem;border:1px solid #e5e7eb;color:#4b5563;">${f.notes || ''}</td>
-                                    </tr>`).join('')}</tbody>
+                                    </tr>`)}</tbody>
                                 </table>` : ''}
                                 <details style="margin-top:0.25rem;">
                                     <summary style="cursor:pointer;color:#2563eb;font-size:0.8rem;font-weight:600;">📋 View example config</summary>
@@ -1450,7 +1450,7 @@ class PropertiesPanel {
         const searchEl = container.querySelector('#cdaTransformRefSearch');
         if (!listEl) return;
 
-        const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const txt = s => String(s ?? ''); // escaped once, by HtmlSafe.html
 
         let transforms = {};
         try {
@@ -1476,11 +1476,11 @@ class PropertiesPanel {
                 listEl.innerHTML = '<div style="padding:1rem;color:#9ca3af;font-size:0.85rem;">No matching transforms.</div>';
                 return;
             }
-            listEl.innerHTML = matches.map(n => `
+            listEl.innerHTML = HtmlSafe.html`${matches.map(n => HtmlSafe.html`
                 <div style="padding:0.6rem 0.85rem;border-bottom:1px solid #f1f5f9;">
-                    <code style="background:#eef2ff;color:#4338ca;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.8rem;">${esc(n)}</code>
-                    <div style="color:#4b5563;font-size:0.82rem;margin-top:0.3rem;">${esc(transforms[n] || '')}</div>
-                </div>`).join('');
+                    <code style="background:#eef2ff;color:#4338ca;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.8rem;">${n}</code>
+                    <div style="color:#4b5563;font-size:0.82rem;margin-top:0.3rem;">${transforms[n] || ''}</div>
+                </div>`)}`;
         };
 
         render('');
@@ -1499,7 +1499,7 @@ class PropertiesPanel {
         const bodyEl = container.querySelector('#oobTemplatesLiveBody');
         if (!bodyEl) return;
 
-        const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const txt = s => String(s ?? ''); // escaped once, by HtmlSafe.html
 
         let rows = [];
         try {
@@ -1517,13 +1517,13 @@ class PropertiesPanel {
             return;
         }
 
-        bodyEl.innerHTML = rows.map(r => `
+        bodyEl.innerHTML = HtmlSafe.html`${rows.map(r => HtmlSafe.html`
             <tr>
-                <td style="padding: 0.6rem; border: 1px solid #e5e7eb;"><code style="background: #e0e7ff; padding: 0.2rem 0.4rem; border-radius: 3px;">${esc(r.key)}</code></td>
-                <td style="padding: 0.6rem; border: 1px solid #e5e7eb; font-weight: 500;">${esc(r.name)}</td>
-                <td style="padding: 0.6rem; border: 1px solid #e5e7eb; color: #6b7280;">${esc(r.note)}</td>
+                <td style="padding: 0.6rem; border: 1px solid #e5e7eb;"><code style="background: #e0e7ff; padding: 0.2rem 0.4rem; border-radius: 3px;">${r.key}</code></td>
+                <td style="padding: 0.6rem; border: 1px solid #e5e7eb; font-weight: 500;">${r.name}</td>
+                <td style="padding: 0.6rem; border: 1px solid #e5e7eb; color: #6b7280;">${r.note}</td>
             </tr>
-        `).join('');
+        `)}`;
     }
 
     /**
@@ -1533,7 +1533,7 @@ class PropertiesPanel {
         const form = document.createElement('div');
         form.className = 'properties-form';
 
-        form.innerHTML = `
+        form.innerHTML = HtmlSafe.html`
             <h3 style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
                 <i class="${step.icon}"></i>
                 <span>Step Configuration</span>
@@ -1564,7 +1564,7 @@ class PropertiesPanel {
      * Create basic properties section
      */
     createBasicPropertiesSection(step) {
-        return `
+        return HtmlSafe.html`
             <div class="form-section">
                 <h4>Basic Properties</h4>
 
@@ -1587,7 +1587,7 @@ class PropertiesPanel {
      * Create execution properties section
      */
     createExecutionPropertiesSection(step) {
-        return `
+        return HtmlSafe.html`
             <div class="form-section">
                 <h4>Execution Settings</h4>
 
@@ -1659,12 +1659,12 @@ class PropertiesPanel {
         // Build inheritance badges
         let inheritanceBadge = '';
         if ((hasRetryDefault || hasEHDefault) && !hasStepRetry && !hasStepEH) {
-            inheritanceBadge = '<span style="font-size:10px; font-weight:normal; color:#3b82f6; background:rgba(59,130,246,0.1); padding:1px 6px; border-radius:4px;">Inherited</span>';
+            inheritanceBadge = HtmlSafe.raw('<span style="font-size:10px; font-weight:normal; color:#3b82f6; background:rgba(59,130,246,0.1); padding:1px 6px; border-radius:4px;">Inherited</span>');
         } else if ((hasRetryDefault || hasEHDefault) && (hasStepRetry || hasStepEH)) {
-            inheritanceBadge = '<span style="font-size:10px; font-weight:normal; color:#8b5cf6; background:rgba(139,92,246,0.1); padding:1px 6px; border-radius:4px;">Override</span>';
+            inheritanceBadge = HtmlSafe.raw('<span style="font-size:10px; font-weight:normal; color:#8b5cf6; background:rgba(139,92,246,0.1); padding:1px 6px; border-radius:4px;">Override</span>');
         }
 
-        return `
+        return HtmlSafe.html`
             <div class="form-section error-handling-section">
                 <h4 style="display:flex; align-items:center; gap:8px; cursor:pointer;" onclick="
                     const body = this.nextElementSibling;
@@ -1679,8 +1679,8 @@ class PropertiesPanel {
                 ">
                     <span class="eh-arrow" style="transition:0.2s; transform:rotate(${isEnabled || retryEnabled ? '90deg' : '0deg'}); font-size:12px;">&#9654;</span>
                     Error Handling & Retry
-                    ${isEnabled ? '<span style="font-size:10px; font-weight:normal; color:#ef4444; background:rgba(239,68,68,0.1); padding:1px 6px; border-radius:4px;">ERROR ON</span>' : ''}
-                    ${retryEnabled ? '<span style="font-size:10px; font-weight:normal; color:#8b5cf6; background:rgba(139,92,246,0.1); padding:1px 6px; border-radius:4px;">RETRY ON</span>' : ''}
+                    ${isEnabled ? HtmlSafe.raw('<span style="font-size:10px; font-weight:normal; color:#ef4444; background:rgba(239,68,68,0.1); padding:1px 6px; border-radius:4px;">ERROR ON</span>') : ''}
+                    ${retryEnabled ? HtmlSafe.raw('<span style="font-size:10px; font-weight:normal; color:#8b5cf6; background:rgba(139,92,246,0.1); padding:1px 6px; border-radius:4px;">RETRY ON</span>') : ''}
                     ${inheritanceBadge}
                 </h4>
                 <div style="display:${isEnabled || retryEnabled ? 'block' : 'none'};">
@@ -1797,7 +1797,7 @@ class PropertiesPanel {
         // Default JSON editor for other step types
         const configJSON = JSON.stringify(step.config, null, 2);
 
-        return `
+        return HtmlSafe.html`
             <div class="form-section">
                 <h4>Step Configuration</h4>
 
@@ -1863,7 +1863,7 @@ class PropertiesPanel {
         const mode    = interfaceId ? (mappingMode || 'oob') : 'oob';
         const modeObj = modeMeta[mode] || modeMeta.oob;
 
-        return `
+        return HtmlSafe.html`
             <div class="form-section">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
                     <h4 style="margin:0;">HL7→FHIR Mapping Configuration</h4>
@@ -1872,7 +1872,7 @@ class PropertiesPanel {
                               style="font-size:11px;padding:3px 10px;border-radius:12px;background:#f0fdf4;color:#166534;font-weight:600;cursor:help;border:1px solid #bbf7d0;font-family:monospace;">
                             ${messageType || 'unknown'}
                         </span>
-                        ${interfaceId ? `
+                        ${interfaceId ? HtmlSafe.html`
                         <span title="${modeObj.tip}"
                               style="font-size:11px;padding:3px 10px;border-radius:12px;background:${modeObj.bg};color:${modeObj.color};font-weight:600;cursor:help;border:1px solid ${modeObj.color}33;">
                             ${modeObj.label}
@@ -1971,16 +1971,16 @@ class PropertiesPanel {
                     <div id="mappingStatusBar" style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
                         <span id="mappingStatusText" style="color: #475569; font-size: 0.875rem;">
                             ${mappingSource === 'interface_ref'
-                                ? '<i class="fas fa-spinner fa-spin"></i> Loading mappings…'
-                                : `<strong>${mappingCount}</strong> mappings configured`
+                                ? HtmlSafe.raw('<i class="fas fa-spinner fa-spin"></i> Loading mappings…')
+                                : HtmlSafe.html`<strong>${mappingCount}</strong> mappings configured`
                             }
                             ${mappingSource === 'interface_ref' ? (() => {
                                 const modeLabels = { oob: '🔗 Tracking OOB template', delta: '⚡ OOB + custom additions', custom: '✏️ Fully custom' };
-                                return `<span style="margin-left:6px;font-size:11px;padding:2px 7px;border-radius:10px;background:#e0f2fe;color:#0369a1;font-weight:600;">${modeLabels[mappingMode] || mappingMode}</span>`;
+                                return HtmlSafe.html`<span style="margin-left:6px;font-size:11px;padding:2px 7px;border-radius:10px;background:#e0f2fe;color:#0369a1;font-weight:600;">${modeLabels[mappingMode] || mappingMode}</span>`;
                             })() : ''}
-                            ${mappingSource === 'embedded' ? '<span style="color: #059669; font-weight: 500;">(from wizard)</span>' : ''}
-                            ${mappingSource === 'config' && mappingCount > 0 ? '<span style="color: #3b82f6; font-weight: 500;">(custom)</span>' : ''}
-                            ${mappingSource === 'none' ? '<span style="color: #f59e0b; font-weight: 500;">(using standard template at runtime)</span>' : ''}
+                            ${mappingSource === 'embedded' ? HtmlSafe.raw('<span style="color: #059669; font-weight: 500;">(from wizard)</span>') : ''}
+                            ${mappingSource === 'config' && mappingCount > 0 ? HtmlSafe.raw('<span style="color: #3b82f6; font-weight: 500;">(custom)</span>') : ''}
+                            ${mappingSource === 'none' ? HtmlSafe.raw('<span style="color: #f59e0b; font-weight: 500;">(using standard template at runtime)</span>') : ''}
                         </span>
                         <div style="display: flex; gap: 0.5rem; align-items: center;">
                             <button id="loadStandardTemplateBtn" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;"
@@ -2008,7 +2008,7 @@ class PropertiesPanel {
                        data-message-type="${messageType || ''}"
                        data-mapping-mode="${mappingMode || 'oob'}">
                         ${mappingSource === 'interface_ref' || mappingSource === 'template_reference' ?
-                            '<div style="padding: 2rem; text-align: center; color: #64748b;"><i class="fas fa-spinner fa-spin fa-2x"></i><p style="margin-top: 1rem;">Loading mappings…</p></div>' :
+                            HtmlSafe.raw('<div style="padding: 2rem; text-align: center; color: #64748b;"><i class="fas fa-spinner fa-spin fa-2x"></i><p style="margin-top: 1rem;">Loading mappings…</p></div>') :
                             this.renderMappingTable(mappings)
                         }
                     </div>
@@ -2216,7 +2216,7 @@ class PropertiesPanel {
               example: '(no HL7 input needed)\n→ "category": [{"coding": [{"code": "LAB",\n    "system": "http://terminology.hl7.org/CodeSystem/v2-0074",\n    "display": "Laboratory"}]}]' },
         ];
 
-        const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const txt = s => String(s ?? ''); // escaped once, by HtmlSafe.html
 
         // ── Text Report Merging card ──────────────────────────────────────────
         const collapseOff    = rules.collapse_text_obx === false;
@@ -2226,17 +2226,17 @@ class PropertiesPanel {
 
         // Render existing service tags as chips
         const svcChipsHtml = existingSvcs.map(s =>
-            `<span class="merge-svc-chip" data-code="${esc(s.toUpperCase())}"
+            HtmlSafe.html`<span class="merge-svc-chip" data-code="${s.toUpperCase()}"
                 style="display:inline-flex;align-items:center;gap:3px;background:#fef3c7;border:1px solid #fcd34d;
                        border-radius:4px;padding:2px 7px;font-size:0.78rem;font-weight:600;color:#78350f;white-space:nowrap;">
-                <code style="background:none;font-size:0.78rem;">${esc(s.toUpperCase())}</code>
-                <button type="button" class="merge-svc-remove" data-code="${esc(s.toUpperCase())}"
+                <code style="background:none;font-size:0.78rem;">${s.toUpperCase()}</code>
+                <button type="button" class="merge-svc-remove" data-code="${s.toUpperCase()}"
                     style="background:none;border:none;cursor:pointer;color:#b45309;font-size:0.85rem;padding:0;line-height:1;"
-                    title="Remove ${esc(s.toUpperCase())}">×</button>
+                    title="Remove ${s.toUpperCase()}">×</button>
             </span>`
-        ).join('');
+        );
 
-        const mergeCard = `
+        const mergeCard = HtmlSafe.html`
         <div style="border:1px solid #d97706;border-radius:8px;overflow:hidden;margin-bottom:1rem;">
             <div style="padding:0.6rem 0.75rem;background:#fef9c3;border-bottom:1px solid #fde68a;display:flex;align-items:center;gap:0.5rem;">
                 <i class="fas fa-layer-group" style="color:#b45309;font-size:0.9rem;"></i>
@@ -2294,14 +2294,14 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                             never:      'Never merge (keep each OBX separate)',
                             by_service: 'Merge only for specific services (OBR.24)'
                         };
-                        return `<label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.83rem;color:#374151;">
+                        return HtmlSafe.html`<label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.83rem;color:#374151;">
                             <input type="radio" name="collapse_text_obx_mode" value="${m}"
                                 ${collapseMode === m ? 'checked' : ''}
                                 ${!masterOn ? 'disabled' : ''}
                                 style="accent-color:#b45309;cursor:pointer;">
                             ${labels[m]}
                         </label>`;
-                    }).join('')}
+                    })}
                 </div>
 
                 <!-- Service tag input (shown only in by_service mode) -->
@@ -2328,11 +2328,11 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     <div style="margin-top:0.45rem;font-size:0.74rem;color:#92400e;">
                         Common codes — click to add:
                         ${['AP','SP','RAD','NM','NMR','OTH','CH','MB','LAB'].map(c =>
-                            `<button type="button" class="merge-svc-hint" data-code="${c}"
+                            HtmlSafe.html`<button type="button" class="merge-svc-hint" data-code="${c}"
                                 style="background:#fef3c7;border:1px solid #fcd34d;border-radius:3px;
                                        padding:1px 6px;font-size:0.74rem;font-weight:600;color:#78350f;
                                        cursor:pointer;margin:0 2px;">${c}</button>`
-                        ).join('')}
+                        )}
                     </div>
 
                     <p style="font-size:0.74rem;color:#6b7280;margin:0.5rem 0 0;">
@@ -2353,32 +2353,32 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
         const ruleRow = (r) => {
             const on = masterOn && isEnabled(r.key);
-            const exampleHtml = r.example ? `
+            const exampleHtml = r.example ? HtmlSafe.html`
                 <details style="margin-top:5px;">
                     <summary style="font-size:0.72rem;color:#4f46e5;cursor:pointer;user-select:none;list-style:none;display:inline-flex;align-items:center;gap:3px;outline:none;">
                         <span style="font-size:0.65rem;">▸</span> Example
                     </summary>
                     <pre style="margin:4px 0 0;font-size:0.7rem;line-height:1.55;color:#1e3a8a;
                                 background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;
-                                padding:5px 7px;white-space:pre-wrap;overflow-x:auto;">${esc(r.example)}</pre>
+                                padding:5px 7px;white-space:pre-wrap;overflow-x:auto;">${r.example}</pre>
                 </details>` : '';
-            return `
+            return HtmlSafe.html`
             <tr style="border-bottom: 1px solid #f1f5f9; ${!on ? 'opacity:0.45;' : ''}">
                 <td style="padding: 0.6rem 0.75rem; white-space: nowrap; vertical-align:top;">
-                    <code style="background:#dbeafe;padding:2px 6px;border-radius:3px;color:#1e3a8a;font-size:0.78rem;">${esc(r.src)}</code>
+                    <code style="background:#dbeafe;padding:2px 6px;border-radius:3px;color:#1e3a8a;font-size:0.78rem;">${r.src}</code>
                 </td>
                 <td style="padding: 0.6rem 0.75rem; white-space: nowrap; vertical-align:top;">
-                    <code style="background:#fce7f3;padding:2px 6px;border-radius:3px;color:#831843;font-size:0.78rem;">${esc(r.fhir)}</code>
+                    <code style="background:#fce7f3;padding:2px 6px;border-radius:3px;color:#831843;font-size:0.78rem;">${r.fhir}</code>
                 </td>
                 <td style="padding: 0.6rem 0.75rem; vertical-align:top;">
-                    <div style="font-size:0.82rem;font-weight:600;color:#1e293b;">${esc(r.label)}</div>
-                    <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${esc(r.desc)}</div>
+                    <div style="font-size:0.82rem;font-weight:600;color:#1e293b;">${r.label}</div>
+                    <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${r.desc}</div>
                     ${exampleHtml}
                 </td>
                 <td style="padding: 0.6rem 0.75rem; text-align: center; vertical-align:top;">
                     <label style="cursor:pointer;display:inline-flex;align-items:center;" title="${on ? 'Disable this assembly rule' : 'Enable this assembly rule'}">
                         <input type="checkbox" class="assembly-rule-toggle"
-                            data-rule-key="${esc(r.key)}"
+                            data-rule-key="${r.key}"
                             ${isEnabled(r.key) ? 'checked' : ''}
                             ${!masterOn ? 'disabled' : ''}
                             style="width:15px;height:15px;cursor:pointer;accent-color:#1e3a8a;">
@@ -2387,7 +2387,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             </tr>`;
         };
 
-        return `
+        return HtmlSafe.html`
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
                 <div style="font-size:0.8rem;color:#64748b;">
                     OOB certified rules — disable any that conflict with your interface data.
@@ -2403,7 +2403,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
             ${mergeCard}
 
-            ${this._renderAttachmentEncodingCard(step, rules, masterOn, esc)}
+            ${this._renderAttachmentEncodingCard(step, rules, masterOn)}
 
             <!-- Observation rules -->
             <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:1rem;">
@@ -2421,7 +2421,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                             <th style="padding:0.5rem 0.75rem;text-align:center;font-size:0.75rem;color:#64748b;border-bottom:1px solid #f1f5f9;width:60px;">On</th>
                         </tr>
                     </thead>
-                    <tbody>${OBS_RULES.map(ruleRow).join('')}</tbody>
+                    <tbody>${OBS_RULES.map(ruleRow)}</tbody>
                 </table>
             </div>
 
@@ -2441,11 +2441,11 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                             <th style="padding:0.5rem 0.75rem;text-align:center;font-size:0.75rem;color:#64748b;border-bottom:1px solid #f1f5f9;width:60px;">On</th>
                         </tr>
                     </thead>
-                    <tbody>${DR_RULES.map(ruleRow).join('')}</tbody>
+                    <tbody>${DR_RULES.map(ruleRow)}</tbody>
                 </table>
             </div>
 
-            ${this._renderOptionalSegmentBlocks(step, rules, esc)}
+            ${this._renderOptionalSegmentBlocks(step, rules)}
         `;
     }
 
@@ -2456,11 +2456,11 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
      *
      * Maps to assemblyRules.validate_base64 (default ON = validate).
      */
-    _renderAttachmentEncodingCard(step, rules, masterOn, esc) {
+    _renderAttachmentEncodingCard(step, rules, masterOn) {
         // validate_base64 defaults ON (undefined → checked).  Only explicit false = off.
         const validateOn = rules.validate_base64 !== false;
 
-        return `
+        return HtmlSafe.html`
         <div style="border:1px solid #0891b2;border-radius:8px;overflow:hidden;margin-bottom:1rem;">
             <div style="padding:0.6rem 0.75rem;background:#ecfeff;border-bottom:1px solid #a5f3fc;display:flex;align-items:center;gap:0.5rem;">
                 <i class="fas fa-paperclip" style="color:#0e7490;font-size:0.9rem;"></i>
@@ -2543,7 +2543,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
      * Each toggle writes to step.config.assemblyRules["opt_*"] via the
      * existing .assembly-rule-toggle event listener.
      */
-    _renderOptionalSegmentBlocks(step, rules, esc) {
+    _renderOptionalSegmentBlocks(step, rules) {
         const messageType = this.builder?.pipeline?.messageType || step.config?.message_type || '';
 
         // Registry of optional blocks. AppliesTo: event codes after "^".
@@ -2585,29 +2585,29 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         const optRows = applicable.map(b => {
             // Optional blocks default OFF: only checked when rules[key] === true explicitly.
             const isOn = rules[b.key] === true;
-            return `<tr style="border-bottom:1px solid #f1f5f9;opacity:${isOn ? '1' : '0.6'}">
+            return HtmlSafe.html`<tr style="border-bottom:1px solid #f1f5f9;opacity:${isOn ? '1' : '0.6'}">
                 <td style="padding:0.6rem 0.75rem;white-space:nowrap;vertical-align:top;">
-                    <code style="background:#dbeafe;padding:2px 6px;border-radius:3px;color:#1e3a8a;font-size:0.78rem;">${esc(b.src)}</code>
+                    <code style="background:#dbeafe;padding:2px 6px;border-radius:3px;color:#1e3a8a;font-size:0.78rem;">${b.src}</code>
                 </td>
                 <td style="padding:0.6rem 0.75rem;white-space:nowrap;vertical-align:top;">
-                    <code style="background:#fce7f3;padding:2px 6px;border-radius:3px;color:#831843;font-size:0.78rem;">${esc(b.fhir)}</code>
+                    <code style="background:#fce7f3;padding:2px 6px;border-radius:3px;color:#831843;font-size:0.78rem;">${b.fhir}</code>
                 </td>
                 <td style="padding:0.6rem 0.75rem;vertical-align:top;">
-                    <div style="font-size:0.82rem;font-weight:600;color:#1e293b;">${esc(b.label)}</div>
-                    <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${esc(b.desc)}</div>
+                    <div style="font-size:0.82rem;font-weight:600;color:#1e293b;">${b.label}</div>
+                    <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${b.desc}</div>
                 </td>
                 <td style="padding:0.6rem 0.75rem;text-align:center;vertical-align:top;">
                     <label style="cursor:pointer;display:inline-flex;align-items:center;" title="${isOn ? 'Disable' : 'Enable'} this optional resource">
                         <input type="checkbox" class="assembly-rule-toggle"
-                            data-rule-key="${esc(b.key)}"
+                            data-rule-key="${b.key}"
                             ${isOn ? 'checked' : ''}
                             style="width:15px;height:15px;cursor:pointer;accent-color:#16a34a;">
                     </label>
                 </td>
             </tr>`;
-        }).join('');
+        });
 
-        return `
+        return HtmlSafe.html`
             <!-- Optional output resources — OFF by default -->
             <div style="border:1px solid #bbf7d0;border-radius:8px;overflow:hidden;margin-top:1rem;">
                 <div style="padding:0.6rem 0.75rem;background:#f0fdf4;border-bottom:1px solid #bbf7d0;display:flex;align-items:center;gap:0.5rem;">
@@ -2681,7 +2681,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
      */
     renderMappingTable(mappings) {
         if (!mappings || mappings.length === 0) {
-            return `
+            return HtmlSafe.html`
                 <div style="padding: 2rem; text-align: center; color: #94a3b8;">
                     <i class="fas fa-inbox" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;"></i>
                     <p>No mappings configured</p>
@@ -2715,8 +2715,8 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             // Source column: show HL7 field or a "Static" indicator
             const hl7FieldRaw  = mapping.hl7Field || mapping.sourceField || mapping.sourcePath || '';
             const hl7Field     = isStatic
-                ? `<em style="color:#059669;font-size:0.78rem;">static: "${staticVal}"</em>`
-                : `<code style="background:#dbeafe;padding:2px 7px;border-radius:3px;color:#1e3a8a;font-weight:500;font-size:0.82rem;">${hl7FieldRaw || 'N/A'}</code>`;
+                ? HtmlSafe.html`<em style="color:#059669;font-size:0.78rem;">static: "${staticVal}"</em>`
+                : HtmlSafe.html`<code style="background:#dbeafe;padding:2px 7px;border-radius:3px;color:#1e3a8a;font-weight:500;font-size:0.82rem;">${hl7FieldRaw || 'N/A'}</code>`;
 
             // Transform badge — inlined so it works on pipeline-builder.html
             // regardless of whether WizardView.js is loaded.
@@ -2737,14 +2737,14 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             };
             let transformBadge = '';
             if (isStatic) {
-                transformBadge = `<span style="display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:600;background:#dcfce7;color:#166534;border:1px solid #bbf7d0;white-space:nowrap;">Static</span>`;
+                transformBadge = HtmlSafe.html`<span style="display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:600;background:#dcfce7;color:#166534;border:1px solid #bbf7d0;white-space:nowrap;">Static</span>`;
             } else if (transformType) {
                 const label = TRANSFORM_LABELS[transformType] || transformType;
-                transformBadge = `<span style="display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:600;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;white-space:nowrap;max-width:90px;overflow:hidden;text-overflow:ellipsis;" title="${transformType}">${label}</span>`;
+                transformBadge = HtmlSafe.html`<span style="display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:600;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;white-space:nowrap;max-width:90px;overflow:hidden;text-overflow:ellipsis;" title="${transformType}">${label}</span>`;
             } else {
-                transformBadge = `<span style="display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:500;background:#f3f4f6;color:#9ca3af;border:1px solid #e5e7eb;white-space:nowrap;" title="Auto-translate based on HL7 and FHIR data types">Auto</span>`;
+                transformBadge = HtmlSafe.html`<span style="display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:500;background:#f3f4f6;color:#9ca3af;border:1px solid #e5e7eb;white-space:nowrap;" title="Auto-translate based on HL7 and FHIR data types">Auto</span>`;
             }
-            return `
+            return HtmlSafe.html`
                 <tr class="mapping-row" data-index="${index}"
                     style="border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: background 0.15s;"
                     onclick="window.propertiesPanel.editMapping(${index})"
@@ -2781,7 +2781,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         const groupBlocks = [];
         groups.forEach((rows, rt) => {
             const style = this._resourceTypeStyle(rt);
-            groupBlocks.push(`
+            groupBlocks.push(HtmlSafe.html`
                 <div style="margin-bottom: 0.75rem; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
                     <div style="display:flex; align-items:center; justify-content:space-between;
                                 padding: 0.55rem 0.75rem; background: ${style.bg};
@@ -2805,20 +2805,20 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                                     <th style="padding:0.45rem 0.75rem; text-align:center; border-bottom:1px solid #f1f5f9; font-weight:600; font-size:0.78rem; color:#64748b; width:50px;"></th>
                                 </tr>
                             </thead>
-                            <tbody>${rows.map(renderRow).join('')}</tbody>
+                            <tbody>${rows.map(renderRow)}</tbody>
                         </table>
                     </div>
                 </div>`);
         });
 
-        return groupBlocks.join('');
+        return groupBlocks;
     }
 
     /**
      * Create script editor section
      */
     createScriptSection(step) {
-        return `
+        return HtmlSafe.html`
             <div class="form-section">
                 <h4>Custom Script</h4>
 
@@ -3023,7 +3023,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             chip.className = 'merge-svc-chip';
             chip.dataset.code = cleaned;
             chip.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:#fef3c7;border:1px solid #fcd34d;border-radius:4px;padding:2px 7px;font-size:0.78rem;font-weight:600;color:#78350f;white-space:nowrap;';
-            chip.innerHTML = `<code style="background:none;font-size:0.78rem;">${cleaned}</code>
+            chip.innerHTML = HtmlSafe.html`<code style="background:none;font-size:0.78rem;">${cleaned}</code>
                 <button type="button" class="merge-svc-remove" data-code="${cleaned}"
                     style="background:none;border:none;cursor:pointer;color:#b45309;font-size:0.85rem;padding:0;line-height:1;"
                     title="Remove ${cleaned}">×</button>`;
@@ -4023,7 +4023,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
         statusDiv.style.display = 'flex';
         statusDiv.className = isValid ? 'json-validation-status json-valid' : 'json-validation-status json-invalid';
-        statusDiv.innerHTML = `
+        statusDiv.innerHTML = HtmlSafe.html`
             <i class="fas fa-${isValid ? 'check-circle' : 'exclamation-triangle'}"></i>
             <span>${message}</span>
         `;
@@ -4067,7 +4067,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
         const mappings = step.config.mappings || [];
 
-        return `
+        return HtmlSafe.html`
             <div class="form-section">
                 <h4 style="color: #1e3a8a; margin-bottom: 1rem; font-weight: 600;">Variable Assignments</h4>
 
@@ -4153,10 +4153,10 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
                 <!-- Assignments List -->
                 <div id="genericMappingsList" style="margin-top: 1rem;">
-                    ${mappings.length > 0 ? `
+                    ${mappings.length > 0 ? HtmlSafe.html`
                         <h5 style="color: #1e3a8a; margin-bottom: 0.5rem; font-weight: 600; font-size: 0.9rem;">Configured Variables (${mappings.length}):</h5>
                         <div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
-                            ${mappings.map((mapping, index) => `
+                            ${mappings.map((mapping, index) => HtmlSafe.html`
                                 <div id="mapping-row-${index}" style="display: flex; align-items: center; gap: 12px; padding: 12px; border-bottom: 1px solid #e2e8f0; transition: background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
                                     <div style="flex: 1;">
                                         <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 2px;">Variable:</div>
@@ -4193,7 +4193,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                                         🗑️
                                     </button>
                                 </div>
-                            `).join('')}
+                            `)}
                         </div>
                     ` : ''}
                 </div>
@@ -4230,7 +4230,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
         const section = document.createElement('div');
         section.className = 'form-section';
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
             <h4 style="color: var(--primary-color); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
                 <i class="fas fa-code-branch"></i>
                 Conditional Logic Configuration
@@ -4251,7 +4251,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             }
         }, 0);
 
-        return section.outerHTML;
+        return HtmlSafe.raw(section.outerHTML); // serialized DOM built from HtmlSafe templates
     }
 
     /**
@@ -4266,7 +4266,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
         const section = document.createElement('div');
         section.className = 'form-section';
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
             <div id="switch-case-builder-container" style="margin-top: 1rem;"></div>
         `;
 
@@ -4293,7 +4293,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             }
         }, 0);
 
-        return section.outerHTML;
+        return HtmlSafe.raw(section.outerHTML); // serialized DOM built from HtmlSafe templates
     }
 
     /**
@@ -4308,7 +4308,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
         const section = document.createElement('div');
         section.className = 'form-section';
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
             <div id="loop-container-builder-container" style="margin-top: 1rem;"></div>
         `;
 
@@ -4335,7 +4335,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             }
         }, 0);
 
-        return section.outerHTML;
+        return HtmlSafe.raw(section.outerHTML); // serialized DOM built from HtmlSafe templates
     }
 
     /**
@@ -4349,7 +4349,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
         const section = document.createElement('div');
         section.className = 'form-section';
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
             <div id="connector-config-builder-container" style="margin-top: 1rem;"></div>
         `;
 
@@ -4369,7 +4369,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             } else {
                 console.error('ConnectorConfigBuilder not loaded or container not found');
                 if (container) {
-                    container.innerHTML = `
+                    container.innerHTML = HtmlSafe.html`
                         <div class="alert alert-warning" style="margin: 12px 0;">
                             <i class="fas fa-exclamation-triangle"></i>
                             Connector configuration builder not available. Ensure ConnectorConfigBuilder.js is loaded.
@@ -4379,7 +4379,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             }
         }, 0);
 
-        return section.outerHTML;
+        return HtmlSafe.raw(section.outerHTML); // serialized DOM built from HtmlSafe templates
     }
 
     /**
@@ -4424,29 +4424,29 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         // Build resource checkboxes
         let resourceCheckboxesHtml = commonResources.map(res => {
             const checked = requiredResources.includes(res.value) ? 'checked' : '';
-            return `<label class="fhir-resource-checkbox" title="${res.desc}">
+            return HtmlSafe.html`<label class="fhir-resource-checkbox" title="${res.desc}">
                 <input type="checkbox" name="fhir_required_resource" value="${res.value}" ${checked}>
                 <span class="fhir-resource-name">${res.value}</span>
                 <span class="fhir-resource-desc">${res.desc}</span>
             </label>`;
-        }).join('');
+        });
 
         // Custom resource chips (resources selected but not in the common 14)
         const commonValues = commonResources.map(r => r.value);
         const customResources = requiredResources.filter(r => !commonValues.includes(r));
         const customChipsHtml = customResources.map(r =>
-            `<span class="fhir-custom-resource-chip" data-resource="${r}">
+            HtmlSafe.html`<span class="fhir-custom-resource-chip" data-resource="${r}">
                 ${r}
                 <button type="button" class="remove-custom-resource-btn" title="Remove ${r}">&times;</button>
             </span>`
-        ).join('');
+        );
 
         const isBasic = validationLevel === 'basic';
         const toggleOpacity = isBasic ? '0.5' : '1';
 
         const section = document.createElement('div');
         section.className = 'form-section';
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
             <h4><i class="fas fa-shield-alt" style="color: var(--success-color, #28a745); margin-right: 6px;"></i>FHIR Validation Configuration</h4>
 
             <!-- Validation Level -->
@@ -4552,7 +4552,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             if (levelSelect) {
                 levelSelect.addEventListener('change', () => {
                     const level = levelSelect.value;
-                    if (levelDesc) levelDesc.innerHTML = levelDescriptions[level] || '';
+                    if (levelDesc) levelDesc.innerHTML = HtmlSafe.raw(levelDescriptions[level] || ''); // constant help text
                     const dim = level === 'basic' ? '0.5' : '1';
                     if (reqFieldsGroup) reqFieldsGroup.style.opacity = dim;
                     if (refsGroup) refsGroup.style.opacity = dim;
@@ -4593,7 +4593,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     const chip = document.createElement('span');
                     chip.className = 'fhir-custom-resource-chip';
                     chip.dataset.resource = value;
-                    chip.innerHTML = `${value} <button type="button" class="remove-custom-resource-btn" title="Remove ${value}">&times;</button>`;
+                    chip.innerHTML = HtmlSafe.html`${value} <button type="button" class="remove-custom-resource-btn" title="Remove ${value}">&times;</button>`;
                     chip.querySelector('.remove-custom-resource-btn').addEventListener('click', () => chip.remove());
                     chipsContainer.appendChild(chip);
                     customInput.value = '';
@@ -4628,7 +4628,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             }
         }, 0);
 
-        return section.outerHTML;
+        return HtmlSafe.raw(section.outerHTML); // serialized DOM built from HtmlSafe templates
     }
 
     /**
@@ -4778,7 +4778,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
     renderApiResponseMappingBuilder(container, initialMappings, step) {
         const extractors = initialMappings.extractors || [];
 
-        let html = `
+        const html = [HtmlSafe.html`
             <div class="api-response-mapping-builder">
                 <div class="mapping-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <span style="font-size: 12px; color: #666;">
@@ -4793,10 +4793,10 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                         font-size: 12px;
                     ">+ Add Variable</button>
                 </div>
-        `;
+        `];
 
         if (extractors.length === 0) {
-            html += `
+            html.push(HtmlSafe.html`
                 <div class="no-mappings" style="
                     padding: 20px;
                     background: #f5f5f5;
@@ -4808,12 +4808,12 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     <p style="margin: 0 0 10px 0;">No output variables configured.</p>
                     <p style="margin: 0; font-size: 12px;">Use "Test API Endpoint" above to test your API and click response fields to add them as output variables.</p>
                 </div>
-            `;
+            `);
         } else {
-            html += `<div class="mapping-list" style="display: flex; flex-direction: column; gap: 8px;">`;
+            html.push(HtmlSafe.html`<div class="mapping-list" style="display: flex; flex-direction: column; gap: 8px;">`);
 
             extractors.forEach((extractor, index) => {
-                html += `
+                html.push(HtmlSafe.html`
                     <div class="mapping-item" data-index="${index}" style="
                         display: flex;
                         align-items: center;
@@ -4825,14 +4825,14 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     ">
                         <div class="mapping-source" style="flex: 1; min-width: 0;">
                             <label style="font-size: 10px; color: #888; display: block;">Source Path</label>
-                            <input type="text" class="extractor-source-path" value="${this.builder.escapeHtml(extractor.sourcePath || '')}"
+                            <input type="text" class="extractor-source-path" value="${extractor.sourcePath || ''}"
                                    style="width: 100%; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;"
                                    placeholder="response.data.field">
                         </div>
                         <span style="color: #666; font-size: 16px;">→</span>
                         <div class="mapping-target" style="flex: 1; min-width: 0;">
                             <label style="font-size: 10px; color: #888; display: block;">Output Variable</label>
-                            <input type="text" class="extractor-target-field" value="${this.builder.escapeHtml(extractor.targetField || '')}"
+                            <input type="text" class="extractor-target-field" value="${extractor.targetField || ''}"
                                    style="width: 100%; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;"
                                    placeholder="variableName">
                         </div>
@@ -4845,15 +4845,15 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                             font-size: 16px;
                         " title="Remove mapping">×</button>
                     </div>
-                `;
+                `);
             });
 
-            html += `</div>`;
+            html.push(HtmlSafe.html`</div>`);
         }
 
-        html += `</div>`;
+        html.push(HtmlSafe.html`</div>`);
 
-        container.innerHTML = html;
+        container.innerHTML = HtmlSafe.html`${html}`;
 
         // Attach events
         const addBtn = container.querySelector('.add-mapping-btn');
@@ -5052,7 +5052,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             : {};
 
         // Create edit modal with NO-CODE enhancements
-        const editModalHTML = `
+        const editModalHTML = HtmlSafe.html`
             <div id="editMappingModal" class="modal" style="display: flex;">
                 <div class="modal-content" style="max-width: 700px;">
                     <div class="modal-header" style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color: white;">
@@ -5467,9 +5467,8 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         if (container) {
             const banner = document.createElement('div');
             banner.style.cssText = 'margin-top:0.4rem;padding:0.4rem 0.75rem;background:#d1fae5;border:1px solid #6ee7b7;border-radius:5px;font-size:0.8rem;color:#065f46;display:flex;justify-content:space-between;align-items:center;';
-            const esc = s => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            banner.innerHTML = '<span>✓ Selected: <strong>' + esc(detail.hl7Field) + '</strong> → <strong>' + esc(detail.fhirPath) + '</strong></span>'
-                + '<button type="button" style="background:none;border:none;cursor:pointer;font-size:0.8rem;color:#065f46;text-decoration:underline;" onclick="window.propertiesPanel._deactivateCompositePicker()">Change</button>';
+            banner.innerHTML = HtmlSafe.html`<span>✓ Selected: <strong>${detail.hl7Field}</strong> → <strong>${detail.fhirPath}</strong></span>
+                <button type="button" style="background:none;border:none;cursor:pointer;font-size:0.8rem;color:#065f46;text-decoration:underline;" onclick="window.propertiesPanel._deactivateCompositePicker()">Change</button>`;
             container.appendChild(banner);
         }
     }
@@ -5608,7 +5607,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 const messagesUrl = interfaceId
                     ? `/messages.html?interfaceId=${encodeURIComponent(interfaceId)}`
                     : '/messages.html';
-                content.innerHTML = `
+                content.innerHTML = HtmlSafe.html`
                     <div style="padding:1rem 1.25rem; font-size:0.82rem; color:#475569; line-height:1.7;">
                         <div style="display:flex; gap:0.6rem; align-items:flex-start; margin-bottom:0.75rem;">
                             <i class="fas fa-info-circle" style="color:#0369a1; margin-top:2px; flex-shrink:0;"></i>
@@ -5627,17 +5626,17 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
             // xpathTree.children = segments
             this._hl7BrowserSegments = data.xpathTree.children || [];
-            content.innerHTML = this._renderHL7BrowserSegments(this._hl7BrowserSegments);
+            content.innerHTML = HtmlSafe.html`${this._renderHL7BrowserSegments(this._hl7BrowserSegments)}`;
 
         } catch (err) {
-            content.innerHTML = `<div style="padding:1rem; text-align:center; color:#ef4444; font-size:0.82rem;">Failed to load: ${err.message}</div>`;
+            content.innerHTML = HtmlSafe.html`<div style="padding:1rem; text-align:center; color:#ef4444; font-size:0.82rem;">Failed to load: ${err.message}</div>`;
         }
     }
 
     _renderHL7BrowserSegments(segments) {
-        if (!segments || segments.length === 0) return '<div style="padding:1rem; text-align:center; color:#94a3b8; font-size:0.82rem;">No segments found</div>';
+        if (!segments || segments.length === 0) return HtmlSafe.raw('<div style="padding:1rem; text-align:center; color:#94a3b8; font-size:0.82rem;">No segments found</div>');
 
-        const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        const txt = s => String(s ?? ''); // escaped once, by HtmlSafe.html
 
         return segments.map((seg, si) => {
             // Each segment's fields are inside seg.children[0] (the "fields" node)
@@ -5651,49 +5650,49 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 const subfieldsNode = (fObj?.children || []).find(c => c.name === 'subfields');
                 if (subfieldsNode) subNodes.push(...(subfieldsNode.children || []));
 
-                const key  = esc(f.name);
-                const desc = esc(f.description || '');
-                const ex   = f.example != null ? esc(f.example) : '';
+                const key  = txt(f.name);
+                const desc = txt(f.description || '');
+                const ex   = f.example != null ? txt(f.example) : '';
 
                 const subRows = subNodes.map(sf => {
-                    const sk  = esc(sf.name);
-                    const sex = sf.example != null ? esc(sf.example) : '';
-                    return `<div class="hl7-field-row hl7-subfield-row" data-hl7key="${sk}"
+                    const sk  = txt(sf.name);
+                    const sex = sf.example != null ? txt(sf.example) : '';
+                    return HtmlSafe.html`<div class="hl7-field-row hl7-subfield-row" data-hl7key="${sk}"
                                 style="padding:0.28rem 0.75rem 0.28rem 2.5rem; display:flex; align-items:center; gap:0.5rem; cursor:pointer; border-bottom:1px solid #f1f5f9;"
                                 onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background=''"
-                                onclick="window.propertiesPanel.useHL7Field('${sk}')">
+                                data-field="${sk}" onclick="window.propertiesPanel.useHL7Field(this.dataset.field)">
                         <code style="min-width:70px; font-size:0.75rem; color:#6d28d9; background:#ede9fe; padding:1px 5px; border-radius:3px;">${sk}</code>
                         <span style="flex:1; font-size:0.75rem; color:#475569; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${sex ? `"${sex}"` : ''}</span>
                     </div>`;
-                }).join('');
+                });
 
-                return `<div class="hl7-field-row" data-hl7key="${key}"
+                return HtmlSafe.html`<div class="hl7-field-row" data-hl7key="${key}"
                             style="padding:0.32rem 0.75rem; display:flex; align-items:center; gap:0.5rem; cursor:pointer; border-bottom:1px solid #f1f5f9;"
                             onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background=''"
-                            onclick="window.propertiesPanel.useHL7Field('${key}')">
+                            data-field="${key}" onclick="window.propertiesPanel.useHL7Field(this.dataset.field)">
                     <code style="min-width:55px; font-size:0.78rem; color:#1e3a8a; background:#dbeafe; padding:1px 5px; border-radius:3px; flex-shrink:0;">${key}</code>
                     <span style="flex:1; font-size:0.78rem; color:#374151; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${desc}">${desc}</span>
-                    ${ex ? `<span style="font-size:0.73rem; color:#64748b; max-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0;" title="${ex}">"${ex}"</span>` : ''}
+                    ${ex ? HtmlSafe.html`<span style="font-size:0.73rem; color:#64748b; max-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0;" title="${ex}">"${ex}"</span>` : ''}
                 </div>${subRows}`;
-            }).join('');
+            });
 
-            const segName = esc(seg.name);
-            const segDesc = esc(seg.description || '');
+            const segName = txt(seg.name);
+            const segDesc = txt(seg.description || '');
             const isZ     = seg.name.startsWith('Z');
 
-            return `<div class="hl7-browser-segment" data-segment="${segName}">
+            return HtmlSafe.html`<div class="hl7-browser-segment" data-segment="${segName}">
                 <div style="padding:0.4rem 0.75rem; background:${isZ ? '#fef9c3' : '#f8fafc'}; border-bottom:1px solid #e2e8f0;
                             display:flex; align-items:center; gap:0.5rem; cursor:pointer; user-select:none;"
                      onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display==='none' ? 'block' : 'none'">
                     <i class="fas fa-caret-right" style="font-size:0.7rem; color:#94a3b8;"></i>
                     <code style="font-size:0.8rem; font-weight:700; color:${isZ ? '#92400e' : '#1e3a8a'};">${segName}</code>
                     <span style="font-size:0.78rem; color:#64748b;">${segDesc}</span>
-                    ${isZ ? '<span style="font-size:0.7rem; background:#fde68a; color:#92400e; padding:1px 5px; border-radius:3px; font-weight:600;">Z-seg</span>' : ''}
+                    ${isZ ? HtmlSafe.raw('<span style="font-size:0.7rem; background:#fde68a; color:#92400e; padding:1px 5px; border-radius:3px; font-weight:600;">Z-seg</span>') : ''}
                     <span style="margin-left:auto; font-size:0.72rem; color:#94a3b8;">${fieldNodes.length} fields</span>
                 </div>
                 <div style="display:none;">${fieldRows}</div>
             </div>`;
-        }).join('');
+        });
     }
 
     filterHL7Browser(query) {
@@ -5848,7 +5847,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
      * Show transformation help guide
      */
     showTransformHelp() {
-        const helpHTML = `
+        const helpHTML = HtmlSafe.html`
             <div id="transformHelpModal" class="modal" style="display: flex;">
                 <div class="modal-content" style="max-width: 700px;">
                     <div class="modal-header" style="background: #1e3a8a; color: white; border-bottom: 3px solid #ffc0cb;">
@@ -5990,19 +5989,23 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         const q = (query || '').trim().toLowerCase();
 
         if (!groups.length) {
-            return `<div style="padding:0.75rem; text-align:center; color:#94a3b8; font-size:0.82rem;">
+            return HtmlSafe.html`<div style="padding:0.75rem; text-align:center; color:#94a3b8; font-size:0.82rem;">
                 No mappings loaded — open the mapping panel first
             </div>`;
         }
 
-        const esc    = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        // Highlights query matches: the text is split on the query and only the
+        // matched parts are wrapped; everything is escaped by HtmlSafe.html.
         const hilite = (text) => {
-            if (!q) return esc(text);
+            const s = String(text ?? '');
+            if (!q) return s;
             const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-            return esc(text).replace(re, '<mark style="background:#fef08a;border-radius:2px;padding:0 1px;">$1</mark>');
+            return s.split(re).map((part, i) => i % 2
+                ? HtmlSafe.html`<mark style="background:#fef08a;border-radius:2px;padding:0 1px;">${part}</mark>`
+                : part);
         };
 
-        let html = '';
+        const html = [];
         let totalShown = 0;
 
         groups.forEach(({ resourceType, paths }) => {
@@ -6010,41 +6013,41 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             if (!filtered.length) return;
             totalShown += filtered.length;
 
-            html += `<div>
+            html.push(HtmlSafe.html`<div>
                 <div style="padding:0.3rem 0.75rem; background:#f8fafc; border-bottom:1px solid #f1f5f9;
                             font-size:0.72rem; font-weight:700; color:#475569;
                             text-transform:uppercase; letter-spacing:0.5px; position:sticky; top:0; z-index:1;">
-                    ${esc(resourceType)}
+                    ${resourceType}
                 </div>
-                ${filtered.map(path => `
-                    <div class="fhir-suggestion-item" data-value="${esc(path)}"
+                ${filtered.map(path => HtmlSafe.html`
+                    <div class="fhir-suggestion-item" data-value="${path}"
                         style="padding:0.38rem 0.75rem 0.38rem 1.25rem; cursor:pointer;
                                font-size:0.82rem; color:#1e293b; border-bottom:1px solid #f8fafc;"
                         onmouseover="this.style.background='#eff6ff'"
                         onmouseout="this.style.background=''"
-                        onmousedown="window.propertiesPanel._selectFhirPath('${esc(path)}')">
+                        data-path="${path}" onmousedown="window.propertiesPanel._selectFhirPath(this.dataset.path)">
                         ${hilite(path)}
-                    </div>`).join('')}
-            </div>`;
+                    </div>`)}
+            </div>`);
         });
 
         if (totalShown === 0 && q) {
-            html = `<div style="padding:0.75rem; font-size:0.82rem; color:#64748b; text-align:center;">
-                No match — <strong>"${esc(q)}"</strong> will be used as a custom path
+            html = HtmlSafe.html`<div style="padding:0.75rem; font-size:0.82rem; color:#64748b; text-align:center;">
+                No match — <strong>"${q}"</strong> will be used as a custom path
             </div>`;
         }
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     _showFhirDropdown() {
         const box = document.getElementById('editFhirSuggestions');
         const inp = document.getElementById('editFhirPath');
         if (!box) return;
-        box.innerHTML = this._renderFhirSuggestions(
+        box.innerHTML = HtmlSafe.html`${this._renderFhirSuggestions(
             this._fhirPathGroups || [],
             inp?.value || ''
-        );
+        )}`;
         box.style.display = 'block';
     }
 
@@ -6052,10 +6055,10 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         const box = document.getElementById('editFhirSuggestions');
         if (!box) return;
         if (box.style.display === 'none') box.style.display = 'block';
-        box.innerHTML = this._renderFhirSuggestions(
+        box.innerHTML = HtmlSafe.html`${this._renderFhirSuggestions(
             this._fhirPathGroups || [],
             query
-        );
+        )}`;
     }
 
     _hideFhirDropdown() {
@@ -6404,7 +6407,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 if (!data.success) throw new Error(data.error || 'resolved-mappings failed');
                 mappings = data.atomicMappings || [];
                 const modeLabels = { oob: '🔗 Tracking OOB template', delta: '⚡ OOB + custom additions', custom: '✏️ Fully custom' };
-                statusHtml = `<strong>${mappings.length}</strong> mappings
+                statusHtml = HtmlSafe.html`<strong>${mappings.length}</strong> mappings
                     <span style="margin-left:6px;font-size:11px;padding:2px 7px;border-radius:10px;background:#e0f2fe;color:#0369a1;font-weight:600;">
                         ${modeLabels[data.mappingMode] || data.mappingMode}
                     </span>`;
@@ -6414,7 +6417,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 if (!response.success) throw new Error(response.error || 'Failed to fetch template');
                 const { template, mappings: tplMappings } = response.data;
                 mappings = tplMappings || [];
-                statusHtml = `<strong>${mappings.length}</strong> mappings
+                statusHtml = HtmlSafe.html`<strong>${mappings.length}</strong> mappings
                     <span style="color:#059669;font-weight:500;">(OOB: ${template?.name || 'standard'})</span>`;
             }
 
@@ -6423,8 +6426,8 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 return;
             }
 
-            if (tableContainer) tableContainer.innerHTML = this.renderMappingTable(mappings);
-            if (statusText)    statusText.innerHTML = statusHtml;
+            if (tableContainer) tableContainer.innerHTML = HtmlSafe.html`${this.renderMappingTable(mappings)}`;
+            if (statusText)    statusText.innerHTML = HtmlSafe.html`${statusHtml}`;
 
             this.builder.dragDropManager.showNotification(`Loaded ${mappings.length} mappings`, 'success');
             this.builder.markAsUnsaved();
@@ -6462,7 +6465,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 mappings = data.atomicMappings || [];
                 mappingMode = data.mappingMode || mappingMode;
                 const modeLabels = { oob: '🔗 Tracking OOB template', delta: '⚡ OOB + custom additions', custom: '✏️ Fully custom' };
-                sourceLabel = `<span style="margin-left:6px;font-size:11px;padding:2px 7px;border-radius:10px;background:#e0f2fe;color:#0369a1;font-weight:600;">${modeLabels[mappingMode] || mappingMode}</span>`;
+                sourceLabel = HtmlSafe.html`<span style="margin-left:6px;font-size:11px;padding:2px 7px;border-radius:10px;background:#e0f2fe;color:#0369a1;font-weight:600;">${modeLabels[mappingMode] || mappingMode}</span>`;
             } else {
                 // ── Fallback: OOB standard template (no interface context) ──
                 console.log(`🔄 Auto-fetching OOB template for ${messageType}…`);
@@ -6470,11 +6473,11 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 if (!response.success) throw new Error(response.error || 'Failed to fetch template');
                 const { template, mappings: tplMappings } = response.data;
                 mappings = tplMappings || [];
-                sourceLabel = `<span style="color:#059669;font-weight:500;">(OOB template: ${template?.name || 'standard'})</span>`;
+                sourceLabel = HtmlSafe.html`<span style="color:#059669;font-weight:500;">(OOB template: ${template?.name || 'standard'})</span>`;
             }
 
             if (!mappings || mappings.length === 0) {
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <div style="padding: 2rem; text-align: center; color: #64748b;">
                         <i class="fas fa-info-circle fa-2x" style="color: #f59e0b;"></i>
                         <p style="margin-top: 1rem;">No mappings found for ${messageType}</p>
@@ -6487,18 +6490,18 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             // Update the status bar
             const statusText = document.getElementById('mappingStatusText');
             if (statusText) {
-                statusText.innerHTML = `<strong>${mappings.length}</strong> mappings ${sourceLabel}`;
+                statusText.innerHTML = HtmlSafe.html`<strong>${mappings.length}</strong> mappings ${sourceLabel}`;
             }
 
             // Render the mappings table
-            container.innerHTML = this.renderMappingTable(mappings);
+            container.innerHTML = HtmlSafe.html`${this.renderMappingTable(mappings)}`;
             this._displayedTemplateMappings = mappings;
 
             console.log(`✅ Loaded ${mappings.length} mappings (mode: ${mappingMode})`);
 
         } catch (error) {
             console.error('Error loading mappings:', error);
-            container.innerHTML = `
+            container.innerHTML = HtmlSafe.html`
                 <div style="padding: 2rem; text-align: center; color: #ef4444;">
                     <i class="fas fa-exclamation-triangle fa-2x"></i>
                     <p style="margin-top: 1rem;">Failed to load template: ${error.message}</p>
@@ -6524,7 +6527,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
         const messageType = this.builder.pipeline?.messageType || step.config?.message_type || 'ADT^A01';
 
-        cardsArea.innerHTML = `<div style="padding: 1.5rem; text-align: center; color: #64748b;">
+        cardsArea.innerHTML = HtmlSafe.html`<div style="padding: 1.5rem; text-align: center; color: #64748b;">
             <i class="fas fa-spinner fa-spin fa-lg"></i>
             <p style="margin-top: 0.5rem; font-size: 0.875rem;">Loading resource info for ${messageType}…</p>
         </div>`;
@@ -6552,11 +6555,11 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 return 'Low';
             };
 
-            cardsArea.innerHTML = data.resources.map(r => {
+            cardsArea.innerHTML = HtmlSafe.html`${data.resources.map(r => {
                 const isChecked = selectedResources === null || selectedResources.includes(r.name);
                 const pct = Math.round(r.avg_confidence * 100);
                 const color = confColor(r.avg_confidence);
-                return `
+                return HtmlSafe.html`
                 <div class="resource-card" style="
                     display: flex; align-items: flex-start; gap: 0.75rem;
                     padding: 0.875rem 1rem;
@@ -6572,7 +6575,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     <div style="flex: 1; min-width: 0;">
                         <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.35rem;">
                             <span style="font-weight: 600; font-size: 0.9rem; color: #1e293b;">${r.name}</span>
-                            ${r.optional ? '<span style="font-size: 0.7rem; background: #fef3c7; color: #92400e; padding: 1px 6px; border-radius: 10px;">optional</span>' : '<span style="font-size: 0.7rem; background: #dcfce7; color: #166534; padding: 1px 6px; border-radius: 10px;">core</span>'}
+                            ${r.optional ? HtmlSafe.raw('<span style="font-size: 0.7rem; background: #fef3c7; color: #92400e; padding: 1px 6px; border-radius: 10px;">optional</span>') : HtmlSafe.raw('<span style="font-size: 0.7rem; background: #dcfce7; color: #166534; padding: 1px 6px; border-radius: 10px;">core</span>')}
                             <span style="font-size: 0.75rem; color: #64748b; margin-left: auto;">${r.field_count} fields · ${r.required_fields} required</span>
                         </div>
                         <!-- Confidence bar -->
@@ -6584,7 +6587,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                         </div>
                     </div>
                 </div>`;
-            }).join('');
+            })}`;
 
             // Wire up checkboxes → update step.config.selected_resources
             cardsArea.querySelectorAll('.resource-checkbox').forEach(cb => {
@@ -6609,7 +6612,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             });
 
         } catch (err) {
-            cardsArea.innerHTML = `<div style="padding: 1.5rem; text-align: center; color: #dc2626;">
+            cardsArea.innerHTML = HtmlSafe.html`<div style="padding: 1.5rem; text-align: center; color: #dc2626;">
                 <i class="fas fa-exclamation-circle fa-lg"></i>
                 <p style="margin-top: 0.5rem; font-size: 0.875rem;">Failed to load resource info: ${err.message}</p>
             </div>`;
@@ -7301,7 +7304,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 this.builder.dragDropManager.showNotification('Script validation passed', 'success');
             } else {
                 const errorMsg = result.error || 'Unknown validation error';
-                resultDiv.innerHTML = `<span style="color: #ef4444; font-weight: 500;">❌ ${errorMsg}</span>`;
+                resultDiv.innerHTML = HtmlSafe.html`<span style="color: #ef4444; font-weight: 500;">❌ ${errorMsg}</span>`;
                 scriptContent.style.borderColor = '#ef4444';
                 // Show as a modal prompt so the error is always readable
                 this.builder.dragDropManager.showErrorDialog(errorMsg, 'Script Validation Failed');
@@ -7313,7 +7316,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             }
         } catch (error) {
             console.error('Script validation error:', error);
-            resultDiv.innerHTML = `<span style="color: #ef4444; font-weight: 500;">❌ ${error.message}</span>`;
+            resultDiv.innerHTML = HtmlSafe.html`<span style="color: #ef4444; font-weight: 500;">❌ ${error.message}</span>`;
             this.builder.dragDropManager.showErrorDialog(error.message, 'Script Validation Error');
         } finally {
             validateBtn.disabled = false;
@@ -7415,7 +7418,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
         try {
             this.currentStep = null;
-            this.container.innerHTML = `
+            this.container.innerHTML = HtmlSafe.html`
                 <div class="no-selection-message">
                     <i class="fas fa-mouse-pointer"></i>
                     <p>Select a step to configure its properties</p>
@@ -7431,7 +7434,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
      * Show pipeline properties
      */
     showPipelineProperties(pipeline) {
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="properties-form">
                 <h3><i class="fas fa-project-diagram"></i> Pipeline Settings</h3>
 
@@ -7478,6 +7481,20 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
     /**
      * Create dynamic form fields based on step type
      */
+    // Step builders (pipeline/components/*Builder.js) are converted to return
+    // HtmlSafe values. Until every builder is, a plain string is accepted here
+    // as the builder's own markup and reported once, so none is overlooked.
+    _builderMarkup(markup) {
+        if (markup instanceof HtmlSafe.SafeHtml) return markup;
+        const name = this.activeStepBuilder && this.activeStepBuilder.constructor && this.activeStepBuilder.constructor.name;
+        if (!PropertiesPanel._plainBuilders) PropertiesPanel._plainBuilders = new Set();
+        if (!PropertiesPanel._plainBuilders.has(name)) {
+            PropertiesPanel._plainBuilders.add(name);
+            console.warn(`[HtmlSafe] ${name}.render() returned a plain string; it should build with HtmlSafe.html`);
+        }
+        return HtmlSafe.raw(markup == null ? '' : String(markup));
+    }
+
     createDynamicFormFields(step) {
         const stepType = step.stepType || step.type;
 
@@ -7539,7 +7556,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             console.log('📄 Using File Parser UI with column definition builder');
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create('file_parser', this);
-            return this.activeStepBuilder.render(step);
+            return this._builderMarkup(this.activeStepBuilder.render(step));
         }
 
         // Special handling for Remove Duplicates step (chip-based no-code UI)
@@ -7547,7 +7564,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             console.log('🔧 Using Remove Duplicates no-code UI');
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create('remove_duplicates', this);
-            return this.activeStepBuilder.render(step);
+            return this._builderMarkup(this.activeStepBuilder.render(step));
         }
 
         // Special handling for Data Masking step (rule-based no-code UI)
@@ -7555,56 +7572,56 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             console.log('🔒 Using Data Masking no-code UI');
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create('data_masking', this);
-            return this.activeStepBuilder.render(step);
+            return this._builderMarkup(this.activeStepBuilder.render(step));
         }
 
         if (VisualStep.isNormalizer(step)) {
             console.log('📐 Using Normalizer / Pivot / Transpose no-code UI');
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create('normalizer', this);
-            return this.activeStepBuilder.render(step);
+            return this._builderMarkup(this.activeStepBuilder.render(step));
         }
 
         if (VisualStep.isAPIEnrichment(step)) {
             console.log('🌐 Using API Enrichment no-code UI');
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create('enrichment.api', this);
-            return this.activeStepBuilder.render(step);
+            return this._builderMarkup(this.activeStepBuilder.render(step));
         }
 
         if (VisualStep.isDatabaseEnrichment(step)) {
             console.log('🗄️ Using Database Enrichment no-code UI');
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create('database_enrichment', this);
-            return this.activeStepBuilder.render(step);
+            return this._builderMarkup(this.activeStepBuilder.render(step));
         }
 
         if (VisualStep.isDeidentify(step)) {
             console.log('🛡️ Using HIPAA De-identify no-code UI');
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create('deidentify', this);
-            return this.activeStepBuilder.render(step);
+            return this._builderMarkup(this.activeStepBuilder.render(step));
         }
 
         if (VisualStep.isPayloadBuilder(step)) {
             console.log('📤 Using Payload Builder no-code UI');
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create('payload.builder', this);
-            return this.activeStepBuilder.render(step);
+            return this._builderMarkup(this.activeStepBuilder.render(step));
         }
 
         if (VisualStep.isCdaParseStep(step)) {
             console.log('🏥 Using CDA Parse step builder');
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create('cda.parse', this);
-            return this.activeStepBuilder.render(step);
+            return this._builderMarkup(this.activeStepBuilder.render(step));
         }
 
         if (VisualStep.isCdaToFhirStep(step)) {
             console.log('🏥 Using CDA→FHIR 4-tab step builder');
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create('cda.to_fhir', this);
-            return this.activeStepBuilder.render(step);
+            return this._builderMarkup(this.activeStepBuilder.render(step));
         }
 
         // Generic fallback: any step type with a builder registered in
@@ -7619,7 +7636,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             if (this.activeStepBuilder) { this.activeStepBuilder.destroy(); }
             this.activeStepBuilder = StepBuilderRegistry.create(registryType, this);
             if (this.activeStepBuilder) {
-                return this.activeStepBuilder.render(step);
+                return this._builderMarkup(this.activeStepBuilder.render(step));
             }
         }
 
@@ -7633,10 +7650,10 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             return ''; // No dynamic fields for this step type
         }
 
-        let html = `
+        const html = [HtmlSafe.html`
             <div class="form-section">
                 <h4>Step-Specific Configuration</h4>
-        `;
+        `];
 
         stepConfig.fields.forEach(field => {
             const rawValue = step.config?.[field.key] || field.default || '';
@@ -7663,7 +7680,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             // Check visibleWhen condition (single value match)
             if (field.visibleWhen) {
                 visibilityClass = 'conditional-field';
-                visibilityDataAttr = `data-visible-when-field="${field.visibleWhen.field}" data-visible-when-value="${field.visibleWhen.value}"`;
+                visibilityDataAttr = HtmlSafe.html`data-visible-when-field="${field.visibleWhen.field}" data-visible-when-value="${field.visibleWhen.value}"`;
 
                 const controlFieldValue = step.config?.[field.visibleWhen.field] ||
                                          stepConfig.fields.find(f => f.key === field.visibleWhen.field)?.default || '';
@@ -7675,10 +7692,10 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             // Check showIf condition (multiple value match - AND with visibleWhen if both present)
             if (field.showIf) {
                 visibilityClass = 'conditional-field';
-                const showIfAttr = `data-show-if-field="${field.showIf.field}" data-show-if-values='${JSON.stringify(field.showIf.values)}'`;
+                const showIfAttr = HtmlSafe.html`data-show-if-field="${field.showIf.field}" data-show-if-values='${JSON.stringify(field.showIf.values)}'`;
 
                 // Combine with existing visibility data if present
-                visibilityDataAttr = visibilityDataAttr ? `${visibilityDataAttr} ${showIfAttr}` : showIfAttr;
+                visibilityDataAttr = visibilityDataAttr ? HtmlSafe.html`${visibilityDataAttr} ${showIfAttr}` : showIfAttr;
 
                 const controlFieldValue = step.config?.[field.showIf.field] ||
                                          stepConfig.fields.find(f => f.key === field.showIf.field)?.default || '';
@@ -7692,30 +7709,30 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 visibilityClass += ' hidden';
             }
 
-            html += `<div class="form-group ${visibilityClass}" ${visibilityDataAttr}>`;
-            html += `<label>${field.label}${field.required ? ' *' : ''}</label>`;
+            html.push(HtmlSafe.html`<div class="form-group ${visibilityClass}" ${visibilityDataAttr}>`);
+            html.push(HtmlSafe.html`<label>${field.label}${field.required ? ' *' : ''}</label>`);
 
             switch (field.type) {
                 case 'text':
                 case 'password':
-                    html += `<input type="${field.type}" name="config_${field.key}" value="${value}" ${field.required ? 'required' : ''} placeholder="${field.placeholder || ''}">`;
+                    html.push(HtmlSafe.html`<input type="${field.type}" name="config_${field.key}" value="${value}" ${field.required ? 'required' : ''} placeholder="${field.placeholder || ''}">`);
                     break;
 
                 case 'number':
-                    html += `<input type="number" name="config_${field.key}" value="${value}" ${field.required ? 'required' : ''} min="${field.min || 0}" max="${field.max || ''}" step="${field.step || 1}">`;
+                    html.push(HtmlSafe.html`<input type="number" name="config_${field.key}" value="${value}" ${field.required ? 'required' : ''} min="${field.min || 0}" max="${field.max || ''}" step="${field.step || 1}">`);
                     break;
 
                 case 'textarea':
-                    html += `<textarea name="config_${field.key}" rows="${field.rows || 3}" ${field.required ? 'required' : ''} placeholder="${field.placeholder || ''}">${value}</textarea>`;
+                    html.push(HtmlSafe.html`<textarea name="config_${field.key}" rows="${field.rows || 3}" ${field.required ? 'required' : ''} placeholder="${field.placeholder || ''}">${value}</textarea>`);
                     break;
 
                 case 'select':
-                    html += `<select name="config_${field.key}" ${field.required ? 'required' : ''}>`;
+                    html.push(HtmlSafe.html`<select name="config_${field.key}" ${field.required ? 'required' : ''}>`);
                     field.options.forEach(opt => {
                         const selected = value === opt.value ? 'selected' : '';
-                        html += `<option value="${opt.value}" ${selected}>${opt.label}</option>`;
+                        html.push(HtmlSafe.html`<option value="${opt.value}" ${selected}>${opt.label}</option>`);
                     });
-                    html += `</select>`;
+                    html.push(HtmlSafe.html`</select>`);
                     break;
 
                 case 'checkbox': {
@@ -7723,18 +7740,18 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     // This prevents `false` being overridden by `default: true` via the `||` short-circuit.
                     const boolVal = step.config?.[field.key] !== undefined ? step.config[field.key] : field.default;
                     const checked = boolVal === true || boolVal === 'true' ? 'checked' : '';
-                    html += `<label class="checkbox-label"><input type="checkbox" name="config_${field.key}" ${checked}> ${field.checkboxLabel || field.label}</label>`;
+                    html.push(HtmlSafe.html`<label class="checkbox-label"><input type="checkbox" name="config_${field.key}" ${checked}> ${field.checkboxLabel || field.label}</label>`);
                     break;
                 }
 
                 case 'multiselect':
-                    html += `<div class="multiselect-group">`;
+                    html.push(HtmlSafe.html`<div class="multiselect-group">`);
                     field.options.forEach(opt => {
                         const valueArray = Array.isArray(value) ? value : [];
                         const checked = valueArray.includes(opt.value) ? 'checked' : '';
-                        html += `<label class="checkbox-label"><input type="checkbox" name="config_${field.key}[]" value="${opt.value}" ${checked}> ${opt.label}</label>`;
+                        html.push(HtmlSafe.html`<label class="checkbox-label"><input type="checkbox" name="config_${field.key}[]" value="${opt.value}" ${checked}> ${opt.label}</label>`);
                     });
-                    html += `</div>`;
+                    html.push(HtmlSafe.html`</div>`);
                     break;
 
                 case 'validation-builder':
@@ -7753,7 +7770,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     }
 
                     // Create container for ValidationRuleBuilder component
-                    html += `<div class="validation-builder-container" data-field-key="${field.key}" data-initial-rules='${JSON.stringify(rules)}'></div>`;
+                    html.push(HtmlSafe.html`<div class="validation-builder-container" data-field-key="${field.key}" data-initial-rules='${JSON.stringify(rules)}'></div>`);
                     break;
 
                 case 'metadata-builder':
@@ -7771,7 +7788,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     }
 
                     // Create container for MetadataBuilder component
-                    html += `<div class="metadata-builder-container" data-field-key="${field.key}" data-initial-metadata='${JSON.stringify(metadata)}'></div>`;
+                    html.push(HtmlSafe.html`<div class="metadata-builder-container" data-field-key="${field.key}" data-initial-metadata='${JSON.stringify(metadata)}'></div>`);
                     break;
 
                 case 'header-builder':
@@ -7789,7 +7806,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     }
 
                     // Create container for HeaderBuilder component
-                    html += `<div class="header-builder-container" data-field-key="${field.key}" data-initial-headers='${JSON.stringify(headers)}'></div>`;
+                    html.push(HtmlSafe.html`<div class="header-builder-container" data-field-key="${field.key}" data-initial-headers='${JSON.stringify(headers)}'></div>`);
                     break;
 
                 case 'query-param-builder':
@@ -7809,7 +7826,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     console.log(`[PropertiesPanel] 🏗️ Rendering query-param-builder for field "${field.key}", value from step.config:`, value, 'parsed queryParams:', queryParams);
 
                     // Create container for QueryParamBuilder component
-                    html += `<div class="query-param-builder-container" data-field-key="${field.key}" data-initial-params='${JSON.stringify(queryParams)}'></div>`;
+                    html.push(HtmlSafe.html`<div class="query-param-builder-container" data-field-key="${field.key}" data-initial-params='${JSON.stringify(queryParams)}'></div>`);
                     break;
 
                 case 'result-mapping-builder':
@@ -7827,13 +7844,13 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     }
 
                     // Create container for ResultMappingBuilder component
-                    html += `<div class="result-mapping-builder-container" data-field-key="${field.key}" data-initial-mappings='${JSON.stringify(resultMappings)}'></div>`;
+                    html.push(HtmlSafe.html`<div class="result-mapping-builder-container" data-field-key="${field.key}" data-initial-mappings='${JSON.stringify(resultMappings)}'></div>`);
                     break;
 
                 case 'api-endpoint-tester':
                     // API Endpoint Tester - NO-CODE: Test API and visually pick response fields
                     // This enables first-time users to see actual API response before configuration
-                    html += `<div class="api-endpoint-tester-container" id="api-endpoint-tester-container"></div>`;
+                    html.push(HtmlSafe.html`<div class="api-endpoint-tester-container" id="api-endpoint-tester-container"></div>`);
                     break;
 
                 case 'api-response-mapping-builder':
@@ -7850,13 +7867,13 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     }
 
                     // Create container for API Response Mapping Builder component
-                    html += `<div class="api-response-mapping-builder-container" data-field-key="${field.key}" data-initial-mappings='${JSON.stringify(responseMapping)}'></div>`;
+                    html.push(HtmlSafe.html`<div class="api-response-mapping-builder-container" data-field-key="${field.key}" data-initial-mappings='${JSON.stringify(responseMapping)}'></div>`);
                     break;
 
                 case 'database-query-tester':
                     // Database Query Tester - NO-CODE: Test SQL queries before saving pipeline
                     // Shows actual database results and allows click-to-add mapping
-                    html += `<div class="database-query-tester-container" data-field-key="${field.key}"></div>`;
+                    html.push(HtmlSafe.html`<div class="database-query-tester-container" data-field-key="${field.key}"></div>`);
                     break;
 
                 case 'mongodb-filter-builder':
@@ -7873,7 +7890,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                         filterValue = {};
                     }
 
-                    html += `<div class="mongodb-filter-builder-container" data-field-key="${field.key}" data-initial-filter='${JSON.stringify(filterValue)}'></div>`;
+                    html.push(HtmlSafe.html`<div class="mongodb-filter-builder-container" data-field-key="${field.key}" data-initial-filter='${JSON.stringify(filterValue)}'></div>`);
                     break;
 
                 case 'mongodb-projection-builder':
@@ -7890,7 +7907,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                         projectionValue = {};
                     }
 
-                    html += `<div class="mongodb-projection-builder-container" data-field-key="${field.key}" data-initial-projection='${JSON.stringify(projectionValue)}'></div>`;
+                    html.push(HtmlSafe.html`<div class="mongodb-projection-builder-container" data-field-key="${field.key}" data-initial-projection='${JSON.stringify(projectionValue)}'></div>`);
                     break;
 
                 case 'redis-query-builder':
@@ -7909,12 +7926,12 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                         .replace(/</g, '&lt;')
                         .replace(/>/g, '&gt;');
 
-                    html += `<div class="redis-query-builder-container"
+                    html.push(HtmlSafe.html`<div class="redis-query-builder-container"
                                   data-field-key="${field.key}"
                                   data-redis-query='${escapeAttr(redisQuery)}'
                                   data-redis-command='${escapeAttr(redisCommand)}'
                                   data-redis-key='${escapeAttr(redisKey)}'
-                                  data-redis-hash-field='${escapeAttr(redisHashField)}'></div>`;
+                                  data-redis-hash-field='${escapeAttr(redisHashField)}'></div>`);
                     break;
 
                 case 'basic-auth-container':
@@ -7931,7 +7948,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     }
 
                     // Create styled container for basic auth
-                    html += `<div class="auth-container basic-auth-container">
+                    html.push(HtmlSafe.html`<div class="auth-container basic-auth-container">
                         <div class="auth-container-header">
                             <h4><i class="fas fa-user-lock"></i> Basic Authentication</h4>
                         </div>
@@ -7951,7 +7968,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                                 <small class="form-text text-muted">Password for basic authentication</small>
                             </div>
                         </div>
-                    </div>`;
+                    </div>`);
                     break;
 
                 case 'bearer-token-container':
@@ -7959,7 +7976,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     let bearerTokenData = typeof value === 'string' ? value : (value?.token || '');
 
                     // Create styled container for bearer token
-                    html += `<div class="auth-container bearer-token-container">
+                    html.push(HtmlSafe.html`<div class="auth-container bearer-token-container">
                         <div class="auth-container-header">
                             <h4><i class="fas fa-key"></i> Bearer Token Authentication</h4>
                         </div>
@@ -7977,7 +7994,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                                 </label>
                             </div>
                         </div>
-                    </div>`;
+                    </div>`);
                     break;
 
                 case 'apikey-container':
@@ -7994,7 +8011,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     }
 
                     // Create styled container for API key
-                    html += `<div class="auth-container apikey-container">
+                    html.push(HtmlSafe.html`<div class="auth-container apikey-container">
                         <div class="auth-container-header">
                             <h4><i class="fas fa-fingerprint"></i> API Key Authentication</h4>
                         </div>
@@ -8017,7 +8034,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                                 <strong>Common header names:</strong> X-API-Key, X-API-Token, Authorization, api-key
                             </div>
                         </div>
-                    </div>`;
+                    </div>`);
                     break;
 
                 case 'oauth2-builder':
@@ -8049,20 +8066,20 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     }
 
                     // Create container for OAuth2ConfigBuilder component
-                    html += `<div class="oauth2-config-builder-container" data-field-key="${field.key}" data-initial-config='${JSON.stringify(oauth2Config)}'></div>`;
+                    html.push(HtmlSafe.html`<div class="oauth2-config-builder-container" data-field-key="${field.key}" data-initial-config='${JSON.stringify(oauth2Config)}'></div>`);
                     break;
             }
 
             if (field.help) {
-                html += `<small style="color: #6b7280; margin-top: 0.25rem; display: block;">${field.help}</small>`;
+                html.push(HtmlSafe.html`<small style="color: #6b7280; margin-top: 0.25rem; display: block;">${field.help}</small>`);
             }
 
-            html += `</div>`;
+            html.push(HtmlSafe.html`</div>`);
         });
 
-        html += `</div>`;
+        html.push(HtmlSafe.html`</div>`);
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -8077,7 +8094,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         const validationType = rule.type || 'required';
         const errorMessage = rule.errorMessage || '';
 
-        return `
+        return HtmlSafe.html`
             <div class="validation-rule-row" data-index="${index}">
                 <div class="rule-fields">
                     <div class="rule-field">
@@ -8132,7 +8149,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
 
         // Create new row
         const newRow = this.createValidationRuleRow({}, newIndex);
-        rulesList.insertAdjacentHTML('beforeend', newRow);
+        rulesList.insertAdjacentHTML('beforeend', HtmlSafe.html`${newRow}`);
 
         // Update hidden field
         this.updateValidationRulesJSON(builderContainer);
@@ -8655,7 +8672,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                         required: true,
                         rows: 15,
                         // NO placeholder - start with completely blank textarea
-                        help: `<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px; border-radius: 8px; margin-bottom: 8px; font-size: 13px;">
+                        help: HtmlSafe.html`<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px; border-radius: 8px; margin-bottom: 8px; font-size: 13px;">
     <strong>📘 Available Functions:</strong><br>
     • <code style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px;">getNestedValue(input, "path.to.field")</code> - Access HL7 fields or enriched data<br>
     • <code style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px;">calculateAge(hl7Date)</code> - Calculate age from HL7 date (YYYYMMDD)<br>
@@ -8676,7 +8693,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                         type: 'text',
                         default: 'enriched.script',
                         placeholder: 'enriched.script',
-                        help: `<div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 10px; border-radius: 4px; font-size: 13px;">
+                        help: HtmlSafe.html`<div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 10px; border-radius: 4px; font-size: 13px;">
     <strong style="color: #d97706;">💾 Storage Path:</strong> Where to store script output in the message<br>
     <strong style="color: #92400e;">Examples:</strong><br>
     • <code style="background: #fde68a; padding: 2px 6px; border-radius: 3px;">enriched.script</code> - Default location<br>
@@ -9096,9 +9113,9 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
             page:         'pipeline-builder'
         };
 
-        const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const txt = s => String(s ?? ''); // escaped once, by HtmlSafe.html
 
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
 <div style="display:flex;flex-direction:column;gap:16px;padding:4px 0;">
 
   <!-- Explain this step -->
@@ -9106,14 +9123,14 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
     <div style="background:#f8fafc;padding:10px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e2e8f0;">
       <span style="font-size:15px;">💡</span>
       <strong style="font-size:13px;color:#1e3a8a;">Explain this step</strong>
-      ${isPreview ? '' : `<button id="ai-tab-explain-btn" style="margin-left:auto;background:linear-gradient(135deg,#f472b6,#1e3a8a);color:#fff;border:none;padding:5px 14px;border-radius:20px;cursor:pointer;font-size:12px;">Explain</button>`}
+      ${isPreview ? '' : HtmlSafe.html`<button id="ai-tab-explain-btn" style="margin-left:auto;background:linear-gradient(135deg,#f472b6,#1e3a8a);color:#fff;border:none;padding:5px 14px;border-radius:20px;cursor:pointer;font-size:12px;">Explain</button>`}
     </div>
     <div id="ai-tab-explain-out" style="padding:12px 14px;font-size:13px;color:#4b5563;min-height:40px;line-height:1.6;">
-      ${isPreview ? '<em style="color:#9ca3af;">Save the step first to explain it.</em>' : '<em style="color:#9ca3af;">Click Explain to get a plain-English description of this step.</em>'}
+      ${isPreview ? HtmlSafe.raw('<em style="color:#9ca3af;">Save the step first to explain it.</em>') : HtmlSafe.raw('<em style="color:#9ca3af;">Click Explain to get a plain-English description of this step.</em>')}
     </div>
   </div>
 
-  ${isScriptStep && !isPreview ? `
+  ${isScriptStep && !isPreview ? HtmlSafe.html`
   <!-- Generate script -->
   <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
     <div style="background:#f8fafc;padding:10px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e2e8f0;">
@@ -9164,14 +9181,15 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                 try {
                     await window.AIAssistant.explainStep(step.id, (_tok, text) => {
                         full = text;
-                        explainOut.innerHTML = full
+                        // escaped first, then fixed tags only -> safe markup
+                        explainOut.innerHTML = HtmlSafe.raw(full
                             .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
                             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                             .replace(/`([^`]+)`/g, '<code style="background:#f1f5f9;padding:1px 4px;border-radius:3px;font-size:11px">$1</code>')
-                            .replace(/\n/g, '<br>');
+                            .replace(/\n/g, '<br>'));
                     });
                 } catch (e) {
-                    explainOut.innerHTML = `<span style="color:#dc2626;">⚠️ ${esc(e.message)}</span>`;
+                    explainOut.innerHTML = HtmlSafe.html`<span style="color:#dc2626;">⚠️ ${e.message}</span>`;
                 } finally {
                     explainBtn.disabled = false;
                     explainBtn.textContent = 'Explain';
@@ -9258,7 +9276,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
         // Wire: quick-ask chips
         container.querySelectorAll('.ai-tab-quick').forEach(btn => {
             btn.addEventListener('click', () => {
-                const q = `[Step: ${esc(step.stepName || step.stepType)}] ${btn.dataset.q}`;
+                const q = `[Step: ${step.stepName || step.stepType}] ${btn.dataset.q}`;
                 if (window.AIAssistant) window.AIAssistant.openWithContext(ctx, q);
             });
         });

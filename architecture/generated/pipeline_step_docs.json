@@ -1,6 +1,6 @@
 {
   "_generated_by": "scripts/export-pipeline-step-docs.js",
-  "_generated_at": "2026-10-20T03:45:59.018Z",
+  "_generated_at": "2026-10-21T08:03:15.714Z",
   "_source_files": [
     "StepDocumentationRegistry.js",
     "CDAStepsDocs.js",
@@ -2645,7 +2645,7 @@
       ]
     },
     "post.validation": {
-      "description": "Validates FHIR data against the R4 specification. Works in two modes: <strong>Bundle mode</strong> (validates bundle structure + all entry resources) when <code>fhirBundle</code> contains a Bundle, and <strong>Resource mode</strong> (validates a single standalone resource) when <code>fhirResource</code> is present or <code>fhirBundle</code> contains a non-Bundle resource. Searches <code>fhirBundle</code>, <code>fhirResource</code>, <code>message.*</code>, and <code>enriched.*</code>.",
+      "description": "Validates FHIR data against the R4 specification. Works in two modes: Bundle mode (validates bundle structure + all entry resources) when <code>fhirBundle</code> contains a Bundle, and Resource mode (validates a single standalone resource) when <code>fhirResource</code> is present or <code>fhirBundle</code> contains a non-Bundle resource. Searches <code>fhirBundle</code>, <code>fhirResource</code>, <code>message.*</code>, and <code>enriched.*</code>.",
       "useCases": [
         "Validate FHIR bundle from HL7→FHIR Transform (bundle mode)",
         "Validate a standalone FHIR resource from an API enrichment step (resource mode)",
@@ -3052,7 +3052,7 @@
           "key": "collapse_text_obx",
           "src": "OBX.3 + OBX.2",
           "fhir": "Observation.valueString",
-          "desc": "<strong>Merge mode</strong> — controlled in the \"Text Report Merging\" card at the top of the Assembly tab. When enabled, consecutive TX/FT OBX segments sharing the same OBX.3 code are joined into one Observation.valueString (the HL7 continuation-segment pattern). Example: a 50-line surgical pathology report sent as OBX|1|TX … OBX|50|TX all with OBX.3=4050097^Surg Path produces one Observation instead of 50. Disable (or restrict to specific services via <code>collapse_text_obx_services</code>) when your discrete lab results also happen to use the same OBX.3 across rows. <em>Examples where merging is correct: AP (Anatomic Pathology), RAD (Radiology), SP (Surgical Path). Examples where merging should be OFF or restricted: CH (Chemistry), MB (Microbiology) — each analyte has a distinct OBX.3.</em>"
+          "desc": "Merge mode — controlled in the \"Text Report Merging\" card at the top of the Assembly tab. When enabled, consecutive TX/FT OBX segments sharing the same OBX.3 code are joined into one Observation.valueString (the HL7 continuation-segment pattern). Example: a 50-line surgical pathology report sent as OBX|1|TX … OBX|50|TX all with OBX.3=4050097^Surg Path produces one Observation instead of 50. Disable (or restrict to specific services via <code>collapse_text_obx_services</code>) when your discrete lab results also happen to use the same OBX.3 across rows. <em>Examples where merging is correct: AP (Anatomic Pathology), RAD (Radiology), SP (Surgical Path). Examples where merging should be OFF or restricted: CH (Chemistry), MB (Microbiology) — each analyte has a distinct OBX.3.</em>"
         },
         {
           "key": "obs_value_dispatch",

@@ -13,7 +13,7 @@
 (function () {
     const docs = {
             'post.validation': {
-                description: 'Validates FHIR data against the R4 specification. Works in two modes: <strong>Bundle mode</strong> (validates bundle structure + all entry resources) when <code>fhirBundle</code> contains a Bundle, and <strong>Resource mode</strong> (validates a single standalone resource) when <code>fhirResource</code> is present or <code>fhirBundle</code> contains a non-Bundle resource. Searches <code>fhirBundle</code>, <code>fhirResource</code>, <code>message.*</code>, and <code>enriched.*</code>.',
+                description: 'Validates FHIR data against the R4 specification. Works in two modes: Bundle mode (validates bundle structure + all entry resources) when <code>fhirBundle</code> contains a Bundle, and Resource mode (validates a single standalone resource) when <code>fhirResource</code> is present or <code>fhirBundle</code> contains a non-Bundle resource. Searches <code>fhirBundle</code>, <code>fhirResource</code>, <code>message.*</code>, and <code>enriched.*</code>.',
                 useCases: [
                     'Validate FHIR bundle from HL7→FHIR Transform (bundle mode)',
                     'Validate a standalone FHIR resource from an API enrichment step (resource mode)',
