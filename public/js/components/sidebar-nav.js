@@ -101,9 +101,7 @@
 
     // ── HTML builder ───────────────────────────────────────────────────────────
     function esc(s) {
-        return String(s)
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        return HtmlSafe.escapeHtml(s);
     }
 
     function buildHTML() {
@@ -360,7 +358,8 @@
         if (!sidebar) return;
 
         // Replace entire sidebar content with canonical HTML
-        sidebar.innerHTML = buildHTML();
+        // buildHTML() is the app's own markup (static NAV table, values escaped).
+        sidebar.innerHTML = HtmlSafe.raw(buildHTML());
 
         initCollapsible(sidebar);
         initToggle(sidebar);

@@ -67,6 +67,62 @@ test.describe('User-entered text is never rendered as HTML', () => {
     }
 });
 
+// A saved template carries user-chosen name/description/tags/icon and is shown
+// to every user in the gallery, its preview, the configure modal and the
+// delete confirmation.
+test.describe('User-saved templates render as text in the gallery', () => {
+    let templateId;
+    const tName = `PW XSS tpl ${MARK}');window.__ezhkXss='${MARK}-tplclick';(' <img src=x onerror="window.__ezhkXss='${MARK}-tpl'">`;
+
+    test.beforeAll(async ({ request }) => {
+        const res = await request.post('/api/interface-templates', { data: {
+            name: tName,
+            description: `<svg onload="window.__ezhkXss='${MARK}-tpldesc'"></svg>`,
+            tags: [`<b onmouseover="window.__ezhkXss=1">${MARK}</b>`],
+            icon: '<u>!</u>', // the column holds 10 characters
+            category: 'custom',
+        } });
+        const body = await res.json();
+        expect(body.success, JSON.stringify(body)).toBeTruthy();
+        templateId = body.template_id;
+    });
+
+    test.afterAll(async ({ request }) => {
+        if (templateId) await request.delete(`/api/interface-templates/${templateId}`).catch(() => {});
+    });
+
+    test('card, details, configure and delete confirm show the name as text', async ({ page }) => {
+        const dialogs = [];
+        page.on('dialog', d => { dialogs.push(d.message()); d.dismiss().catch(() => {}); });
+        await page.goto('/dashboard.html');
+        await page.click('a[href="#templates"]');
+        await page.waitForSelector('.tg-card', { timeout: 15_000 });
+        await page.locator('#tgSearch').fill(MARK);
+        const card = page.locator('.tg-card').filter({ hasText: MARK }).first();
+        await expect(card).toBeVisible({ timeout: 10_000 });
+        expect(await card.innerText()).toContain('<img src=x onerror=');
+        await expect(card.locator('.tg-use-btn')).toHaveCount(1);
+        await expect(card.locator('u, b')).toHaveCount(0); // icon and tag markup shown as text
+
+        await card.locator('.tg-info-btn').click();
+        await expect(page.locator('#tgPreviewModal .tg-modal-title')).toContainText(MARK);
+        await page.locator('#tgPreviewModal .tg-modal-close').click();
+
+        await card.locator('.tg-use-btn').click();
+        await expect(page.locator('#tcf_name')).toHaveValue(tName);
+        await page.locator('#tgConfigureModal').evaluate(el => el.remove());
+
+        await card.locator('.tg-del-btn').click();
+        await expect(page.locator('.app-dialog-body')).toContainText(MARK);
+        await page.locator('#_appDlgCancel').click();
+
+        await page.waitForTimeout(500);
+        expect(await page.evaluate(() => window.__ezhkXss || null)).toBeNull();
+        expect(dialogs).toEqual([]);
+        expect(await page.locator(`img[onerror*="${MARK}"], svg[onload*="${MARK}"]`).count()).toBe(0);
+    });
+});
+
 // AppDialogs is used everywhere with messages that interpolate data (names,
 // errors returned by the server). A plain string is shown as text; formatting
 // needs HtmlSafe.html (data inside stays escaped) or HtmlSafe.raw (constants).

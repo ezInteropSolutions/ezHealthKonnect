@@ -280,7 +280,7 @@ async function _loadTemplates() {
         _renderTemplateGrid(_templatesState.all);
     } catch (err) {
         const grid = document.getElementById('tgGrid');
-        if (grid) grid.innerHTML = `
+        if (grid) grid.innerHTML = HtmlSafe.html`
             <div class="tg-empty">
                 <div class="tg-empty-icon">⚠️</div>
                 <p>Could not load templates: ${err.message}</p>
@@ -304,14 +304,14 @@ function _renderCategoryTabs(categories) {
     const extras = [...present].filter(k => !preferred.includes(k) && k !== 'custom').sort();
     const order = [...preferred, ...extras, 'custom'];
 
-    tabs.innerHTML = order
+    tabs.innerHTML = HtmlSafe.html`${order
         .filter(k => present.has(k))
         .map(k => {
             const meta = TEMPLATE_CATEGORY_META[k] || { label: k, icon: '📋' };
             const count = totals[k] || 0;
             const active = k === _templatesState.activeCategory ? ' active' : '';
-            return `<button class="tg-cat-tab${active}" onclick="setTemplateCategory('${k}')">${meta.icon} ${meta.label}${count ? ` <span style="opacity:0.65">(${count})</span>` : ''}</button>`;
-        }).join('');
+            return HtmlSafe.html`<button class="tg-cat-tab${active}" data-cat="${k}" onclick="setTemplateCategory(this.dataset.cat)">${meta.icon} ${meta.label}${count ? HtmlSafe.html` <span style="opacity:0.65">(${count})</span>` : ''}</button>`;
+        })}`;
 }
 
 function setTemplateCategory(cat) {
@@ -323,8 +323,7 @@ function setTemplateCategory(cat) {
     const allTabs = document.querySelectorAll('.tg-cat-tab');
     allTabs.forEach(t => {
         t.classList.remove('active');
-        const onclick = t.getAttribute('onclick') || '';
-        if (onclick.includes(`'${cat}'`)) t.classList.add('active');
+        if (t.dataset.cat === cat) t.classList.add('active');
     });
     filterTemplates();
 }
@@ -350,51 +349,51 @@ function _renderTemplateGrid(templates) {
     if (!grid) return;
 
     if (!templates.length) {
-        grid.innerHTML = `<div class="tg-empty"><div class="tg-empty-icon">🔍</div><p>No templates found. Try a different category or search term.</p></div>`;
+        grid.innerHTML = HtmlSafe.html`<div class="tg-empty"><div class="tg-empty-icon">🔍</div><p>No templates found. Try a different category or search term.</p></div>`;
         return;
     }
 
-    grid.innerHTML = templates.map(t => _renderTemplateCard(t)).join('');
+    grid.innerHTML = HtmlSafe.html`${templates.map(t => _renderTemplateCard(t))}`;
 }
 
 function _renderTemplateCard(t) {
     const steps = (t.preview_steps || []);
     const stepsChain = steps.length
-        ? steps.map((s, i) => `${i > 0 ? '<span class="tg-step-sep">›</span>' : ''}<span class="tg-step-icon">${s.icon || '⚙️'} ${_escHtml(s.name)}</span>`).join('')
+        ? steps.map((s, i) => HtmlSafe.html`${i > 0 ? HtmlSafe.raw('<span class="tg-step-sep">›</span>') : ''}<span class="tg-step-icon">${s.icon || '⚙️'} ${s.name}</span>`)
         : '';
 
     const connFlow = [
-        t.source_connector_type ? `<span class="tg-conn-pill">📥 ${_escHtml(_formatConnType(t.source_connector_type))}</span>` : '',
-        t.target_connector_type ? `<span class="tg-conn-arrow">→</span><span class="tg-conn-pill">📤 ${_escHtml(_formatConnType(t.target_connector_type))}</span>` : '',
-    ].filter(Boolean).join('');
+        t.source_connector_type ? HtmlSafe.html`<span class="tg-conn-pill">📥 ${_formatConnType(t.source_connector_type)}</span>` : '',
+        t.target_connector_type ? HtmlSafe.html`<span class="tg-conn-arrow">→</span><span class="tg-conn-pill">📤 ${_formatConnType(t.target_connector_type)}</span>` : '',
+    ].filter(Boolean);
 
-    const tags = (t.tags || []).slice(0, 4).map(tag => `<span class="tg-tag">${_escHtml(tag)}</span>`).join('');
+    const tags = (t.tags || []).slice(0, 4).map(tag => HtmlSafe.html`<span class="tg-tag">${tag}</span>`);
 
-    return `
+    return HtmlSafe.html`
         <div class="tg-card" onclick="useTemplate('${t.id}')" title="Click to use this template">
             <div class="tg-card-top">
                 <div class="tg-card-title-row">
-                    <span class="tg-card-title">${t.icon || '📋'} ${_escHtml(t.name)}</span>
+                    <span class="tg-card-title">${t.icon || '📋'} ${t.name}</span>
                     <button class="tg-info-btn" onclick="event.stopPropagation();previewTemplate('${t.id}','details')">ℹ Details</button>
-                    ${t.has_guide ? `<button class="tg-guide-btn" onclick="event.stopPropagation();previewTemplate('${t.id}','guide')">📖 Guide</button>` : ''}
+                    ${t.has_guide ? HtmlSafe.html`<button class="tg-guide-btn" onclick="event.stopPropagation();previewTemplate('${t.id}','guide')">📖 Guide</button>` : ''}
                 </div>
-                <p class="tg-card-desc">${_escHtml(t.description || '')}</p>
-                ${connFlow ? `<div class="tg-conn-flow">${connFlow}</div>` : ''}
-                ${stepsChain ? `<div class="tg-steps-chain">${stepsChain}</div>` : ''}
+                <p class="tg-card-desc">${t.description || ''}</p>
+                ${connFlow.length ? HtmlSafe.html`<div class="tg-conn-flow">${connFlow}</div>` : ''}
+                ${stepsChain ? HtmlSafe.html`<div class="tg-steps-chain">${stepsChain}</div>` : ''}
             </div>
-            ${tags ? `<div class="tg-tags">${tags}</div>` : ''}
+            ${tags.length ? HtmlSafe.html`<div class="tg-tags">${tags}</div>` : ''}
             <div class="tg-card-bottom">
-                ${t.is_system ? '<span class="tg-meta-pill tg-meta-oob">⭐ OOB</span>' : ''}
-                ${t.message_type ? `<span class="tg-meta-pill tg-meta-msgtype">${_escHtml(t.message_type)}</span>` : ''}
-                ${t.estimated_setup_minutes ? `<span class="tg-meta-pill tg-meta-time">~${t.estimated_setup_minutes}m</span>` : ''}
-                ${!t.is_system ? `<button class="tg-del-btn" onclick="event.stopPropagation();deleteTemplate('${t.id}', '${_escHtml(t.name)}')" title="Delete template">🗑</button>` : ''}
+                ${t.is_system ? HtmlSafe.raw('<span class="tg-meta-pill tg-meta-oob">⭐ OOB</span>') : ''}
+                ${t.message_type ? HtmlSafe.html`<span class="tg-meta-pill tg-meta-msgtype">${t.message_type}</span>` : ''}
+                ${t.estimated_setup_minutes ? HtmlSafe.html`<span class="tg-meta-pill tg-meta-time">~${t.estimated_setup_minutes}m</span>` : ''}
+                ${!t.is_system ? HtmlSafe.html`<button class="tg-del-btn" onclick="event.stopPropagation();deleteTemplate('${t.id}')" title="Delete template">🗑</button>` : ''}
                 <button class="tg-use-btn" onclick="event.stopPropagation();useTemplate('${t.id}')">▶ Use</button>
             </div>
         </div>`;
 }
 
 function _escHtml(str) {
-    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return HtmlSafe.escapeHtml(str || '');
 }
 
 function _formatConnType(type) {
@@ -496,7 +495,7 @@ function _mdToHtml(md) {
         out.push(`<p>${inl(_escHtml(raw))}</p>`);
     }
     closeList(); closeTable();
-    return out.join('\n');
+    return HtmlSafe.raw(out.join('\n')); // built only from escaped text above
 }
 
 async function previewTemplate(id, activeTab) {
@@ -511,25 +510,25 @@ async function previewTemplate(id, activeTab) {
         const steps = (t.preview_steps || []);
 
         const stepsHtml = steps.length
-            ? steps.map(s => `<div class="tg-pipeline-step"><span>${s.icon || '⚙️'}</span><span>${_escHtml(s.name)}</span></div>`).join('')
-            : '<p style="color:#aaa;font-size:0.82rem">No pipeline steps recorded.</p>';
+            ? steps.map(s => HtmlSafe.html`<div class="tg-pipeline-step"><span>${s.icon || '⚙️'}</span><span>${s.name}</span></div>`)
+            : HtmlSafe.raw('<p style="color:#aaa;font-size:0.82rem">No pipeline steps recorded.</p>');
 
         const connHtml = [
-            t.source_connector_type ? `<div class="tg-pipeline-step"><span>📥</span><span>Source: ${_escHtml(_formatConnType(t.source_connector_type))}</span></div>` : '',
-            t.target_connector_type ? `<div class="tg-pipeline-step"><span>📤</span><span>Destination: ${_escHtml(_formatConnType(t.target_connector_type))}</span></div>` : '',
-        ].filter(Boolean).join('');
+            t.source_connector_type ? HtmlSafe.html`<div class="tg-pipeline-step"><span>📥</span><span>Source: ${_formatConnType(t.source_connector_type)}</span></div>` : '',
+            t.target_connector_type ? HtmlSafe.html`<div class="tg-pipeline-step"><span>📤</span><span>Destination: ${_formatConnType(t.target_connector_type)}</span></div>` : '',
+        ].filter(Boolean);
 
         const reqHtml = required.length
-            ? required.map(f => `
+            ? required.map(f => HtmlSafe.html`
                 <div class="tg-required-field">
                     <span class="tg-req-badge ${f.required ? 'required' : 'optional'}">${f.required ? 'Required' : 'Optional'}</span>
-                    <span>${_escHtml(f.label)}</span>
+                    <span>${f.label}</span>
                     <span style="color:#aaa;font-size:0.78rem;margin-left:auto">${f.section}</span>
-                </div>`).join('')
-            : '<p style="color:#888;font-size:0.82rem">This template requires no additional connection setup — all defaults are pre-filled.</p>';
+                </div>`)
+            : HtmlSafe.raw('<p style="color:#888;font-size:0.82rem">This template requires no additional connection setup — all defaults are pre-filled.</p>');
 
         const hasGuide = !!(t.user_guide && t.user_guide.trim());
-        const tabBar = hasGuide ? `
+        const tabBar = hasGuide ? HtmlSafe.html`
             <div class="tg-tab-bar">
                 <button class="tg-tab-btn${activeTab === 'details' ? ' active' : ''}" data-tab="details"
                     onclick="_tgSwitchTab('tgPreviewModal','details')">Details</button>
@@ -537,27 +536,28 @@ async function previewTemplate(id, activeTab) {
                     onclick="_tgSwitchTab('tgPreviewModal','guide')">📖 User Guide</button>
             </div>` : '';
 
-        const detailsHidden = hasGuide && activeTab !== 'details' ? ' style="display:none"' : '';
-        const guideHidden   = !hasGuide || activeTab !== 'guide'  ? ' style="display:none"' : '';
+        const hidden = HtmlSafe.raw(' style="display:none"');
+        const detailsHidden = hasGuide && activeTab !== 'details' ? hidden : '';
+        const guideHidden   = !hasGuide || activeTab !== 'guide'  ? hidden : '';
 
         const modal = document.createElement('div');
         modal.className = 'tg-modal-overlay';
         modal.id = 'tgPreviewModal';
-        modal.innerHTML = `
+        modal.innerHTML = HtmlSafe.html`
             <div class="tg-modal">
                 <div class="tg-modal-header">
                     <div>
-                        <div class="tg-modal-title">${t.icon || '📋'} ${_escHtml(t.name)}</div>
-                        <div class="tg-modal-cat">${(TEMPLATE_CATEGORY_META[t.category] || {}).icon || ''} ${_escHtml(t.category)} ${t.subcategory ? '· ' + t.subcategory : ''}</div>
+                        <div class="tg-modal-title">${t.icon || '📋'} ${t.name}</div>
+                        <div class="tg-modal-cat">${(TEMPLATE_CATEGORY_META[t.category] || {}).icon || ''} ${t.category} ${t.subcategory ? '· ' + t.subcategory : ''}</div>
                     </div>
                     <button class="tg-modal-close" onclick="document.getElementById('tgPreviewModal').remove()">×</button>
                 </div>
                 ${tabBar}
                 <div class="tg-tab-panel tg-modal-body" data-panel="details"${detailsHidden}>
-                    <p class="tg-modal-desc">${_escHtml(t.description || 'No description available.')}</p>
+                    <p class="tg-modal-desc">${t.description || 'No description available.'}</p>
                     <div class="tg-modal-section">
                         <div class="tg-modal-section-title">Connectors</div>
-                        <div class="tg-pipeline-flow">${connHtml || '<p style="color:#aaa">No connectors defined.</p>'}</div>
+                        <div class="tg-pipeline-flow">${connHtml.length ? connHtml : HtmlSafe.raw('<p style="color:#aaa">No connectors defined.</p>')}</div>
                     </div>
                     <div class="tg-modal-section">
                         <div class="tg-modal-section-title">Pipeline Flow</div>
@@ -568,7 +568,7 @@ async function previewTemplate(id, activeTab) {
                         ${reqHtml}
                     </div>
                 </div>
-                ${hasGuide ? `<div class="tg-tab-panel tg-guide-body" data-panel="guide"${guideHidden}>${_mdToHtml(t.user_guide)}</div>` : ''}
+                ${hasGuide ? HtmlSafe.html`<div class="tg-tab-panel tg-guide-body" data-panel="guide"${guideHidden}>${_mdToHtml(t.user_guide)}</div>` : ''}
                 <div class="tg-modal-footer">
                     <button class="tg-modal-btn cancel" onclick="document.getElementById('tgPreviewModal').remove()">Close</button>
                     <button class="tg-modal-btn use" onclick="document.getElementById('tgPreviewModal').remove(); useTemplate('${t.id}')">▶ Configure & Create</button>
@@ -582,7 +582,8 @@ async function previewTemplate(id, activeTab) {
     }
 }
 
-async function deleteTemplate(id, name) {
+async function deleteTemplate(id) {
+    const name = (_templatesState.all.find(t => String(t.id) === String(id)) || {}).name || '';
     const ok = await AppDialogs.confirm(HtmlSafe.html`Delete template "<b>${name}</b>"?<br><br>This cannot be undone.`, { title: 'Delete Template', type: 'danger', confirmText: 'Delete' });
     if (!ok) return;
     try {
@@ -637,15 +638,15 @@ function _renderRequiredFieldsSection(fields) {
 
     const renderField = (f) => {
         const idAttr = `tcf_field_${f.section}_${String(f.field).replace(/[^a-zA-Z0-9]/g, '_')}`;
-        const reqMark = f.required ? ' <span style="color:#e65100">*</span>' : '';
-        const hint = f.hint ? `<div style="font-size:0.72rem;color:#999;margin-top:3px">${_escHtml(f.hint)}</div>` : '';
-        const common = `data-tcf-section="${_escHtml(f.section)}" data-tcf-field="${_escHtml(f.field)}" data-tcf-required="${f.required ? '1' : '0'}"`;
+        const reqMark = f.required ? HtmlSafe.raw(' <span style="color:#e65100">*</span>') : '';
+        const hint = f.hint ? HtmlSafe.html`<div style="font-size:0.72rem;color:#999;margin-top:3px">${f.hint}</div>` : '';
+        const common = HtmlSafe.html`data-tcf-section="${f.section}" data-tcf-field="${f.field}" data-tcf-required="${f.required ? '1' : '0'}"`;
 
         if (f.type === 'boolean') {
-            return `<div style="margin-bottom:14px">
+            return HtmlSafe.html`<div style="margin-bottom:14px">
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:#1a1a2e">
                     <input type="checkbox" id="${idAttr}" ${common} data-tcf-type="boolean">
-                    ${_escHtml(f.label)}${reqMark}
+                    ${f.label}${reqMark}
                 </label>${hint}
             </div>`;
         }
@@ -653,13 +654,13 @@ function _renderRequiredFieldsSection(fields) {
             const opts = (f.options || []).map(o => {
                 const val = (o && typeof o === 'object') ? o.value : o;
                 const label = (o && typeof o === 'object') ? (o.label || o.value) : o;
-                return `<option value="${_escHtml(String(val))}">${_escHtml(String(label))}</option>`;
-            }).join('');
+                return HtmlSafe.html`<option value="${String(val)}">${String(label)}</option>`;
+            });
             const emptyOption = (!f.options || !f.options.length)
-                ? `<option value="" disabled>${f.optionsEndpoint ? 'No ports detected — enter the value manually in Pipeline Builder later' : 'No options available'}</option>`
+                ? HtmlSafe.html`<option value="" disabled>${f.optionsEndpoint ? 'No ports detected — enter the value manually in Pipeline Builder later' : 'No options available'}</option>`
                 : '';
-            return `<div style="margin-bottom:14px">
-                <label style="display:block;font-size:0.78rem;font-weight:600;color:#444;margin-bottom:5px">${_escHtml(f.label)}${reqMark}</label>
+            return HtmlSafe.html`<div style="margin-bottom:14px">
+                <label style="display:block;font-size:0.78rem;font-weight:600;color:#444;margin-bottom:5px">${f.label}${reqMark}</label>
                 <select id="${idAttr}" ${common} data-tcf-type="select"
                     style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #dde1e7;border-radius:7px;font-size:0.9rem;color:#1a1a2e;background:#fafbfc">
                     <option value="">— Select —</option>
@@ -669,27 +670,27 @@ function _renderRequiredFieldsSection(fields) {
             </div>`;
         }
         if (f.type === 'textarea') {
-            return `<div style="margin-bottom:14px">
-                <label style="display:block;font-size:0.78rem;font-weight:600;color:#444;margin-bottom:5px">${_escHtml(f.label)}${reqMark}</label>
+            return HtmlSafe.html`<div style="margin-bottom:14px">
+                <label style="display:block;font-size:0.78rem;font-weight:600;color:#444;margin-bottom:5px">${f.label}${reqMark}</label>
                 <textarea id="${idAttr}" ${common} data-tcf-type="textarea" rows="3"
                     style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #dde1e7;border-radius:7px;font-size:0.9rem;color:#1a1a2e;background:#fafbfc;font-family:inherit"></textarea>${hint}
             </div>`;
         }
         const inputType = f.type === 'password' ? 'password' : (f.type === 'number' ? 'number' : (f.type === 'url' ? 'url' : 'text'));
-        return `<div style="margin-bottom:14px">
-            <label style="display:block;font-size:0.78rem;font-weight:600;color:#444;margin-bottom:5px">${_escHtml(f.label)}${reqMark}</label>
-            <input type="${inputType}" id="${idAttr}" ${common} data-tcf-type="${_escHtml(f.type || 'string')}" autocomplete="off"
+        return HtmlSafe.html`<div style="margin-bottom:14px">
+            <label style="display:block;font-size:0.78rem;font-weight:600;color:#444;margin-bottom:5px">${f.label}${reqMark}</label>
+            <input type="${inputType}" id="${idAttr}" ${common} data-tcf-type="${f.type || 'string'}" autocomplete="off"
                 style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #dde1e7;border-radius:7px;font-size:0.9rem;color:#1a1a2e;background:#fafbfc">${hint}
         </div>`;
     };
 
-    const sectionBlock = (label, items) => (items && items.length) ? `
+    const sectionBlock = (label, items) => (items && items.length) ? HtmlSafe.html`
         <div style="margin-bottom:16px">
             <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#aaa;margin-bottom:8px">${label}</div>
-            ${items.map(renderField).join('')}
+            ${items.map(renderField)}
         </div>` : '';
 
-    return `
+    return HtmlSafe.html`
         <div style="margin-bottom:18px;padding:14px;background:#fff;border:1px solid #e8ecf0;border-radius:8px">
             <div style="font-size:0.85rem;font-weight:700;color:#1a1a2e;margin-bottom:10px">Connection Details</div>
             ${sectionBlock('Source Connection', bySection.source)}
@@ -721,25 +722,25 @@ async function useTemplate(id) {
     const steps = t.preview_steps || [];
     const stepsHtml = steps.length
         ? steps.map((s, i) =>
-            `${i > 0 ? '<span style="color:#c5cff9;margin:0 4px">›</span>' : ''}<span style="background:#f0f4ff;color:#4a63d3;border-radius:5px;padding:3px 8px;font-size:0.75rem;white-space:nowrap">${s.icon || '⚙️'} ${_escHtml(s.name)}</span>`
-          ).join('')
-        : '<span style="color:#aaa;font-size:0.8rem">No steps recorded</span>';
+            HtmlSafe.html`${i > 0 ? HtmlSafe.raw('<span style="color:#c5cff9;margin:0 4px">›</span>') : ''}<span style="background:#f0f4ff;color:#4a63d3;border-radius:5px;padding:3px 8px;font-size:0.75rem;white-space:nowrap">${s.icon || '⚙️'} ${s.name}</span>`
+          )
+        : HtmlSafe.raw('<span style="color:#aaa;font-size:0.8rem">No steps recorded</span>');
 
     // Connector type badges — informational
     const connFlow = [
-        t.source_connector_type ? `<span style="background:#e8f0fe;color:#3b5bdb;border-radius:5px;padding:3px 9px;font-size:0.75rem">📥 ${_escHtml(_formatConnType(t.source_connector_type))}</span>` : '',
-        t.target_connector_type ? `<span style="color:#aaa;font-size:0.8rem">→</span><span style="background:#e8f0fe;color:#3b5bdb;border-radius:5px;padding:3px 9px;font-size:0.75rem">📤 ${_escHtml(_formatConnType(t.target_connector_type))}</span>` : '',
+        t.source_connector_type ? HtmlSafe.html`<span style="background:#e8f0fe;color:#3b5bdb;border-radius:5px;padding:3px 9px;font-size:0.75rem">📥 ${_formatConnType(t.source_connector_type)}</span>` : '',
+        t.target_connector_type ? HtmlSafe.html`<span style="color:#aaa;font-size:0.8rem">→</span><span style="background:#e8f0fe;color:#3b5bdb;border-radius:5px;padding:3px 9px;font-size:0.75rem">📤 ${_formatConnType(t.target_connector_type)}</span>` : '',
     ].filter(Boolean).join(' ');
 
     const overlay = document.createElement('div');
     overlay.id = 'tgConfigureModal';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,20,40,0.45);z-index:1100;display:flex;align-items:center;justify-content:center';
-    overlay.innerHTML = `
+    overlay.innerHTML = HtmlSafe.html`
         <div style="background:#fff;border-radius:14px;width:480px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,0.22)">
             <div style="padding:20px 24px 14px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:flex-start">
                 <div>
-                    <div style="font-size:1.05rem;font-weight:700;color:#1a1a2e;margin-bottom:2px">${t.icon || '📋'} ${_escHtml(t.name)}</div>
-                    <div style="font-size:0.75rem;color:#999">${t.message_type ? _escHtml(t.message_type) + ' · ' : ''}pipeline pre-configured · add connectivity after</div>
+                    <div style="font-size:1.05rem;font-weight:700;color:#1a1a2e;margin-bottom:2px">${t.icon || '📋'} ${t.name}</div>
+                    <div style="font-size:0.75rem;color:#999">${t.message_type ? t.message_type + ' · ' : ''}pipeline pre-configured · add connectivity after</div>
                 </div>
                 <button onclick="document.getElementById('tgConfigureModal').remove()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:#bbb;line-height:1;padding:0;margin-left:12px">×</button>
             </div>
@@ -747,7 +748,7 @@ async function useTemplate(id) {
 
                 <div style="margin-bottom:20px">
                     <label style="display:block;font-size:0.78rem;font-weight:600;color:#444;margin-bottom:5px">Interface Name <span style="color:#e65100">*</span></label>
-                    <input type="text" id="tcf_name" value="${_escHtml(t.name)}" required autocomplete="off"
+                    <input type="text" id="tcf_name" value="${t.name}" required autocomplete="off"
                         style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #dde1e7;border-radius:7px;font-size:0.9rem;color:#1a1a2e;background:#fafbfc">
                 </div>
 
@@ -756,10 +757,10 @@ async function useTemplate(id) {
                     <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${stepsHtml}</div>
                 </div>
 
-                ${connFlow ? `
+                ${connFlow ? HtmlSafe.html`
                 <div style="padding:10px 14px;background:#f0f4ff;border-radius:8px;border:1px solid #c5cff9;margin-bottom:12px;font-size:0.79rem;color:#3b4a9e;line-height:1.55">
-                    <strong>📥 ${_escHtml(_formatConnType(t.source_connector_type || ''))}
-                    ${t.target_connector_type ? '→ 📤 ' + _escHtml(_formatConnType(t.target_connector_type)) : ''}</strong><br>
+                    <strong>📥 ${_formatConnType(t.source_connector_type || '')}
+                    ${t.target_connector_type ? '→ 📤 ' + _formatConnType(t.target_connector_type) : ''}</strong><br>
                     ${(t.required_connection_fields || []).length
                         ? 'Fill in the fields below and this pipeline is ready to use. Anything else can be fine-tuned later in Pipeline Builder.'
                         : "After creation you'll be guided to configure these connectors using the full connector editor in Pipeline Builder."}
@@ -1034,7 +1035,7 @@ function _showDeviceVerificationStep(interfaceId) {
     const overlay = document.createElement('div');
     overlay.id = 'tgVerifyModal';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,20,40,0.45);z-index:1150;display:flex;align-items:center;justify-content:center';
-    overlay.innerHTML = `
+    overlay.innerHTML = HtmlSafe.html`
         <div style="background:#fff;border-radius:14px;width:420px;max-width:92vw;padding:30px 26px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,0.22)">
             <div id="tgVerifySpinner" style="font-size:2.1rem;margin-bottom:14px">⏳</div>
             <div id="tgVerifyTitle" style="font-size:1rem;font-weight:700;color:#1a1a2e;margin-bottom:8px">Waiting for your device's first message…</div>
@@ -1102,8 +1103,8 @@ function _showDeviceActivationWarning(interfaceId, warnings) {
     const overlay = document.createElement('div');
     overlay.id = 'tgVerifyModal';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,20,40,0.45);z-index:1150;display:flex;align-items:center;justify-content:center';
-    const warningItems = (warnings || []).map(w => `<li style="margin-bottom:4px">${_escHtml(w)}</li>`).join('');
-    overlay.innerHTML = `
+    const warningItems = (warnings || []).map(w => HtmlSafe.html`<li style="margin-bottom:4px">${w}</li>`);
+    overlay.innerHTML = HtmlSafe.html`
         <div style="background:#fff;border-radius:14px;width:460px;max-width:92vw;padding:30px 26px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,0.22)">
             <div style="font-size:2.1rem;margin-bottom:14px">⚠️</div>
             <div style="font-size:1rem;font-weight:700;color:#1a1a2e;margin-bottom:8px">Your interface was created, but didn't fully start</div>
@@ -1167,7 +1168,7 @@ function showAccessDenied(sectionName, message) {
     // Create access denied content
     const placeholder = document.createElement('div');
     placeholder.className = 'content-placeholder';
-    placeholder.innerHTML = `
+    placeholder.innerHTML = HtmlSafe.html`
         <div class="placeholder-card access-denied">
             <div class="placeholder-icon">🔒</div>
             <h2 class="placeholder-title">Access Denied</h2>
@@ -1212,7 +1213,7 @@ function showPlaceholderContent(title, description) {
     // Create placeholder content
     const placeholder = document.createElement('div');
     placeholder.className = 'content-placeholder';
-    placeholder.innerHTML = `
+    placeholder.innerHTML = HtmlSafe.html`
         <div class="placeholder-card">
             <div class="placeholder-icon">${getIconForSection(title)}</div>
             <h2 class="placeholder-title">${title}</h2>
@@ -1307,7 +1308,7 @@ async function loadRecentActivity() {
         if (!response.ok) throw new Error('Non-OK response');
         const data = await response.json();
         if (!data.success || !data.activity || data.activity.length === 0) {
-            container.innerHTML = `<div class="activity-item">
+            container.innerHTML = HtmlSafe.html`<div class="activity-item">
                 <span class="activity-dot"></span>
                 <div class="activity-content"><span class="activity-text" style="color:#aaa">No recent activity</span></div>
             </div>`;
@@ -1331,22 +1332,22 @@ async function loadRecentActivity() {
 
         const SUCCESS_ACTIONS = new Set(['login', 'create_interface', 'activate_interface', 'create_template', 'save_pipeline']);
 
-        container.innerHTML = data.activity.map(row => {
+        container.innerHTML = HtmlSafe.html`${data.activity.map(row => {
             const label = ACTION_LABELS[row.action] || row.action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
             const isSuccess = row.result === 'success' || SUCCESS_ACTIONS.has(row.action);
             const dotClass = isSuccess ? 'activity-dot success' : 'activity-dot';
             const who = row.user_name ? `by ${row.user_name.split(' ')[0]}` : '';
             const when = row.created_at ? _relativeTime(new Date(row.created_at)) : '';
-            return `<div class="activity-item">
+            return HtmlSafe.html`<div class="activity-item">
                 <span class="${dotClass}"></span>
                 <div class="activity-content">
-                    <span class="activity-text">${label}${who ? ' <span style="opacity:.65">'+who+'</span>' : ''}</span>
+                    <span class="activity-text">${label}${who ? HtmlSafe.html` <span style="opacity:.65">${who}</span>` : ''}</span>
                     <span class="activity-time">${when}</span>
                 </div>
             </div>`;
-        }).join('');
+        })}`;
     } catch (e) {
-        if (container) container.innerHTML = `<div class="activity-item">
+        if (container) container.innerHTML = HtmlSafe.html`<div class="activity-item">
             <span class="activity-dot"></span>
             <div class="activity-content"><span class="activity-text" style="color:#aaa">Could not load activity</span></div>
         </div>`;

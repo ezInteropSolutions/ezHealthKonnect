@@ -12,7 +12,8 @@
         }
         
         // ✅ PRESERVED: Header HTML with all original IDs and structure
-        container.innerHTML = `
+        // Constant markup: every interpolation below is the app's own help text.
+        container.innerHTML = HtmlSafe.raw(`
             <!-- Ultra Compact Header with Inline Status Tiles -->
             <header class="main-header">
                 <div class="header-left">
@@ -245,7 +246,7 @@
                     </div><!-- /body -->
                 </div>
             </div>
-        `;
+        `);
         
         console.log('✅ Interface header component loaded');
     }
