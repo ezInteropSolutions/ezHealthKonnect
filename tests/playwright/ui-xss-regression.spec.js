@@ -211,6 +211,50 @@ test.describe('User names render as text on user management', () => {
     });
 });
 
+// ezCompanion renders model output. A document or message the model reads can
+// steer what it says (prompt injection), so its answer is untrusted text that
+// gets a markdown subset, never HTML.
+test.describe('ezCompanion renders model output as text', () => {
+    test('a hostile streamed answer keeps formatting and runs nothing', async ({ page }) => {
+        const answer = `**Bold** and \`code\` <img src=x onerror="window.__ezhkXss='${MARK}-ai'"> ` +
+            `<a href="javascript:window.__ezhkXss=1">link</a> ${MARK}`;
+        await page.route('**/api/ai/ask/stream', route => route.fulfill({
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+            body: `data: ${JSON.stringify(answer)}\n\ndata: [DONE]\n\n`,
+        }));
+        // Agent Mode (on for admins) answers non-streaming and may propose an
+        // action whose arguments come from the model too.
+        await page.route('**/api/ai/agent/ask', route => route.fulfill({
+            status: 200, contentType: 'application/json',
+            body: JSON.stringify({ success: true, data: {
+                answer,
+                proposed_action: { id: 'pa-1', tool_name: 'verify_pipeline_script', arguments: {
+                    step_id: `<img src=x onerror="window.__ezhkXss='${MARK}-step'">`, verified: false, attempts: 2,
+                    last_error: `<svg onload="window.__ezhkXss='${MARK}-err'">`, script: `</pre><img src=x onerror="window.__ezhkXss='${MARK}-script'">`,
+                } },
+            } }),
+        }));
+        await page.goto('/interfaces.html');
+        await page.waitForFunction(() => window.AIAssistant && window.HtmlSafe);
+        await page.evaluate(() => window.AIAssistant.ask('hello'));
+        const bubble = page.locator('.ai-msg.assistant').filter({ hasText: MARK }).last();
+        await expect(bubble).toBeVisible({ timeout: 15_000 });
+        await expect(bubble.locator('strong')).toHaveText('Bold');
+        await expect(bubble.locator('code')).toHaveText('code');
+        await expect(bubble.locator('img, a[href^="javascript"]')).toHaveCount(0);
+        expect(await bubble.innerText()).toContain('<img src=x onerror=');
+        const card = page.locator('.ai-proposal-card').last();
+        if (await card.count()) {
+            await expect(card.locator('pre')).toContainText('</pre><img src=x');
+            await expect(card.locator('img, svg')).toHaveCount(0);
+            await expect(card.locator('.ai-proposal-approve')).toHaveCount(1);
+        }
+        await page.waitForTimeout(500);
+        expect(await page.evaluate(() => window.__ezhkXss || null)).toBeNull();
+    });
+});
+
 // AppDialogs is used everywhere with messages that interpolate data (names,
 // errors returned by the server). A plain string is shown as text; formatting
 // needs HtmlSafe.html (data inside stays escaped) or HtmlSafe.raw (constants).
