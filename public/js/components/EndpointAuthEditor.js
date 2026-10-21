@@ -47,8 +47,8 @@ class EndpointAuthEditor {
     // Markup for the section; inserted by modal-components.js.
     render() {
         const options = EndpointAuthEditor.TYPES
-            .map(t => `<option value="${t.value}">${t.label}</option>`).join('');
-        return `
+            .map(t => HtmlSafe.html`<option value="${t.value}">${t.label}</option>`);
+        return HtmlSafe.html`
             <div class="form-group" id="${this.rootId}" style="margin-top: 16px;">
                 <div style="background: linear-gradient(to right, #eff6ff, #f5f3ff); border-left: 3px solid #6366f1; padding: 14px; border-radius: 6px;">
                     <label for="${this.rootId}Type" style="font-weight: 600; color: #3730a3; font-size: 0.95rem; display: block; margin-bottom: 4px;">
@@ -118,13 +118,13 @@ class EndpointAuthEditor {
         const container = document.getElementById(`${this.rootId}Fields`);
         if (!container) return;
         const fields = EndpointAuthEditor.FIELDS[type] || [];
-        container.innerHTML = fields.map(([key, label, inputType, placeholder]) => `
+        container.innerHTML = HtmlSafe.html`${fields.map(([key, label, inputType, placeholder]) => HtmlSafe.html`
             <div>
                 <label for="${this._fieldId(key)}" style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">${label}</label>
                 <input type="${inputType}" id="${this._fieldId(key)}" data-endpoint-auth-field="${key}"
                        autocomplete="new-password" placeholder="${placeholder}"
                        style="width:100%;padding:6px 9px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-            </div>`).join('');
+            </div>`)}`;
         // Values set via .value (never interpolated into HTML).
         for (const [key] of fields) {
             const input = document.getElementById(this._fieldId(key));

@@ -85,7 +85,7 @@
         console.log('✅ Loading edit modal (REFACTORED with shared components)...');
 
         // ✅ REFACTORED: Using shared InterfaceConfigComponents with tabs and maximize
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
             <style>
                 .family-chip {
                     cursor: pointer; padding: 4px 10px; border-radius: 12px;
@@ -596,10 +596,10 @@
                 auto_start: interfaceData.auto_start,
                 deployment_delay_seconds: interfaceData.deployment_delay_seconds
             });
-            deploymentSettingsContainer.innerHTML = InterfaceConfigComponents.getDeploymentSettingsPanel(
+            deploymentSettingsContainer.innerHTML = HtmlSafe.html`${InterfaceConfigComponents.getDeploymentSettingsPanel(
                 interfaceData,
                 'edit'
-            );
+            )}`;
             // Initialize event handlers for deployment settings
             InterfaceConfigComponents.initDeploymentSettingsEvents(document, 'edit');
         } else {
@@ -688,16 +688,16 @@
                     el.innerHTML = '<div style="font-size:11px;color:#6b7280;">No alert channels configured yet — <a href="alerts.html" target="_blank">create one in Alerts settings</a>.</div>';
                     return;
                 }
-                el.innerHTML = channels.map(function(ch) {
+                el.innerHTML = HtmlSafe.html`${channels.map(function(ch) {
                     const checked = selectedIds.indexOf(ch.id) !== -1;
                     const iconClass = ch.channel_type === 'email' ? 'fa-envelope' : ch.channel_type === 'slack' ? 'fa-slack' : 'fa-globe';
-                    return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #fef3c7;cursor:pointer;font-size:12px;">' +
-                        '<input type="checkbox" data-channel-id="' + ch.id + '" ' + (checked ? 'checked' : '') + ' style="width:auto;">' +
-                        '<i class="fab ' + iconClass + '" style="width:16px;color:#92400e;"></i>' +
-                        '<span>' + ch.name + '</span>' +
-                        '<span style="font-size:10px;color:#6b7280;margin-left:auto;">' + ch.channel_type + '</span>' +
-                    '</label>';
-                }).join('');
+                    return HtmlSafe.html`<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #fef3c7;cursor:pointer;font-size:12px;">
+                        <input type="checkbox" data-channel-id="${ch.id}" ${checked ? HtmlSafe.raw('checked') : ''} style="width:auto;">
+                        <i class="fab ${iconClass}" style="width:16px;color:#92400e;"></i>
+                        <span>${ch.name}</span>
+                        <span style="font-size:10px;color:#6b7280;margin-left:auto;">${ch.channel_type}</span>
+                    </label>`;
+                })}`;
             })
             .catch(function() {
                 el.innerHTML = '<div style="font-size:11px;color:#6b7280;">Could not load alert channels.</div>';

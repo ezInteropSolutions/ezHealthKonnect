@@ -738,7 +738,7 @@ function updateSourceFields() {
     switch (sourceType) {
         case 'tcp':
         case 'mllp':
-            fieldsHTML = `
+            fieldsHTML = HtmlSafe.html`
                 <div class="form-row">
                     <div class="form-group">
                         <label for="editSourceHost" class="field-label-required">Listen Host/IP</label>
@@ -755,7 +755,7 @@ function updateSourceFields() {
             break;
         case 'http':
             const existingPath = document.getElementById('editSourcePath')?.value || '';
-            fieldsHTML = `
+            fieldsHTML = HtmlSafe.html`
                 <div class="form-row">
                     <div class="form-group">
                         <label for="editSourceHost">Listen Host/IP</label>
@@ -774,7 +774,7 @@ function updateSourceFields() {
             `;
             break;
         case 'file':
-            fieldsHTML = `
+            fieldsHTML = HtmlSafe.html`
                 <div class="form-group">
                     <label for="editSourcePath" class="field-label-required">Directory Path</label>
                     <input type="text" id="editSourcePath" name="sourcePath" placeholder="/data/hl7/inbound" required>
@@ -785,10 +785,10 @@ function updateSourceFields() {
         // Note: 'database' case is handled by InterfaceConfigComponents.getSourceConfigPanel()
         // via modal-components.js updateEditSourceConfigPanel() - no duplicate code here
         default:
-            fieldsHTML = '<p class="form-help">Configure source-specific settings above</p>';
+            fieldsHTML = HtmlSafe.raw('<p class="form-help">Configure source-specific settings above</p>');
     }
 
-    configFields.innerHTML = fieldsHTML;
+    configFields.innerHTML = HtmlSafe.html`${fieldsHTML}`;
 }
 
 function updateTargetFields() {
@@ -825,7 +825,7 @@ function updateTargetFields() {
 
     switch (targetType) {
         case 'fhir':
-            fieldsHTML = `
+            fieldsHTML = HtmlSafe.html`
                 <div class="form-row">
                     <div class="form-group">
                         <label for="editFhirServerUrl" class="field-label-required">FHIR Server URL</label>
@@ -846,7 +846,7 @@ function updateTargetFields() {
             break;
         case 'tcp':
         case 'mllp':
-            fieldsHTML = `
+            fieldsHTML = HtmlSafe.html`
                 <div class="form-row">
                     <div class="form-group">
                         <label for="editTargetHost" class="field-label-required">Target Host</label>
@@ -860,7 +860,7 @@ function updateTargetFields() {
             `;
             break;
         case 'http':
-            fieldsHTML = `
+            fieldsHTML = HtmlSafe.html`
                 <div class="form-group">
                     <label for="editTargetHost" class="field-label-required">Target URL</label>
                     <input type="text" id="editTargetHost" name="targetHost" value="${existingTargetHost}" placeholder="http://target-server:8080/api/messages" required>
@@ -869,7 +869,7 @@ function updateTargetFields() {
             `;
             break;
         case 'file':
-            fieldsHTML = `
+            fieldsHTML = HtmlSafe.html`
                 <div class="form-row">
                     <div class="form-group">
                         <label for="editFileOutputDirectory" class="field-label-required">Output Directory</label>
@@ -894,7 +894,7 @@ function updateTargetFields() {
             `;
             break;
         case 'database':
-            fieldsHTML = `
+            fieldsHTML = HtmlSafe.html`
                 <div class="form-group">
                     <label for="editDatabaseConnectionString">Connection String (Optional)</label>
                     <input type="text" id="editDatabaseConnectionString" name="connectionString" value="${existingDatabaseConnectionString}" placeholder="postgresql://user:pass@localhost:5432/dbname">
@@ -923,7 +923,7 @@ function updateTargetFields() {
             `;
             break;
         case 'sink':
-            fieldsHTML = `
+            fieldsHTML = HtmlSafe.html`
                 <div class="form-group">
                     <div class="info-panel">
                         <div class="info-icon">💾</div>
@@ -941,10 +941,10 @@ function updateTargetFields() {
             `;
             break;
         default:
-            fieldsHTML = '<p class="form-help">Configure target-specific settings above</p>';
+            fieldsHTML = HtmlSafe.raw('<p class="form-help">Configure target-specific settings above</p>');
     }
 
-    configFields.innerHTML = fieldsHTML;
+    configFields.innerHTML = HtmlSafe.html`${fieldsHTML}`;
 }
 
 function updateRoutingFields() {

@@ -315,6 +315,36 @@ test.describe('Mirth migration preview renders channel content as text', () => {
     });
 });
 
+// Stored connection settings are written back into the connection forms.
+// A value containing a quote must stay inside its value="" attribute.
+test.describe('Connection forms keep stored settings inside their fields', () => {
+    const host = `h" autofocus onfocus="window.__ezhkXss='${MARK}-host'" x="`;
+    test('shared connection-form generators', async ({ page }) => {
+        await page.goto('/interfaces.html');
+        await page.waitForFunction(() => window.HtmlSafe && typeof InterfaceConfigComponents !== 'undefined');
+        const result = await page.evaluate((h) => {
+            const out = {};
+            const forms = {
+                tcp: InterfaceConfigComponents.getTcpMllpConfig('source', { host: h, port: 2575 }, 'x'),
+                http: InterfaceConfigComponents.getHttpConfig('source', { endpoint: h }, 'x'),
+                auth: InterfaceConfigComponents.getHttpAuthDetailsPanel('basic', { username: h }, 'x'),
+                target: InterfaceConfigComponents.getTargetConfigPanel('http', 'fhir', { endpoint: h }, { idPrefix: 'x' }),
+            };
+            for (const [k, html] of Object.entries(forms)) {
+                const box = document.createElement('div');
+                box.innerHTML = HtmlSafe.html`${html}`;
+                const inputs = [...box.querySelectorAll('input')];
+                out[k] = { withValue: inputs.filter(i => i.value === h).length, injected: box.querySelectorAll('[onfocus]').length };
+            }
+            return out;
+        }, host);
+        for (const [k, r] of Object.entries(result)) {
+            expect(r.injected, `${k}: attribute injected`).toBe(0);
+            expect(r.withValue, `${k}: value kept intact`).toBeGreaterThan(0);
+        }
+    });
+});
+
 // AppDialogs is used everywhere with messages that interpolate data (names,
 // errors returned by the server). A plain string is shown as text; formatting
 // needs HtmlSafe.html (data inside stays escaped) or HtmlSafe.raw (constants).

@@ -250,19 +250,19 @@
         // Source Type - use shared component
         const sourceTypeContainer = document.getElementById('editSourceTypeContainer');
         if (sourceTypeContainer) {
-            sourceTypeContainer.innerHTML = InterfaceConfigComponents.getSourceTypeSelector(
+            sourceTypeContainer.innerHTML = HtmlSafe.html`${InterfaceConfigComponents.getSourceTypeSelector(
                 interfaceData.sourceType || 'hl7v2',
                 { idPrefix: 'edit', showHint: false }
-            );
+            )}`;
         }
 
         // Source Connectivity - use shared component
         const sourceConnectivityContainer = document.getElementById('editSourceConnectivityContainer');
         if (sourceConnectivityContainer) {
-            sourceConnectivityContainer.innerHTML = InterfaceConfigComponents.getSourceConnectivitySelector(
+            sourceConnectivityContainer.innerHTML = HtmlSafe.html`${InterfaceConfigComponents.getSourceConnectivitySelector(
                 sourceConnectivityValue || 'tcp',
                 { idPrefix: 'edit', showHint: false }
-            );
+            )}`;
         }
 
         // Source Config Panel - use shared component with extracted data
@@ -299,12 +299,12 @@
 
         console.log('🔄 Updating edit source config panel:', { sourceType, sourceConnectivity });
 
-        sourceConfigPanel.innerHTML = InterfaceConfigComponents.getSourceConfigPanel(
+        sourceConfigPanel.innerHTML = HtmlSafe.html`${InterfaceConfigComponents.getSourceConfigPanel(
             sourceConnectivity,
             sourceType,
             sourceConfig,
             { idPrefix: 'edit' }
-        );
+        )}`;
 
         // Attach event listeners for the new panel
         InterfaceConfigComponents.attachEventListeners(
