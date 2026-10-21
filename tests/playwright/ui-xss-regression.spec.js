@@ -375,6 +375,24 @@ test.describe('Reports render result rows as text', () => {
     });
 });
 
+// The FHIR validator echoes the resource's id and the validation messages
+// (which quote values from the resource).
+test.describe('FHIR validator renders results as text', () => {
+    test('hostile resource id and gender', async ({ page }) => {
+        await page.goto('/fhir-validator.html');
+        const bad = `<img src=x onerror="window.__ezhkXss='${MARK}-fv'">`;
+        await page.locator('#fhirInput').fill(JSON.stringify({ resourceType: 'Patient', id: bad, gender: bad }));
+        await page.locator('#validateBtn').click();
+        const out = page.locator('#resultOutput');
+        await expect(out.locator('.resource-card')).toHaveCount(1, { timeout: 20_000 });
+        await expect(page.locator('#resultBadges .badge').first()).toBeVisible();
+        expect(await out.innerText()).toContain('<img src=x');
+        await expect(out.locator('img')).toHaveCount(0);
+        await page.waitForTimeout(300);
+        expect(await page.evaluate(() => window.__ezhkXss || null)).toBeNull();
+    });
+});
+
 // AppDialogs is used everywhere with messages that interpolate data (names,
 // errors returned by the server). A plain string is shown as text; formatting
 // needs HtmlSafe.html (data inside stays escaped) or HtmlSafe.raw (constants).

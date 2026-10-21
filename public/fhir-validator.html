@@ -708,15 +708,15 @@
                       : severity === 'information' ? 'issue-info'
                       : 'issue-warning';
             const pathHtml = path
-                ? `<span class="issue-path">${esc(path)}</span>`
+                ? HtmlSafe.html`<span class="issue-path">${path}</span>`
                 : '';
-            return `<div class="issue-row ${cls}">
+            return HtmlSafe.html`<div class="issue-row ${cls}">
                 <div class="issue-icon"><i class="fas ${icon}"></i></div>
                 <div class="issue-body">
                     <div class="issue-header">
-                        <span class="issue-type">${esc(label)}</span>${pathHtml}
+                        <span class="issue-type">${label}</span>${pathHtml}
                     </div>
-                    <div class="issue-msg">${esc(message)}</div>
+                    <div class="issue-msg">${message}</div>
                 </div>
             </div>`;
         }
@@ -747,20 +747,20 @@
 
             const badges = [];
             if (pass) {
-                badges.push('<span class="badge badge-pass"><i class="fas fa-check" style="margin-right:3px;"></i>Valid</span>');
+                badges.push(HtmlSafe.raw('<span class="badge badge-pass"><i class="fas fa-check" style="margin-right:3px;"></i>Valid</span>'));
             } else {
-                badges.push(`<span class="badge badge-fail"><i class="fas fa-times" style="margin-right:3px;"></i>${data.error_count} error${data.error_count !== 1 ? 's' : ''}</span>`);
+                badges.push(HtmlSafe.html`<span class="badge badge-fail"><i class="fas fa-times" style="margin-right:3px;"></i>${data.error_count} error${data.error_count !== 1 ? 's' : ''}</span>`);
             }
             if (warnCount > 0)
-                badges.push(`<span class="badge badge-warn">${warnCount} warning${warnCount !== 1 ? 's' : ''}</span>`);
+                badges.push(HtmlSafe.html`<span class="badge badge-warn">${warnCount} warning${warnCount !== 1 ? 's' : ''}</span>`);
             if (infoCount > 0)
-                badges.push(`<span class="badge" style="background:#dbeafe;color:#1e40af;">${infoCount} info</span>`);
-            badges.push(`<span class="badge badge-profile">${esc(data.version)} / ${esc(data.profile)}</span>`);
-            badges.push(`<span class="badge badge-info">${esc(data.level)}</span>`);
-            badges.push(`<span class="badge badge-info"><i class="fas fa-clock" style="margin-right:3px;"></i>${data.duration_ms}ms</span>`);
-            document.getElementById('resultBadges').innerHTML = badges.join('');
+                badges.push(HtmlSafe.html`<span class="badge" style="background:#dbeafe;color:#1e40af;">${infoCount} info</span>`);
+            badges.push(HtmlSafe.html`<span class="badge badge-profile">${data.version} / ${data.profile}</span>`);
+            badges.push(HtmlSafe.html`<span class="badge badge-info">${data.level}</span>`);
+            badges.push(HtmlSafe.html`<span class="badge badge-info"><i class="fas fa-clock" style="margin-right:3px;"></i>${data.duration_ms}ms</span>`);
+            document.getElementById('resultBadges').innerHTML = HtmlSafe.html`${badges}`;
 
-            let html = '';
+            const html = [];
 
             // ── Summary banner ────────────────────────────────────────────────
             const bannerColor = pass ? '#f0fdf4' : '#fef2f2';
@@ -768,7 +768,7 @@
             const bannerIcon  = pass ? 'fa-circle-check' : 'fa-circle-xmark';
             const bannerIconColor = pass ? '#16a34a' : '#dc2626';
 
-            html += `<div class="result-summary ${pass ? 'pass' : 'fail'}" style="background:${bannerColor};border-color:${bannerBorder};">
+            html.push(HtmlSafe.html`<div class="result-summary ${pass ? 'pass' : 'fail'}" style="background:${bannerColor};border-color:${bannerBorder};">
                 <div class="summary-header">
                     <i class="fas ${bannerIcon} summary-icon ${pass ? 'pass' : 'fail'}" style="color:${bannerIconColor};font-size:18px;"></i>
                     <span class="summary-title" style="font-size:14px;">${pass ? 'Validation passed' : 'Validation failed'}</span>
@@ -781,14 +781,14 @@
                     <span style="color:${warnCount ? '#d97706' : '#9ca3af'};font-weight:${warnCount ? '600' : '400'};">
                         <i class="fas fa-triangle-exclamation" style="margin-right:4px;"></i>${warnCount} warning${warnCount !== 1 ? 's' : ''}
                     </span>
-                    ${infoCount ? `<span style="color:#2563eb;"><i class="fas fa-circle-info" style="margin-right:4px;"></i>${infoCount} info</span>` : ''}
-                    <span><i class="fas fa-layer-group" style="margin-right:4px;"></i>${esc(data.mode)}</span>
+                    ${infoCount ? HtmlSafe.html`<span style="color:#2563eb;"><i class="fas fa-circle-info" style="margin-right:4px;"></i>${infoCount} info</span>` : ''}
+                    <span><i class="fas fa-layer-group" style="margin-right:4px;"></i>${data.mode}</span>
                 </div>
-            </div>`;
+            </div>`);
 
             // ── Per-resource cards ────────────────────────────────────────────
             if (resources.length > 0) {
-                html += '<div class="resource-list">';
+                html.push(HtmlSafe.raw('<div class="resource-list">'));
                 resources.forEach(r => {
                     const rPass   = r.valid;
                     const rErrors = r.errors   || [];
@@ -796,47 +796,47 @@
                     const rInfos  = rWarns.filter(w => issueClass(w) === 'information');
                     const rRealW  = rWarns.filter(w => issueClass(w) !== 'information');
 
-                    html += `<div class="resource-card ${rPass ? 'pass' : 'fail'}">
+                    html.push(HtmlSafe.html`<div class="resource-card ${rPass ? 'pass' : 'fail'}">
                         <div class="resource-card-header">
-                            <span class="resource-type-badge">${esc(r.resource_type || '?')}</span>
-                            <code class="resource-id">${esc(r.resource_id || '—')}</code>
+                            <span class="resource-type-badge">${r.resource_type || '?'}</span>
+                            <code class="resource-id">${r.resource_id || '—'}</code>
                             <span class="resource-status ${rPass ? 'pass' : 'fail'}" style="margin-left:auto;font-size:12px;font-weight:700;">
                                 <i class="fas ${rPass ? 'fa-circle-check' : 'fa-circle-xmark'}" style="margin-right:3px;"></i>${rPass ? 'Valid' : 'Invalid'}
                             </span>
-                        </div>`;
+                        </div>`);
 
                     if (rErrors.length) {
-                        html += `<div style="margin-top:8px;">
+                        html.push(HtmlSafe.html`<div style="margin-top:8px;">
                             <div style="font-size:10.5px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">
                                 <i class="fas fa-times-circle" style="margin-right:4px;"></i>${rErrors.length} Error${rErrors.length !== 1 ? 's' : ''}
-                            </div>`;
-                        rErrors.forEach(e => { html += renderIssue(e, 'error'); });
-                        html += '</div>';
+                            </div>`);
+                        rErrors.forEach(e => { html.push(renderIssue(e, 'error')); });
+                        html.push(HtmlSafe.raw('</div>'));
                     }
                     if (rRealW.length) {
-                        html += `<div style="margin-top:8px;">
+                        html.push(HtmlSafe.html`<div style="margin-top:8px;">
                             <div style="font-size:10.5px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">
                                 <i class="fas fa-triangle-exclamation" style="margin-right:4px;"></i>${rRealW.length} Warning${rRealW.length !== 1 ? 's' : ''}
-                            </div>`;
-                        rRealW.forEach(w => { html += renderIssue(w, 'warning'); });
-                        html += '</div>';
+                            </div>`);
+                        rRealW.forEach(w => { html.push(renderIssue(w, 'warning')); });
+                        html.push(HtmlSafe.raw('</div>'));
                     }
                     if (rInfos.length) {
-                        html += `<div style="margin-top:8px;">
+                        html.push(HtmlSafe.html`<div style="margin-top:8px;">
                             <div style="font-size:10.5px;font-weight:700;color:#1e40af;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">
                                 <i class="fas fa-circle-info" style="margin-right:4px;"></i>${rInfos.length} Info
-                            </div>`;
-                        rInfos.forEach(i => { html += renderIssue(i, 'information'); });
-                        html += '</div>';
+                            </div>`);
+                        rInfos.forEach(i => { html.push(renderIssue(i, 'information')); });
+                        html.push(HtmlSafe.raw('</div>'));
                     }
 
-                    html += '</div>';
+                    html.push(HtmlSafe.raw('</div>'));
                 });
-                html += '</div>';
+                html.push(HtmlSafe.raw('</div>'));
             }
 
             const out = document.getElementById('resultOutput');
-            out.innerHTML = html;
+            out.innerHTML = HtmlSafe.html`${html}`;
             out.style.display = 'block';
         }
 
