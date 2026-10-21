@@ -22,7 +22,6 @@
     };
 
     // ─── Helpers ──────────────────────────────────────────────────────────
-    const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
     function fmt(d) {
         if (!d) return '—';
@@ -44,23 +43,23 @@
 
     function roleBadge(role) {
         const cls = { admin: 'role-admin', operator: 'role-operator', viewer: 'role-viewer', user: 'role-user' }[role] || 'role-user';
-        return `<span class="role-badge ${cls}">${esc(role)}</span>`;
+        return HtmlSafe.html`<span class="role-badge ${cls}">${role}</span>`;
     }
 
     function statusBadge(status) {
         const cls = { active: 'status-active', inactive: 'status-inactive', suspended: 'status-suspended', pending: 'status-pending' }[status] || '';
-        return `<span class="status-badge ${cls}">${esc(status)}</span>`;
+        return HtmlSafe.html`<span class="status-badge ${cls}">${status}</span>`;
     }
 
     function riskBadge(level) {
         const cls = { low: 'risk-low', medium: 'risk-medium', high: 'risk-high', critical: 'risk-critical' }[level] || '';
-        return `<span class="risk-badge ${cls}">${esc(level || '—')}</span>`;
+        return HtmlSafe.html`<span class="risk-badge ${cls}">${level || '—'}</span>`;
     }
 
     function showAlert(msg, type = 'success') {
         const el = document.getElementById('um-alert');
         if (!el) return;
-        el.innerHTML = `<div class="um-alert um-alert--${type}">${esc(msg)}</div>`;
+        el.innerHTML = HtmlSafe.html`<div class="um-alert um-alert--${type}">${msg}</div>`;
         setTimeout(() => { el.innerHTML = ''; }, 4000);
     }
 
@@ -106,7 +105,7 @@
 
     async function loadUsers() {
         const tbody = document.getElementById('um-tbody');
-        tbody.innerHTML = `<tr><td colspan="8" class="um-loading"><i class="fas fa-spinner fa-spin"></i> Loading users…</td></tr>`;
+        tbody.innerHTML = HtmlSafe.html`<tr><td colspan="8" class="um-loading"><i class="fas fa-spinner fa-spin"></i> Loading users…</td></tr>`;
         try {
             const res = await api('GET', buildUsersURL());
             // API now returns { users, total, page, pages } but handle old array response too
@@ -123,7 +122,7 @@
             }
             renderTable();
         } catch (e) {
-            tbody.innerHTML = `<tr><td colspan="8" class="um-error"><i class="fas fa-exclamation-circle"></i> Failed to load users: ${esc(e.message)}</td></tr>`;
+            tbody.innerHTML = HtmlSafe.html`<tr><td colspan="8" class="um-error"><i class="fas fa-exclamation-circle"></i> Failed to load users: ${e.message}</td></tr>`;
         }
     }
 
@@ -145,27 +144,27 @@
         const { users, selected } = state;
 
         if (!users.length) {
-            tbody.innerHTML = `<tr><td colspan="8" class="um-empty"><i class="fas fa-users-slash"></i><br>No users found</td></tr>`;
+            tbody.innerHTML = HtmlSafe.html`<tr><td colspan="8" class="um-empty"><i class="fas fa-users-slash"></i><br>No users found</td></tr>`;
             renderPagination();
             return;
         }
 
-        tbody.innerHTML = users.map(u => {
-            const name = u.first_name ? `${esc(u.first_name)} ${esc(u.last_name || '')}`.trim() : esc(u.name || '—');
+        tbody.innerHTML = HtmlSafe.html`${users.map(u => {
+            const name = u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : (u.name || '—');
             const login = u.last_login_at || u.lastLogin;
             const dept = u.department || '—';
-            return `
-            <tr class="um-row ${selected.has(u.id) ? 'um-row--selected' : ''}" data-id="${esc(u.id)}">
-                <td class="um-td-check"><input type="checkbox" class="um-row-check" data-id="${esc(u.id)}" ${selected.has(u.id) ? 'checked' : ''}></td>
+            return HtmlSafe.html`
+            <tr class="um-row ${selected.has(u.id) ? 'um-row--selected' : ''}" data-id="${u.id}">
+                <td class="um-td-check"><input type="checkbox" class="um-row-check" data-id="${u.id}" ${selected.has(u.id) ? 'checked' : ''}></td>
                 <td class="um-td-name">
                     <div class="um-user-cell">
                         <div class="um-user-avatar-sm">${initials(u)}</div>
-                        <span class="um-user-name-link" data-id="${esc(u.id)}">${name}</span>
+                        <span class="um-user-name-link" data-id="${u.id}">${name}</span>
                     </div>
                 </td>
-                <td>${esc(u.email)}</td>
+                <td>${u.email}</td>
                 <td>
-                    <select class="um-role-select role-badge role-${esc(u.role)}" data-id="${esc(u.id)}" title="Change role">
+                    <select class="um-role-select role-badge role-${u.role}" data-id="${u.id}" title="Change role">
                         <option value="admin"    ${u.role==='admin'    ?'selected':''}>admin</option>
                         <option value="operator" ${u.role==='operator' ?'selected':''}>operator</option>
                         <option value="viewer"   ${u.role==='viewer'   ?'selected':''}>viewer</option>
@@ -173,14 +172,14 @@
                     </select>
                 </td>
                 <td>${statusBadge(u.status)}</td>
-                <td>${esc(dept)}</td>
+                <td>${dept}</td>
                 <td>${fmt(login)}</td>
                 <td class="um-td-actions">
-                    <button class="um-action-btn" title="View / Edit" data-action="edit" data-id="${esc(u.id)}"><i class="fas fa-pen-to-square"></i></button>
-                    <button class="um-action-btn um-action-btn--danger" title="${u.id === state.currentUserId ? 'Cannot delete your own account' : 'Delete'}" data-action="delete" data-id="${esc(u.id)}" ${u.id === state.currentUserId ? 'disabled' : ''}><i class="fas fa-trash"></i></button>
+                    <button class="um-action-btn" title="View / Edit" data-action="edit" data-id="${u.id}"><i class="fas fa-pen-to-square"></i></button>
+                    <button class="um-action-btn um-action-btn--danger" title="${u.id === state.currentUserId ? 'Cannot delete your own account' : 'Delete'}" data-action="delete" data-id="${u.id}" ${u.id === state.currentUserId ? 'disabled' : ''}><i class="fas fa-trash"></i></button>
                 </td>
             </tr>`;
-        }).join('');
+        })}`;
 
         renderPagination();
         updateBulkBar();
@@ -389,17 +388,17 @@
         try {
             const logs = await api('GET', `/api/users/${userId}/activity`);
             if (!logs.length) { list.innerHTML = '<div class="um-empty">No activity recorded yet</div>'; return; }
-            list.innerHTML = logs.map(log => `
+            list.innerHTML = HtmlSafe.html`${logs.map(log => HtmlSafe.html`
                 <div class="um-activity-item">
                     <div class="um-activity-icon ${riskClass(log.risk_level)}"><i class="fas ${actionIcon(log.action)}"></i></div>
                     <div class="um-activity-detail">
-                        <div class="um-activity-action">${esc(log.action)}</div>
-                        <div class="um-activity-meta">${fmt(log.created_at)} &bull; IP: ${esc(log.ip_address || '—')}</div>
+                        <div class="um-activity-action">${log.action}</div>
+                        <div class="um-activity-meta">${fmt(log.created_at)} &bull; IP: ${log.ip_address || '—'}</div>
                     </div>
                     <div>${riskBadge(log.risk_level)}</div>
-                </div>`).join('');
+                </div>`)}`;
         } catch (e) {
-            list.innerHTML = `<div class="um-error">${esc(e.message)}</div>`;
+            list.innerHTML = HtmlSafe.html`<div class="um-error">${e.message}</div>`;
         }
     }
 
@@ -520,7 +519,7 @@
         if (to) params.append('to', to);
 
         const tbody = document.getElementById('audit-tbody');
-        tbody.innerHTML = `<tr><td colspan="7" class="um-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>`;
+        tbody.innerHTML = HtmlSafe.html`<tr><td colspan="7" class="um-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>`;
 
         try {
             const r = await api('GET', `/api/audit-logs?${params}`);
@@ -530,16 +529,16 @@
             if (!r.logs || !r.logs.length) {
                 tbody.innerHTML = '<tr><td colspan="7" class="um-empty">No audit events found</td></tr>';
             } else {
-                tbody.innerHTML = r.logs.map(log => `
+                tbody.innerHTML = HtmlSafe.html`${r.logs.map(log => HtmlSafe.html`
                     <tr>
                         <td class="um-td-mono">${fmt(log.created_at)}</td>
-                        <td class="um-td-mono" style="font-size:0.78rem">${esc((log.user_id || '').slice(0, 8))}…</td>
-                        <td class="um-action-cell">${esc(log.action)}</td>
-                        <td>${esc(log.entity_type || '—')}</td>
-                        <td class="um-td-mono">${esc(log.ip_address || '—')}</td>
+                        <td class="um-td-mono" style="font-size:0.78rem">${(log.user_id || '').slice(0, 8)}…</td>
+                        <td class="um-action-cell">${log.action}</td>
+                        <td>${log.entity_type || '—'}</td>
+                        <td class="um-td-mono">${log.ip_address || '—'}</td>
                         <td>${statusBadge(log.result || '—')}</td>
                         <td>${riskBadge(log.risk_level)}</td>
-                    </tr>`).join('');
+                    </tr>`)}`;
             }
 
             document.getElementById('audit-page-info').textContent = `${r.total} total events`;
@@ -552,7 +551,7 @@
             exportParams.set('limit', '500');
             document.getElementById('audit-export-csv').href = `/api/audit-logs?${exportParams}`;
         } catch (e) {
-            tbody.innerHTML = `<tr><td colspan="7" class="um-error">${esc(e.message)}</td></tr>`;
+            tbody.innerHTML = HtmlSafe.html`<tr><td colspan="7" class="um-error">${e.message}</td></tr>`;
         }
     }
 
@@ -578,9 +577,9 @@
         if (!inputEl || !barEl) return;
         inputEl.addEventListener('input', () => {
             const { score, label, cls } = pwStrength(inputEl.value);
-            barEl.innerHTML = inputEl.value
-                ? `<div class="pw-bar"><div class="pw-fill pw-fill--${score}" style="width:${score * 20}%"></div></div><span class="${cls}">${label}</span>`
-                : '';
+            barEl.innerHTML = HtmlSafe.html`${inputEl.value
+                ? HtmlSafe.html`<div class="pw-bar"><div class="pw-fill pw-fill--${score}" style="width:${score * 20}%"></div></div><span class="${cls}">${label}</span>`
+                : ''}`;
         });
     }
 

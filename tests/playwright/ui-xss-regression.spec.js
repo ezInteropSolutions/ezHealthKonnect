@@ -178,6 +178,39 @@ test.describe('Alert rules and channels render names as text', () => {
     });
 });
 
+// A user's display name is chosen by that user (profile) and shown to admins.
+test.describe('User names render as text on user management', () => {
+    let userId;
+
+    test.beforeAll(async ({ request }) => {
+        const res = await request.post('/api/users', { data: {
+            email: `pw-${MARK}@example.invalid`,
+            password: `Pw!${MARK}Aa9#long`,
+            name: `PW ${MARK} <img src=x onerror="window.__ezhkXss='${MARK}-user'">`,
+            role: 'user',
+        } });
+        const body = await res.json();
+        expect(res.ok(), JSON.stringify(body)).toBeTruthy();
+        userId = body.user.id;
+    });
+
+    test.afterAll(async ({ request }) => {
+        if (userId) await request.delete(`/api/users/${userId}`).catch(() => {});
+    });
+
+    test('users table shows the name as text', async ({ page }) => {
+        await page.goto('/user-management.html');
+        await page.locator('#um-search').fill(MARK);
+        const row = page.locator('#um-tbody tr.um-row').filter({ hasText: MARK }).first();
+        await expect(row).toBeVisible({ timeout: 15_000 });
+        expect(await row.innerText()).toContain('<img src=x onerror=');
+        await expect(row.locator('select.um-role-select')).toHaveCount(1);
+        await page.waitForTimeout(500);
+        expect(await page.evaluate(() => window.__ezhkXss || null)).toBeNull();
+        expect(await page.locator(`img[onerror*="${MARK}"]`).count()).toBe(0);
+    });
+});
+
 // AppDialogs is used everywhere with messages that interpolate data (names,
 // errors returned by the server). A plain string is shown as text; formatting
 // needs HtmlSafe.html (data inside stays escaped) or HtmlSafe.raw (constants).
