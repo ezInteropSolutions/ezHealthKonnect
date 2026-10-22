@@ -113,7 +113,7 @@ class RemoveDuplicatesBuilder {
                     Key Fields
                     <span style="font-weight:400;color:var(--text-muted,#6b7280);font-size:11px;margin-left:4px">(empty = deduplicate on entire record)</span>
                 </label>
-                <div id="rdKeyChips" class="rd-chips-container">${chipsHtml || HtmlSafe.raw('<span style="color:var(--text-muted,#9ca3af);font-size:12px;align-self:center">No key fields — full-record dedup</span>')}</div>
+                <div id="rdKeyChips" class="rd-chips-container">${chipsHtml.length ? chipsHtml : HtmlSafe.raw('<span style="color:var(--text-muted,#9ca3af);font-size:12px;align-self:center">No key fields — full-record dedup</span>')}</div>
                 <input type="hidden" id="rdKeyFieldsJson" value='${JSON.stringify(keyFields)}'>
                 <div class="rd-chip-input-row">
                     <input type="text" id="rdKeyFieldInput" class="form-control form-control-sm"

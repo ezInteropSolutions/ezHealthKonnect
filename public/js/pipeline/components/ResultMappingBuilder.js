@@ -20,7 +20,7 @@ class ResultMappingBuilder {
     }
 
     render() {
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="result-mapping-builder">
                 <div class="mapping-builder-header">
                     <span class="builder-label">Map Database Columns to Output Fields</span>
@@ -76,19 +76,19 @@ class ResultMappingBuilder {
 
         const row = document.createElement('tr');
         row.id = rowId;
-        row.innerHTML = `
+        row.innerHTML = HtmlSafe.html`
             <td>
                 <input type="text"
                        class="form-control db-column-input"
-                       value="${this.escapeHtml(dbColumn)}"
+                       value="${dbColumn}"
                        placeholder="e.g., patient_name, mrn, dob"
                        list="${datalistId}"
                        autocomplete="off"
                        required>
                 <datalist id="${datalistId}">
-                    ${this.availableColumns.map(col => `<option value="${this.escapeHtml(col)}">${this.escapeHtml(col)}</option>`).join('')}
+                    ${this.availableColumns.map(col => HtmlSafe.html`<option value="${col}">${col}</option>`)}
                 </datalist>
-                ${this.availableColumns.length > 0 ? `<small class="text-muted">Available columns: ${this.availableColumns.length}</small>` : ''}
+                ${this.availableColumns.length > 0 ? HtmlSafe.html`<small class="text-muted">Available columns: ${this.availableColumns.length}</small>` : ''}
             </td>
             <td>
                 <div class="output-field-wrapper"></div>

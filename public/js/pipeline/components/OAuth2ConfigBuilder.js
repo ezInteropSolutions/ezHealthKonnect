@@ -19,7 +19,7 @@ class OAuth2ConfigBuilder {
         // Create header
         const header = document.createElement('div');
         header.className = 'oauth2-config-header';
-        header.innerHTML = `
+        header.innerHTML = HtmlSafe.html`
             <h4>OAuth 2.0 Configuration</h4>
             <small style="color: #6b7280;">Configure OAuth 2.0 settings, then use "🧪 Test API Endpoint" to test</small>
         `;
@@ -28,7 +28,7 @@ class OAuth2ConfigBuilder {
         // Grant type selector
         const grantTypeSelector = document.createElement('div');
         grantTypeSelector.className = 'form-group';
-        grantTypeSelector.innerHTML = `
+        grantTypeSelector.innerHTML = HtmlSafe.html`
             <label>Grant Type <span class="text-danger">*</span></label>
             <select class="form-control grant-type-select">
                 <option value="client_credentials" ${this.grantType === 'client_credentials' ? 'selected' : ''}>
@@ -57,7 +57,7 @@ class OAuth2ConfigBuilder {
         const tokenDisplay = document.createElement('div');
         tokenDisplay.className = 'token-display';
         tokenDisplay.style.display = 'none';
-        tokenDisplay.innerHTML = `
+        tokenDisplay.innerHTML = HtmlSafe.html`
             <div class="alert alert-success">
                 <div class="token-display-header">
                     <strong><i class="fas fa-check-circle"></i> Token Obtained Successfully</strong>
@@ -136,16 +136,16 @@ class OAuth2ConfigBuilder {
         const value = this.config[name] || '';
 
         if (type === 'textarea') {
-            formGroup.innerHTML = `
-                <label>${label} ${required ? '<span class="text-danger">*</span>' : ''}</label>
+            formGroup.innerHTML = HtmlSafe.html`
+                <label>${label} ${required ? HtmlSafe.raw('<span class="text-danger">*</span>') : ''}</label>
                 <textarea class="form-control oauth2-field" data-field="${name}"
-                          placeholder="${placeholder}" rows="3">${this.escapeHtml(value)}</textarea>
+                          placeholder="${placeholder}" rows="3">${value}</textarea>
             `;
         } else {
-            formGroup.innerHTML = `
-                <label>${label} ${required ? '<span class="text-danger">*</span>' : ''}</label>
+            formGroup.innerHTML = HtmlSafe.html`
+                <label>${label} ${required ? HtmlSafe.raw('<span class="text-danger">*</span>') : ''}</label>
                 <input type="${type}" class="form-control oauth2-field" data-field="${name}"
-                       value="${this.escapeHtml(value)}" placeholder="${placeholder}">
+                       value="${value}" placeholder="${placeholder}">
             `;
         }
 
@@ -226,7 +226,7 @@ class OAuth2ConfigBuilder {
             this.displayToken(response);
 
             setTimeout(() => {
-                btn.innerHTML = originalHTML;
+                btn.innerHTML = HtmlSafe.html`${originalHTML}`;
                 btn.classList.remove('btn-success');
                 btn.classList.add('btn-outline-success');
                 btn.disabled = false;
@@ -240,7 +240,7 @@ class OAuth2ConfigBuilder {
             this.showNotification(`OAuth 2.0 Test Failed: ${error.message}`, 'error');
 
             setTimeout(() => {
-                btn.innerHTML = originalHTML;
+                btn.innerHTML = HtmlSafe.html`${originalHTML}`;
                 btn.classList.remove('btn-danger');
                 btn.disabled = false;
             }, 3000);
@@ -330,7 +330,7 @@ class OAuth2ConfigBuilder {
                 const originalHTML = copyBtn.innerHTML;
                 copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
                 setTimeout(() => {
-                    copyBtn.innerHTML = originalHTML;
+                    copyBtn.innerHTML = HtmlSafe.html`${originalHTML}`;
                 }, 2000);
             });
         };

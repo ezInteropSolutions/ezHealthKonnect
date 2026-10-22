@@ -16,7 +16,7 @@ class QueryParamBuilder {
         // Create header
         const header = document.createElement('div');
         header.className = 'query-param-builder-header';
-        header.innerHTML = `
+        header.innerHTML = HtmlSafe.html`
             <h4>Query Parameters</h4>
             <button class="btn btn-sm btn-primary add-param-btn" type="button">
                 <i class="fas fa-plus"></i> Add Parameter
@@ -27,7 +27,7 @@ class QueryParamBuilder {
         // Create URL preview
         const urlPreview = document.createElement('div');
         urlPreview.className = 'url-preview';
-        urlPreview.innerHTML = `
+        urlPreview.innerHTML = HtmlSafe.html`
             <div class="url-preview-label">URL Preview:</div>
             <div class="url-preview-value">
                 <code class="url-preview-text">?</code>
@@ -44,7 +44,7 @@ class QueryParamBuilder {
         // Create table
         const table = document.createElement('div');
         table.className = 'query-param-builder-table';
-        table.innerHTML = `
+        table.innerHTML = HtmlSafe.html`
             <div class="query-param-row query-param-row-labels">
                 <div class="query-param-col-checkbox"></div>
                 <div class="query-param-col-key">Key</div>
@@ -62,7 +62,7 @@ class QueryParamBuilder {
         // Bulk actions
         const bulkActions = document.createElement('div');
         bulkActions.className = 'bulk-actions';
-        bulkActions.innerHTML = `
+        bulkActions.innerHTML = HtmlSafe.html`
             <button class="btn btn-sm btn-outline-secondary bulk-enable-btn" type="button">
                 <i class="fas fa-check-square"></i> Enable All
             </button>
@@ -118,13 +118,13 @@ class QueryParamBuilder {
         row.className = 'query-param-row';
         row.dataset.enabled = enabled;
 
-        row.innerHTML = `
+        row.innerHTML = HtmlSafe.html`
             <div class="query-param-col-checkbox">
                 <input type="checkbox" class="param-enabled" ${enabled ? 'checked' : ''}>
             </div>
             <div class="query-param-col-key">
                 <input type="text" class="form-control form-control-sm param-key"
-                       value="${this.escapeHtml(key)}"
+                       value="${key}"
                        placeholder="Parameter name">
             </div>
             <div class="query-param-col-value">
@@ -132,7 +132,7 @@ class QueryParamBuilder {
             </div>
             <div class="query-param-col-description">
                 <input type="text" class="form-control form-control-sm param-description"
-                       value="${this.escapeHtml(description)}"
+                       value="${description}"
                        placeholder="Optional description">
             </div>
             <div class="query-param-col-actions">
@@ -269,7 +269,7 @@ class QueryParamBuilder {
             this.copyUrlBtn.classList.remove('btn-outline-secondary');
 
             setTimeout(() => {
-                this.copyUrlBtn.innerHTML = originalHTML;
+                this.copyUrlBtn.innerHTML = HtmlSafe.html`${originalHTML}`;
                 this.copyUrlBtn.classList.remove('btn-success');
                 this.copyUrlBtn.classList.add('btn-outline-secondary');
             }, 2000);
@@ -336,16 +336,16 @@ class QueryParamBuilder {
                 z-index: 100000;
             `;
 
-            overlay.innerHTML = `
+            overlay.innerHTML = HtmlSafe.html`
                 <div style="background: white; border-radius: 12px; max-width: 400px; width: 90%; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);">
                     <div style="padding: 16px 20px; border-bottom: 1px solid ${color.border}; background: ${color.bg}; display: flex; align-items: center; gap: 10px;">
                         <span style="font-size: 20px;">${type === 'danger' ? '⚠️' : '❓'}</span>
-                        <span style="font-weight: 600; color: #1e293b;">${this.escapeHtml(title)}</span>
+                        <span style="font-weight: 600; color: #1e293b;">${title}</span>
                     </div>
-                    <div style="padding: 20px; color: #475569; font-size: 14px;">${this.escapeHtml(message)}</div>
+                    <div style="padding: 20px; color: #475569; font-size: 14px;">${message}</div>
                     <div style="padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px;">
-                        <button class="cancel-btn" style="padding: 8px 16px; border: 1px solid #e2e8f0; background: white; color: #64748b; border-radius: 6px; cursor: pointer; font-size: 14px;">${this.escapeHtml(cancelText)}</button>
-                        <button class="confirm-btn" style="padding: 8px 16px; border: none; background: ${color.primary}; color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">${this.escapeHtml(confirmText)}</button>
+                        <button class="cancel-btn" style="padding: 8px 16px; border: 1px solid #e2e8f0; background: white; color: #64748b; border-radius: 6px; cursor: pointer; font-size: 14px;">${cancelText}</button>
+                        <button class="confirm-btn" style="padding: 8px 16px; border: none; background: ${color.primary}; color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">${confirmText}</button>
                     </div>
                 </div>
             `;

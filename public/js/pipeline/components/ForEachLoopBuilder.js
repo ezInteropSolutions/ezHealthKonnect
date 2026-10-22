@@ -289,7 +289,7 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
      * @override
      */
     render() {
-        this.container.innerHTML = this.generateHTML();
+        this.container.innerHTML = HtmlSafe.html`${this.generateHTML()}`;
     }
 
     /**
@@ -1436,7 +1436,7 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
     generateHTML() {
         const loopType = this.config.loopType || 'foreach';
 
-        return `
+        return HtmlSafe.html`
             <div class="loop-builder-container">
                 <!-- Header -->
                 <div class="loop-builder-header">
@@ -1547,7 +1547,7 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
         // Get loop options from provider (HL7 or FHIR based on context)
         const options = this.getLoopOptionsForContext();
 
-        return `
+        return HtmlSafe.html`
             <div class="loop-config-section">
                 <h4><i class="fas fa-redo"></i> What should repeat?</h4>
                 <p class="loop-config-subtitle">Select what you want to loop through</p>
@@ -1642,21 +1642,21 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
             return (categoryMeta[a]?.order || 50) - (categoryMeta[b]?.order || 50);
         });
 
-        let html = '';
+        const html = [];
         for (const category of sortedCategories) {
             const catOptions = grouped[category];
             const catLabel = categoryMeta[category]?.label || category;
 
             // Only show category header if more than one category
             if (sortedCategories.length > 1 && category !== 'utility') {
-                html += `<div class="loop-option-category-label">${catLabel}</div>`;
+                html.push(HtmlSafe.html`<div class="loop-option-category-label">${catLabel}</div>`);
             }
 
-            html += `<div class="loop-option-category ${category === 'utility' ? 'utility-options' : ''}">`;
+            html.push(HtmlSafe.html`<div class="loop-option-category ${category === 'utility' ? 'utility-options' : ''}">`);
             for (const opt of catOptions) {
                 const isSelected = selectedOption === opt.id ||
                                    (this.config.collection === opt.technicalPath && opt.technicalPath);
-                html += `
+                html.push(HtmlSafe.html`
                     <div class="loop-option-card ${isSelected ? 'selected' : ''} ${opt.isAdvanced ? 'advanced' : ''}"
                          data-option-id="${opt.id}"
                          data-technical-path="${opt.technicalPath || ''}"
@@ -1666,12 +1666,12 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
                         </div>
                         <div class="loop-option-label">${opt.label}</div>
                     </div>
-                `;
+                `);
             }
-            html += '</div>';
+            html.push(HtmlSafe.raw('</div>'));
         }
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -1681,7 +1681,7 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
     renderAvailableVariablesInfo(selectedOption, options) {
         const option = options.find(o => o.id === selectedOption);
 
-        return `
+        return HtmlSafe.html`
             <div class="loop-variables-info">
                 <div class="loop-variables-header">
                     <i class="fas fa-info-circle"></i>
@@ -1848,7 +1848,7 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
     renderNestedLoopSection() {
         if (!this.isNestedLoop || !this.parentLoopInfo) return '';
 
-        return `
+        return HtmlSafe.html`
             <div class="nested-loop-info">
                 <div class="nested-loop-badge">
                     <i class="fas fa-layer-group"></i>
@@ -1905,15 +1905,15 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
             ];
         }
 
-        return `
+        return HtmlSafe.html`
             <div class="collection-shortcuts">
                 <span class="shortcuts-label">Quick pick:</span>
                 <div class="shortcuts-list">
-                    ${shortcuts.map(s => `
+                    ${shortcuts.map(s => HtmlSafe.html`
                         <button type="button" class="shortcut-btn" data-value="${s.value}" title="${s.desc}">
                             ${s.label}
                         </button>
-                    `).join('')}
+                    `)}
                 </div>
             </div>
         `;
@@ -1924,7 +1924,7 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
      * @private
      */
     renderForConfig() {
-        return `
+        return HtmlSafe.html`
             <div class="loop-config-section">
                 <h4><i class="fas fa-sort-numeric-down"></i> Iteration Count</h4>
 
@@ -1966,7 +1966,7 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
             { value: 'false', label: 'Is False' }
         ];
 
-        return `
+        return HtmlSafe.html`
             <div class="loop-config-section">
                 <h4><i class="fas fa-question-circle"></i> Loop Condition</h4>
                 <p style="font-size: 12px; color: #64748b; margin-bottom: 16px;">
@@ -1986,11 +1986,11 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
                     <div class="loop-config-field">
                         <label>Operator</label>
                         <select id="conditionOperatorSelect">
-                            ${operators.map(op => `
+                            ${operators.map(op => HtmlSafe.html`
                                 <option value="${op.value}" ${condition.operator === op.value ? 'selected' : ''}>
                                     ${op.label}
                                 </option>
-                            `).join('')}
+                            `)}
                         </select>
                     </div>
                     <div class="loop-config-field">
@@ -2022,7 +2022,7 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
         const childStepIds = this.config.childStepIds || [];
 
         if (childStepIds.length === 0) {
-            return `
+            return HtmlSafe.html`
                 <div class="loop-body-empty">
                     <i class="fas fa-inbox"></i>
                     <p>No steps in loop body</p>
@@ -2045,7 +2045,7 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
             const step = this.getStepById(stepId);
             if (!step) return '';
 
-            return `
+            return HtmlSafe.html`
                 <div class="loop-child-step" data-step-id="${stepId}" draggable="true">
                     <div class="loop-child-step-number">${index + 1}</div>
                     <div class="loop-child-step-icon">
@@ -2073,9 +2073,9 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
                     </div>
                 </div>
             `;
-        }).join('');
+        });
 
-        return `
+        return HtmlSafe.html`
             ${stepsHTML}
             <div class="loop-add-step-actions">
                 <button type="button" class="add-step-to-loop-btn primary" id="createNewStepBtn">
@@ -2123,15 +2123,15 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
             ];
         }
 
-        return `
+        return HtmlSafe.html`
             <div class="loop-variables-preview" style="margin: 0 20px 20px 20px;">
                 <h5><i class="fas fa-code"></i> Available Loop Variables</h5>
-                ${variables.map(v => `
+                ${variables.map(v => HtmlSafe.html`
                     <div class="loop-variable-item">
                         <code>${v.name}</code>
                         <span>- ${v.desc}</span>
                     </div>
-                `).join('')}
+                `)}
             </div>
         `;
     }
@@ -2252,12 +2252,12 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
         const dropdown = document.createElement('div');
         dropdown.className = 'step-selector-dropdown';
 
-        let html = '<div class="step-selector-header"><i class="fas fa-plus-circle"></i> Create New Step</div>';
+        const html = [HtmlSafe.raw('<div class="step-selector-header"><i class="fas fa-plus-circle"></i> Create New Step</div>')];
 
         stepTemplates.forEach(category => {
-            html += `<div class="step-selector-section">
+            html.push(HtmlSafe.html`<div class="step-selector-section">
                 <div class="step-selector-section-title">${category.category}</div>
-                ${category.templates.map(template => `
+                ${category.templates.map(template => HtmlSafe.html`
                     <div class="step-selector-item create-new" data-template-id="${template.id}" data-template-type="${template.type}">
                         <div class="loop-child-step-icon">
                             <i class="${template.icon}"></i>
@@ -2267,11 +2267,11 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
                             <small>${template.type}</small>
                         </div>
                     </div>
-                `).join('')}
-            </div>`;
+                `)}
+            </div>`);
         });
 
-        dropdown.innerHTML = html;
+        dropdown.innerHTML = HtmlSafe.html`${html}`;
 
         const loopBody = this.container.querySelector('.loop-body-container');
         loopBody.style.position = 'relative';
@@ -2315,7 +2315,7 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
             // Show empty state message
             const dropdown = document.createElement('div');
             dropdown.className = 'step-selector-dropdown';
-            dropdown.innerHTML = `
+            dropdown.innerHTML = HtmlSafe.html`
                 <div class="step-selector-header"><i class="fas fa-link"></i> Link Existing Step</div>
                 <div style="padding: 20px; text-align: center; color: #64748b;">
                     <i class="fas fa-info-circle" style="font-size: 24px; margin-bottom: 8px; display: block;"></i>
@@ -2333,9 +2333,9 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
 
         const dropdown = document.createElement('div');
         dropdown.className = 'step-selector-dropdown';
-        dropdown.innerHTML = `
+        dropdown.innerHTML = HtmlSafe.html`
             <div class="step-selector-header"><i class="fas fa-link"></i> Link Existing Step</div>
-            ${availableToAdd.map(step => `
+            ${availableToAdd.map(step => HtmlSafe.html`
                 <div class="step-selector-item" data-step-id="${step.id}">
                     <div class="loop-child-step-icon">
                         <i class="${step.icon}"></i>
@@ -2345,7 +2345,7 @@ class ForEachLoopBuilder extends BaseStepConfigBuilder {
                         <small>${step.type}</small>
                     </div>
                 </div>
-            `).join('')}
+            `)}
         `;
 
         const loopBody = this.container.querySelector('.loop-body-container');

@@ -133,7 +133,7 @@ class HL7BuildBuilder {
                 <div style="flex:1 1 200px;">
                     <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Message Type</label>
                     <select id="hbbMessageType" class="form-select form-select-sm">
-                        ${messageTypeOptions || HtmlSafe.html`<option value="${cfg.messageType}^${cfg.triggerEvent}">${cfg.messageType}^${cfg.triggerEvent}</option>`}
+                        ${messageTypeOptions.length ? messageTypeOptions : HtmlSafe.html`<option value="${cfg.messageType}^${cfg.triggerEvent}">${cfg.messageType}^${cfg.triggerEvent}</option>`}
                     </select>
                 </div>
                 <div style="flex:0 0 110px;">

@@ -95,7 +95,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         this.container.classList.add('connector-config-builder');
 
         // Header
-        const header = this.createElement('div', { class: 'connector-builder-header' }, `
+        const header = this.createElement('div', { class: 'connector-builder-header' }, HtmlSafe.html`
             <div class="connector-builder-title">
                 <i class="fas fa-${this.direction === 'inbound' ? 'download' : 'upload'}"></i>
                 <h4>${this.direction === 'inbound' ? 'Inbound' : 'Outbound'} Connector Configuration</h4>
@@ -107,7 +107,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         // Tab bar — inbound: Connection | Acknowledgment; outbound: Connection | Payload | Recovery
         const tabBar = this.createElement('div', { class: 'connector-tab-bar', id: 'connectorTabBar' });
         if (this.direction === 'inbound') {
-            tabBar.innerHTML = `
+            tabBar.innerHTML = HtmlSafe.html`
                 <button class="connector-tab active" data-tab="connection">
                     <i class="fas fa-plug"></i> Connection
                 </button>
@@ -119,7 +119,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 </button>
             `;
         } else {
-            tabBar.innerHTML = `
+            tabBar.innerHTML = HtmlSafe.html`
                 <button class="connector-tab active" data-tab="connection">
                     <i class="fas fa-plug"></i> Connection
                 </button>
@@ -145,7 +145,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
 
         // Connector type selector
         const typeSection = this.createElement('div', { class: 'connector-type-section' });
-        typeSection.innerHTML = `
+        typeSection.innerHTML = HtmlSafe.html`
             <div class="form-group">
                 <label>Connector Type <span class="text-danger">*</span></label>
                 <select class="form-control connector-type-select" id="connectorTypeSelect">
@@ -169,7 +169,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const isFHIRConnector = (this.config.connectorType || '').includes('fhir');
         if (this.direction === 'inbound' && !isFHIRConnector) {
             const extraFields = this.createElement('div', { class: 'connector-extra-fields' });
-            extraFields.innerHTML = `
+            extraFields.innerHTML = HtmlSafe.html`
                 <div class="form-group">
                     <label>Timeout (ms)</label>
                     <input type="number" class="form-control connector-timeout"
@@ -183,7 +183,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
 
         // Test connection button
         const testSection = this.createElement('div', { class: 'connector-test-section' });
-        testSection.innerHTML = `
+        testSection.innerHTML = HtmlSafe.html`
             <button type="button" class="btn btn-outline-info btn-sm test-connection-btn" disabled>
                 <i class="fas fa-plug"></i> Test Connection
             </button>
@@ -244,7 +244,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
 
     _buildRecoveryPanel() {
         const panel = this.createElement('div', { class: 'recovery-config-panel' });
-        panel.innerHTML = `
+        panel.innerHTML = HtmlSafe.html`
             <p style="font-size:12px;color:#6b7280;margin-bottom:14px;">
                 Configure how failed deliveries for this interface are retried.
                 These settings apply to all outbound connectors on this interface and
@@ -382,7 +382,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const script = ack.script || '';
 
         const panel = this.createElement('div', { class: 'ack-config-panel' });
-        panel.innerHTML = `
+        panel.innerHTML = HtmlSafe.html`
             <p class="text-muted" style="font-size:12px; margin-bottom:12px;">
                 Configure how this connector acknowledges received HL7 messages.
                 The script option (advanced) gives full control over the ACK content.
@@ -421,12 +421,12 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                     <div class="form-group">
                         <label>Sending Application (MSH-3)</label>
                         <input type="text" class="form-control form-control-sm ack-field" data-ack-field="sending_app"
-                               value="${this.escapeHtml(sendingApp)}" placeholder="Default: ezHealthKonnect">
+                               value="${sendingApp}" placeholder="Default: ezHealthKonnect">
                     </div>
                     <div class="form-group">
                         <label>Sending Facility (MSH-4)</label>
                         <input type="text" class="form-control form-control-sm ack-field" data-ack-field="sending_facility"
-                               value="${this.escapeHtml(sendingFacility)}" placeholder="Default: EHK">
+                               value="${sendingFacility}" placeholder="Default: EHK">
                     </div>
                 </div>
             </div>
@@ -440,12 +440,12 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                     <div class="form-group">
                         <label>Success Text (MSA-3)</label>
                         <input type="text" class="form-control form-control-sm ack-field" data-ack-field="text_success"
-                               value="${this.escapeHtml(textSuccess)}" placeholder="Default: Message received successfully">
+                               value="${textSuccess}" placeholder="Default: Message received successfully">
                     </div>
                     <div class="form-group">
                         <label>Error Text (MSA-3 on NACK)</label>
                         <input type="text" class="form-control form-control-sm ack-field" data-ack-field="text_error"
-                               value="${this.escapeHtml(textError)}" placeholder="Default: Message processing error">
+                               value="${textError}" placeholder="Default: Message processing error">
                     </div>
                 </div>
             </div>
@@ -467,7 +467,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                     </div>
                     <textarea class="form-control ack-field ack-script-editor" data-ack-field="script"
                               rows="10" spellcheck="false"
-                              placeholder="function buildACK(msg) {&#10;  if (msg.messageType !== 'ADT^A01') {&#10;    return { ackCode: 'AR', textMessage: 'Unsupported message type' };&#10;  }&#10;  return { ackCode: 'AA', textMessage: 'Accepted' };&#10;}">${this.escapeHtml(script)}</textarea>
+                              placeholder="function buildACK(msg) {&#10;  if (msg.messageType !== 'ADT^A01') {&#10;    return { ackCode: 'AR', textMessage: 'Unsupported message type' };&#10;  }&#10;  return { ackCode: 'AA', textMessage: 'Accepted' };&#10;}">${script}</textarea>
                 </div>
             </div>
         `;
@@ -495,7 +495,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const onFailureNack = hq.on_failure_nack !== false && hq.on_failure_nack !== 'false';
 
         const panel = this.createElement('div', { class: 'hostquery-config-panel' });
-        panel.innerHTML = `
+        panel.innerHTML = HtmlSafe.html`
             <p class="text-muted" style="font-size:12px; margin-bottom:12px;">
                 For devices that ask this connector a live question on the same connection
                 (e.g. a lab analyzer's HL7 host query for pending orders) and expect a real
@@ -517,19 +517,19 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                     <div class="form-group">
                         <label>Query Message Type(s) (MSH.9.1)</label>
                         <input type="text" class="form-control form-control-sm hostquery-field" data-hostquery-field="message_types"
-                               data-hostquery-type="array" value="${this.escapeHtml(messageTypes)}" placeholder="QRY">
+                               data-hostquery-type="array" value="${messageTypes}" placeholder="QRY">
                         <small class="form-text text-muted">Comma-separated MSH.9.1 values treated as a live query (e.g. <code>QRY</code>)</small>
                     </div>
                     <div class="form-group">
                         <label>Answering Pipeline's Message Type</label>
                         <div class="hostquery-pipeline-type-wrap">
                             <select class="form-control form-control-sm hostquery-field hostquery-pipeline-type-select" data-hostquery-field="pipeline_message_type">
-                                <option value="${this.escapeHtml(pipelineMessageType)}" selected>${this.escapeHtml(pipelineMessageType)}</option>
+                                <option value="${pipelineMessageType}" selected>${pipelineMessageType}</option>
                                 <option value="__custom__">+ Custom / not yet created…</option>
                             </select>
                             <div class="hostquery-pipeline-type-custom-wrap" style="display:none;">
                                 <input type="text" class="form-control form-control-sm hostquery-field hostquery-pipeline-type-custom-input"
-                                       value="${this.escapeHtml(pipelineMessageType)}" placeholder="QRY">
+                                       value="${pipelineMessageType}" placeholder="QRY">
                                 <button type="button" class="btn btn-sm btn-outline-secondary hostquery-pipeline-type-back">↩ Back to list</button>
                             </div>
                         </div>
@@ -639,13 +639,13 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                     enterCustomMode();
                     return;
                 }
-                const optionHTML = mt => `<option value="${this.escapeHtml(mt)}" ${mt === currentValue ? 'selected' : ''}>${this.escapeHtml(mt)}</option>`;
+                const optionHTML = mt => HtmlSafe.html`<option value="${mt}" ${mt === currentValue ? 'selected' : ''}>${mt}</option>`;
                 const inList = messageTypes.includes(currentValue);
                 const extra = (currentValue && !inList) ? optionHTML(currentValue) : '';
-                select.innerHTML = `
+                select.innerHTML = HtmlSafe.html`
                     <option value="">— select a pipeline's message type —</option>
                     ${extra}
-                    ${messageTypes.map(optionHTML).join('')}
+                    ${messageTypes.map(optionHTML)}
                     <option value="__custom__">+ Custom / not yet created…</option>
                 `;
                 if (currentValue && inList) select.value = currentValue;
@@ -662,11 +662,11 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const contentType = this.config.contentType || 'application/json';
 
         const panel = this.createElement('div', { class: 'payload-config-panel' });
-        panel.innerHTML = `
+        panel.innerHTML = HtmlSafe.html`
             <div class="form-group">
                 <label style="font-weight:600; font-size:13px;">Payload Source</label>
                 <input type="text" class="form-control connector-content-field"
-                       value="${this.escapeHtml(contentField)}"
+                       value="${contentField}"
                        placeholder="Search pipeline variables or type a path..."
                        autocomplete="off" spellcheck="false">
                 <div class="connector-payload-quickpick">
@@ -1611,7 +1611,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 const group = this.createElement('div', { class: 'connector-config-group' });
 
                 // Group header (collapsible)
-                const groupHeader = this.createElement('div', { class: 'connector-config-group-header' }, `
+                const groupHeader = this.createElement('div', { class: 'connector-config-group-header' }, HtmlSafe.html`
                     <span class="connector-config-group-title">${this.formatGroupName(groupName)}</span>
                     <i class="fas fa-chevron-down connector-config-group-toggle"></i>
                 `);
@@ -1757,7 +1757,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
 
         // Label
         const label = document.createElement('label');
-        label.innerHTML = `${this.escapeHtml(title)}${isRequired ? ' <span class="text-danger">*</span>' : ''}`;
+        label.innerHTML = HtmlSafe.html`${title}${isRequired ? HtmlSafe.raw(' <span class="text-danger">*</span>') : ''}`;
         formGroup.appendChild(label);
 
         // Hint text, when the schema carries one -- previously read by
@@ -2309,11 +2309,11 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             testBtn.innerHTML = '<i class="fas fa-times-circle"></i> Failed';
             testBtn.classList.add('btn-danger');
             testBtn.classList.remove('btn-outline-info');
-            statusEl.innerHTML = `<span style="color: #ef4444;">${this.escapeHtml(error.message)}</span>`;
+            statusEl.innerHTML = HtmlSafe.html`<span style="color: #ef4444;">${error.message}</span>`;
         }
 
         setTimeout(() => {
-            testBtn.innerHTML = originalHTML;
+            testBtn.innerHTML = HtmlSafe.html`${originalHTML}`;
             testBtn.classList.remove('btn-success', 'btn-danger');
             testBtn.classList.add('btn-outline-info');
             testBtn.disabled = false;
@@ -2688,7 +2688,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             const isRuntime = !resourceType && !operation;
             urlLine.style.color = isRuntime ? '#666' : '#1a73e8';
             urlLine.style.fontStyle = isRuntime ? 'italic' : 'normal';
-            urlLine.innerHTML = `<strong style="color:${isRuntime ? '#555' : '#0d47a1'}">${verb}</strong>  ${this.escapeHtml(url)}`;
+            urlLine.innerHTML = HtmlSafe.html`<strong style="color:${isRuntime ? '#555' : '#0d47a1'}">${verb}</strong>  ${url}`;
             helpLine.textContent = note;
         };
 
@@ -2721,7 +2721,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;
             padding:10px 12px;margin-top:12px;font-size:12px;color:#1b5e20;
         `;
-        hint.innerHTML = `
+        hint.innerHTML = HtmlSafe.html`
             <strong>Accepts all FHIR resource types</strong><br>
             This connector receives any valid FHIR resource or Bundle on the configured base path.
             To route different resource types differently (e.g. handle <code>Patient</code> and
@@ -2749,7 +2749,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         if (sessionStorage.getItem('fhir-schema-notice-dismissed')) return null;
         const banner = document.createElement('div');
         banner.className = 'fhir-schema-notice';
-        banner.innerHTML = `
+        banner.innerHTML = HtmlSafe.html`
             <i class="fas fa-cube fhir-schema-notice-icon"></i>
             <div class="fhir-schema-notice-body">
                 <strong>Schema packages</strong> power FHIR validation and rich field mapping.
@@ -2775,7 +2775,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
     _makeFHIRSection(title, iconClass, expanded) {
         const section = document.createElement('div');
         section.className = `fhir-section${expanded ? '' : ' collapsed'}`;
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
             <div class="fhir-section-header">
                 <div class="fhir-section-header-left">
                     <i class="${iconClass} fhir-section-icon"></i>
@@ -2843,19 +2843,19 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const endSec = this._makeFHIRSection('Endpoint Setup', 'fas fa-server', true);
         const endBody = endSec.querySelector('.fhir-section-body');
 
-        endBody.innerHTML = `
+        endBody.innerHTML = HtmlSafe.html`
             <div class="fhir-field-row">
                 <div class="fhir-field">
                     <label class="fhir-field-label">Listen Port <span class="fhir-required">*</span></label>
                     <input type="number" class="form-control form-control-sm connector-config-field"
                            data-field="port" data-field-type="number"
-                           value="${esc(cfg.port || 2576)}" min="1" max="65535" placeholder="2576">
+                           value="${cfg.port || 2576}" min="1" max="65535" placeholder="2576">
                     <small class="fhir-hint">Port this FHIR endpoint listens on</small>
                 </div>
                 <div class="fhir-field">
                     <label class="fhir-field-label">FHIR Version</label>
                     <select class="form-control form-control-sm connector-config-field" data-field="fhirVersion" id="fhirVersionSelect">
-                        <option value="${esc(cfg.fhirVersion || 'R4')}" selected>${esc(cfg.fhirVersion || 'R4')}</option>
+                        <option value="${cfg.fhirVersion || 'R4'}" selected>${cfg.fhirVersion || 'R4'}</option>
                     </select>
                 </div>
             </div>
@@ -2983,7 +2983,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const secBody = secSec.querySelector('.fhir-section-body');
         const authType = cfg.authType || 'none';
 
-        secBody.innerHTML = `
+        secBody.innerHTML = HtmlSafe.html`
             <div class="fhir-field">
                 <label class="fhir-field-label">Who can call this endpoint?</label>
                 <select class="form-control form-control-sm connector-config-field"
@@ -2998,27 +2998,27 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 <div class="fhir-auth-cred" data-auth="basic">
                     <label class="fhir-field-label" style="margin-top:8px">Username</label>
                     <input type="text" class="form-control form-control-sm connector-config-field"
-                           data-field="username" value="${esc(cfg.username || '')}">
+                           data-field="username" value="${cfg.username || ''}">
                 </div>
                 <div class="fhir-auth-cred" data-auth="basic">
                     <label class="fhir-field-label" style="margin-top:8px">Password</label>
                     <input type="password" class="form-control form-control-sm connector-config-field"
-                           data-field="password" value="${esc(cfg.password || '')}">
+                           data-field="password" value="${cfg.password || ''}">
                 </div>
                 <div class="fhir-auth-cred" data-auth="bearer">
                     <label class="fhir-field-label" style="margin-top:8px">Bearer Token</label>
                     <input type="password" class="form-control form-control-sm connector-config-field"
-                           data-field="bearerToken" value="${esc(cfg.bearerToken || '')}">
+                           data-field="bearerToken" value="${cfg.bearerToken || ''}">
                 </div>
                 <div class="fhir-auth-cred" data-auth="api_key">
                     <label class="fhir-field-label" style="margin-top:8px">API Key</label>
                     <input type="password" class="form-control form-control-sm connector-config-field"
-                           data-field="apiKey" value="${esc(cfg.apiKey || '')}">
+                           data-field="apiKey" value="${cfg.apiKey || ''}">
                 </div>
                 <div class="fhir-auth-cred" data-auth="api_key">
                     <label class="fhir-field-label" style="margin-top:8px">API Key Header</label>
                     <input type="text" class="form-control form-control-sm connector-config-field"
-                           data-field="apiKeyHeader" value="${esc(cfg.apiKeyHeader || 'X-API-Key')}">
+                           data-field="apiKeyHeader" value="${cfg.apiKeyHeader || 'X-API-Key'}">
                 </div>
             </div>
         `;
@@ -3042,19 +3042,19 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const advSec  = this._makeFHIRSection('Advanced', 'fas fa-sliders-h', false);
         const advBody = advSec.querySelector('.fhir-section-body');
 
-        advBody.innerHTML = `
+        advBody.innerHTML = HtmlSafe.html`
             <div class="fhir-field-row">
                 <div class="fhir-field">
                     <label class="fhir-field-label">Base Path</label>
                     <input type="text" class="form-control form-control-sm connector-config-field"
-                           data-field="basePath" value="${esc(cfg.basePath || '/fhir/r4')}" placeholder="/fhir/r4">
+                           data-field="basePath" value="${cfg.basePath || '/fhir/r4'}" placeholder="/fhir/r4">
                     <small class="fhir-hint">URL prefix for all resources on this connector</small>
                 </div>
                 <div class="fhir-field">
                     <label class="fhir-field-label">Max Body Size (MB)</label>
                     <input type="number" class="form-control form-control-sm connector-config-field"
                            data-field="maxBodySizeMB" data-field-type="number"
-                           value="${esc(cfg.maxBodySizeMB || 10)}" min="1" max="500">
+                           value="${cfg.maxBodySizeMB || 10}" min="1" max="500">
                 </div>
             </div>
             <div class="fhir-field-row" style="margin-top:10px">
@@ -3062,7 +3062,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                     <label class="fhir-field-label">Request Timeout (seconds)</label>
                     <input type="number" class="form-control form-control-sm connector-config-field"
                            data-field="requestTimeoutSeconds" data-field-type="number"
-                           value="${esc(cfg.requestTimeoutSeconds || 30)}" min="1" max="300">
+                           value="${cfg.requestTimeoutSeconds || 30}" min="1" max="300">
                 </div>
                 <div class="fhir-field" style="display:flex;align-items:flex-end;padding-bottom:2px">
                     <label style="display:flex;align-items:center;gap:7px;cursor:pointer;margin:0">
@@ -3087,7 +3087,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const tlsBody  = tlsSec.querySelector('.fhir-section-body');
         const tlsEnabled = tlsCfg.enabled === true;
 
-        tlsBody.innerHTML = `
+        tlsBody.innerHTML = HtmlSafe.html`
             <div class="fhir-field" style="margin-bottom:10px">
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
                     <input type="checkbox" id="fhirTLSEnabled" ${tlsEnabled ? 'checked' : ''}>
@@ -3100,13 +3100,13 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                     <div class="fhir-field">
                         <label class="fhir-field-label">Certificate File <span class="fhir-required">*</span></label>
                         <input type="text" class="form-control form-control-sm" id="fhirTLSCert"
-                               value="${esc(tlsCfg.certFile || '')}" placeholder="/etc/ssl/certs/server.crt">
+                               value="${tlsCfg.certFile || ''}" placeholder="/etc/ssl/certs/server.crt">
                         <small class="fhir-hint">Absolute path to PEM certificate file</small>
                     </div>
                     <div class="fhir-field">
                         <label class="fhir-field-label">Key File <span class="fhir-required">*</span></label>
                         <input type="text" class="form-control form-control-sm" id="fhirTLSKey"
-                               value="${esc(tlsCfg.keyFile || '')}" placeholder="/etc/ssl/private/server.key">
+                               value="${tlsCfg.keyFile || ''}" placeholder="/etc/ssl/private/server.key">
                         <small class="fhir-hint">Absolute path to PEM private key file</small>
                     </div>
                 </div>
@@ -3127,12 +3127,12 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const ipSec      = this._makeFHIRSection('IP Allowlist', 'fas fa-shield-alt', false);
         const ipBody     = ipSec.querySelector('.fhir-section-body');
 
-        ipBody.innerHTML = `
+        ipBody.innerHTML = HtmlSafe.html`
             <div class="fhir-field">
                 <label class="fhir-field-label">Allowed IPs / CIDRs</label>
                 <textarea class="form-control form-control-sm" id="fhirAllowedIPs"
                           rows="4" placeholder="Leave empty to allow all&#10;192.168.1.0/24&#10;10.0.0.5"
-                          style="font-family:monospace;font-size:12px">${esc(allowedIPs)}</textarea>
+                          style="font-family:monospace;font-size:12px">${allowedIPs}</textarea>
                 <small class="fhir-hint">One IP or CIDR per line. Empty = accept from anywhere.</small>
             </div>
         `;
@@ -3178,14 +3178,14 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const destSec  = this._makeFHIRSection('Destination', 'fas fa-location-arrow', true);
         const destBody = destSec.querySelector('.fhir-section-body');
 
-        destBody.innerHTML = `
+        destBody.innerHTML = HtmlSafe.html`
             <div class="fhir-field">
                 <label class="fhir-field-label">FHIR Server URL <span class="fhir-required">*</span></label>
                 <div style="display:flex;align-items:center;gap:0;border:1.5px solid #cbd5e1;border-radius:8px;overflow:hidden;background:#fff;transition:border-color .15s;" id="fhirUrlInputWrap"
                      onfocusin="this.style.borderColor='#3b82f6'" onfocusout="this.style.borderColor='#cbd5e1'">
                     <span style="padding:0 10px;background:#f1f5f9;color:#64748b;font-size:12px;font-weight:600;border-right:1.5px solid #cbd5e1;height:36px;display:flex;align-items:center;white-space:nowrap;user-select:none;">URL</span>
                     <input type="text" class="connector-config-field"
-                           data-field="baseUrl" value="${esc(cfg.baseUrl || '')}"
+                           data-field="baseUrl" value="${cfg.baseUrl || ''}"
                            placeholder="https://fhir.yourserver.com/fhir/R4"
                            autocomplete="off" spellcheck="false"
                            style="flex:1;border:none;outline:none;padding:0 10px;font-size:13px;height:36px;background:transparent;min-width:0;">
@@ -3249,16 +3249,16 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 <label class="fhir-field-label">Resource Type</label>
                 <select class="form-control form-control-sm" id="fhirOutboundResourceTypeSelect">
                     <option value="">— Select resource type —</option>
-                    ${FHIR_R4_TYPES.map(t => `<option value="${t}" ${cfg.resourceType === t ? 'selected' : ''}>${t}</option>`).join('')}
+                    ${FHIR_R4_TYPES.map(t => HtmlSafe.html`<option value="${t}" ${cfg.resourceType === t ? 'selected' : ''}>${t}</option>`)}
                     <option value="_custom_">✎  Other (type manually)…</option>
                 </select>
                 <input type="text" class="form-control form-control-sm" id="fhirResourceTypeCustomInput"
                        placeholder="e.g. MolecularSequence" style="display:none;margin-top:4px">
             </div>
 
-            <input type="hidden" class="connector-config-field" data-field="resourceType" id="fhirResourceTypeHidden" value="${esc(cfg.resourceType || '')}">
-            <input type="hidden" class="connector-config-field" data-field="bundleType"   id="fhirBundleTypeHidden"   value="${esc(cfg.bundleType || '')}">
-            <input type="hidden" class="connector-config-field" data-field="method"       id="fhirMethodHidden"       value="${esc(cfg.method || 'POST')}">
+            <input type="hidden" class="connector-config-field" data-field="resourceType" id="fhirResourceTypeHidden" value="${cfg.resourceType || ''}">
+            <input type="hidden" class="connector-config-field" data-field="bundleType"   id="fhirBundleTypeHidden"   value="${cfg.bundleType || ''}">
+            <input type="hidden" class="connector-config-field" data-field="method"       id="fhirMethodHidden"       value="${cfg.method || 'POST'}">
 
             <div class="fhir-url-preview-card" id="fhirOutboundUrlPreview" style="margin-top:16px">
                 <div class="fhir-url-preview-verb fhir-verb-post" id="fhirUrlVerb">POST</div>
@@ -3332,7 +3332,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const authBody = authSec.querySelector('.fhir-section-body');
         const authType = cfg.authType || 'none';
 
-        authBody.innerHTML = `
+        authBody.innerHTML = HtmlSafe.html`
             <div class="fhir-field">
                 <label class="fhir-field-label">Authentication method</label>
                 <select class="form-control form-control-sm connector-config-field"
@@ -3349,17 +3349,17 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 <div class="fhir-auth-cred" data-auth="basic">
                     <label class="fhir-field-label">Username</label>
                     <input type="text" class="form-control form-control-sm connector-config-field"
-                           data-field="username" value="${esc(cfg.username || '')}">
+                           data-field="username" value="${cfg.username || ''}">
                 </div>
                 <div class="fhir-auth-cred" data-auth="basic">
                     <label class="fhir-field-label" style="margin-top:8px">Password</label>
                     <input type="password" class="form-control form-control-sm connector-config-field"
-                           data-field="password" value="${esc(cfg.password || '')}">
+                           data-field="password" value="${cfg.password || ''}">
                 </div>
                 <div class="fhir-auth-cred" data-auth="bearer smart">
                     <label class="fhir-field-label" style="margin-top:8px">Bearer Token</label>
                     <input type="password" class="form-control form-control-sm connector-config-field"
-                           data-field="bearerToken" value="${esc(cfg.bearerToken || '')}">
+                           data-field="bearerToken" value="${cfg.bearerToken || ''}">
                 </div>
                 <div class="fhir-auth-cred" data-auth="smart" style="margin-top:4px">
                     <small class="fhir-hint" style="color:#1d4ed8">
@@ -3369,12 +3369,12 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 <div class="fhir-auth-cred" data-auth="api_key">
                     <label class="fhir-field-label" style="margin-top:8px">API Key</label>
                     <input type="password" class="form-control form-control-sm connector-config-field"
-                           data-field="apiKey" value="${esc(cfg.apiKey || '')}">
+                           data-field="apiKey" value="${cfg.apiKey || ''}">
                 </div>
                 <div class="fhir-auth-cred" data-auth="api_key">
                     <label class="fhir-field-label" style="margin-top:8px">Header name</label>
                     <input type="text" class="form-control form-control-sm connector-config-field"
-                           data-field="apiKeyHeader" value="${esc(cfg.apiKeyHeader || 'X-API-Key')}">
+                           data-field="apiKeyHeader" value="${cfg.apiKeyHeader || 'X-API-Key'}">
                 </div>
             </div>
         `;
@@ -3421,33 +3421,33 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const isCustomOp = currOp !== '' && !knownOps.includes(currOp);
         const activeOpV  = isCustomOp ? '_custom_' : currOp;
 
-        opsBody.innerHTML = `
+        opsBody.innerHTML = HtmlSafe.html`
             <div class="fhir-ops-list" id="fhirOpsList">
-                ${FHIR_OPS.map(op => `
-                    <label class="fhir-ops-item" data-op="${esc(op.v)}">
-                        <input type="radio" name="fhir-operation" value="${esc(op.v)}"
+                ${FHIR_OPS.map(op => HtmlSafe.html`
+                    <label class="fhir-ops-item" data-op="${op.v}">
+                        <input type="radio" name="fhir-operation" value="${op.v}"
                                ${activeOpV === op.v ? 'checked' : ''}>
                         <i class="fas ${op.icon} fhir-ops-icon"></i>
                         <div>
-                            <div class="fhir-ops-title">${esc(op.l)}</div>
-                            <div class="fhir-ops-sub">${esc(op.sub)}</div>
+                            <div class="fhir-ops-title">${op.l}</div>
+                            <div class="fhir-ops-sub">${op.sub}</div>
                         </div>
                     </label>
-                `).join('')}
+                `)}
             </div>
             <div id="fhirCustomOpRow" style="display:${isCustomOp ? '' : 'none'};margin-top:8px">
                 <input type="text" class="form-control form-control-sm" id="fhirCustomOpInput"
-                       placeholder="e.g. $myCustomOp" value="${esc(isCustomOp ? currOp : '')}">
+                       placeholder="e.g. $myCustomOp" value="${isCustomOp ? currOp : ''}">
             </div>
             <input type="hidden" class="connector-config-field" data-field="operation"
-                   id="fhirOperationHidden" value="${esc(currOp)}">
+                   id="fhirOperationHidden" value="${currOp}">
             <div style="margin-top:12px">
                 <label class="fhir-field-label">
                     Resource ID
                     <small style="font-weight:400;color:#94a3b8"> — optional, for instance-level operations</small>
                 </label>
                 <input type="text" class="form-control form-control-sm connector-config-field"
-                       data-field="resourceId" value="${esc(cfg.resourceId || '')}"
+                       data-field="resourceId" value="${cfg.resourceId || ''}"
                        placeholder="Leave empty for create / type-level operations">
             </div>
         `;
@@ -3479,32 +3479,32 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
         const relSec  = this._makeFHIRSection('Reliability', 'fas fa-sync-alt', false);
         const relBody = relSec.querySelector('.fhir-section-body');
 
-        relBody.innerHTML = `
+        relBody.innerHTML = HtmlSafe.html`
             <div class="fhir-field-row">
                 <div class="fhir-field">
                     <label class="fhir-field-label">Retry attempts</label>
                     <input type="number" class="form-control form-control-sm connector-config-field"
                            data-field="retryAttempts" data-field-type="number"
-                           value="${esc(cfg.retryAttempts ?? 3)}" min="0" max="10">
+                           value="${cfg.retryAttempts ?? 3}" min="0" max="10">
                     <small class="fhir-hint">0 = no retry</small>
                 </div>
                 <div class="fhir-field">
                     <label class="fhir-field-label">Retry delay (s)</label>
                     <input type="number" class="form-control form-control-sm connector-config-field"
                            data-field="retryDelay" data-field-type="number"
-                           value="${esc(cfg.retryDelay ?? 1)}" min="0">
+                           value="${cfg.retryDelay ?? 1}" min="0">
                 </div>
                 <div class="fhir-field">
                     <label class="fhir-field-label">Timeout (s)</label>
                     <input type="number" class="form-control form-control-sm connector-config-field"
                            data-field="timeout" data-field-type="number"
-                           value="${esc(cfg.timeout || 30)}" min="1" max="300">
+                           value="${cfg.timeout || 30}" min="1" max="300">
                 </div>
             </div>
             <div class="fhir-field" style="margin-top:10px">
                 <label class="fhir-field-label">Extra query parameters</label>
                 <input type="text" class="form-control form-control-sm connector-config-field"
-                       data-field="queryParams" value="${esc(cfg.queryParams || '')}"
+                       data-field="queryParams" value="${cfg.queryParams || ''}"
                        placeholder="_format=json&amp;_pretty=true">
                 <small class="fhir-hint">Appended to every request URL</small>
             </div>

@@ -1,6 +1,6 @@
 /**
  * HL7SegmentPicker — one segment-name cell inside an hl7.build "Segments"
- * card (see HL7BuildBuilder.js). Replaces a plain, unrestricted `<select>`
+ * card (see HL7BuildBuilder.js). Replaces a plain, unrestricted HtmlSafe.html`<select>`
  * populated with every segment in the schema with a grammar-guarded picker:
  *
  *   1. Default: only segments hl7/builder.NextAllowedSegments says are valid
@@ -109,7 +109,7 @@ class HL7SegmentPicker {
 
     _renderLoading() {
         if (!this.container) return;
-        this.container.innerHTML = `<select class="form-select form-select-sm" disabled><option>Loading…</option></select>`;
+        this.container.innerHTML = HtmlSafe.html`<select class="form-select form-select-sm" disabled><option>Loading…</option></select>`;
     }
 
     _render() {
@@ -126,15 +126,15 @@ class HL7SegmentPicker {
             const warningText = currentValue && !currentValue.startsWith('Z')
                 ? '⚠ Non-standard: site-specific segments conventionally start with "Z".'
                 : '';
-            this.container.innerHTML = `
+            this.container.innerHTML = HtmlSafe.html`
                 <div style="display:flex;gap:0.3rem;align-items:center;">
                     <input type="text" class="form-control form-control-sm hl7sp-custom-input"
-                        value="${esc(currentValue)}" placeholder="e.g. ZEM" autocomplete="off"
+                        value="${currentValue}" placeholder="e.g. ZEM" autocomplete="off"
                         style="text-transform:uppercase;font-family:monospace;">
                     <button type="button" class="btn btn-sm btn-outline-secondary hl7sp-back-btn"
                         title="Back to segment list" style="flex:0 0 auto;padding:0.15rem 0.4rem;">↩</button>
                 </div>
-                <div class="hl7sp-warning" style="font-size:0.68rem;color:#b45309;margin-top:0.2rem;">${esc(warningText)}</div>`;
+                <div class="hl7sp-warning" style="font-size:0.68rem;color:#b45309;margin-top:0.2rem;">${warningText}</div>`;
             const input = this.container.querySelector('.hl7sp-custom-input');
             const warningEl = this.container.querySelector('.hl7sp-warning');
             const backBtn = this.container.querySelector('.hl7sp-back-btn');
@@ -159,16 +159,16 @@ class HL7SegmentPicker {
             return;
         }
 
-        const optionHTML = name => `<option value="${esc(name)}" ${name === this.options.value ? 'selected' : ''}>${esc(name)}</option>`;
+        const optionHTML = name => HtmlSafe.html`<option value="${name}" ${name === this.options.value ? 'selected' : ''}>${name}</option>`;
         const currentInAllowed = this._allowed.includes(this.options.value);
         const extraCurrentOption = (this.options.value && !currentInAllowed) ? optionHTML(this.options.value) : '';
 
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <select class="form-select form-select-sm hl7sp-select" ${this._loading ? 'disabled' : ''}>
                 <option value="">— select segment —</option>
                 ${extraCurrentOption}
-                ${this._allowed.map(optionHTML).join('')}
-                ${this.options.unrestricted ? '' : '<option value="__override__">⚠ Add anyway (non-standard)…</option>'}
+                ${this._allowed.map(optionHTML)}
+                ${this.options.unrestricted ? '' : HtmlSafe.raw('<option value="__override__">⚠ Add anyway (non-standard)…</option>')}
                 <option value="__custom__">+ Custom / Z-segment…</option>
             </select>`;
 

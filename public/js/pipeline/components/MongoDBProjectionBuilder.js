@@ -161,11 +161,11 @@ class MongoDBProjectionBuilder {
 
         if (this.dynamicFields.length > 0) {
             // Using dynamic fields from collection
-            addAllBtn.innerHTML = `<i class="fas fa-check-double"></i> Select All (${availableFields.length})`;
+            addAllBtn.innerHTML = HtmlSafe.html`<i class="fas fa-check-double"></i> Select All (${availableFields.length})`;
             addAllBtn.title = `Add all ${availableFields.length} fields from the '${this.connectionConfig.collection}' collection`;
         } else {
             // Using default common fields
-            addAllBtn.innerHTML = `<i class="fas fa-check-double"></i> Select All (${availableFields.length})`;
+            addAllBtn.innerHTML = HtmlSafe.html`<i class="fas fa-check-double"></i> Select All (${availableFields.length})`;
             addAllBtn.title = `Add all ${availableFields.length} common healthcare fields`;
         }
     }
@@ -178,7 +178,7 @@ class MongoDBProjectionBuilder {
     }
 
     render() {
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="mongodb-projection-builder-v2">
                 <div class="projection-header">
                     <div class="projection-title">
@@ -263,24 +263,24 @@ class MongoDBProjectionBuilder {
 
         emptyState.style.display = 'none';
 
-        let html = '';
+        const html = [];
         this.fields.forEach(fieldName => {
             const fieldInfo = this.commonFields.find(f => f.name === fieldName);
             const category = fieldInfo?.category || 'Custom';
             const categoryColor = this.getCategoryColor(category);
 
-            html += `
-                <div class="field-tag" data-field="${this.escapeHtml(fieldName)}" style="border-color: ${categoryColor};">
+            html.push(HtmlSafe.html`
+                <div class="field-tag" data-field="${fieldName}" style="border-color: ${categoryColor};">
                     <span class="field-tag-category" style="background: ${categoryColor};">${category}</span>
-                    <span class="field-tag-name">${this.escapeHtml(fieldName)}</span>
+                    <span class="field-tag-name">${fieldName}</span>
                     <button type="button" class="field-tag-remove" title="Remove field">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
-            `;
+            `);
         });
 
-        container.innerHTML = html;
+        container.innerHTML = HtmlSafe.html`${html}`;
     }
 
     getCategoryColor(category) {
@@ -385,10 +385,10 @@ class MongoDBProjectionBuilder {
         }
 
         // Render dropdown
-        let html = '';
+        const html = [];
         matches.forEach(field => {
             const categoryColor = this.getCategoryColor(field.category);
-            html += `
+            html.push(HtmlSafe.html`
                 <div class="autocomplete-item" data-field="${field.name}">
                     <span class="autocomplete-category" style="background: ${categoryColor};">${field.category}</span>
                     <div class="autocomplete-content">
@@ -396,10 +396,10 @@ class MongoDBProjectionBuilder {
                         <span class="autocomplete-desc">${field.description}</span>
                     </div>
                 </div>
-            `;
+            `);
         });
 
-        dropdown.innerHTML = html;
+        dropdown.innerHTML = HtmlSafe.html`${html}`;
         dropdown.style.display = 'block';
     }
 
@@ -449,13 +449,13 @@ class MongoDBProjectionBuilder {
 
     highlightMatch(text, query) {
         const index = text.toLowerCase().indexOf(query.toLowerCase());
-        if (index === -1) return this.escapeHtml(text);
+        if (index === -1) return HtmlSafe.html`${text}`;
 
-        const before = this.escapeHtml(text.substring(0, index));
-        const match = this.escapeHtml(text.substring(index, index + query.length));
-        const after = this.escapeHtml(text.substring(index + query.length));
+        const before = (text.substring(0, index));
+        const match = (text.substring(index, index + query.length));
+        const after = (text.substring(index + query.length));
 
-        return `${before}<mark>${match}</mark>${after}`;
+        return HtmlSafe.html`${before}<mark>${match}</mark>${after}`;
     }
 
     addField(fieldName) {
@@ -566,7 +566,7 @@ class MongoDBProjectionBuilder {
                 z-index: 100000;
             `;
 
-            overlay.innerHTML = `
+            overlay.innerHTML = HtmlSafe.html`
                 <div style="background: white; border-radius: 12px; max-width: 400px; width: 90%; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);">
                     <div style="padding: 16px 20px; background: ${color.bg}; display: flex; align-items: center; gap: 10px;">
                         <span style="font-size: 20px;">${type === 'danger' ? '⚠️' : '❓'}</span>

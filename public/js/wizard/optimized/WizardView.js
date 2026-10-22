@@ -4885,7 +4885,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                 </div>
             `);
 
-        return configItems || HtmlSafe.raw('<div class="summary-item text-muted">Using default configuration</div>');
+        return configItems.length ? configItems : HtmlSafe.raw('<div class="summary-item text-muted">Using default configuration</div>');
     }
 
     /**

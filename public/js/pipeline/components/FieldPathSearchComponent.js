@@ -235,17 +235,17 @@ class FieldPathSearchComponent {
             .filter(Boolean)
             .slice(0, 5);
 
-        let html = '';
+        const html = [];
         if (recentFields.length > 0) {
-            html += '<div class="field-path-category">⏱️ Recently Used</div>';
-            recentFields.forEach(f => { html += this.renderFieldItem(f, ''); });
+            html.push(HtmlSafe.raw('<div class="field-path-category">⏱️ Recently Used</div>'));
+            recentFields.forEach(f => { html.push(this.renderFieldItem(f, '')); });
         }
-        html += `
+        html.push(HtmlSafe.html`
             <div class="field-path-hint" style="padding:12px;text-align:center;color:#888;">
                 🏥 Type a clinical term to search CDA fields<br>
                 e.g. <code>allergy</code>, <code>patient</code>, <code>medication</code>
-            </div>`;
-        this.dropdown.innerHTML = html;
+            </div>`);
+        this.dropdown.innerHTML = HtmlSafe.html`${html}`;
         this.showDropdown();
     }
 
@@ -269,7 +269,7 @@ class FieldPathSearchComponent {
         this._cdaFetchController = new AbortController();
 
         // Show loading hint while fetching
-        this.dropdown.innerHTML = `
+        this.dropdown.innerHTML = HtmlSafe.html`
             <div class="field-path-hint" style="padding:10px;text-align:center;color:#888;">
                 🔍 Searching CDA fields…
             </div>`;
@@ -302,21 +302,21 @@ class FieldPathSearchComponent {
             return;
         }
 
-        let html = '<div class="field-path-category">🏥 CDA Clinical Fields (USCDI)</div>';
-        results.forEach(r => { html += this._renderCDAItem(r, query); });
+        const html = [HtmlSafe.raw('<div class="field-path-category">🏥 CDA Clinical Fields (USCDI)</div>')];
+        results.forEach(r => { html.push(this._renderCDAItem(r, query)); });
 
         if (this.options.allowCustom && query) {
-            html += `
-                <div class="field-path-item custom-path" data-path="${this.escapeHtml(query)}">
+            html.push(HtmlSafe.html`
+                <div class="field-path-item custom-path" data-path="${query}">
                     <div class="field-path-icon">✏️</div>
                     <div class="field-path-content">
                         <div class="field-path-name">Custom: ${this.highlightMatch(query, query)}</div>
                         <div class="field-path-desc">Use custom field path</div>
                     </div>
-                </div>`;
+                </div>`);
         }
 
-        this.dropdown.innerHTML = html;
+        this.dropdown.innerHTML = HtmlSafe.html`${html}`;
         this._attachCDAExpandListeners();
         this.showDropdown();
     }
@@ -324,7 +324,7 @@ class FieldPathSearchComponent {
     /** Renders one CDA result row with a ⊕ expand button. */
     _renderCDAItem(result, query) {
         const conformanceBadge = result.conformance
-            ? `<span class="cda-conformance cda-conformance--${result.conformance.toLowerCase()}">${result.conformance}</span>`
+            ? HtmlSafe.html`<span class="cda-conformance cda-conformance--${result.conformance.toLowerCase()}">${result.conformance}</span>`
             : '';
         const highlightedLabel = this.highlightMatch(result.label || result.shortPath, query);
         const highlightedPath = this.highlightMatch(result.shortPath, query);
@@ -332,26 +332,26 @@ class FieldPathSearchComponent {
 
         const hasPaths = result.fhirPath || result.cdaXPath;
         const expandBtn = hasPaths
-            ? `<button class="cda-expand-btn" title="Show FHIR path and CDA XPath" aria-label="Expand paths">⊕</button>`
+            ? HtmlSafe.html`<button class="cda-expand-btn" title="Show FHIR path and CDA XPath" aria-label="Expand paths">⊕</button>`
             : '';
 
         const fhirRow = result.fhirPath
-            ? `<div class="cda-expanded-row">
+            ? HtmlSafe.html`<div class="cda-expanded-row">
                    <span class="cda-path-label">FHIR</span>
-                   <code class="cda-path-value">${this.escapeHtml(result.fhirPath)}</code>
-                   <button class="cda-copy-btn" data-copy="${this.escapeHtml(result.fhirPath)}" title="Copy FHIR path">📋</button>
+                   <code class="cda-path-value">${result.fhirPath}</code>
+                   <button class="cda-copy-btn" data-copy="${result.fhirPath}" title="Copy FHIR path">📋</button>
                </div>`
             : '';
         const cdaRow = result.cdaXPath
-            ? `<div class="cda-expanded-row">
+            ? HtmlSafe.html`<div class="cda-expanded-row">
                    <span class="cda-path-label">XPath</span>
-                   <code class="cda-path-value">${this.escapeHtml(result.cdaXPath)}</code>
-                   <button class="cda-copy-btn" data-copy="${this.escapeHtml(result.cdaXPath)}" title="Copy CDA XPath">📋</button>
+                   <code class="cda-path-value">${result.cdaXPath}</code>
+                   <button class="cda-copy-btn" data-copy="${result.cdaXPath}" title="Copy CDA XPath">📋</button>
                </div>`
             : '';
 
-        return `
-            <div class="field-path-item cda-field-item" data-path="${this.escapeHtml(result.shortPath)}">
+        return HtmlSafe.html`
+            <div class="field-path-item cda-field-item" data-path="${result.shortPath}">
                 <div class="field-path-icon" style="background:#10b981;">🏥</div>
                 <div class="field-path-content">
                     <div class="field-path-name">
@@ -360,8 +360,8 @@ class FieldPathSearchComponent {
                         ${expandBtn}
                     </div>
                     <div class="field-path-path">${highlightedPath}</div>
-                    <div class="field-path-desc">${this.escapeHtml(uscdiMeta)}</div>
-                    ${hasPaths ? `<div class="cda-expanded-paths" style="display:none;">${fhirRow}${cdaRow}</div>` : ''}
+                    <div class="field-path-desc">${uscdiMeta}</div>
+                    ${hasPaths ? HtmlSafe.html`<div class="cda-expanded-paths" style="display:none;">${fhirRow}${cdaRow}</div>` : ''}
                 </div>
             </div>`;
     }
@@ -446,7 +446,7 @@ class FieldPathSearchComponent {
     renderDropdown(fields, query = '') {
         this.activeIndex = -1;
 
-        let html = '';
+        const html = [];
 
         if (this.options.showCategories) {
             // Group by category
@@ -454,33 +454,33 @@ class FieldPathSearchComponent {
 
             for (const [category, items] of Object.entries(grouped)) {
                 if (items.length > 0) {
-                    html += `<div class="field-path-category">${category}</div>`;
+                    html.push(HtmlSafe.html`<div class="field-path-category">${category}</div>`);
                     items.forEach(field => {
-                        html += this.renderFieldItem(field, query);
+                        html.push(this.renderFieldItem(field, query));
                     });
                 }
             }
         } else {
             // Flat list
             fields.forEach(field => {
-                html += this.renderFieldItem(field, query);
+                html.push(this.renderFieldItem(field, query));
             });
         }
 
         // Add custom option if allowed and query exists
         if (this.options.allowCustom && query) {
-            html += `
-                <div class="field-path-item custom-path" data-path="${this.escapeHtml(query)}">
+            html.push(HtmlSafe.html`
+                <div class="field-path-item custom-path" data-path="${query}">
                     <div class="field-path-icon">✏️</div>
                     <div class="field-path-content">
                         <div class="field-path-name">Custom: ${this.highlightMatch(query, query)}</div>
                         <div class="field-path-desc">Use custom field path</div>
                     </div>
                 </div>
-            `;
+            `);
         }
 
-        this.dropdown.innerHTML = html;
+        this.dropdown.innerHTML = HtmlSafe.html`${html}`;
         this.showDropdown();
     }
 
@@ -489,8 +489,8 @@ class FieldPathSearchComponent {
         const highlightedName = this.highlightMatch(field.name, query);
         const highlightedPath = this.highlightMatch(field.path, query);
 
-        return `
-            <div class="field-path-item" data-path="${this.escapeHtml(field.path)}">
+        return HtmlSafe.html`
+            <div class="field-path-item" data-path="${field.path}">
                 <div class="field-path-icon" style="background: ${categoryColor};">
                     ${this.getCategoryIcon(field.category)}
                 </div>
@@ -516,12 +516,12 @@ class FieldPathSearchComponent {
             .slice(0, 5);
 
         if (recentFields.length > 0) {
-            let html = '<div class="field-path-category">⏱️ Recently Used</div>';
+            const html = [HtmlSafe.raw('<div class="field-path-category">⏱️ Recently Used</div>')];
             recentFields.forEach(field => {
-                html += this.renderFieldItem(field, '');
+                html.push(this.renderFieldItem(field, ''));
             });
 
-            this.dropdown.innerHTML = html;
+            this.dropdown.innerHTML = HtmlSafe.html`${html}`;
             this.showDropdown();
         }
     }
@@ -534,7 +534,7 @@ class FieldPathSearchComponent {
      * without knowing any path syntax.
      */
     showBrowseMode() {
-        let html = '';
+        const html = [];
 
         // 1. Recently used paths (always shown first)
         const allFields = this.getAllFields();
@@ -544,8 +544,8 @@ class FieldPathSearchComponent {
             .slice(0, 5);
 
         if (recentFields.length > 0) {
-            html += '<div class="field-path-category">⏱️ Recently Used</div>';
-            recentFields.forEach(field => { html += this.renderFieldItem(field, ''); });
+            html.push(HtmlSafe.raw('<div class="field-path-category">⏱️ Recently Used</div>'));
+            recentFields.forEach(field => { html.push(this.renderFieldItem(field, '')); });
         }
 
         // 2. Step output variables — leaf paths only (skip array container hints)
@@ -557,33 +557,33 @@ class FieldPathSearchComponent {
 
                 if (leafVars.length > 0) {
                     const limit = 30;
-                    html += '<div class="field-path-category">📦 Available Step Outputs</div>';
+                    html.push(HtmlSafe.raw('<div class="field-path-category">📦 Available Step Outputs</div>'));
                     leafVars.slice(0, limit).forEach(v => {
-                        html += this.renderFieldItem({
+                        html.push(this.renderFieldItem({
                             ...v,
                             category: v.category || 'Step Outputs'
-                        }, '');
+                        }, ''));
                     });
                     if (leafVars.length > limit) {
-                        html += `<div class="field-path-hint">Type to search ${leafVars.length - limit} more fields…</div>`;
+                        html.push(HtmlSafe.html`<div class="field-path-hint">Type to search ${leafVars.length - limit} more fields…</div>`);
                     }
                 } else if (recentFields.length === 0) {
                     // Only arrays/containers available — show them with a hint
-                    html += '<div class="field-path-category">📦 Available Step Outputs</div>';
+                    html.push(HtmlSafe.raw('<div class="field-path-category">📦 Available Step Outputs</div>'));
                     stepVars.slice(0, 15).forEach(v => {
-                        html += this.renderFieldItem({ ...v, category: v.category || 'Step Outputs' }, '');
+                        html.push(this.renderFieldItem({ ...v, category: v.category || 'Step Outputs' }, ''));
                     });
                 }
             } else if (recentFields.length === 0) {
                 // No step variables and no recents — clickable hint to open test modal
-                html += `
+                html.push(HtmlSafe.html`
                     <div class="field-path-hint" style="padding:12px;text-align:center;color:#888;">
                         💡 <a href="#" style="color:#4a90e2;text-decoration:none;"
                               onmousedown="event.preventDefault();document.getElementById('testPipelineBtn')?.click();">
                             Run the test pipeline
                         </a> once to browse all available fields here,<br>
                         or type a path directly like <code>PID.5.1</code>
-                    </div>`;
+                    </div>`);
             }
         } else if (recentFields.length === 0) {
             // No callback and no recents — just hide
@@ -591,18 +591,18 @@ class FieldPathSearchComponent {
             return;
         }
 
-        if (html) {
-            this.dropdown.innerHTML = html;
+        if (html.length) {
+            this.dropdown.innerHTML = HtmlSafe.html`${html}`;
             this.showDropdown();
         }
     }
 
     showCustomOption(value) {
-        this.dropdown.innerHTML = `
-            <div class="field-path-item custom-path" data-path="${this.escapeHtml(value)}">
+        this.dropdown.innerHTML = HtmlSafe.html`
+            <div class="field-path-item custom-path" data-path="${value}">
                 <div class="field-path-icon">✏️</div>
                 <div class="field-path-content">
-                    <div class="field-path-name">Custom: ${this.escapeHtml(value)}</div>
+                    <div class="field-path-name">Custom: ${value}</div>
                     <div class="field-path-desc">Use this custom field path</div>
                 </div>
             </div>
@@ -679,19 +679,19 @@ class FieldPathSearchComponent {
     }
 
     highlightMatch(text, query) {
-        if (!query) return this.escapeHtml(text);
+        if (!query) return HtmlSafe.html`${text}`;
 
         const lowerText = this.options.caseSensitive ? text : text.toLowerCase();
         const lowerQuery = this.options.caseSensitive ? query : query.toLowerCase();
         const index = lowerText.indexOf(lowerQuery);
 
-        if (index === -1) return this.escapeHtml(text);
+        if (index === -1) return HtmlSafe.html`${text}`;
 
         const before = text.substring(0, index);
         const match = text.substring(index, index + query.length);
         const after = text.substring(index + query.length);
 
-        return `${this.escapeHtml(before)}<mark>${this.escapeHtml(match)}</mark>${this.escapeHtml(after)}`;
+        return HtmlSafe.html`${before}<mark>${match}</mark>${after}`;
     }
 
     escapeHtml(text) {

@@ -56,7 +56,7 @@ class MongoDBFilterBuilder {
     }
 
     render() {
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="mongodb-filter-builder">
                 <div class="filter-header">
                     <div class="filter-title">
@@ -89,7 +89,7 @@ class MongoDBFilterBuilder {
         const conditionsList = this.container.querySelector('.conditions-list');
 
         if (this.conditions.length === 0) {
-            conditionsList.innerHTML = `
+            conditionsList.innerHTML = HtmlSafe.html`
                 <div class="empty-state">
                     <i class="fas fa-info-circle"></i>
                     <p>No filter conditions defined</p>
@@ -99,20 +99,20 @@ class MongoDBFilterBuilder {
             return;
         }
 
-        let html = '<div class="conditions-table">';
-        html += '<div class="conditions-header">';
-        html += '<div class="col-field">Field Name</div>';
-        html += '<div class="col-operator">Operator</div>';
-        html += '<div class="col-value">Value</div>';
-        html += '<div class="col-actions">Actions</div>';
-        html += '</div>';
+        const html = [HtmlSafe.raw('<div class="conditions-table">')];
+        html.push(HtmlSafe.raw('<div class="conditions-header">'));
+        html.push(HtmlSafe.raw('<div class="col-field">Field Name</div>'));
+        html.push(HtmlSafe.raw('<div class="col-operator">Operator</div>'));
+        html.push(HtmlSafe.raw('<div class="col-value">Value</div>'));
+        html.push(HtmlSafe.raw('<div class="col-actions">Actions</div>'));
+        html.push(HtmlSafe.raw('</div>'));
 
         this.conditions.forEach((condition, index) => {
-            html += this.renderCondition(condition, index);
+            html.push(this.renderCondition(condition, index));
         });
 
-        html += '</div>';
-        conditionsList.innerHTML = html;
+        html.push(HtmlSafe.raw('</div>'));
+        conditionsList.innerHTML = HtmlSafe.html`${html}`;
     }
 
     renderCondition(condition, index) {
@@ -129,13 +129,13 @@ class MongoDBFilterBuilder {
             { value: 'exists', label: 'Field Exists', example: 'email exists' }
         ];
 
-        let html = `<div class="condition-row" data-condition-id="${condition.id}">`;
+        const html = [HtmlSafe.html`<div class="condition-row" data-condition-id="${condition.id}">`];
 
         // Field Name
-        html += `<div class="col-field">
+        html.push(HtmlSafe.html`<div class="col-field">
             <input type="text"
                    class="form-control form-control-sm condition-field"
-                   value="${this.escapeHtml(condition.field)}"
+                   value="${condition.field}"
                    placeholder="mrn"
                    list="mongodb-field-suggestions-${index}">
             <datalist id="mongodb-field-suggestions-${index}">
@@ -149,36 +149,36 @@ class MongoDBFilterBuilder {
                 <option value="email">email - Email Address</option>
                 <option value="status">status - Status</option>
             </datalist>
-        </div>`;
+        </div>`);
 
         // Operator
-        html += `<div class="col-operator">
-            <select class="form-control form-control-sm condition-operator">`;
+        html.push(HtmlSafe.html`<div class="col-operator">
+            <select class="form-control form-control-sm condition-operator">`);
         operators.forEach(op => {
             const selected = condition.operator === op.value ? 'selected' : '';
-            html += `<option value="${op.value}" ${selected} title="${op.example}">${op.label}</option>`;
+            html.push(HtmlSafe.html`<option value="${op.value}" ${selected} title="${op.example}">${op.label}</option>`);
         });
-        html += `</select>
-        </div>`;
+        html.push(HtmlSafe.html`</select>
+        </div>`);
 
         // Value
-        html += `<div class="col-value">
+        html.push(HtmlSafe.html`<div class="col-value">
             <input type="text"
                    class="form-control form-control-sm condition-value"
-                   value="${this.escapeHtml(condition.value)}"
+                   value="${condition.value}"
                    placeholder="MRN123456 or {PID.3}">
             <small class="text-muted">Use {PID.3} for HL7 field values</small>
-        </div>`;
+        </div>`);
 
         // Actions
-        html += `<div class="col-actions">
+        html.push(HtmlSafe.html`<div class="col-actions">
             <button type="button" class="btn btn-sm btn-danger remove-condition-btn" title="Remove condition">
                 <i class="fas fa-trash"></i>
             </button>
-        </div>`;
+        </div>`);
 
-        html += '</div>';
-        return html;
+        html.push(HtmlSafe.raw('</div>'));
+        return HtmlSafe.html`${html}`;
     }
 
     attachEventListeners() {

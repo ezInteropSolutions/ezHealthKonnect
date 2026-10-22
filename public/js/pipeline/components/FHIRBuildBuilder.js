@@ -140,7 +140,7 @@ class FHIRBuildBuilder {
                 <div style="flex:1 1 160px;">
                     <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Resource Type</label>
                     <select id="fbbResourceType" class="form-select form-select-sm">
-                        ${resourceOptions || HtmlSafe.html`<option value="${cfg.resourceType}">${cfg.resourceType}</option>`}
+                        ${resourceOptions.length ? resourceOptions : HtmlSafe.html`<option value="${cfg.resourceType}">${cfg.resourceType}</option>`}
                     </select>
                 </div>
                 <div style="flex:1 1 120px;">

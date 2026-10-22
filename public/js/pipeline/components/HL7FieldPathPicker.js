@@ -39,9 +39,9 @@ class HL7FieldPathPicker {
     _render() {
         if (!this.container) return;
         const esc = HL7FieldPathPicker._esc;
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <input type="text" class="form-control form-control-sm hl7fp-input"
-                value="${esc(this.options.value)}" placeholder="Search fields… (e.g. SSN, ${esc(this.options.segment || 'PID')}.19)"
+                value="${this.options.value}" placeholder="Search fields… (e.g. SSN, ${this.options.segment || 'PID'}.19)"
                 autocomplete="off" style="font-family:monospace;font-size:0.8rem;">
             <div class="hl7fp-warning" style="font-size:0.68rem;color:#dc2626;margin-top:0.15rem;"></div>`;
 

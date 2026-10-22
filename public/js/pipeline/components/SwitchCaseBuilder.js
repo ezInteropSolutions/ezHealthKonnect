@@ -1012,7 +1012,7 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
         const wrapper = document.createElement('div');
         wrapper.className = 'switch-header-wrapper';
 
-        wrapper.innerHTML = `
+        wrapper.innerHTML = HtmlSafe.html`
             <div class="switch-header">
                 <div class="switch-title">
                     <span class="switch-icon">🔀</span>
@@ -1037,7 +1037,7 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
     createSwitchFieldSection() {
         const section = document.createElement('div');
         section.className = 'switch-field-section';
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
             <label class="switch-label">
                 <span class="label-icon">📊</span>
                 Switch On Field
@@ -1047,7 +1047,7 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
                        class="switch-field-input"
                        id="switch-field-input"
                        placeholder="Search for a field (e.g., PID.8, MSH.9)..."
-                       value="${this.escapeHtml(this.config.field || '')}">
+                       value="${this.config.field || ''}">
                 <span class="switch-field-hint">The field value will be compared against each case</span>
             </div>
         `;
@@ -1064,9 +1064,9 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
 
         const casesHtml = this.config.cases.map((caseItem, index) =>
             this.createCaseCardHtml(caseItem, index)
-        ).join('');
+        );
 
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
             <div class="cases-header">
                 <label class="switch-label">
                     <span class="label-icon">📋</span>
@@ -1090,7 +1090,7 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
     createCaseCardHtml(caseItem, index) {
         const actionsHtml = this.createActionsHtml(caseItem.actions || [], index, 'case');
 
-        return `
+        return HtmlSafe.html`
             <div class="case-card" data-case-index="${index}">
                 <div class="case-header">
                     <div class="case-match">
@@ -1100,14 +1100,14 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
                                class="case-value-input"
                                data-index="${index}"
                                placeholder="Value to match..."
-                               value="${this.escapeHtml(caseItem.value || '')}">
+                               value="${caseItem.value || ''}">
                     </div>
                     <div class="case-controls">
                         <input type="text"
                                class="case-label-input"
                                data-index="${index}"
                                placeholder="Label (optional)"
-                               value="${this.escapeHtml(caseItem.label || '')}">
+                               value="${caseItem.label || ''}">
                         <button type="button" class="delete-case-btn" data-index="${index}" title="Delete case">
                             🗑️
                         </button>
@@ -1139,7 +1139,7 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
             'default'
         );
 
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
             <div class="default-header">
                 <label class="switch-label">
                     <span class="label-icon">↩️</span>
@@ -1170,7 +1170,7 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
 
         return actions.map((action, actionIndex) =>
             this.createActionRowHtml(action, caseIndex, actionIndex, section)
-        ).join('');
+        );
     }
 
     /**
@@ -1180,7 +1180,7 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
     createActionRowHtml(action, caseIndex, actionIndex, section) {
         const actionType = action.action || 'continue';
 
-        return `
+        return HtmlSafe.html`
             <div class="action-row" data-action-index="${actionIndex}">
                 <select class="action-type-select"
                         data-case-index="${caseIndex}"
@@ -1214,11 +1214,11 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
             { value: 'route_to_step', label: 'Route to Step', icon: '🔀' }
         ];
 
-        return actions.map(a => `
+        return actions.map(a => HtmlSafe.html`
             <option value="${a.value}" ${a.value === selectedAction ? 'selected' : ''}>
                 ${a.icon} ${a.label}
             </option>
-        `).join('');
+        `);
     }
 
     /**
@@ -1233,40 +1233,40 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
         switch (actionType) {
             case 'continue':
             case 'stop':
-                return '<span class="no-config">No configuration needed</span>';
+                return HtmlSafe.raw('<span class="no-config">No configuration needed</span>');
 
             case 'set_value':
-                return `
+                return HtmlSafe.html`
                     <div class="action-fields">
                         <div class="field-search-container" id="${prefix}-targetField"
                              data-field="targetField"
                              data-case-index="${caseIndex}"
                              data-action-index="${actionIndex}"
-                             data-initial-value="${this.escapeHtml(action.targetField || '')}"></div>
+                             data-initial-value="${action.targetField || ''}"></div>
                         <span class="action-separator">=</span>
                         <input type="text" class="action-value-input"
                                data-field="value"
                                data-case-index="${caseIndex}"
                                data-action-index="${actionIndex}"
                                placeholder="Value"
-                               value="${this.escapeHtml(action.value || '')}">
+                               value="${action.value || ''}">
                     </div>
                 `;
 
             case 'copy_field':
-                return `
+                return HtmlSafe.html`
                     <div class="action-fields">
                         <div class="field-search-container" id="${prefix}-sourceField"
                              data-field="sourceField"
                              data-case-index="${caseIndex}"
                              data-action-index="${actionIndex}"
-                             data-initial-value="${this.escapeHtml(action.sourceField || '')}"></div>
+                             data-initial-value="${action.sourceField || ''}"></div>
                         <span class="action-separator">→</span>
                         <div class="field-search-container" id="${prefix}-targetField"
                              data-field="targetField"
                              data-case-index="${caseIndex}"
                              data-action-index="${actionIndex}"
-                             data-initial-value="${this.escapeHtml(action.targetField || '')}"></div>
+                             data-initial-value="${action.targetField || ''}"></div>
                     </div>
                 `;
 
@@ -1278,13 +1278,13 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
                 if (!action.transformation) {
                     action.transformation = 'uppercase';
                 }
-                return `
+                return HtmlSafe.html`
                     <div class="action-fields">
                         <div class="field-search-container" id="${prefix}-sourceField"
                              data-field="sourceField"
                              data-case-index="${caseIndex}"
                              data-action-index="${actionIndex}"
-                             data-initial-value="${this.escapeHtml(action.sourceField || action.field || '')}"></div>
+                             data-initial-value="${action.sourceField || action.field || ''}"></div>
                         <select class="action-transform-select"
                                 data-field="transformation"
                                 data-case-index="${caseIndex}"
@@ -1299,14 +1299,14 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
                              data-field="targetField"
                              data-case-index="${caseIndex}"
                              data-action-index="${actionIndex}"
-                             data-initial-value="${this.escapeHtml(action.targetField || '')}"></div>
+                             data-initial-value="${action.targetField || ''}"></div>
                     </div>
                 `;
 
             case 'route_to_step':
                 // Support multiple step selection
                 const selectedStepIds = action.targetStepIds || (action.targetStepId ? [action.targetStepId] : []);
-                return `
+                return HtmlSafe.html`
                     <div class="action-fields route-to-steps-container">
                         <div class="multi-step-select-wrapper">
                             <select class="action-step-select multi-step-add"
@@ -1326,7 +1326,7 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
                 `;
 
             default:
-                return '<span class="no-config">Unknown action type</span>';
+                return HtmlSafe.raw('<span class="no-config">Unknown action type</span>');
         }
     }
 
@@ -1339,11 +1339,11 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
             const allSteps = window.pipelineBuilder.getAllSteps ?
                 window.pipelineBuilder.getAllSteps() : [];
 
-            return allSteps.map(step => `
+            return allSteps.map(step => HtmlSafe.html`
                 <option value="${step.id}" ${step.id === selectedStepId ? 'selected' : ''}>
                     Step ${step.sequence || ''} - ${step.stepName || step.step_name || 'Unnamed'}
                 </option>
-            `).join('');
+            `);
         }
         return '';
     }
@@ -1354,7 +1354,7 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
      */
     renderSelectedSteps(stepIds, caseIndex, actionIndex) {
         if (!stepIds || stepIds.length === 0) {
-            return '<span class="no-steps-selected">No steps selected</span>';
+            return HtmlSafe.raw('<span class="no-steps-selected">No steps selected</span>');
         }
 
         const allSteps = window.pipelineBuilder?.getAllSteps?.() || [];
@@ -1366,10 +1366,10 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
                 `Step ${step.sequence || ''} - ${step.stepName || step.step_name || 'Unnamed'}` :
                 stepId;
 
-            return `
+            return HtmlSafe.html`
                 <div class="selected-step-chip" data-step-id="${stepId}" data-index="${idx}">
                     <span class="step-order">${idx + 1}.</span>
-                    <span class="step-name">${this.escapeHtml(stepName)}</span>
+                    <span class="step-name">${stepName}</span>
                     <button type="button" class="remove-step-btn"
                             data-case-index="${caseIndex}"
                             data-action-index="${actionIndex}"
@@ -1377,7 +1377,7 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
                             title="Remove step">×</button>
                 </div>
             `;
-        }).join('');
+        });
     }
 
     /**
@@ -1445,7 +1445,7 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
         const caseInsensitive = this.config.options?.caseInsensitive || false;
         const trimWhitespace = this.config.options?.trimWhitespace !== false;
 
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
             <button type="button" class="advanced-toggle-btn" id="advanced-toggle-btn">
                 <span class="toggle-icon">▶</span> Advanced Options
             </button>
@@ -1761,7 +1761,7 @@ class SwitchCaseBuilder extends BaseStepConfigBuilder {
     showHelp() {
         const modal = document.createElement('div');
         modal.className = 'switch-help-overlay';
-        modal.innerHTML = `
+        modal.innerHTML = HtmlSafe.html`
             <div class="switch-help-content">
                 <h3>🔀 Switch/Case Logic</h3>
                 <p>The Switch/Case step evaluates a field's value and executes different actions based on matches.</p>

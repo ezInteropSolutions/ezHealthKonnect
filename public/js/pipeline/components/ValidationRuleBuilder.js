@@ -74,10 +74,10 @@ class ValidationRuleBuilder {
      * Render the validation builder
      */
     render() {
-        const html = `
+        const html = HtmlSafe.html`
             <div class="validation-builder" data-component="validation-rule-builder">
                 <div class="validation-rules-list">
-                    ${this.rules.map((rule, index) => this.renderRuleRow(rule, index)).join('')}
+                    ${this.rules.map((rule, index) => this.renderRuleRow(rule, index))}
                 </div>
                 <button type="button" class="btn-add-rule">
                     <span style="font-size: 1.2em; margin-right: 0.25rem;">+</span> Add Rule
@@ -113,7 +113,7 @@ class ValidationRuleBuilder {
     renderRuleRow(rule, index) {
         const validationType = rule.type || 'required';
 
-        return `
+        return HtmlSafe.html`
             <div class="validation-rule-row" data-index="${index}">
                 <div class="rule-fields">
                     <!-- Field Path -->
@@ -141,13 +141,13 @@ class ValidationRuleBuilder {
      * @returns {string}
      */
     renderFieldPath(rule) {
-        return `
+        return HtmlSafe.html`
             <div class="rule-field">
                 <label>Field Path</label>
                 <div class="field-path-input-container" data-field-index="${this.rules.indexOf(rule)}"></div>
                 <input type="hidden"
                        class="rule-field-path"
-                       value="${this.escapeHtml(rule.field)}"
+                       value="${rule.field}"
                        data-rule-prop="field">
             </div>
         `;
@@ -161,10 +161,10 @@ class ValidationRuleBuilder {
     renderValidationType(rule) {
         const validationType = rule.type || 'required';
         const options = ValidationRuleBuilder.VALIDATION_TYPES.map(type =>
-            `<option value="${type.value}" ${validationType === type.value ? 'selected' : ''}>${type.label}</option>`
-        ).join('');
+            HtmlSafe.html`<option value="${type.value}" ${validationType === type.value ? 'selected' : ''}>${type.label}</option>`
+        );
 
-        return `
+        return HtmlSafe.html`
             <div class="rule-field">
                 <label>Validation Type</label>
                 <select class="rule-type" data-rule-prop="type">
@@ -181,24 +181,24 @@ class ValidationRuleBuilder {
      * @returns {string}
      */
     renderConditionalFields(rule, validationType) {
-        let html = '';
+        const html = [];
 
         // Format preset dropdown
         if (validationType === 'format') {
-            html += this.renderFormatPreset(rule);
+            html.push(this.renderFormatPreset(rule));
         }
 
         // Length inputs
         if (validationType === 'length') {
-            html += this.renderLengthInputs(rule);
+            html.push(this.renderLengthInputs(rule));
         }
 
         // Pattern input
         if (validationType === 'pattern') {
-            html += this.renderPatternInput(rule);
+            html.push(this.renderPatternInput(rule));
         }
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -208,10 +208,10 @@ class ValidationRuleBuilder {
      */
     renderFormatPreset(rule) {
         const options = ValidationRuleBuilder.FORMAT_PRESETS.map(preset =>
-            `<option value="${preset.value}" ${rule.format === preset.value ? 'selected' : ''}>${preset.label}</option>`
-        ).join('');
+            HtmlSafe.html`<option value="${preset.value}" ${rule.format === preset.value ? 'selected' : ''}>${preset.label}</option>`
+        );
 
-        return `
+        return HtmlSafe.html`
             <div class="rule-field rule-format-field">
                 <label>Format Preset</label>
                 <select class="rule-format-preset" data-rule-prop="format">
@@ -229,7 +229,7 @@ class ValidationRuleBuilder {
      * @returns {string}
      */
     renderLengthInputs(rule) {
-        return `
+        return HtmlSafe.html`
             <div class="rule-field rule-length-field">
                 <label>Min/Max Length</label>
                 <div style="display: flex; gap: 0.5rem;">
@@ -257,7 +257,7 @@ class ValidationRuleBuilder {
      * @returns {string}
      */
     renderPatternInput(rule) {
-        return `
+        return HtmlSafe.html`
             <div class="rule-field rule-pattern-field">
                 <label>Regex Pattern</label>
                 <input type="text"
@@ -276,13 +276,13 @@ class ValidationRuleBuilder {
      * @returns {string}
      */
     renderErrorMessage(rule) {
-        return `
+        return HtmlSafe.html`
             <div class="rule-field">
                 <label>Error Message</label>
                 <input type="text"
                        class="rule-error-msg"
                        placeholder="Custom error message (optional)"
-                       value="${this.escapeHtml(rule.errorMessage)}"
+                       value="${rule.errorMessage}"
                        data-rule-prop="errorMessage">
             </div>
         `;
@@ -293,7 +293,7 @@ class ValidationRuleBuilder {
      * @returns {string}
      */
     renderActions() {
-        return `
+        return HtmlSafe.html`
             <div class="rule-actions">
                 <button type="button" class="btn-remove-rule" title="Remove Rule">
                     <span style="color: #ef4444; font-size: 1.2em;">×</span>
@@ -498,7 +498,7 @@ class ValidationRuleBuilder {
 
         if (conditionalHTML) {
             const typeField = ruleRow.querySelector('.rule-field:nth-child(2)');
-            typeField.insertAdjacentHTML('afterend', conditionalHTML);
+            typeField.insertAdjacentHTML('afterend', HtmlSafe.html`${conditionalHTML}`);
 
             // Re-attach listeners for new fields
             this.attachInputListeners();

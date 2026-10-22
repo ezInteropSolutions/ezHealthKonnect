@@ -88,7 +88,7 @@ class MetadataBuilder {
      * Render the metadata builder UI
      */
     render() {
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="metadata-builder">
                 <!-- Header -->
                 <div class="metadata-builder-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding: 0.75rem; background: #f3f4f6; border-radius: 6px;">
@@ -158,7 +158,7 @@ class MetadataBuilder {
      */
     renderRows() {
         if (this.metadataArray.length === 0) {
-            return `
+            return HtmlSafe.html`
                 <div class="empty-state" style="text-align: center; padding: 2rem; color: #9ca3af;">
                     <i class="fas fa-inbox" style="font-size: 2rem; margin-bottom: 0.5rem;"></i>
                     <p>No metadata fields added yet.</p>
@@ -167,7 +167,7 @@ class MetadataBuilder {
             `;
         }
 
-        return this.metadataArray.map((item, index) => this.renderRow(item, index)).join('');
+        return this.metadataArray.map((item, index) => this.renderRow(item, index));
     }
 
     /**
@@ -177,21 +177,21 @@ class MetadataBuilder {
         // Check if value is an object/array
         const isObject = typeof item.value === 'object' && item.value !== null;
         const displayValue = isObject ? JSON.stringify(item.value, null, 2) : (item.value || '');
-        const escapedValue = this.escapeHtml(displayValue);
+        const escapedValue = (displayValue);
 
-        return `
+        return HtmlSafe.html`
             <div class="metadata-row" data-index="${index}" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; padding: 0.75rem; background: white; border: 1px solid #e5e7eb; border-radius: 6px; align-items: flex-start;">
                 <div style="flex: 1; min-width: 0;">
                     <label style="display: block; font-size: 0.75rem; color: #6b7280; margin-bottom: 0.25rem;">Key</label>
-                    <input type="text" class="metadata-key" value="${this.escapeHtml(item.key || '')}" placeholder="e.g., environment" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
+                    <input type="text" class="metadata-key" value="${item.key || ''}" placeholder="e.g., environment" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
                 </div>
                 <div style="flex: 2; min-width: 0;">
                     <label style="display: block; font-size: 0.75rem; color: #6b7280; margin-bottom: 0.25rem;">
-                        Value ${isObject ? '<span style="color: #059669; font-weight: 500;">(JSON Object)</span>' : ''}
+                        Value ${isObject ? HtmlSafe.raw('<span style="color: #059669; font-weight: 500;">(JSON Object)</span>') : ''}
                     </label>
                     ${isObject ?
-                        `<textarea class="metadata-value" rows="6" placeholder="e.g., production" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem; font-family: 'Courier New', monospace; resize: vertical;">${escapedValue}</textarea>` :
-                        `<input type="text" class="metadata-value" value="${escapedValue}" placeholder="e.g., production" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">`
+                        HtmlSafe.html`<textarea class="metadata-value" rows="6" placeholder="e.g., production" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem; font-family: 'Courier New', monospace; resize: vertical;">${escapedValue}</textarea>` :
+                        HtmlSafe.html`<input type="text" class="metadata-value" value="${escapedValue}" placeholder="e.g., production" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">`
                     }
                 </div>
                 <div style="padding-top: 1.5rem;">
@@ -227,7 +227,7 @@ class MetadataBuilder {
             { key: 'source', value: 'EPIC', description: 'Source system name' }
         ];
 
-        return suggestions.map(suggestion => `
+        return suggestions.map(suggestion => HtmlSafe.html`
             <label class="suggestion-item" style="display: flex; align-items: flex-start; padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 4px; margin-bottom: 0.5rem; cursor: pointer; transition: all 0.2s;">
                 <input type="checkbox" class="suggestion-checkbox" data-key="${suggestion.key}" data-value="${suggestion.value}" style="margin-right: 0.75rem; margin-top: 0.25rem;">
                 <div style="flex: 1;">
@@ -238,7 +238,7 @@ class MetadataBuilder {
                     <p style="margin: 0; color: #6b7280; font-size: 0.8rem;">${suggestion.description}</p>
                 </div>
             </label>
-        `).join('');
+        `);
     }
 
     /**
