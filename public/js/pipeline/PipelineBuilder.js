@@ -299,10 +299,10 @@ class PipelineBuilder {
             .map(p => p.message_type)
             .filter(Boolean)
             .sort()
-            .map(mt => `<option value="${mt}" ${mt === current ? 'selected' : ''}>${mt} Pipeline</option>`)
-            .join('');
+            .map(mt => HtmlSafe.html`<option value="${mt}" ${mt === current ? 'selected' : ''}>${mt} Pipeline</option>`)
+            ;
 
-        msgEl.innerHTML = `<select class="breadcrumb-msgtype-select" title="Switch to another message type's pipeline">${options}</select>`;
+        msgEl.innerHTML = HtmlSafe.html`<select class="breadcrumb-msgtype-select" title="Switch to another message type's pipeline">${options}</select>`;
         const select = msgEl.querySelector('select');
         select.addEventListener('change', (e) => {
             const params = new URLSearchParams(window.location.search);
@@ -419,7 +419,7 @@ class PipelineBuilder {
         modal = document.createElement('div');
         modal.id = 'pipelineSettingsModal';
         modal.className = 'modal active';
-        modal.innerHTML = `
+        modal.innerHTML = HtmlSafe.html`
             <div class="modal-content" style="max-width:560px;">
                 <div class="modal-header">
                     <h3><i class="fas fa-cog" style="color:var(--primary-color);"></i> Pipeline Settings</h3>
@@ -663,7 +663,7 @@ class PipelineBuilder {
             }
 
             // Display results with enhanced FHIR resource rendering
-            resultsContent.innerHTML = this.renderTestResults(result);
+            resultsContent.innerHTML = HtmlSafe.html`${this.renderTestResults(result)}`;
             this.loadCDAComplianceReport();
 
             // Check success field from test response
@@ -688,13 +688,13 @@ class PipelineBuilder {
                 errorMessage = JSON.stringify(error, null, 2);
             }
 
-            resultsContent.innerHTML = `
+            resultsContent.innerHTML = HtmlSafe.html`
                 <div class="test-result error">
                     <h4><i class="fas fa-times-circle"></i> Test Error</h4>
-                    <p>${this.escapeHtml(errorMessage)}</p>
+                    <p>${errorMessage}</p>
                     <details style="margin-top: 0.5rem;">
                         <summary style="cursor: pointer; font-size: 0.875rem;">View Error Details</summary>
-                        <pre style="background: #fef2f2; padding: 0.5rem; border-radius: 0.25rem; overflow: auto; max-height: 300px; font-size: 0.75rem;">${this.escapeHtml(JSON.stringify(error, null, 2))}</pre>
+                        <pre style="background: #fef2f2; padding: 0.5rem; border-radius: 0.25rem; overflow: auto; max-height: 300px; font-size: 0.75rem;">${JSON.stringify(error, null, 2)}</pre>
                     </details>
                 </div>
             `;
@@ -837,7 +837,7 @@ class PipelineBuilder {
         }
         const executionTimeMs = totalTimeMs > 0 ? totalTimeMs : 'N/A';
 
-        let html = `
+        const html = [HtmlSafe.html`
             <div style="margin-bottom: 15px; text-align: right;">
                 <button onclick="window.pipelineBuilder.runTest()" class="btn-secondary" style="padding: 8px 16px;">
                     <i class="fas fa-redo"></i> Run Test Again
@@ -851,14 +851,14 @@ class PipelineBuilder {
                 <p><strong>Execution Time:</strong> ${executionTimeMs}ms</p>
                 <p><strong>Steps Executed:</strong> ${stepsExecuted}</p>
                 <p><strong>Status:</strong> ${result.status || 'unknown'}</p>
-                ${result.errors?.length > 0 ? `<p class="error-message"><strong>Errors:</strong> ${result.errors.length} error(s) occurred</p>` : ''}
+                ${result.errors?.length > 0 ? HtmlSafe.html`<p class="error-message"><strong>Errors:</strong> ${result.errors.length} error(s) occurred</p>` : ''}
             </div>
-        `;
+        `];
 
         // The real outbound payload(s) — most authoritative "final output"
         // signal available (see renderOutboundPayloads doc comment) — shown
         // right after the pass/fail summary, ahead of the per-step list.
-        html += this.renderOutboundPayloads(result.outbound_payloads);
+        html.push(this.renderOutboundPayloads(result.outbound_payloads));
 
         // Render per-step results with pass/fail indicators
         console.log('[TestResults] result keys:', Object.keys(result));
@@ -888,19 +888,19 @@ class PipelineBuilder {
             const warningOnlyCount = stepEntries.filter(([name]) => warningsByStep[name] && !errorsByStep[name]).length;
             const passedCount = stepEntries.length - failedCount - caughtCount - warningOnlyCount;
 
-            html += `
+            html.push(HtmlSafe.html`
                 <div class="step-results-section">
                     <h4 class="step-results-header">
                         <i class="fas fa-tasks"></i> Step Results
                         <span class="step-results-summary">
                             <span class="step-count-pass">${passedCount} passed</span>
-                            ${caughtCount > 0 ? `<span style="color:var(--warning-color);font-weight:600;">${caughtCount} caught</span>` : ''}
-                            ${warningOnlyCount > 0 ? `<span style="color:var(--warning-color);font-weight:600;">${warningOnlyCount} with warnings</span>` : ''}
-                            ${failedCount > 0 ? `<span class="step-count-fail">${failedCount} failed</span>` : ''}
+                            ${caughtCount > 0 ? HtmlSafe.html`<span style="color:var(--warning-color);font-weight:600;">${caughtCount} caught</span>` : ''}
+                            ${warningOnlyCount > 0 ? HtmlSafe.html`<span style="color:var(--warning-color);font-weight:600;">${warningOnlyCount} with warnings</span>` : ''}
+                            ${failedCount > 0 ? HtmlSafe.html`<span class="step-count-fail">${failedCount} failed</span>` : ''}
                         </span>
                     </h4>
                     <div class="step-results-list">
-            `;
+            `);
 
             for (const [stepName, stepData] of stepEntries) {
                 const stepSuccess = getSuccess(stepData);
@@ -914,102 +914,102 @@ class PipelineBuilder {
                 const statusClass = isFailedError ? 'step-fail' : (isCaughtError ? 'step-caught' : (hasWarningsOnly ? 'step-warning' : 'step-pass'));
                 const statusIcon = isFailedError ? 'fa-times-circle' : (isCaughtError ? 'fa-shield-alt' : (hasWarningsOnly ? 'fa-exclamation-triangle' : 'fa-check-circle'));
 
-                html += `
+                html.push(HtmlSafe.html`
                     <div class="step-result-item ${statusClass}">
                         <div class="step-result-main">
                             <i class="fas ${statusIcon} step-result-icon"></i>
-                            <span class="step-result-name">${this.escapeHtml(stepName)}</span>
-                            ${isCaughtError ? '<span style="font-size:11px;background:var(--warning-color);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px;">CAUGHT</span>' : ''}
-                            ${hasWarningsOnly ? `<span style="font-size:11px;background:var(--warning-color);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px;">${stepWarnings.length} WARNING${stepWarnings.length > 1 ? 'S' : ''}</span>` : ''}
-                            ${duration ? `<span class="step-result-duration">${duration}</span>` : ''}
+                            <span class="step-result-name">${stepName}</span>
+                            ${isCaughtError ? HtmlSafe.raw('<span style="font-size:11px;background:var(--warning-color);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px;">CAUGHT</span>') : ''}
+                            ${hasWarningsOnly ? HtmlSafe.html`<span style="font-size:11px;background:var(--warning-color);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px;">${stepWarnings.length} WARNING${stepWarnings.length > 1 ? 'S' : ''}</span>` : ''}
+                            ${duration ? HtmlSafe.html`<span class="step-result-duration">${duration}</span>` : ''}
                         </div>
-                        ${isFailedError ? `
+                        ${isFailedError ? HtmlSafe.html`
                             <div class="step-result-error">
-                                <i class="fas fa-exclamation-triangle"></i> ${this.escapeHtml(stepError.error)}
+                                <i class="fas fa-exclamation-triangle"></i> ${stepError.error}
                             </div>
                         ` : ''}
-                        ${isCaughtError ? `
+                        ${isCaughtError ? HtmlSafe.html`
                             <div class="step-result-error" style="color:var(--warning-color);background:rgba(245,158,11,0.08);border-left-color:var(--warning-color);">
-                                <i class="fas fa-shield-alt"></i> ${this.escapeHtml(stepError.error)}
-                                ${stepError.default_applied ? `<br><i class="fas fa-edit" style="margin-left:2px;"></i> Default: <code>${this.escapeHtml(stepError.default_applied.field)} = ${this.escapeHtml(String(stepError.default_applied.value))}</code>` : ''}
+                                <i class="fas fa-shield-alt"></i> ${stepError.error}
+                                ${stepError.default_applied ? HtmlSafe.html`<br><i class="fas fa-edit" style="margin-left:2px;"></i> Default: <code>${stepError.default_applied.field} = ${String(stepError.default_applied.value)}</code>` : ''}
                             </div>
                         ` : ''}
-                        ${hasWarningsOnly ? `
+                        ${hasWarningsOnly ? HtmlSafe.html`
                             <div class="step-result-error" style="color:var(--warning-color);background:rgba(245,158,11,0.08);border-left-color:var(--warning-color);">
-                                ${stepWarnings.map(w => `<div><i class="fas fa-exclamation-triangle"></i> ${this.escapeHtml(w)}</div>`).join('')}
+                                ${stepWarnings.map(w => HtmlSafe.html`<div><i class="fas fa-exclamation-triangle"></i> ${w}</div>`)}
                             </div>
                         ` : ''}
                     </div>
-                `;
+                `);
             }
 
-            html += `
+            html.push(HtmlSafe.html`
                     </div>
                 </div>
-            `;
+            `);
         }
 
         // Render top-level errors summary (above FHIR output)
         if (result.errors && Array.isArray(result.errors) && result.errors.length > 0) {
             const uncaught = result.errors.filter(e => !e.caught);
             const caught = result.errors.filter(e => e.caught);
-            html += `
+            html.push(HtmlSafe.html`
                 <div style="margin:16px 0;border-radius:8px;overflow:hidden;border:2px solid ${uncaught.length > 0 ? 'var(--danger-color)' : 'var(--warning-color)'};">
                     <div style="padding:10px 14px;background:${uncaught.length > 0 ? 'rgba(239,68,68,0.08)' : 'rgba(245,158,11,0.08)'};display:flex;align-items:center;gap:8px;">
                         <i class="fas fa-exclamation-circle" style="color:${uncaught.length > 0 ? 'var(--danger-color)' : 'var(--warning-color)'};"></i>
                         <strong style="font-size:14px;">Pipeline Errors (${result.errors.length})</strong>
-                        ${caught.length > 0 ? `<span style="font-size:12px;color:var(--warning-color);margin-left:auto;">${caught.length} caught</span>` : ''}
-                        ${uncaught.length > 0 ? `<span style="font-size:12px;color:var(--danger-color);margin-left:${caught.length > 0 ? '8px' : 'auto'};">${uncaught.length} uncaught</span>` : ''}
+                        ${caught.length > 0 ? HtmlSafe.html`<span style="font-size:12px;color:var(--warning-color);margin-left:auto;">${caught.length} caught</span>` : ''}
+                        ${uncaught.length > 0 ? HtmlSafe.html`<span style="font-size:12px;color:var(--danger-color);margin-left:${caught.length > 0 ? '8px' : 'auto'};">${uncaught.length} uncaught</span>` : ''}
                     </div>
                     <div style="padding:0;">
-            `;
+            `);
             for (const err of result.errors) {
                 if (err.step === '_pipeline') continue;
                 const bg = err.caught ? 'rgba(245,158,11,0.04)' : 'rgba(239,68,68,0.04)';
                 const borderColor = err.caught ? 'var(--warning-color)' : 'var(--danger-color)';
                 const icon = err.caught ? 'fa-shield-alt' : 'fa-times-circle';
                 const iconColor = err.caught ? 'var(--warning-color)' : 'var(--danger-color)';
-                html += `
+                html.push(HtmlSafe.html`
                     <div style="padding:10px 14px;border-top:1px solid var(--border-color);background:${bg};display:flex;gap:10px;align-items:flex-start;">
                         <i class="fas ${icon}" style="color:${iconColor};margin-top:2px;flex-shrink:0;"></i>
                         <div style="flex:1;min-width:0;">
                             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                                <strong style="font-size:13px;">${this.escapeHtml(err.step)}</strong>
+                                <strong style="font-size:13px;">${err.step}</strong>
                                 <span style="font-size:11px;padding:1px 6px;border-radius:4px;color:#fff;background:${err.caught ? 'var(--warning-color)' : 'var(--danger-color)'};">
                                     ${err.caught ? 'CAUGHT' : 'FAILED'}
                                 </span>
-                                ${err.handler ? `<span style="font-size:11px;color:var(--text-tertiary);">handler: ${this.escapeHtml(err.handler)}</span>` : ''}
+                                ${err.handler ? HtmlSafe.html`<span style="font-size:11px;color:var(--text-tertiary);">handler: ${err.handler}</span>` : ''}
                             </div>
-                            <div style="font-size:12px;color:var(--text-secondary);word-break:break-word;">${this.escapeHtml(err.error)}</div>
-                            ${err.default_applied ? `
+                            <div style="font-size:12px;color:var(--text-secondary);word-break:break-word;">${err.error}</div>
+                            ${err.default_applied ? HtmlSafe.html`
                                 <div style="font-size:12px;margin-top:4px;color:var(--primary-light);">
-                                    <i class="fas fa-edit"></i> Default applied: <code style="background:var(--bg-tertiary);padding:1px 4px;border-radius:3px;">${this.escapeHtml(err.default_applied.field)} = ${this.escapeHtml(String(err.default_applied.value))}</code>
+                                    <i class="fas fa-edit"></i> Default applied: <code style="background:var(--bg-tertiary);padding:1px 4px;border-radius:3px;">${err.default_applied.field} = ${String(err.default_applied.value)}</code>
                                 </div>
                             ` : ''}
                         </div>
                     </div>
-                `;
+                `);
             }
-            html += `
+            html.push(HtmlSafe.html`
                     </div>
                 </div>
-            `;
+            `);
         }
 
         // Show validation warnings prominently if any
         if (validationWarnings.length > 0) {
-            html += this.renderValidationWarnings(validationWarnings);
+            html.push(this.renderValidationWarnings(validationWarnings));
         }
 
         // Show validation errors prominently if any
         const allErrors = [...validationErrors, ...mappingValidationErrors];
         if (allErrors.length > 0) {
-            html += this.renderValidationErrors(allErrors);
+            html.push(this.renderValidationErrors(allErrors));
         }
 
         // Render transformed message output (FHIR Bundle)
         if (fhirBundle) {
-            html += this.renderTransformedMessage(fhirBundle);
+            html.push(this.renderTransformedMessage(fhirBundle));
         }
 
         // Placeholder for the CDA spec-compliance report -- populated
@@ -1017,29 +1017,29 @@ class PipelineBuilder {
         // is inserted into the DOM (renderTestResults itself is synchronous
         // and can't await the /api/cda/validate round trip inline).
         if (this._lastTestCdaXML) {
-            html += `<div id="cdaComplianceReport" style="margin-top:1rem;"><p style="text-align:center;color:var(--text-tertiary);"><i class="fas fa-spinner fa-spin"></i> Checking C-CDA spec compliance...</p></div>`;
+            html.push(HtmlSafe.html`<div id="cdaComplianceReport" style="margin-top:1rem;"><p style="text-align:center;color:var(--text-tertiary);"><i class="fas fa-spinner fa-spin"></i> Checking C-CDA spec compliance...</p></div>`);
         }
 
         // Render FHIR resources with narratives
         if (resourcesCreated && Array.isArray(resourcesCreated) && resourcesCreated.length > 0) {
-            html += this.renderFHIRResources(resourcesCreated);
+            html.push(this.renderFHIRResources(resourcesCreated));
         }
 
         // Copy buttons — only offer to copy an output that actually exists for
         // THIS pipeline (a CDA-only pipeline like cda.map_to_canonical +
         // cda.build has no FHIR bundle, and vice versa); "Copy Full Results"
         // (raw JSON) is always available regardless of pipeline type.
-        html += `
+        html.push(HtmlSafe.html`
             <div style="margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                ${fhirBundle ? `
+                ${fhirBundle ? HtmlSafe.html`
                 <button id="copyBundleBtn" class="btn-copy">
                     <i class="fas fa-copy"></i> Copy FHIR Bundle
                 </button>` : ''}
-                ${this._lastTestCdaXML ? `
+                ${this._lastTestCdaXML ? HtmlSafe.html`
                 <button id="copyCdaXmlBtn" class="btn-copy">
                     <i class="fas fa-copy"></i> Copy CCD/CDA XML
                 </button>` : ''}
-                ${this._lastTestHL7Message ? `
+                ${this._lastTestHL7Message ? HtmlSafe.html`
                 <button id="copyHl7MessageBtn" class="btn-copy">
                     <i class="fas fa-copy"></i> Copy HL7 Message
                 </button>` : ''}
@@ -1047,17 +1047,17 @@ class PipelineBuilder {
                     <i class="fas fa-file-code"></i> Copy Full Results
                 </button>
             </div>
-        `;
+        `);
 
         // Application details in collapsible section
-        html += `
+        html.push(HtmlSafe.html`
             <details style="margin-top: 1rem;">
                 <summary style="cursor: pointer; font-weight: 600; color: #64748b;">
                     <i class="fas fa-cog"></i> Application Details
                 </summary>
-                <pre id="fullResultsJSON" style="background: #f1f5f9; padding: 1rem; border-radius: 0.375rem; overflow: auto; max-height: 400px; font-size: 0.75rem;">${this.escapeHtml(JSON.stringify(result, null, 2))}</pre>
+                <pre id="fullResultsJSON" style="background: #f1f5f9; padding: 1rem; border-radius: 0.375rem; overflow: auto; max-height: 400px; font-size: 0.75rem;">${JSON.stringify(result, null, 2)}</pre>
             </details>
-        `;
+        `);
 
         // Setup copy buttons after rendering
         setTimeout(() => {
@@ -1104,7 +1104,7 @@ class PipelineBuilder {
             });
         }, 100);
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -1126,12 +1126,12 @@ class PipelineBuilder {
             });
             const data = await response.json();
             if (!response.ok || !data.success) {
-                container.innerHTML = `<p style="color:var(--text-tertiary);font-size:0.85rem;">Could not check C-CDA spec compliance: ${this.escapeHtml(data.error || response.statusText)}</p>`;
+                container.innerHTML = HtmlSafe.html`<p style="color:var(--text-tertiary);font-size:0.85rem;">Could not check C-CDA spec compliance: ${data.error || response.statusText}</p>`;
                 return;
             }
-            container.innerHTML = this.renderComplianceReport(data.report);
+            container.innerHTML = HtmlSafe.html`${this.renderComplianceReport(data.report)}`;
         } catch (err) {
-            container.innerHTML = `<p style="color:var(--text-tertiary);font-size:0.85rem;">Could not check C-CDA spec compliance: ${this.escapeHtml(err.message)}</p>`;
+            container.innerHTML = HtmlSafe.html`<p style="color:var(--text-tertiary);font-size:0.85rem;">Could not check C-CDA spec compliance: ${err.message}</p>`;
         }
     }
 
@@ -1153,25 +1153,25 @@ class PipelineBuilder {
             const statusIcon = sr.status === 'missing' ? 'fa-times-circle' : (sr.status === 'present_empty' ? 'fa-exclamation-triangle' : 'fa-check-circle');
             const statusColor = sr.status === 'missing' ? 'var(--danger-color, #dc2626)' : (sr.status === 'present_empty' ? 'var(--warning-color, #d97706)' : 'var(--success-color, #16a34a)');
             const fieldRows = (sr.fieldReports || []).filter(fr => fr.status !== 'populated').map(fr =>
-                `<div style="font-size:0.75rem;color:var(--text-tertiary);padding-left:1.5rem;">
+                HtmlSafe.html`<div style="font-size:0.75rem;color:var(--text-tertiary);padding-left:1.5rem;">
                     <i class="fas fa-circle" style="font-size:0.4rem;vertical-align:middle;"></i>
-                    ${this.escapeHtml(fr.fieldPath)} (${this.escapeHtml(fr.conformance)}) — ${this.escapeHtml(fr.status)}${fr.valueSummary ? ': ' + this.escapeHtml(fr.valueSummary) : ''}
-                </div>`).join('');
-            return `
+                    ${fr.fieldPath} (${fr.conformance}) — ${fr.status}${fr.valueSummary ? ': ' + (fr.valueSummary) : ''}
+                </div>`);
+            return HtmlSafe.html`
                 <div style="padding:0.4rem 0;border-bottom:1px solid var(--border-color, #e2e8f0);">
                     <div style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;">
                         <i class="fas ${statusIcon}" style="color:${statusColor};"></i>
-                        <strong>${this.escapeHtml(sr.title || sr.sectionKey)}</strong>
-                        <span style="font-size:0.7rem;color:var(--text-tertiary);">${this.escapeHtml(sr.conformance)} · ${this.escapeHtml(sr.status)}${sr.entryCount ? ` · ${sr.entryCount} entries` : ''}</span>
+                        <strong>${sr.title || sr.sectionKey}</strong>
+                        <span style="font-size:0.7rem;color:var(--text-tertiary);">${sr.conformance} · ${sr.status}${sr.entryCount ? ` · ${sr.entryCount} entries` : ''}</span>
                     </div>
                     ${fieldRows}
                 </div>`;
-        }).join('');
+        });
 
-        return `
+        return HtmlSafe.html`
             <details class="transformed-message-section" style="margin-top:1rem;">
                 <summary style="cursor:pointer;font-weight:600;display:flex;align-items:center;gap:0.5rem;">
-                    <i class="fas fa-file-medical-alt"></i> C-CDA Spec Compliance — ${this.escapeHtml(report.documentType)}
+                    <i class="fas fa-file-medical-alt"></i> C-CDA Spec Compliance — ${report.documentType}
                     <span style="font-size:0.8rem;font-weight:400;color:${scoreColor(report.shallScore)};">SHALL ${pct(report.shallScore)}%</span>
                     <span style="font-size:0.8rem;font-weight:400;color:${scoreColor(report.shouldScore)};">SHOULD ${pct(report.shouldScore)}%</span>
                 </summary>
@@ -1199,33 +1199,33 @@ class PipelineBuilder {
 
         this._lastOutboundPayloads = outboundPayloads;
 
-        const tabHeaders = outboundPayloads.map((p, i) => `
+        const tabHeaders = outboundPayloads.map((p, i) => HtmlSafe.html`
             <button class="outbound-payload-tab ${i === 0 ? 'active' : ''}" data-outbound-tab-index="${i}"
                     style="padding:8px 14px;border:none;border-bottom:3px solid ${i === 0 ? 'var(--primary-color,#3b82f6)' : 'transparent'};
                            background:transparent;cursor:pointer;font-size:13px;font-weight:600;
                            color:${i === 0 ? 'var(--primary-color,#3b82f6)' : '#64748b'};white-space:nowrap;">
-                ${this.escapeHtml(p.step_name)}${p.connector_type ? ` <span style="font-weight:400;opacity:0.75;">(${this.escapeHtml(p.connector_type)})</span>` : ''}
+                ${p.step_name}${p.connector_type ? HtmlSafe.html` <span style="font-weight:400;opacity:0.75;">(${p.connector_type})</span>` : ''}
             </button>
-        `).join('');
+        `);
 
         const tabPanels = outboundPayloads.map((p, i) => {
             const pretty = p.is_json ? (() => { try { return JSON.stringify(JSON.parse(p.content), null, 2); } catch (_) { return p.content; } })() : p.content;
-            return `
+            return HtmlSafe.html`
                 <div class="outbound-payload-panel" data-outbound-panel-index="${i}" style="${i === 0 ? '' : 'display:none;'}">
                     <div style="margin-bottom: 0.75rem; color: #64748b; font-size: 0.875rem; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
-                        <span><strong>Content-Type:</strong> ${this.escapeHtml(p.content_type || 'unknown')} | <strong>Size:</strong> ${p.size_bytes} bytes</span>
+                        <span><strong>Content-Type:</strong> ${p.content_type || 'unknown'} | <strong>Size:</strong> ${p.size_bytes} bytes</span>
                         <button class="btn-copy copy-outbound-payload-btn" data-outbound-copy-index="${i}" style="padding:4px 10px;font-size:12px;">
                             <i class="fas fa-copy"></i> Copy This Payload
                         </button>
                     </div>
                     <div class="message-output">
-                        <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${this.escapeHtml(pretty)}</pre>
+                        <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${pretty}</pre>
                     </div>
                 </div>
             `;
-        }).join('');
+        });
 
-        return `
+        return HtmlSafe.html`
             <div class="outbound-payloads-section" style="margin-top:1rem;border:2px solid var(--primary-color,#3b82f6);border-radius:8px;overflow:hidden;">
                 <div style="padding:10px 14px;background:rgba(59,130,246,0.08);display:flex;align-items:center;gap:8px;">
                     <i class="fas fa-paper-plane" style="color:var(--primary-color,#3b82f6);"></i>
@@ -1241,7 +1241,7 @@ class PipelineBuilder {
     renderTransformedMessage(bundle) {
         if (!bundle) return '';
 
-        return `
+        return HtmlSafe.html`
             <div class="transformed-message-section">
                 <h5>
                     <i class="fas fa-exchange-alt"></i>
@@ -1253,7 +1253,7 @@ class PipelineBuilder {
                     <strong>Timestamp:</strong> ${bundle.timestamp || 'N/A'}
                 </div>
                 <div class="message-output">
-                    <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${this.escapeHtml(JSON.stringify(bundle, null, 2))}</pre>
+                    <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(bundle, null, 2)}</pre>
                 </div>
             </div>
         `;
@@ -1263,53 +1263,53 @@ class PipelineBuilder {
      * Render FHIR resources with proper HTML narrative display
      */
     renderFHIRResources(resources) {
-        let html = `
+        const html = [HtmlSafe.html`
             <div class="fhir-resources-section">
                 <h5><i class="fas fa-file-medical"></i> FHIR Resources (${resources.length})</h5>
-        `;
+        `];
 
         resources.forEach((resource, index) => {
             const resourceType = resource.resourceType || 'Unknown';
             const resourceId = resource.id || 'N/A';
 
-            html += `
+            html.push(HtmlSafe.html`
                 <details class="resource-card">
                     <summary>
                         <i class="fas fa-file-medical-alt"></i> ${resourceType} (ID: ${resourceId})
                     </summary>
                     <div class="resource-card-content">
-            `;
+            `);
 
             // Render narrative HTML if available
             if (resource.text && resource.text.div) {
-                html += `
+                html.push(HtmlSafe.html`
                     <div class="narrative-section">
                         <h6>Human-Readable Summary</h6>
                         <div class="narrative-content">
                             ${resource.text.div}
                         </div>
                     </div>
-                `;
+                `);
             }
 
             // Show resource JSON
-            html += `
+            html.push(HtmlSafe.html`
                 <details style="margin-top: 0.5rem;">
                     <summary style="cursor: pointer; font-size: 0.875rem; color: #64748b;">
                         <i class="fas fa-code"></i> View Full ${resourceType} JSON
                     </summary>
-                    <pre style="background: #f8fafc; padding: 0.75rem; border-radius: 0.25rem; overflow: auto; max-height: 300px; font-size: 0.75rem; margin-top: 0.5rem;">${this.escapeHtml(JSON.stringify(resource, null, 2))}</pre>
+                    <pre style="background: #f8fafc; padding: 0.75rem; border-radius: 0.25rem; overflow: auto; max-height: 300px; font-size: 0.75rem; margin-top: 0.5rem;">${JSON.stringify(resource, null, 2)}</pre>
                 </details>
-            `;
+            `);
 
-            html += `
+            html.push(HtmlSafe.html`
                     </div>
                 </details>
-            `;
+            `);
         });
 
-        html += `</div>`;
-        return html;
+        html.push(HtmlSafe.html`</div>`);
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -1318,29 +1318,29 @@ class PipelineBuilder {
     renderValidationWarnings(warnings) {
         if (!warnings || warnings.length === 0) return '';
 
-        let html = `
+        const html = [HtmlSafe.html`
             <div class="validation-warnings-section" style="background: #fffbeb; border: 1px solid #fbbf24; border-radius: 0.5rem; padding: 1rem; margin: 1rem 0;">
                 <h5 style="color: #b45309; margin: 0 0 0.75rem 0; display: flex; align-items: center; gap: 0.5rem;">
                     <i class="fas fa-exclamation-triangle"></i> Validation Warnings (${warnings.length})
                     <span style="font-size: 0.75rem; font-weight: normal; color: #92400e; background: #fef3c7; padding: 0.25rem 0.5rem; border-radius: 0.25rem;">Pipeline Continued (ACK Sent)</span>
                 </h5>
                 <ul style="margin: 0; padding-left: 1.5rem; color: #78350f;">
-        `;
+        `];
 
         warnings.forEach(warning => {
-            html += `<li style="margin-bottom: 0.5rem;">${this.escapeHtml(warning)}</li>`;
+            html.push(HtmlSafe.html`<li style="margin-bottom: 0.5rem;">${warning}</li>`);
         });
 
-        html += `
+        html.push(HtmlSafe.html`
                 </ul>
                 <p style="margin: 0.75rem 0 0 0; font-size: 0.875rem; color: #92400e;">
                     <i class="fas fa-info-circle"></i> These warnings indicate data quality issues but did not stop processing.
                     The message was accepted (ACK) and the pipeline continued successfully.
                 </p>
             </div>
-        `;
+        `);
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -1349,29 +1349,29 @@ class PipelineBuilder {
     renderValidationErrors(errors) {
         if (!errors || errors.length === 0) return '';
 
-        let html = `
+        const html = [HtmlSafe.html`
             <div class="validation-errors-section" style="background: #fef2f2; border: 1px solid #ef4444; border-radius: 0.5rem; padding: 1rem; margin: 1rem 0;">
                 <h5 style="color: #991b1b; margin: 0 0 0.75rem 0; display: flex; align-items: center; gap: 0.5rem;">
                     <i class="fas fa-times-circle"></i> Validation Errors (${errors.length})
                     <span style="font-size: 0.75rem; font-weight: normal; color: #7f1d1d; background: #fee2e2; padding: 0.25rem 0.5rem; border-radius: 0.25rem;">Pipeline Stopped (NACK Sent)</span>
                 </h5>
                 <ul style="margin: 0; padding-left: 1.5rem; color: #7f1d1d;">
-        `;
+        `];
 
         errors.forEach(error => {
-            html += `<li style="margin-bottom: 0.5rem;">${this.escapeHtml(error)}</li>`;
+            html.push(HtmlSafe.html`<li style="margin-bottom: 0.5rem;">${error}</li>`);
         });
 
-        html += `
+        html.push(HtmlSafe.html`
                 </ul>
                 <p style="margin: 0.75rem 0 0 0; font-size: 0.875rem; color: #991b1b;">
                     <i class="fas fa-exclamation-circle"></i> These critical validation errors stopped pipeline execution.
                     The message was rejected (NACK) and will not be processed further.
                 </p>
             </div>
-        `;
+        `);
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**

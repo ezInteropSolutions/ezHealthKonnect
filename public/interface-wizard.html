@@ -1620,7 +1620,7 @@
                     resultDiv.style.background = '#f0fdf4';
                     resultDiv.style.border = '1px solid #22c55e';
                     resultDiv.style.color = '#16a34a';
-                    resultDiv.innerHTML = `✅ Connection successful!<br><small>FHIR Version: ${result.fhir_version || 'R4'}</small>`;
+                    resultDiv.innerHTML = HtmlSafe.html`✅ Connection successful!<br><small>FHIR Version: ${result.fhir_version || 'R4'}</small>`;
                 } else {
                     resultDiv.style.background = '#fef2f2';
                     resultDiv.style.border = '1px solid #ef4444';

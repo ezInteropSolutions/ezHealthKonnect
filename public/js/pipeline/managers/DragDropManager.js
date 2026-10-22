@@ -438,7 +438,7 @@ class DragDropManager {
                 animation: scaleIn 0.2s ease;
             `;
 
-            dialog.innerHTML = `
+            dialog.innerHTML = HtmlSafe.html`
                 <div style="
                     padding: 16px 20px;
                     border-bottom: 1px solid ${color.border};
@@ -454,14 +454,14 @@ class DragDropManager {
                         font-weight: 600;
                         color: #1e293b;
                         font-size: 16px;
-                    ">${this.escapeHtml(title)}</span>
+                    ">${title}</span>
                 </div>
                 <div style="
                     padding: 20px;
                     color: #475569;
                     font-size: 14px;
                     line-height: 1.6;
-                ">${this.escapeHtml(message)}</div>
+                ">${message}</div>
                 <div style="
                     padding: 12px 20px;
                     background: #f8fafc;
@@ -480,7 +480,7 @@ class DragDropManager {
                         font-size: 14px;
                         font-weight: 500;
                         transition: all 0.2s;
-                    ">${this.escapeHtml(cancelText)}</button>
+                    ">${cancelText}</button>
                     <button class="confirm-ok-btn" style="
                         padding: 8px 16px;
                         border: none;
@@ -491,7 +491,7 @@ class DragDropManager {
                         font-size: 14px;
                         font-weight: 500;
                         transition: all 0.2s;
-                    ">${this.escapeHtml(confirmText)}</button>
+                    ">${confirmText}</button>
                 </div>
             `;
 
@@ -575,7 +575,7 @@ class DragDropManager {
                 animation: scaleIn 0.2s ease;
             `;
 
-            dialog.innerHTML = `
+            dialog.innerHTML = HtmlSafe.html`
                 <div style="
                     padding: 16px 20px;
                     background: #fee2e2;
@@ -585,7 +585,7 @@ class DragDropManager {
                     gap: 10px;
                 ">
                     <span style="font-size: 20px;">❌</span>
-                    <span style="font-weight: 600; color: #1e293b; font-size: 16px;">${this.escapeHtml(title)}</span>
+                    <span style="font-weight: 600; color: #1e293b; font-size: 16px;">${title}</span>
                 </div>
                 <div style="
                     padding: 20px;
@@ -594,7 +594,7 @@ class DragDropManager {
                     line-height: 1.6;
                     white-space: pre-wrap;
                     word-break: break-word;
-                ">${this.escapeHtml(message)}</div>
+                ">${message}</div>
                 <div style="
                     padding: 12px 20px;
                     background: #f8fafc;

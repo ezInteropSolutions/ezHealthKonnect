@@ -18,7 +18,7 @@ class StepNodeManager {
         node.dataset.stepId = step.id;
         node.dataset.groupId = groupId;
 
-        node.innerHTML = `
+        node.innerHTML = HtmlSafe.html`
             <div class="step-node-header">
                 <div class="step-reorder-controls">
                     <button class="step-node-btn btn-move-up" title="Move Up">
@@ -46,8 +46,8 @@ class StepNodeManager {
             </div>
             <div class="step-node-meta">
                 <span class="step-type-badge">${this.formatStepType(step.stepType)}</span>
-                ${step.required ? '<span class="required-badge">Required</span>' : ''}
-                ${!step.enabled ? '<span class="disabled-badge">Disabled</span>' : ''}
+                ${step.required ? HtmlSafe.raw('<span class="required-badge">Required</span>') : ''}
+                ${!step.enabled ? HtmlSafe.raw('<span class="disabled-badge">Disabled</span>') : ''}
             </div>
         `;
 
@@ -207,10 +207,10 @@ class StepNodeManager {
         // Update meta
         const meta = node.querySelector('.step-node-meta');
         if (meta) {
-            meta.innerHTML = `
+            meta.innerHTML = HtmlSafe.html`
                 <span class="step-type-badge">${this.formatStepType(updatedStep.stepType)}</span>
-                ${updatedStep.required ? '<span class="required-badge">Required</span>' : ''}
-                ${!updatedStep.enabled ? '<span class="disabled-badge">Disabled</span>' : ''}
+                ${updatedStep.required ? HtmlSafe.raw('<span class="required-badge">Required</span>') : ''}
+                ${!updatedStep.enabled ? HtmlSafe.raw('<span class="disabled-badge">Disabled</span>') : ''}
             `;
         }
     }

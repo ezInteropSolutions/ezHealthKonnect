@@ -598,3 +598,62 @@ test.describe('Externally supplied message data is never rendered as HTML', () =
         expect(await page.locator(`img[onerror*="${MARK}"]`).count(), 'injected elements present').toBe(0);
     });
 });
+
+test.describe('Pipeline builder renders step names and test output as text', () => {
+    const STEP_NAME = `Step <img src=x onerror="window.__ezhkXss='${MARK}-step'"> ${MARK}`;
+    const STEP_DESC = `<svg onload="window.__ezhkXss='${MARK}-stepdesc'"></svg> ${MARK}`;
+
+    test('canvas node, properties panel, toolbox search and Test Pipeline results', async ({ page }) => {
+        const dialogs = [];
+        page.on('dialog', d => { dialogs.push(d.message()); d.dismiss().catch(() => {}); });
+        await page.goto('/pipeline-builder.html');
+        await page.waitForSelector('#all-steps-list .step-card', { timeout: 15_000 });
+
+        // A step with a hostile name and description, rendered on the canvas
+        // and opened in the properties panel.
+        await page.evaluate(({ name, desc }) => {
+            const step = new VisualStep({ stepName: name, description: desc, stepType: 'field_mapping', config: {} });
+            window.pipelineBuilder.addStep(step);
+            window.pipelineBuilder.propertiesPanel.showStepProperties(step, false);
+        }, { name: STEP_NAME, desc: STEP_DESC });
+        await page.waitForSelector('#stepPropertiesModal', { state: 'visible', timeout: 5_000 });
+        // The canvas node shows the name as text (it may be drawn by either renderer).
+        const nodeText = await page.evaluate((m) => [...document.querySelectorAll('.step-node, .flowchart-node, [data-step-id]')]
+            .map(n => n.textContent).find(t => t.includes(m)) || null, MARK);
+        expect(nodeText, 'step node on the canvas').not.toBeNull();
+        expect(nodeText).toContain('<img src=x onerror=');
+
+        // The toolbox search reflects the query in its empty state.
+        await page.locator('#toolboxSearch').fill(`<img src=x onerror="window.__ezhkXss='${MARK}-search'">`);
+        await page.waitForTimeout(400);
+
+        // Test Pipeline results built from hostile step names, outputs, warnings and errors.
+        const rendered = await page.evaluate((m) => {
+            const p = `<img src=x onerror="window.__ezhkXss='${m}-result'">`;
+            const result = {
+                success: false,
+                error: p,
+                output: { payload: { note: p } },
+                steps: {
+                    [`bad ${p}`]: {
+                        step_output: { value: p, fhir_bundle: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'Patient', id: p } }] } },
+                        step_metadata: { success: false, duration_ms: 3, warnings: [p], error: p },
+                    },
+                },
+            };
+            const host = document.createElement('div');
+            host.id = 'xssTestResultsHost';
+            host.innerHTML = HtmlSafe.html`${window.pipelineBuilder.renderTestResults(result)}`;
+            document.body.appendChild(host);
+            return { text: host.innerText, isSafe: window.pipelineBuilder.renderTestResults(result) instanceof HtmlSafe.SafeHtml };
+        }, MARK);
+        expect(rendered.isSafe, 'renderTestResults returns HtmlSafe markup').toBe(true);
+        expect(rendered.text).toContain('<img src=x onerror=');
+        expect(rendered.text).not.toMatch(/&lt;|&amp;|<div|<span/);
+
+        await page.waitForTimeout(1500);
+        expect(await page.evaluate(() => window.__ezhkXss || null), 'injected markup executed').toBeNull();
+        expect(await page.locator(`img[onerror*="${MARK}"], svg[onload*="${MARK}"]`).count(), 'injected elements present').toBe(0);
+        expect(dialogs).toEqual([]);
+    });
+});
