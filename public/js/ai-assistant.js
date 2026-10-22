@@ -210,7 +210,7 @@
     }
 
     // Lists configured git repos for the commit-on-approve picker. Talks to
-    // /api/git directly (not /api/ai) — reuses the same list GitPanel.js shows.
+    // /api/git directly (not /api/ai) — the same list the Git page shows.
     async function listGitRepos() {
         try {
             const resp = await fetch('/api/git', { credentials: 'include' });

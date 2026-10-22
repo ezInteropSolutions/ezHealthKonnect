@@ -4,6 +4,22 @@ Product and architecture decisions that change what the platform supports or how
 
 ---
 
+## 2026-10-22 — The browser UI escapes by default; unused frontend files are removed
+
+**Decision:** Every page builds HTML through the shared `HtmlSafe` helper (`public/js/core/html-safe.js`), which escapes every interpolated value unless code explicitly marks it as markup. A CI lint gate (`npm run lint:xss`, `eslint-plugin-no-unsanitized`) blocks any HTML sink that receives anything else. Unreferenced frontend files are deleted: 12 tracked `.bak`/`.backup` copies, 13 JavaScript files that no page loads, 4 stylesheets used only by those files, and 5 developer test pages.
+
+**Why:**
+- **Escaping was opt-in and inconsistent.** Each page had its own escape helper, or none. A review found stored and reflected XSS: interface and step names, user names, alert rules, template icons, report cells, DLQ links, partner documents and message content could run script in an administrator's session. The CSP must still allow inline handlers (about 900 exist), so it can't stop this on its own.
+- **Opt-out escaping can be enforced mechanically**; opt-in escaping relied on every author remembering every time.
+- **The deleted files did nothing but carry risk.** Nothing loaded them, but they still shipped in the installer and were served as static files, and the backups contained the old unescaped code. One (`hl7Service.js`) did not even parse. They remain in git history.
+
+**Impact:**
+- No feature changes. Pages that echoed markup from data now show it as text.
+- The conversion was verified by the full Playwright suite, a hostile-input regression spec, and a test that every pipeline step builder returns escaped markup exactly once.
+- Developer guide: [SECURITY_FRONTEND_HTML.md](SECURITY_FRONTEND_HTML.md).
+
+---
+
 ## 2026-10-20 — One way to receive FHIR over HTTP; the Node prototypes are removed
 
 **Decision:** FHIR resources are received only by the HTTP FHIR Receiver connector (`http_fhir_inbound`). The Node routes `/fhir/receiver/*` (FhirReceiverController) and `/api/messages/fhir/*` (MessageController.receiveFHIRMessage) are removed. The connector's credential check now uses the shared `InboundAuthenticator`, the same check every other inbound listener uses.

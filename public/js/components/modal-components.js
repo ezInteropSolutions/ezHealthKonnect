@@ -1,4 +1,4 @@
-// js/components/modal-components-refactored.js - Modal Components Loader (Refactored)
+// js/components/modal-components.js - Modal Components Loader
 // Uses shared InterfaceConfigComponents for consistency
 
 (function() {

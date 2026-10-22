@@ -117,6 +117,11 @@ trail, and a much better-informed ezCompanion assistant.
   gitleaks rule, a repository policy test, a pre-commit hook and per-run CI secrets.
 - Go 1.26.9 and updated dependencies: govulncheck reports 0 reachable vulnerabilities; `npm audit`
   reports 0 production vulnerabilities.
+- The browser UI escapes by default. Every page now builds HTML through one shared helper, which
+  fixes stored and reflected cross-site scripting found in interface, step and user names, alert
+  rules, templates, reports, the dead-letter queue, clinical documents and message content. A CI
+  lint gate blocks new unescaped HTML. Unused frontend files (old backups, unreferenced scripts
+  and developer test pages) are no longer shipped.
 
 ### Audit logging and compliance
 

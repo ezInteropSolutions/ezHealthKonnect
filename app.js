@@ -34,7 +34,7 @@ if (process.env.TRUST_PROXY) {
 
 // SECURITY HEADERS — helmet was already a declared dependency but never wired in.
 // crossOriginEmbedderPolicy is disabled: several pages
-// (interface-builder.html, messages.html, test-xpath-autocomplete.html) load Bootstrap/
+// (messages.html and others) load Bootstrap/
 // Font Awesome/leader-line from jsdelivr/cloudflare CDNs, and this app doesn't use
 // SharedArrayBuffer or other features COEP exists to gate — no upside, real breakage
 // risk. The other headers (X-Frame-Options, X-Content-Type-Options, HSTS,

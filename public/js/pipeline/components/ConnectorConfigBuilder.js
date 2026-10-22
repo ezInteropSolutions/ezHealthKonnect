@@ -1954,8 +1954,7 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
      * Builds a "Browse..." button + hidden file input that reads a locally
      * selected private-key file's text content into targetInput via
      * FileReader.readAsText -- same browse-to-textfield pattern already used
-     * for CDA/HL7 file uploads elsewhere in this app (see hl7Service.js's
-     * readFileContent). The file itself is never uploaded; only its text
+     * for CDA/HL7 file uploads elsewhere in this app. The file itself is never uploaded; only its text
      * content is copied into the existing key_content field.
      */
     _buildKeyFileBrowseControl(targetInput) {

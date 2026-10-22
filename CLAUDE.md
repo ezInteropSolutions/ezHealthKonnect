@@ -3175,6 +3175,17 @@ Go 1.26.9 (`go.mod`, Dockerfile, CI, installer scripts) + x/net 0.60, x/crypto 0
 ### Key Files
 `app.js`, `middleware/auth.js`, `admin_auth.go` (+ `admin_auth_test.go`), `controllers/sync_endpoint_auth.go` (+ test), `services/connectors/inbound_auth.go` (+ test), `controllers/interfacesController.js`, `public/js/components/EndpointAuthEditor.js`, `services/audit/audit_events.json`, `tests/unit/app.forwardToGoAuth.test.js`, `tests/unit/controllers/interfacesController.endpointAuth.test.js`, `tests/unit/middleware/partnerEndpoint.test.js`, `tests/playwright/sync-endpoint-auth-e2e.spec.js`, `services/authguard/`, `services/InterfaceConfigProtector.js`, `services/InterfaceCredentialMigrator.js`, `services/credentialCrypto.js`, `config/SecretsGuard.js`, `installer/env_secrets.go`, `tests/playwright/csp-every-page.spec.js`.
 
+## Frontend HTML Escaping — HtmlSafe (October 2026)
+
+All markup in `public/` is built with `HtmlSafe.html` (`public/js/core/html-safe.js`), which escapes every `${}` value unless it is already SafeHtml. `HtmlSafe.raw` is for constant markup only; `HtmlSafe.sanitize` is for third-party rich text. `npm run lint:xss` (CI-blocking, `eslint.config.js`) rejects any HTML sink that receives anything else. **Full rules and the bug each one came from: [docs/SECURITY_FRONTEND_HTML.md](docs/SECURITY_FRONTEND_HTML.md).** The ones most often missed:
+- No data inside `onclick="..."` strings; use `data-*` + `this.dataset`.
+- No `+` / `+=` on SafeHtml values (they become escaped strings); push to an array instead.
+- Arrays are always truthy: `items.length ? items : HtmlSafe.raw('<empty state>')`, never `items || '...'`.
+- Escape once: no `escapeHtml()` inside `HtmlSafe.html`, and helpers whose output is interpolated return SafeHtml, not escaped strings.
+- Keep `.join(...)` on TEXT arrays; only markup arrays inside `HtmlSafe.html` don't need it.
+- Pipeline step builders' `render()` must return SafeHtml (`PropertiesPanel._builderMarkup` shows a plain string as text; `toolbox-step-coverage.spec.js` enforces it). `DOMUtils.createElement` inserts a plain-string content as text.
+- New pages: load `/js/core/html-safe.js` before page scripts, and add a hostile-input case to `tests/playwright/ui-xss-regression.spec.js`.
+
 ## ezCompanion Knowledge — What It Learns From, and Keeping It Current (October 2026)
 
 ### Why this section exists

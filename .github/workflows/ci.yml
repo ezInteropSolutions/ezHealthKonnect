@@ -229,6 +229,12 @@ jobs:
       - name: Run Jest suite
         run: npm test
 
+      # Frontend XSS gate: every innerHTML/insertAdjacentHTML/outerHTML/document.write
+      # sink in public/ must receive HtmlSafe markup (eslint-plugin-no-unsanitized,
+      # configured in eslint.config.js). See docs/SECURITY_FRONTEND_HTML.md.
+      - name: Frontend XSS lint (no unsanitized HTML sinks)
+        run: npm run lint:xss
+
   # ── Secret scanning ──────────────────────────────────────────────────────────
   # Scans the current working tree (--no-git), not git history — this is what
   # actually avoids re-flagging old, already-reviewed example values that still
