@@ -7481,18 +7481,15 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
     /**
      * Create dynamic form fields based on step type
      */
-    // Step builders (pipeline/components/*Builder.js) are converted to return
-    // HtmlSafe values. Until every builder is, a plain string is accepted here
-    // as the builder's own markup and reported once, so none is overlooked.
+    // Step builders (pipeline/components/*Builder.js) return HtmlSafe values.
+    // A plain string is treated as TEXT (escaped), never as markup, and logged
+    // as an error so a builder that bypasses HtmlSafe is caught immediately.
+    // Guarded by tests/playwright/toolbox-step-coverage.spec.js.
     _builderMarkup(markup) {
         if (markup instanceof HtmlSafe.SafeHtml) return markup;
         const name = this.activeStepBuilder && this.activeStepBuilder.constructor && this.activeStepBuilder.constructor.name;
-        if (!PropertiesPanel._plainBuilders) PropertiesPanel._plainBuilders = new Set();
-        if (!PropertiesPanel._plainBuilders.has(name)) {
-            PropertiesPanel._plainBuilders.add(name);
-            console.warn(`[HtmlSafe] ${name}.render() returned a plain string; it should build with HtmlSafe.html`);
-        }
-        return HtmlSafe.raw(markup == null ? '' : String(markup));
+        console.error(`[HtmlSafe] ${name}.render() returned a plain string; it is shown as text. Build it with HtmlSafe.html.`);
+        return HtmlSafe.html`${markup == null ? '' : String(markup)}`;
     }
 
     createDynamicFormFields(step) {

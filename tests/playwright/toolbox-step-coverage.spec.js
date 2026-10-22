@@ -87,3 +87,30 @@ test('newly-toolboxed step types open their config panel without error', async (
 
     expect(consoleErrors, `expected no console errors across all newly-toolboxed types, got: ${consoleErrors.join('; ')}`).toEqual([]);
 });
+
+// Every step builder must build its markup with HtmlSafe (escaping by default).
+// PropertiesPanel._builderMarkup shows a plain-string render() as text, so a
+// builder that returns a string would show its own markup as visible text.
+test('every registered step builder renders HtmlSafe markup, escaped exactly once', async ({ page }) => {
+    const consoleErrors = [];
+    page.on('console', msg => { if (msg.type() === 'error' && /\[HtmlSafe\]/.test(msg.text())) consoleErrors.push(msg.text()); });
+    await page.goto('/pipeline-builder.html');
+    await page.waitForSelector('#all-steps-list .step-card', { timeout: 15000 });
+
+    const problems = await page.evaluate(() => {
+        const out = [];
+        for (const [type, Builder] of Object.entries(StepBuilderRegistry._registry)) {
+            const tpl = (window.pipelineBuilder.toolboxManager.templates || []).find(t => t.type === type);
+            const step = new VisualStep({ stepName: 'Probe ' + type, stepType: type, config: tpl ? JSON.parse(JSON.stringify(tpl.defaultConfig || {})) : {} });
+            let res;
+            try { res = new Builder(window.pipelineBuilder.propertiesPanel).render(step); }
+            catch (e) { out.push(`${type}: render() threw ${e.message}`); continue; }
+            if (!(res instanceof HtmlSafe.SafeHtml)) { out.push(`${type}: render() returned ${typeof res}, not HtmlSafe`); continue; }
+            // Double escaping shows up as escaped tags in the final markup.
+            if (/&lt;(div|span|input|select|button|label|option|table|tr|td|p|i)\b/.test(res.markup)) out.push(`${type}: escaped markup in render() output`);
+        }
+        return out;
+    });
+    expect(problems).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+});
