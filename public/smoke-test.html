@@ -347,10 +347,10 @@ function handleStep(step) {
     if (!row) {
         row = document.createElement('div');
         row.className = 'step-row';
-        row.innerHTML = `
+        row.innerHTML = HtmlSafe.html`
             <span class="step-icon"><i class="fas fa-circle"></i></span>
-            <span class="step-id">${escHtml(step.id)}</span>
-            <span class="step-label">${escHtml(step.label)}</span>
+            <span class="step-id">${step.id}</span>
+            <span class="step-label">${step.label}</span>
             <span class="step-msg"></span>
         `;
         _stepEls[step.id] = row;
@@ -418,7 +418,7 @@ function showError(msg) {
     const list = document.getElementById('stepList');
     const div  = document.createElement('div');
     div.style.cssText = 'padding:20px 18px;color:#dc2626;font-size:13px;display:flex;gap:8px;align-items:center;';
-    div.innerHTML = `<i class="fas fa-triangle-exclamation"></i><span>${escHtml(msg)}</span>`;
+    div.innerHTML = HtmlSafe.html`<i class="fas fa-triangle-exclamation"></i><span>${msg}</span>`;
     list.appendChild(div);
 }
 
@@ -430,15 +430,6 @@ function setRunning(on) {
     btn.disabled       = on;
     icon.className     = on ? 'fas fa-circle-notch fa-spin' : 'fas fa-play';
     label.textContent  = on ? 'Running…' : 'Run Test';
-}
-
-/* ── Util ───────────────────────────────────────────────────────────────────── */
-function escHtml(s) {
-    return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
 }
 
 /* ── Auth / sidebar init (same pattern as other admin pages) ────────────────── */
