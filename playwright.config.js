@@ -23,9 +23,17 @@ module.exports = defineConfig({
         // ── Auth setup ─────────────────────────────────────────────────────────
         // Runs first, logs in once, saves browser storage state to .auth/user.json.
         // All other projects depend on this so they start already authenticated.
+        // First-run setup through the real setup page with the installer's
+        // one-time token. Only does anything on a fresh install (skips once
+        // setup is complete), and must run before anything logs in.
+        {
+            name: 'first-run',
+            testMatch: '**/first-run-setup.spec.js',
+        },
         {
             name: 'setup',
             testMatch: '**/global-setup.spec.js',
+            dependencies: ['first-run'],
         },
 
         // ── Desktop Chrome (primary) ───────────────────────────────────────────
@@ -36,7 +44,7 @@ module.exports = defineConfig({
                 storageState: '.auth/user.json',
             },
             dependencies: ['setup'],
-            testIgnore: ['**/global-setup.spec.js', '**/09-responsive.spec.js'],
+            testIgnore: ['**/global-setup.spec.js', '**/first-run-setup.spec.js', '**/09-responsive.spec.js'],
         },
 
         // ── Firefox (cross-browser smoke) ──────────────────────────────────────
