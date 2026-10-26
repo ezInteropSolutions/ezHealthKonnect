@@ -115,8 +115,9 @@ trail, and a much better-informed ezCompanion assistant.
 - No committed secrets and no secret defaults: production refuses publicly known secret values
   (checked in both the web server and the processing engine), and recurrence is blocked by a
   gitleaks rule, a repository policy test, a pre-commit hook and per-run CI secrets.
-- Go 1.26.9 and updated dependencies: govulncheck reports 0 reachable vulnerabilities; `npm audit`
-  reports 0 production vulnerabilities.
+- Go 1.26.10 and Node.js 22.23.4 (the installer's bundled runtime; both are security releases)
+  plus updated dependencies: govulncheck reports 0 reachable vulnerabilities; `npm audit` reports
+  0 production vulnerabilities.
 - The browser UI escapes by default. Every page now builds HTML through one shared helper, which
   fixes stored and reflected cross-site scripting found in interface, step and user names, alert
   rules, templates, reports, the dead-letter queue, clinical documents and message content. A CI
