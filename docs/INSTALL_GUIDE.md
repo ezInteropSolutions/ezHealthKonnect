@@ -245,11 +245,17 @@ an uninstall. A reinstall reuses it and says so.
 
 Two situations still need a hand:
 
-- **"database ezhealthkonnect already exists and contains data".** The
-  database was not dropped (the install folder was deleted by hand instead of
-  using Uninstall). Setup never overwrites data. Keep it by restoring that
-  installation and choosing Upgrade, or drop it (stop and delete the
-  `ezhealthkonnect` service first, or the drop fails on open connections):
+- **"database ezhealthkonnect already exists and contains data".** An earlier
+  installation left its database behind (it was uninstalled by an older
+  version, or its folder was deleted by hand instead of using Uninstall).
+  Setup never overwrites data on its own. In the setup window the failure
+  offers **Delete the old database and install fresh**: it asks you to
+  confirm, then deletes that database and all its data and installs a new
+  one. In an answer file, set `"replaceDatabase": true`. It needs the
+  administrator access you already gave setup (the `postgres` password on an
+  existing server, or the one setup generated); it is not available for a
+  database and user you provided yourself. To keep the data instead, restore
+  that installation and choose Upgrade. Or drop it yourself:
 
   ```powershell
   $env:PGPASSWORD = "<the postgres password>"

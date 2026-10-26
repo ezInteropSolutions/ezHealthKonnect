@@ -263,19 +263,23 @@ func DropRoleAndDatabase(admin AdminSQL, dbName, user string) error {
 	return nil
 }
 
-// DropDatabaseAsOwner drops the database through the connection of its owner
-// (connected to the maintenance database "postgres"), ending any remaining
-// connections first. It needs no administrator rights: the application user
-// owns the database setup created for it.
-func DropDatabaseAsOwner(owner AdminSQL, dbName string) error {
+// DropDatabase drops a database, ending any connections to it first. The
+// caller is either a superuser (which may drop any database) or the database's
+// own owner connected to the maintenance database "postgres": setup creates a
+// database with the application user as owner, and an owner may drop its own
+// database, so uninstalling needs no administrator password.
+func DropDatabase(admin AdminSQL, dbName string) error {
 	if !identRe.MatchString(dbName) {
 		return fmt.Errorf("invalid database name")
 	}
-	if out, err := owner.Exec("postgres", fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", dbName)); err != nil {
+	if out, err := admin.Exec("postgres", fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", dbName)); err != nil {
 		return fmt.Errorf("%s", firstLine(out, err))
 	}
 	return nil
 }
+
+// DropDatabaseAsOwner is DropDatabase through the owner's connection.
+func DropDatabaseAsOwner(owner AdminSQL, dbName string) error { return DropDatabase(owner, dbName) }
 
 func firstLine(out string, err error) string {
 	out = strings.TrimSpace(out)

@@ -313,19 +313,29 @@ async function run(path, body, title) {
   });
 }
 
-function showFailure(err, retryLabel, retry) {
+function showFailure(err, retryLabel, retry, extras = []) {
   appendLog('error', '');
   appendLog('error', err.message);
   const div = document.createElement('div');
   div.style.marginTop = '16px';
   div.innerHTML = `<div class="callout callout-warn"><span>⚠️</span><span>${esc(err.message)}</span></div>`;
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:12px';
   if (retry) {
     const b = document.createElement('button');
     b.className = 'btn btn-ghost';
     b.textContent = retryLabel;
     b.addEventListener('click', retry);
-    div.appendChild(b);
+    row.appendChild(b);
   }
+  for (const x of extras) {
+    const b = document.createElement('button');
+    b.className = x.className || 'btn btn-primary';
+    b.textContent = x.label;
+    b.addEventListener('click', x.onClick);
+    row.appendChild(b);
+  }
+  div.appendChild(row);
   $('content').appendChild(div);
 }
 
@@ -334,6 +344,14 @@ async function startInstall() {
   const problem = validateConfig(c);
   if (problem) { $('configError').textContent = problem; return; }
   state.cfg = Object.assign(state.cfg, c);
+  await performInstall(c);
+}
+
+// Same text as existingDataMarker in installer.go: the installer refused because
+// a database with this name already holds data from an earlier installation.
+const EXISTING_DATA_MARKER = 'already exists and contains data';
+
+async function performInstall(c) {
   state.step = 3;
   document.querySelectorAll('.step-item').forEach((el, i) => { el.classList.toggle('active', i === 3); el.classList.toggle('done', i < 3); });
   setHeader(STEPS[3][0], STEPS[3][1]);
@@ -342,7 +360,20 @@ async function startInstall() {
     const res = await run('/api/install', c, 'Starting installation…');
     renderInstallDone(res);
   } catch (err) {
-    showFailure(err, '← Back to Configuration', () => setStep(2));
+    // Deleting is only offered where setup has administrator access to the
+    // server, and only when the person asks for it and confirms.
+    const canReplace = !c.replaceDatabase && err.message.includes(EXISTING_DATA_MARKER) &&
+      (c.dbMode !== 'external' || c.dbAdminPassword);
+    const extras = canReplace ? [{
+      label: 'Delete the old database and install fresh',
+      className: 'btn btn-danger',
+      onClick: () => {
+        if (!confirm(`Permanently delete the database "${c.dbName}" and ALL the data in it, then install a fresh copy?\n\n` +
+          'Only do this if it is left over from an installation you no longer need.\nThis cannot be undone.')) return;
+        performInstall(Object.assign({}, c, { replaceDatabase: true }));
+      },
+    }] : [];
+    showFailure(err, '← Back to Configuration', () => setStep(2), extras);
   }
 }
 

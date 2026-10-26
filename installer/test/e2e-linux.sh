@@ -139,4 +139,24 @@ pass "clean reinstall works, no leftover database"
 [ "$(runuser -u postgres -- psql -X -t -A -p "$DB_PORT" -c "SELECT count(*) FROM pg_database WHERE datname='$DB_NAME'")" = "0" ] || fail "database not dropped by the second uninstall"
 pass "second uninstall removed the database too"
 
+# A database left behind by an earlier installation (an older build, a deleted
+# folder) must neither be overwritten nor leave the person stuck: install
+# refuses, and installs fresh only when asked to replace it.
+step "Leftover database from an earlier installation"
+runuser -u postgres -- psql -X -q -p "$DB_PORT" -c "CREATE DATABASE $DB_NAME" || fail "could not create the leftover database"
+runuser -u postgres -- psql -X -q -p "$DB_PORT" -d "$DB_NAME" -c "CREATE TABLE leftover_marker (id int); INSERT INTO leftover_marker VALUES (42)" || fail "could not fill the leftover database"
+if "$INSTALLER" install --config "$WORK/answers.json" >"$WORK/refused.log" 2>&1; then fail "install went ahead over a database that holds data"; fi
+grep -q "already exists and contains data" "$WORK/refused.log" || fail "refusal does not name the leftover data: $(cat "$WORK/refused.log")"
+[ "$(runuser -u postgres -- psql -X -t -A -p "$DB_PORT" -d "$DB_NAME" -c "SELECT count(*) FROM leftover_marker")" = "1" ] || fail "the refused install touched the leftover data"
+pass "install refuses to overwrite it and leaves it untouched"
+cat > "$WORK/answers-replace.json" <<EOF
+{"installDir":"$DIR","appPort":"$APP_PORT","apiPort":"8080","dbMode":"local","replaceDatabase":true}
+EOF
+"$INSTALLER" install --config "$WORK/answers-replace.json" | tee "$WORK/replace.log" || fail "install with replaceDatabase failed"
+grep -q "Deleting the existing database" "$WORK/replace.log" || fail "log does not say the old database was deleted"
+health || fail "not healthy after replacing the leftover database"
+[ "$(runuser -u postgres -- psql -X -t -A -p "$DB_PORT" -d "$DB_NAME" -c "SELECT to_regclass('leftover_marker') IS NULL")" = "t" ] || fail "the leftover data survived the replacement"
+pass "replaceDatabase deleted the old database and installed fresh"
+"$INSTALLER" uninstall --dir "$DIR" --yes || fail "final uninstall failed"
+
 echo; echo "ALL INSTALLER E2E CHECKS PASSED"

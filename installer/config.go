@@ -41,6 +41,13 @@ type Config struct {
 	// cannot be administered through the OS (Windows): its superuser password.
 	PGAdminPassword string `json:"pgAdminPassword"`
 
+	// ReplaceDatabase: if a database with this name already exists and holds
+	// data from an earlier installation, delete it (and ALL its data) and
+	// start clean instead of refusing. Off by default; the setup window asks
+	// for confirmation before sending it. Needs administrator access, so it is
+	// not available for a database and user you provided yourself.
+	ReplaceDatabase bool `json:"replaceDatabase"`
+
 	WithAI bool `json:"withAI"`
 }
 
@@ -90,6 +97,9 @@ func (c *Config) Validate() error {
 	}
 	if !identRe.MatchString(c.DBName) || !identRe.MatchString(c.DBUser) {
 		return fmt.Errorf("database name and user must be lowercase letters, digits and underscores")
+	}
+	if c.ReplaceDatabase && c.DBMode == "external" && c.DBAdminPassword == "" {
+		return fmt.Errorf("replacing a database needs an administrator login; setup never deletes a database it has no administrator access to")
 	}
 	switch c.DBMode {
 	case "local":

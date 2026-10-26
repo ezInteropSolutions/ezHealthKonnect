@@ -23,7 +23,8 @@ type fakePlatform struct {
 	elevated  bool
 	startErr  error
 	installed bool
-	noAdmin   bool // PostgresAdmin has no stored administrator access (PostgreSQL that was already installed)
+	noAdmin   bool     // PostgresAdmin has no stored administrator access (PostgreSQL that was already installed)
+	admin     AdminSQL // when set, the administrator EnsurePostgres hands to setup
 }
 
 func (f *fakePlatform) log(s string) { f.mu.Lock(); f.calls = append(f.calls, s); f.mu.Unlock() }
@@ -35,6 +36,9 @@ func (f *fakePlatform) IsElevated() bool                    { return f.elevated 
 func (f *fakePlatform) Prerequisites(*Config) []CheckResult { return nil }
 func (f *fakePlatform) EnsurePostgres(cfg *Config, _ Reporter) (*PgSetup, error) {
 	f.log("ensure-postgres")
+	if f.admin != nil {
+		return &PgSetup{BinDir: "/pg/bin", Admin: f.admin}, nil
+	}
 	return &PgSetup{BinDir: "/pg/bin", Admin: fakeAdmin{}}, nil
 }
 func (f *fakePlatform) PostgresAdmin(string, *Config) AdminSQL {

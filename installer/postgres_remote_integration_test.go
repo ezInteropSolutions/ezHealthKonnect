@@ -75,4 +75,25 @@ func TestPsqlAdmin_RealServer_CreatesTheDatabaseAndUser(t *testing.T) {
 	if err := EnsureRoleAndDatabase(admin, db, user, "second-pw"); err != nil {
 		t.Errorf("reinstall after the owner's drop: %v", err)
 	}
+
+	// An old database full of data is refused, and replaced only when asked.
+	app2 := psqlAdmin{Psql: admin.Psql, Host: host, Port: port, User: user, Password: "second-pw", SSLMode: "disable"}
+	if _, err := app2.Exec(db, "CREATE TABLE old_data (id int); INSERT INTO old_data VALUES (1)"); err != nil {
+		t.Fatalf("filling the old database: %v", err)
+	}
+	if err := in.refuseExistingData(admin, Config{DBName: db}); err == nil {
+		t.Fatal("a database with data was accepted without being asked to replace it")
+	}
+	if out, _ := app2.Exec(db, "SELECT count(*) FROM old_data"); out != "1" {
+		t.Errorf("the refused install touched the data: %q", out)
+	}
+	if err := in.refuseExistingData(admin, Config{DBName: db, ReplaceDatabase: true}); err != nil {
+		t.Fatalf("replacing the old database: %v", err)
+	}
+	if out, err := admin.Exec("postgres", "SELECT 1 FROM pg_database WHERE datname = 'ezhk_it_db'"); err != nil || out != "" {
+		t.Errorf("the old database survived the replacement: out=%q err=%v", out, err)
+	}
+	if err := EnsureRoleAndDatabase(admin, db, user, "third-pw"); err != nil {
+		t.Errorf("creating the fresh database after the replacement: %v", err)
+	}
 }

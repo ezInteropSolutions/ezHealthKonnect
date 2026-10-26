@@ -282,6 +282,10 @@ func (in *Installer) externalAdmin(binDir string, cfg Config) AdminSQL {
 		User: cfg.DBAdminUser, Password: cfg.DBAdminPassword, SSLMode: cfg.DBSSLMode}
 }
 
+// existingDataMarker is in the refusal message; the setup window looks for it
+// to offer deleting the old database (installer/web/app.js keeps a copy).
+const existingDataMarker = "already exists and contains data"
+
 func (in *Installer) refuseExistingData(admin AdminSQL, cfg Config) error {
 	if admin == nil {
 		return nil
@@ -298,10 +302,16 @@ func (in *Installer) refuseExistingData(admin AdminSQL, cfg Config) error {
 		return fmt.Errorf("inspect database %s: %s", cfg.DBName, firstLine(tables, err))
 	}
 	if strings.TrimSpace(tables) != "0" {
-		return fmt.Errorf("database %[1]s already exists and contains data from an earlier installation, so it was left untouched. "+
-			"To keep that data, restore the installation and use Upgrade. To start clean, drop the old database first "+
-			"(as the PostgreSQL superuser: DROP DATABASE %[1]s;) and run setup again — or install into a different database name "+
-			"(answer file: \"dbName\")", cfg.DBName)
+		if cfg.ReplaceDatabase {
+			in.Rep.Warn("Deleting the existing database %s and all its data, as you asked", cfg.DBName)
+			if err := DropDatabase(admin, cfg.DBName); err != nil {
+				return fmt.Errorf("could not delete the old database %s: %v", cfg.DBName, err)
+			}
+			return nil
+		}
+		return fmt.Errorf("database %[1]s "+existingDataMarker+" from an earlier installation, so it was left untouched. "+
+			"To keep that data, restore the installation and use Upgrade. To start clean, choose to delete the old database "+
+			"(the setup window offers it, or set \"replaceDatabase\": true in the answer file), or drop it yourself: DROP DATABASE %[1]s;", cfg.DBName)
 	}
 	return nil
 }
