@@ -189,6 +189,24 @@ reg query 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ezHealthKonn
 if ($LASTEXITCODE -eq 0) { Fail 'Add/Remove Programs entry still present' }
 Pass 'uninstalled'
 
+if ($PostgresMode -eq 'fresh') {
+    # PostgreSQL stays after an uninstall and its superuser password was generated
+    # by the installer (and kept in the install folder, now deleted). A reinstall
+    # must not ask for a password nobody has ever seen.
+    Step 'Reinstall after uninstall (no PostgreSQL password supplied)'
+    $r = Run-Installer @('install', '--config', "$Work\answers.json")
+    if ($r.Code -ne 0) { Fail "reinstall exited $($r.Code): $($r.Out)" }
+    if ($r.Out -notmatch 'earlier ezHealthKonnect install set up') { Fail 'reinstall did not reuse the saved PostgreSQL password' }
+    if (-not (Healthy)) { Fail 'not healthy after reinstall' }
+    Pass 'clean reinstall works without the PostgreSQL password'
+    $r = Run-Installer @('uninstall', '--dir', $Dir, '--yes')
+    if ($r.Code -ne 0) { Fail 'uninstall after reinstall failed' }
+    if ($r.Out -notmatch 'Database ezhealthkonnect removed') { Fail 'database not removed after reinstall' }
+    Start-Sleep -Seconds 8
+    if (Test-Path $Dir) { Fail 'install dir still present after the second uninstall' }
+    Pass 'second uninstall removed the database too'
+}
+
 Write-Host ''
 Write-Host 'ALL INSTALLER E2E CHECKS PASSED'
 exit 0   # native commands above (reg query) leave a non-zero $LASTEXITCODE

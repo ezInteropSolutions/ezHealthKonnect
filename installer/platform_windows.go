@@ -211,14 +211,32 @@ func (p WindowsPlatform) EnsurePostgres(cfg *Config, rep Reporter) (*PgSetup, er
 		if major < MinPostgresMajor {
 			return nil, fmt.Errorf("PostgreSQL %d is installed; version %d or newer is required", major, MinPostgresMajor)
 		}
-		if cfg.PGAdminPassword == "" {
-			return nil, fmt.Errorf("PostgreSQL %d is already installed on this machine — enter its superuser (postgres) password so the installer can create the database", major)
+		// A PostgreSQL that an earlier ezHealthKonnect installed has a password
+		// only that installer knew. It is kept at machine level (see
+		// saveMachineSecret), so a reinstall after an uninstall needs no password.
+		password, fromSaved := cfg.PGAdminPassword, false
+		if password == "" {
+			if saved := loadMachineSecret(); saved != "" {
+				password, fromSaved = saved, true
+			}
 		}
-		admin := windowsAdmin{psql: filepath.Join(bin, "psql.exe"), port: cfg.DBPort, password: cfg.PGAdminPassword}
+		if password == "" {
+			return nil, fmt.Errorf("PostgreSQL %d is already installed on this machine — enter its superuser (postgres) password so the installer can create the database. "+
+				"If an earlier ezHealthKonnect installed it and its files were deleted by hand, the password is lost: see \"Reinstalling\" in the install guide", major)
+		}
+		admin := windowsAdmin{psql: filepath.Join(bin, "psql.exe"), port: cfg.DBPort, password: password}
 		if out, err := admin.Exec("postgres", "SELECT 1"); err != nil {
+			if fromSaved {
+				return nil, fmt.Errorf("PostgreSQL %d is already installed and the password saved by an earlier ezHealthKonnect install no longer works — "+
+					"enter the current superuser (postgres) password: %s", major, firstLine(out, err))
+			}
 			return nil, fmt.Errorf("cannot sign in to PostgreSQL as postgres on port %s: %s", cfg.DBPort, firstLine(out, err))
 		}
-		rep.OK("Using the installed PostgreSQL %d", major)
+		if fromSaved {
+			rep.OK("Using the PostgreSQL %d that an earlier ezHealthKonnect install set up", major)
+		} else {
+			rep.OK("Using the installed PostgreSQL %d", major)
+		}
 		return &PgSetup{BinDir: bin, Admin: admin}, nil
 	}
 
@@ -234,6 +252,11 @@ func (p WindowsPlatform) EnsurePostgres(cfg *Config, rep Reporter) (*PgSetup, er
 	// remove the database; never printed or logged.
 	if err := os.MkdirAll(filepath.Join(cfg.InstallDir, "tools"), 0o700); err == nil {
 		_ = os.WriteFile(filepath.Join(cfg.InstallDir, "tools", pgSuperuserFile), []byte(superPassword), 0o600)
+	}
+	// Also kept outside the install folder: PostgreSQL outlives an uninstall,
+	// and without this copy a reinstall would ask for a password nobody has seen.
+	if err := saveMachineSecret(superPassword); err != nil {
+		rep.Warn("Could not keep a copy of the PostgreSQL password for reinstalls: %v", err)
 	}
 	admin := windowsAdmin{psql: filepath.Join(bin, "psql.exe"), port: cfg.DBPort, password: superPassword}
 	var lastErr error
@@ -253,11 +276,54 @@ func (p WindowsPlatform) EnsurePostgres(cfg *Config, rep Reporter) (*PgSetup, er
 // PostgresAdmin implements Platform.
 func (WindowsPlatform) PostgresAdmin(dir string, cfg *Config) AdminSQL {
 	bin, _ := existingPostgres()
-	pw, err := os.ReadFile(filepath.Join(dir, "tools", pgSuperuserFile))
-	if bin == "" || err != nil {
+	if bin == "" {
 		return nil
 	}
-	return windowsAdmin{psql: filepath.Join(bin, "psql.exe"), port: cfg.DBPort, password: strings.TrimSpace(string(pw))}
+	password := ""
+	if pw, err := os.ReadFile(filepath.Join(dir, "tools", pgSuperuserFile)); err == nil {
+		password = strings.TrimSpace(string(pw))
+	}
+	if password == "" {
+		password = loadMachineSecret()
+	}
+	if password == "" {
+		return nil
+	}
+	return windowsAdmin{psql: filepath.Join(bin, "psql.exe"), port: cfg.DBPort, password: password}
+}
+
+// machineSecretPath is where the generated PostgreSQL superuser password is
+// also kept: %ProgramData%\ezHealthKonnect, outside the install folder.
+func machineSecretPath() string {
+	base := os.Getenv("ProgramData")
+	if base == "" {
+		base = `C:\ProgramData`
+	}
+	return filepath.Join(base, "ezHealthKonnect", pgSuperuserFile)
+}
+
+// saveMachineSecret writes the password to a folder only SYSTEM and
+// Administrators can open (the access is set before the file exists).
+func saveMachineSecret(password string) error {
+	path := machineSecretPath()
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if out, err := exec.Command("icacls", dir, "/inheritance:r",
+		"/grant:r", sidSystem+":(OI)(CI)F", "/grant:r", sidAdministrators+":(OI)(CI)F", "/Q").CombinedOutput(); err != nil {
+		return fmt.Errorf("restrict access to %s: %s", dir, strings.TrimSpace(string(out)))
+	}
+	return os.WriteFile(path, []byte(password), 0o600)
+}
+
+// loadMachineSecret returns the saved password, or "" when there is none.
+func loadMachineSecret() string {
+	b, err := os.ReadFile(machineSecretPath())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 // runEDBInstaller downloads the pinned PostgreSQL installer, verifies its

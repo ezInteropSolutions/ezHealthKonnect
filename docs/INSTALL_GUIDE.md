@@ -215,6 +215,50 @@ never stored it. Uninstall therefore leaves the database in place and says
 so. To remove it, connect as `postgres` and run
 `DROP DATABASE ezhealthkonnect; DROP ROLE ezhealth_user;`.
 
+## Reinstalling
+
+Uninstall, then run setup again: this works without any database password.
+On Windows, when setup installed PostgreSQL itself it generates the
+`postgres` password and also keeps it in `C:\ProgramData\ezHealthKonnect`
+(readable by administrators and SYSTEM only), because PostgreSQL stays after
+an uninstall. A reinstall reuses it and says so.
+
+Two situations still need a hand:
+
+- **"database ezhealthkonnect already exists and contains data".** The
+  database was not dropped (the install folder was deleted by hand instead of
+  using Uninstall). Setup never overwrites data. Keep it by restoring that
+  installation and choosing Upgrade, or drop it (stop and delete the
+  `ezhealthkonnect` service first, or the drop fails on open connections):
+
+  ```powershell
+  $env:PGPASSWORD = "<the postgres password>"
+  & "C:\Program Files\PostgreSQL\17\bin\psql.exe" -U postgres -h localhost `
+     -c "DROP DATABASE IF EXISTS ezhealthkonnect" -c "DROP ROLE IF EXISTS ezhealth_user"
+  ```
+
+- **PostgreSQL is already installed and nobody knows the `postgres`
+  password** (an install made by an older installer, or its files deleted by
+  hand). If another application uses that PostgreSQL, ask its owner for the
+  password. If nothing else does, set a new one through a temporary local
+  trust rule (run PowerShell as administrator; change `17` to your version):
+
+  ```powershell
+  $data = "C:\Program Files\PostgreSQL\17\data"
+  Stop-Service postgresql-x64-17
+  Copy-Item "$data\pg_hba.conf" "$data\pg_hba.conf.bak"
+  (Get-Content "$data\pg_hba.conf") -replace '(host\s+all\s+all\s+(127\.0\.0\.1/32|::1/128)\s+)scram-sha-256','$1trust' | Set-Content "$data\pg_hba.conf"
+  Start-Service postgresql-x64-17
+  & "C:\Program Files\PostgreSQL\17\bin\psql.exe" -U postgres -h localhost -c "ALTER USER postgres PASSWORD '<new password>'"
+  Stop-Service postgresql-x64-17
+  Move-Item -Force "$data\pg_hba.conf.bak" "$data\pg_hba.conf"
+  Start-Service postgresql-x64-17
+  ```
+
+  Then enter the new password in setup's "PostgreSQL superuser password"
+  box. This replaces the `postgres` login for every application on that
+  server.
+
 ---
 
 ## Day-to-day operations

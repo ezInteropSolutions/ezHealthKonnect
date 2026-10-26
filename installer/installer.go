@@ -265,8 +265,10 @@ func (in *Installer) refuseExistingData(admin AdminSQL, cfg Config) error {
 		return fmt.Errorf("inspect database %s: %s", cfg.DBName, firstLine(tables, err))
 	}
 	if strings.TrimSpace(tables) != "0" {
-		return fmt.Errorf("database %s already exists and contains data — it may belong to an earlier installation. "+
-			"Restore that installation and use Upgrade, or choose a different database name", cfg.DBName)
+		return fmt.Errorf("database %[1]s already exists and contains data from an earlier installation, so it was left untouched. "+
+			"To keep that data, restore the installation and use Upgrade. To start clean, drop the old database first "+
+			"(as the PostgreSQL superuser: DROP DATABASE %[1]s;) and run setup again — or install into a different database name "+
+			"(answer file: \"dbName\")", cfg.DBName)
 	}
 	return nil
 }
