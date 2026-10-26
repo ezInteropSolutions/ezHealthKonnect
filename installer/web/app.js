@@ -435,7 +435,10 @@ async function doUninstall() {
   const st = state.installed;
   const dir = st ? st.installDir : '';
   if (!confirm(`Uninstall ezHealthKonnect?\n\n• The service is stopped and removed\n• Everything in ${dir} is deleted, including stored messages and backups\n` +
-    '• The ezHealthKonnect database is dropped\n\nThis cannot be undone.')) return;
+    (st && st.removesDatabase
+      ? '• The database that setup created is dropped, with all its data\n'
+      : '• The database was provided by you and is kept\n') +
+    '\nThis cannot be undone.')) return;
   setHeader('Uninstalling', dir);
   try {
     await run('/api/uninstall', { installDir: dir, confirm: true }, 'Uninstalling…');

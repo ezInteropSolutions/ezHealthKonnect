@@ -125,14 +125,18 @@ const stateFileName = "install-state.json"
 // top-level entries belong to the application (and may be replaced) and
 // everything else is customer data.
 type InstallState struct {
-	Version     string        `json:"version"`
-	InstalledAt time.Time     `json:"installedAt"`
-	UpdatedAt   time.Time     `json:"updatedAt"`
-	AppEntries  []string      `json:"appEntries"`
-	DBMode      string        `json:"dbMode"`
-	PGBinDir    string        `json:"pgBinDir"`
-	Service     bool          `json:"service"`
-	History     []StateChange `json:"history"`
+	Version     string    `json:"version"`
+	InstalledAt time.Time `json:"installedAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	AppEntries  []string  `json:"appEntries"`
+	DBMode      string    `json:"dbMode"`
+	// DBCreated: setup itself created the database (and its owner, the
+	// application user), so uninstall may remove it. A database you provided
+	// is never dropped. Installs from before this field existed have it unset.
+	DBCreated bool          `json:"dbCreated"`
+	PGBinDir  string        `json:"pgBinDir"`
+	Service   bool          `json:"service"`
+	History   []StateChange `json:"history"`
 }
 
 // StateChange is one install/upgrade/rollback event.
@@ -159,6 +163,11 @@ func LoadState(installDir string) (*InstallState, bool, error) {
 	}
 	return &s, true, nil
 }
+
+// OwnsDatabase reports whether uninstall may drop the database: setup created
+// it. Installs recorded before DBCreated existed always created theirs when
+// they used PostgreSQL on this machine ("local").
+func (s *InstallState) OwnsDatabase() bool { return s.DBCreated || s.DBMode == "local" }
 
 // Save writes install-state.json atomically.
 func (s *InstallState) Save(installDir string) error {

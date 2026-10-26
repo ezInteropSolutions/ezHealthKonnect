@@ -227,7 +227,8 @@ func (in *Installer) Install(cfg Config) (*InstallResult, error) {
 	}
 	state := &InstallState{Version: staged.Info.Version, InstalledAt: in.Now(), UpdatedAt: in.Now(),
 		AppEntries: sortedCopy(staged.Info.Entries), DBMode: cfg.DBMode, PGBinDir: pg.BinDir, Service: true,
-		History: []StateChange{{Action: "install", To: staged.Info.Version, At: in.Now()}}}
+		DBCreated: cfg.DBMode == "local" || cfg.DBAdminPassword != "",
+		History:   []StateChange{{Action: "install", To: staged.Info.Version, At: in.Now()}}}
 	if err := state.Save(dir); err != nil {
 		return nil, err
 	}
@@ -779,18 +780,14 @@ func (in *Installer) Uninstall(installDir string, keepDatabase bool) error {
 		rep.Warn("Service removal: %v", err)
 	}
 
-	if state.DBMode == "local" && !keepDatabase {
+	switch {
+	case keepDatabase:
+		rep.Info("Keeping database %s as requested", env.Get("DB_NAME"))
+	case !state.OwnsDatabase():
+		rep.Info("Database %s was provided by you, not created by setup, so it was left in place", env.Get("DB_NAME"))
+	default:
 		rep.Step(2, "Removing the database")
-		cfg := configFromEnv(dir, env)
-		if admin := in.Platform.PostgresAdmin(dir, cfg); admin != nil {
-			if err := DropRoleAndDatabase(admin, cfg.DBName, cfg.DBUser); err != nil {
-				rep.Warn("Database removal: %v", err)
-			} else {
-				rep.OK("Database %s removed", cfg.DBName)
-			}
-		} else {
-			rep.Warn("No administrator access to PostgreSQL — database %s was left in place", cfg.DBName)
-		}
+		in.removeDatabase(dir, state, env)
 	}
 
 	rep.Step(3, "Removing files")
@@ -800,6 +797,40 @@ func (in *Installer) Uninstall(installDir string, keepDatabase bool) error {
 	}
 	rep.OK("ezHealthKonnect has been removed")
 	return nil
+}
+
+// removeDatabase drops the database setup created. With administrator access
+// to PostgreSQL on this machine it also removes the application user. Without
+// it (PostgreSQL that was already installed, or a remote server) setup uses
+// the application user's own credentials from .env: setup created the
+// database with that user as owner, and an owner may drop its own database,
+// so no administrator password is needed. Failures are reported, never fatal:
+// uninstall continues and says how to remove the database by hand.
+func (in *Installer) removeDatabase(dir string, state *InstallState, env *EnvFile) {
+	rep := in.Rep
+	cfg := configFromEnv(dir, env)
+	if state.DBMode == "local" {
+		if admin := in.Platform.PostgresAdmin(dir, cfg); admin != nil {
+			err := DropRoleAndDatabase(admin, cfg.DBName, cfg.DBUser)
+			if err == nil {
+				rep.OK("Database %s removed", cfg.DBName)
+				return
+			}
+			rep.Warn("Removing it as the PostgreSQL administrator failed (%v); trying as the database owner", err)
+		}
+	}
+	if state.PGBinDir == "" {
+		rep.Warn("PostgreSQL tools were not recorded, so database %s was left in place. Remove it with: DROP DATABASE %s;", cfg.DBName, cfg.DBName)
+		return
+	}
+	conn := connFromEnv(env)
+	owner := in.externalAdmin(state.PGBinDir, Config{DBHost: conn.Host, DBPort: conn.Port, DBSSLMode: conn.SSLMode,
+		DBAdminUser: conn.User, DBAdminPassword: conn.Password})
+	if err := DropDatabaseAsOwner(owner, cfg.DBName); err != nil {
+		rep.Warn("Could not remove database %s: %v. Remove it yourself with: DROP DATABASE %s;", cfg.DBName, err, cfg.DBName)
+		return
+	}
+	rep.OK("Database %s removed (the database user %s was kept)", cfg.DBName, cfg.DBUser)
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

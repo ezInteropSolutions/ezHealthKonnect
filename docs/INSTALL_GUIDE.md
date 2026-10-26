@@ -221,15 +221,19 @@ part-way can be removed from there.
 
 Uninstall removes the services and **the whole install directory, including
 `storage`, `logs`, `uploads` and `backups`**. Copy anything you want to keep
-before running it. It drops the database only when the installer created it
-(`dbMode: local`) and `--keep-database` is not given. An existing database
-(`dbMode: external`) is never dropped. PostgreSQL itself is not removed.
+before running it. It drops the database **that setup created** (PostgreSQL
+on this machine, or an existing server where you gave an administrator
+login) unless `--keep-database` is given, and the setup window's
+confirmation says whether it will. A database you provided yourself ("They
+already exist") is never dropped. PostgreSQL itself is not removed.
 
-On Windows, where PostgreSQL was already installed before ezHealthKonnect,
-the installer used your `postgres` password only during installation and
-never stored it. Uninstall therefore leaves the database in place and says
-so. To remove it, connect as `postgres` and run
-`DROP DATABASE ezhealthkonnect; DROP ROLE ezhealth_user;`.
+Setup never stores an administrator password you typed. It does not need it
+to uninstall: it created the database with the application user as its
+owner, and an owner may drop its own database. When setup installed
+PostgreSQL itself it also removes the `ezhealth_user` role; when it dropped
+the database as the owner, the role stays (a role cannot remove itself), and
+a reinstall simply reuses it. If the drop fails, uninstall still finishes and
+prints the one command to run (`DROP DATABASE ezhealthkonnect;`).
 
 ## Reinstalling
 

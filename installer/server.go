@@ -172,6 +172,8 @@ type StateResponse struct {
 	UpgradeAction  string   `json:"upgradeAction,omitempty"` // "upgrade" | "repair" | "older"
 	RollbackTo     string   `json:"rollbackTo,omitempty"`
 	Backups        []string `json:"backups,omitempty"`
+	// RemovesDatabase: uninstall will drop the database (setup created it).
+	RemovesDatabase bool `json:"removesDatabase"`
 }
 
 func (s *UIServer) installedDir(r *http.Request) string {
@@ -190,6 +192,7 @@ func (s *UIServer) handleState(w http.ResponseWriter, r *http.Request) {
 	if st, found, err := LoadState(dir); err == nil && found {
 		resp.Installed = true
 		resp.Version = st.Version
+		resp.RemovesDatabase = st.OwnsDatabase()
 		if env, err := ReadEnvFile(filepath.Join(dir, ".env")); err == nil {
 			resp.AppPort = env.Get("PORT")
 		}

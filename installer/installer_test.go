@@ -23,6 +23,7 @@ type fakePlatform struct {
 	elevated  bool
 	startErr  error
 	installed bool
+	noAdmin   bool // PostgresAdmin has no stored administrator access (PostgreSQL that was already installed)
 }
 
 func (f *fakePlatform) log(s string) { f.mu.Lock(); f.calls = append(f.calls, s); f.mu.Unlock() }
@@ -36,8 +37,13 @@ func (f *fakePlatform) EnsurePostgres(cfg *Config, _ Reporter) (*PgSetup, error)
 	f.log("ensure-postgres")
 	return &PgSetup{BinDir: "/pg/bin", Admin: fakeAdmin{}}, nil
 }
-func (f *fakePlatform) PostgresAdmin(string, *Config) AdminSQL { return fakeAdmin{} }
-func (f *fakePlatform) GoAPIPath(dir string) string            { return filepath.Join(dir, "go-api") }
+func (f *fakePlatform) PostgresAdmin(string, *Config) AdminSQL {
+	if f.noAdmin {
+		return nil
+	}
+	return fakeAdmin{}
+}
+func (f *fakePlatform) GoAPIPath(dir string) string { return filepath.Join(dir, "go-api") }
 func (f *fakePlatform) ExtraEnv(dir string) map[string]string {
 	return map[string]string{"XDG_CACHE_HOME": filepath.Join(dir, "cache")}
 }

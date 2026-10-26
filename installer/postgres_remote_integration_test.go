@@ -52,9 +52,27 @@ func TestPsqlAdmin_RealServer_CreatesTheDatabaseAndUser(t *testing.T) {
 	if _, err := bad.Exec(db, "SELECT 1"); err == nil {
 		t.Error("the application user signed in with a wrong password")
 	}
+	// Uninstall drops the database as its owner, with no administrator password:
+	// first prove the existing-data protection, then the removal.
 	// The database is now non-empty, so a second install must refuse to reuse it.
 	in := &Installer{Rep: ConsoleReporter{Out: &strings.Builder{}}}
 	if err := in.refuseExistingData(admin, Config{DBName: db}); err == nil || !strings.Contains(err.Error(), "already exists and contains data") {
 		t.Errorf("existing data was not protected: %v", err)
+	}
+
+	// The owner (the application user, connected to "postgres") drops its own
+	// database while a connection to it is still open; the role stays.
+	if err := DropDatabaseAsOwner(app, db); err != nil {
+		t.Fatalf("owner could not drop its database: %v", err)
+	}
+	if out, err := admin.Exec("postgres", "SELECT 1 FROM pg_database WHERE datname = 'ezhk_it_db'"); err != nil || out != "" {
+		t.Errorf("the database still exists after the owner dropped it: out=%q err=%v", out, err)
+	}
+	if out, err := admin.Exec("postgres", "SELECT 1 FROM pg_roles WHERE rolname = 'ezhk_it_user'"); err != nil || out != "1" {
+		t.Errorf("the role should remain (a role cannot drop itself): out=%q err=%v", out, err)
+	}
+	// A reinstall on top of that must work: role exists, database does not.
+	if err := EnsureRoleAndDatabase(admin, db, user, "second-pw"); err != nil {
+		t.Errorf("reinstall after the owner's drop: %v", err)
 	}
 }

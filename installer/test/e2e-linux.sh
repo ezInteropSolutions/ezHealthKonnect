@@ -128,4 +128,15 @@ DB_NAME=$(envget DB_NAME); DB_PORT=$(envget DB_PORT)
 [ "$(runuser -u postgres -- psql -X -t -A -p "$DB_PORT" -c "SELECT count(*) FROM pg_database WHERE datname='$DB_NAME'")" = "0" ] || fail "database not dropped"
 pass "uninstalled completely"
 
+# Uninstall followed by install must work: no leftover database in the way
+# ("database ezhealthkonnect already exists").
+step "Reinstall after uninstall"
+"$INSTALLER" install --config "$WORK/answers.json" | tee "$WORK/reinstall.log" || fail "reinstall exited non-zero"
+health || fail "not healthy after reinstall"
+pass "clean reinstall works, no leftover database"
+"$INSTALLER" uninstall --dir "$DIR" --yes || fail "uninstall after reinstall failed"
+[ ! -e "$DIR" ] || fail "install dir still present after the second uninstall"
+[ "$(runuser -u postgres -- psql -X -t -A -p "$DB_PORT" -c "SELECT count(*) FROM pg_database WHERE datname='$DB_NAME'")" = "0" ] || fail "database not dropped by the second uninstall"
+pass "second uninstall removed the database too"
+
 echo; echo "ALL INSTALLER E2E CHECKS PASSED"
