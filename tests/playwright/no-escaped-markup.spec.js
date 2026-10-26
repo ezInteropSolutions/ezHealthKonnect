@@ -73,3 +73,41 @@ for (const direction of ['inbound', 'outbound']) {
         expect(bad).toEqual({});
     });
 }
+
+test('every step properties modal (all tabs) shows no markup text', async ({ page }) => {
+    await page.goto('/pipeline-builder.html');
+    await page.waitForSelector('#all-steps-list .step-card', { timeout: 15000 });
+    const templates = await page.evaluate(() =>
+        window.pipelineBuilder.toolboxManager.templates.map(t => ({ type: t.type, cfg: t.defaultConfig || {} })));
+    const bad = {};
+    for (const t of templates) {
+        await page.evaluate(({ st, cfg }) => {
+            document.querySelectorAll('#stepPropertiesModal').forEach(m => m.remove());
+            const step = new VisualStep({ stepName: 'Probe ' + st, stepType: st, config: JSON.parse(JSON.stringify(cfg)) });
+            window.pipelineBuilder.addStep(step);
+            window.pipelineBuilder.propertiesPanel.showStepProperties(step, false);
+        }, { st: t.type, cfg: t.cfg }).catch(() => {});
+        const modal = page.locator('#stepPropertiesModal');
+        if (!(await modal.isVisible().catch(() => false))) continue;
+        await page.waitForTimeout(300);
+        const tabs = modal.locator('.nav-tabs button, .modal-tabs button, [role=tab], .tab-btn');
+        const n = Math.min(await tabs.count(), 12);
+        const hits = [];
+        for (let i = -1; i < n; i++) {
+            if (i >= 0) await tabs.nth(i).click({ timeout: 1500 }).catch(() => {});
+            hits.push(...await page.evaluate((src) => {
+                const re = new RegExp(src, 'i'), out = [];
+                const root = document.getElementById('stepPropertiesModal');
+                const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+                for (let x; (x = w.nextNode());) {
+                    const p = x.parentElement;
+                    if (['SCRIPT', 'STYLE', 'TEXTAREA'].includes(p.tagName) || p.closest('pre, code, textarea, .code-editor')) continue;
+                    if (re.test(x.nodeValue)) out.push(x.nodeValue.trim().slice(0, 100));
+                }
+                return out;
+            }, TAG.source));
+        }
+        if (hits.length) bad[t.type] = [...new Set(hits)];
+    }
+    expect(bad).toEqual({});
+});
