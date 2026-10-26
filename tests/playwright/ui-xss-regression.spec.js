@@ -511,6 +511,10 @@ test.describe('Clinical document content cannot run script', () => {
 // connector stores — so every externally controlled field carries a payload,
 // including a quote that would break out of an onclick string.
 test.describe('Externally supplied message data is never rendered as HTML', () => {
+    // A browser west of UTC (the database runs in UTC) once hid the newest
+    // hours of messages: the Messages page sent its local date window with no
+    // zone. Pinned here so every run checks it, whatever the host's zone.
+    test.use({ timezoneId: 'America/New_York' });
     const { Client } = require('pg');
     const DB_URL = process.env.DATABASE_URL;
     const xss = (what) => `<img src=x onerror="window.__ezhkXss='${MARK}-${what}'">`;

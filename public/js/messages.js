@@ -163,12 +163,39 @@ class MessageManager {
             this.filters.dateFrom = formatDateTimeLocal(yesterday);
         }
 
+        // "To" stays empty by default: the window runs up to now, so messages
+        // that arrive after the page loaded still appear on Refresh.
         if (dateToInput) {
-            dateToInput.value = formatDateTimeLocal(now);
-            this.filters.dateTo = formatDateTimeLocal(now);
+            dateToInput.value = '';
+            delete this.filters.dateTo;
         }
 
         console.log('✅ Default date filter set: Last 1 day');
+    }
+
+    /**
+     * Filters as sent to the API. The date inputs hold the browser's LOCAL
+     * time with no zone and minute precision ("2026-10-26T05:15"); sent raw,
+     * the database reads them in its own zone, which shifts the window by the
+     * browser's UTC offset and drops messages received later in the "To"
+     * minute. Converted here to absolute instants; "To" covers its whole minute.
+     */
+    _apiFilters() {
+        const out = {};
+        Object.keys(this.filters).forEach(key => {
+            if (key !== 'interfaceId' && this.filters[key]) out[key] = this.filters[key];
+        });
+        const toInstant = (value, endOfMinute) => {
+            const ms = new Date(value).getTime();
+            if (Number.isNaN(ms)) return null;
+            return new Date(endOfMinute ? ms + 59999 : ms).toISOString();
+        };
+        ['dateFrom', 'dateTo'].forEach(key => {
+            if (!out[key]) return;
+            const instant = toInstant(out[key], key === 'dateTo');
+            if (instant) out[key] = instant; else delete out[key];
+        });
+        return out;
     }
 
     async loadUserInfo() {
@@ -316,11 +343,8 @@ class MessageManager {
             });
 
             // Add filters (excluding interfaceId since it's in the URL)
-            Object.keys(this.filters).forEach(key => {
-                if (key !== 'interfaceId' && this.filters[key]) {
-                    params.append(key, this.filters[key]);
-                }
-            });
+            const apiFilters = this._apiFilters();
+            Object.keys(apiFilters).forEach(key => params.append(key, apiFilters[key]));
 
             const apiUrl = `/api/messages/interface/${this.currentInterfaceId}?${params}`;
             console.log(`🎯 Loading messages for interface: ${this.currentInterfaceId}`);
@@ -3349,7 +3373,8 @@ class MessageManager {
         if (!this.currentInterfaceId) return;
         try {
             const params = new URLSearchParams({ interfaceId: this.currentInterfaceId });
-            Object.keys(this.filters).forEach(k => { if (k !== 'interfaceId' && this.filters[k]) params.append(k, this.filters[k]); });
+            const apiFilters = this._apiFilters();
+            Object.keys(apiFilters).forEach(k => params.append(k, apiFilters[k]));
             const res = await fetch(`/api/messages/bulk-reprocess/count?${params}`);
             const json = await res.json();
             if (!json.success) throw new Error(json.error || 'Count failed');
@@ -3413,8 +3438,7 @@ class MessageManager {
         try {
             const body = { interfaceId: this.currentInterfaceId };
             if (this.bulkSelectAllMatching) {
-                body.filter = { ...this.filters };
-                delete body.filter.interfaceId;
+                body.filter = this._apiFilters();
             } else {
                 body.ids = Array.from(this.bulkSelectedIds);
             }
