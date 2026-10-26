@@ -35,6 +35,10 @@ type UIServer struct {
 	Port     int
 	Done     chan struct{}
 
+	// Locate returns where an existing installation may be (see locate.go);
+	// nil means only the default folder is checked.
+	Locate func() []string
+
 	hub      *Hub
 	mu       sync.Mutex
 	busy     bool
@@ -173,6 +177,9 @@ type StateResponse struct {
 func (s *UIServer) installedDir(r *http.Request) string {
 	if d := r.URL.Query().Get("dir"); d != "" {
 		return filepath.Clean(d)
+	}
+	if s.Locate != nil {
+		return findInstall(s.Locate(), s.Platform.DefaultInstallDir())
 	}
 	return s.Platform.DefaultInstallDir()
 }

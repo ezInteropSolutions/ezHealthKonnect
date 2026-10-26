@@ -218,6 +218,14 @@ func (in *Installer) Install(cfg Config) (*InstallResult, error) {
 	}
 	rep.OK("Files installed; configuration written to %s", filepath.Join(dir, ".env"))
 
+	// Register before the steps that can fail (schema, service, health check),
+	// not at the very end: a half-finished install must still be listed in
+	// Add/Remove Programs with a working Uninstall, instead of leaving a
+	// folder and a service nobody can find.
+	if err := in.Platform.RegisterUninstall(dir, staged.Info.Version, cfg.AppPort); err != nil {
+		rep.Warn("Could not register in the system's program list: %v", err)
+	}
+
 	rep.Step(5, "Creating the database schema")
 	if err := in.Migrator.Migrate(dir, in.Platform.GoAPIPath(dir), rep); err != nil {
 		return nil, err
@@ -238,9 +246,6 @@ func (in *Installer) Install(cfg Config) (*InstallResult, error) {
 		return nil, fmt.Errorf("%w (logs: %s)", err, filepath.Join(dir, "logs"))
 	}
 	rep.OK("ezHealthKonnect is running at %s", appURL)
-	if err := in.Platform.RegisterUninstall(dir, staged.Info.Version, cfg.AppPort); err != nil {
-		rep.Warn("Could not register in the system's program list: %v", err)
-	}
 	return result, nil
 }
 
@@ -726,6 +731,13 @@ func (in *Installer) Uninstall(installDir string, keepDatabase bool) error {
 		return errors.New("the installer must run as administrator (Windows) or root (Linux)")
 	}
 	state, found, _ := LoadState(dir)
+	if !found {
+		// Never delete a folder just because someone named it: only an
+		// ezHealthKonnect installation (it has its install record) is removed.
+		return fmt.Errorf("%s does not hold an ezHealthKonnect installation (no %s), so nothing was removed. "+
+			"If it is left over from an older installer, stop and delete the %q service and remove the folder by hand",
+			dir, stateFileName, "ezhealthkonnect")
+	}
 	env, _ := ReadEnvFile(filepath.Join(dir, ".env"))
 
 	rep.Step(1, "Stopping and removing the service")
@@ -733,7 +745,7 @@ func (in *Installer) Uninstall(installDir string, keepDatabase bool) error {
 		rep.Warn("Service removal: %v", err)
 	}
 
-	if found && state.DBMode == "local" && !keepDatabase {
+	if state.DBMode == "local" && !keepDatabase {
 		rep.Step(2, "Removing the database")
 		cfg := configFromEnv(dir, env)
 		if admin := in.Platform.PostgresAdmin(dir, cfg); admin != nil {

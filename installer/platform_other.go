@@ -16,6 +16,8 @@ func goosName() string { return "unsupported" }
 
 func defaultInstallDir() string { return "/opt/ezhealthkonnect" }
 
+func registeredInstallDirs() []string { return nil }
+
 func (unsupportedPlatform) Name() string              { return "unsupported" }
 func (unsupportedPlatform) DefaultInstallDir() string { return defaultInstallDir() }
 func (unsupportedPlatform) IsElevated() bool          { return false }

@@ -499,6 +499,33 @@ func (WindowsPlatform) RegisterUninstall(dir, ver, _ string) error {
 	return nil
 }
 
+// regQueryValue reads one string value with the built-in reg.exe ("" if absent).
+func regQueryValue(key, name string) string {
+	out, err := exec.Command("reg", "query", key, "/v", name).Output()
+	if err != nil {
+		return ""
+	}
+	return parseRegValue(string(out), name)
+}
+
+// registeredInstallDirs lists where Windows says ezHealthKonnect is installed:
+// the Add/Remove Programs entry's location and the folder holding the
+// service's program (<install>\tools\ezhealthkonnect.exe). The service is
+// created before the Add/Remove entry, so it still locates an install whose
+// last steps failed.
+func registeredInstallDirs() []string {
+	var out []string
+	if v := regQueryValue(uninstallRegKey, "InstallLocation"); v != "" {
+		out = append(out, v)
+	}
+	if v := regQueryValue(`HKLM\SYSTEM\CurrentControlSet\Services\`+windowsServiceID, "ImagePath"); v != "" {
+		if d := installRootFor(programPath(v)); d != "" {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // RemoveUninstall implements Platform.
 func (WindowsPlatform) RemoveUninstall() {
 	_ = exec.Command("reg", "delete", uninstallRegKey, "/f").Run()

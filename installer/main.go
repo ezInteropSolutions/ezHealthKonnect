@@ -69,7 +69,7 @@ func bundleSource(explicit string) BundleSource {
 func runCommand(cmd string, args []string) int {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	p := newPlatform()
-	dir := fs.String("dir", p.DefaultInstallDir(), "installation directory")
+	dir := fs.String("dir", findInstall(installCandidates(), p.DefaultInstallDir()), "installation directory (default: the existing installation, found from the service)")
 	bundle := fs.String("bundle", "", "application bundle zip (default: the one included in this installer)")
 	configPath := fs.String("config", "", "answer file (JSON) for install")
 	yes := fs.Bool("yes", false, "confirm a destructive operation")
@@ -161,6 +161,7 @@ func runGUI(uninstall bool) int {
 	port := l.Addr().(*net.TCPAddr).Port
 	web, _ := fs.Sub(webFS, "web")
 	srv := NewUIServer(newPlatform(), bundleSource(""), web, port)
+	srv.Locate = installCandidates
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go httpSrv.Serve(l) //nolint:errcheck
 

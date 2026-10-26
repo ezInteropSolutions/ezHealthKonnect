@@ -652,6 +652,24 @@ func (LinuxPlatform) RegisterUninstall(dir, _, _ string) error {
 	return keepInstallerCopy(dir, "ezhealthkonnect-setup")
 }
 
+// registeredInstallDirs lists the install folder named by the systemd units
+// (WorkingDirectory=), which exist as soon as the service has been created.
+func registeredInstallDirs() []string {
+	var out []string
+	for _, unit := range []string{webUnit, apiUnit} {
+		data, err := os.ReadFile(filepath.Join(unitDir, unit+".service"))
+		if err != nil {
+			continue
+		}
+		if wd := parseUnitValue(string(data), "WorkingDirectory"); wd != "" {
+			if d := installRootFor(wd); d != "" {
+				out = append(out, d)
+			}
+		}
+	}
+	return out
+}
+
 // RemoveUninstall implements Platform.
 func (LinuxPlatform) RemoveUninstall() {}
 

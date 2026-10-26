@@ -191,6 +191,18 @@ sudo ./ezHealthKonnect-Setup-Linux-x64 uninstall --yes                  # also d
 sudo ./ezHealthKonnect-Setup-Linux-x64 uninstall --yes --keep-database  # keep the data
 ```
 
+Setup finds an existing installation wherever it was installed (from the
+Add or remove programs entry and the service), so Manage and Uninstall are
+offered even for a folder other than the default. Pass `--dir <folder>` only
+to point at a different one. Uninstall refuses a folder that is not an
+ezHealthKonnect installation (it has no `install-state.json`), so it can
+never delete an unrelated folder. An installation left by an older
+installer has no such record: stop and delete the `ezhealthkonnect` service
+(`sc.exe stop ezhealthkonnect` then `sc.exe delete ezhealthkonnect` on
+Windows) and remove its folder by hand. The Add or remove programs entry is
+created before the service is started, so even an install that failed
+part-way can be removed from there.
+
 Uninstall removes the services and **the whole install directory, including
 `storage`, `logs`, `uploads` and `backups`**. Copy anything you want to keep
 before running it. It drops the database only when the installer created it

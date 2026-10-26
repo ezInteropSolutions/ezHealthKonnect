@@ -269,7 +269,7 @@ func TestInstall_FreshInstallation(t *testing.T) {
 	if !found || state.Version != "v26.10" || !state.Service || len(state.AppEntries) == 0 {
 		t.Fatalf("state = %+v", state)
 	}
-	if got := h.plat.callString(); got != "ensure-postgres,prepare,install-service,start,register" {
+	if got := h.plat.callString(); got != "ensure-postgres,prepare,register,install-service,start" {
 		t.Errorf("platform calls = %s", got)
 	}
 	if h.migr.runs != 1 || h.health.checks != 1 {
