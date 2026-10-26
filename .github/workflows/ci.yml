@@ -11,7 +11,7 @@ on:
     branches: [master, main]
 
 env:
-  GO_VERSION: '1.26'
+  GO_VERSION: '1.26.10'
   NODE_VERSION: '22'
 
 jobs:
