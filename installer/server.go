@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // UIServer serves the installer web UI and its API.
@@ -38,6 +39,10 @@ type UIServer struct {
 	mu       sync.Mutex
 	busy     bool
 	doneOnce sync.Once
+
+	// Wizard activity, for exiting once the wizard window is gone (see Idle).
+	lastSeen time.Time // last authorized API request; zero until the wizard connects
+	streams  int       // open progress streams
 }
 
 // NewUIServer creates a server with a fresh random token.
@@ -69,6 +74,7 @@ func (s *UIServer) Handler() http.Handler {
 		"/api/progress":  s.handleProgress,
 		"/api/browse":    s.handleBrowse,
 		"/api/close":     s.handleClose,
+		"/api/ping":      s.handlePing,
 	}
 	for p, h := range api {
 		mux.Handle(p, s.guard(h))
@@ -118,6 +124,7 @@ func (s *UIServer) guard(next http.HandlerFunc) http.Handler {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+		s.touch()
 		if r.Method == http.MethodPost {
 			mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 			if mt != "application/json" {
@@ -327,6 +334,15 @@ func (s *UIServer) handleProgress(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	past, ch := s.hub.Subscribe()
 	defer s.hub.Unsubscribe(ch)
+	s.mu.Lock()
+	s.streams++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.streams--
+		s.lastSeen = time.Now()
+		s.mu.Unlock()
+	}()
 	for _, e := range past {
 		fmt.Fprintf(w, "data: %s\n\n", marshalEvent(e))
 	}
@@ -377,6 +393,48 @@ func (s *UIServer) handleBrowse(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(res.Dirs, func(i, j int) bool { return strings.ToLower(res.Dirs[i].Name) < strings.ToLower(res.Dirs[j].Name) })
 	writeJSON(w, res)
+}
+
+// ── wizard activity ───────────────────────────────────────────────────────────
+
+func (s *UIServer) touch() {
+	s.mu.Lock()
+	s.lastSeen = time.Now()
+	s.mu.Unlock()
+}
+
+// handlePing is the wizard page's heartbeat (it calls it every few seconds).
+func (s *UIServer) handlePing(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Idle reports whether the wizard has gone away: it connected at least once,
+// then nothing has been heard from it for longer than limit, no progress
+// stream is open and no operation is running. An install, upgrade or
+// uninstall always finishes first, even if the window was closed.
+func (s *UIServer) Idle(now time.Time, limit time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.lastSeen.IsZero() && !s.busy && s.streams == 0 && now.Sub(s.lastSeen) > limit
+}
+
+// ExitWhenIdle closes Done once the wizard has been gone for limit, so a
+// setup process whose window was closed (and whose console may be hidden)
+// does not keep running in the background.
+func (s *UIServer) ExitWhenIdle(limit, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.Done:
+			return
+		case now := <-t.C:
+			if s.Idle(now, limit) {
+				s.doneOnce.Do(func() { close(s.Done) })
+				return
+			}
+		}
+	}
 }
 
 func (s *UIServer) handleClose(w http.ResponseWriter, r *http.Request) {

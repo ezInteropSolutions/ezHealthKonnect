@@ -176,16 +176,26 @@ func runGUI(uninstall bool) int {
 		fmt.Println("\nNo desktop detected. Either forward the port over SSH:")
 		fmt.Printf("  ssh -L %d:127.0.0.1:%d <this-server>   then open the address above locally\n", port, port)
 		fmt.Println("or install without a browser:  sudo ./ezHealthKonnect-Setup-Linux-x64 install --config answers.json")
-	} else {
-		openBrowser(url)
+	} else if openBrowser(url) {
+		// The wizard is open in its own window: drop the console window that
+		// Windows opened for a double-clicked setup.exe (no-op from a terminal).
+		releaseOwnConsole()
 	}
+	// Exit once the wizard window has been closed and nothing is running.
+	go srv.ExitWhenIdle(wizardIdleLimit, 10*time.Second)
 	<-srv.Done
 	time.Sleep(300 * time.Millisecond)
 	return 0
 }
 
+// wizardIdleLimit is how long setup waits after the wizard stops responding
+// (window closed) before it exits. The page pings every 15 seconds.
+const wizardIdleLimit = 2 * time.Minute
+
 // openBrowser opens the wizard; on Windows as a frameless Edge/Chrome window.
-func openBrowser(url string) {
+// It reports whether that dedicated window was started (a plain default-
+// browser hand-off cannot be confirmed).
+func openBrowser(url string) bool {
 	if runtime.GOOS == "windows" {
 		for _, base := range []string{os.Getenv("ProgramFiles(x86)"), os.Getenv("ProgramFiles"), os.Getenv("LOCALAPPDATA")} {
 			for _, rel := range []string{`Microsoft\Edge\Application\msedge.exe`, `Google\Chrome\Application\chrome.exe`} {
@@ -195,13 +205,14 @@ func openBrowser(url string) {
 				}
 				if _, err := os.Stat(exe); err == nil {
 					if exec.Command(exe, "--app="+url, "--window-size=1000,720", "--no-first-run").Start() == nil {
-						return
+						return true
 					}
 				}
 			}
 		}
 		exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start() //nolint:errcheck
-		return
+		return false
 	}
 	exec.Command("xdg-open", url).Start() //nolint:errcheck
+	return false
 }

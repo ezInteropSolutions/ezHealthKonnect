@@ -502,4 +502,7 @@ async function boot() {
   showFooter(true);
   setStep(0);
 }
+
+// Heartbeat: setup exits a couple of minutes after this window is closed.
+setInterval(() => { if (TOKEN) api('/api/ping').catch(() => { /* setup already closed */ }); }, 15000);
 boot();

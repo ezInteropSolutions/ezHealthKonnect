@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 func newTestServer() *UIServer {
@@ -73,5 +74,87 @@ func TestUIServer_TokensAreUnique(t *testing.T) {
 	}
 	if !strings.Contains(a.URL(""), "t="+a.Token) || !strings.HasPrefix(a.URL(""), "http://127.0.0.1:") {
 		t.Fatalf("URL %s", a.URL(""))
+	}
+}
+
+func TestUIServer_PingRequiresToken(t *testing.T) {
+	s := newTestServer()
+	host := "127.0.0.1:41234"
+	if code := call(s, http.MethodGet, "/api/ping", host, "", "", "", ""); code != http.StatusForbidden {
+		t.Errorf("ping without token: got %d, want 403", code)
+	}
+	if code := call(s, http.MethodGet, "/api/ping", host, s.Token, "", "", ""); code != http.StatusNoContent {
+		t.Errorf("ping with token: got %d, want 204", code)
+	}
+}
+
+func TestUIServer_IdleOnlyAfterWizardLeavesAndNothingRuns(t *testing.T) {
+	s := newTestServer()
+	host := "127.0.0.1:41234"
+	limit := 2 * time.Minute
+	now := time.Now()
+
+	if s.Idle(now.Add(time.Hour), limit) {
+		t.Fatal("idle before the wizard ever connected (a slow first visit must not end setup)")
+	}
+
+	call(s, http.MethodGet, "/api/ping", host, s.Token, "", "", "")
+	if s.Idle(time.Now().Add(limit/2), limit) {
+		t.Error("idle while the wizard is still within the limit")
+	}
+	if !s.Idle(time.Now().Add(limit+time.Second), limit) {
+		t.Error("not idle after the wizard stopped responding")
+	}
+
+	// Rejected requests (no token) are not wizard activity.
+	s.mu.Lock()
+	s.lastSeen = time.Now().Add(-time.Hour)
+	s.mu.Unlock()
+	call(s, http.MethodGet, "/api/ping", host, "", "", "", "")
+	if !s.Idle(time.Now(), limit) {
+		t.Error("an unauthorized request kept setup alive")
+	}
+
+	s.mu.Lock()
+	s.busy = true
+	s.mu.Unlock()
+	if s.Idle(time.Now().Add(time.Hour), limit) {
+		t.Error("idle while an operation is running (an install must always finish)")
+	}
+
+	s.mu.Lock()
+	s.busy, s.streams = false, 1
+	s.mu.Unlock()
+	if s.Idle(time.Now().Add(time.Hour), limit) {
+		t.Error("idle while a progress stream is open")
+	}
+}
+
+func TestUIServer_ExitWhenIdleClosesDone(t *testing.T) {
+	s := newTestServer()
+	s.touch()
+	go s.ExitWhenIdle(10*time.Millisecond, 5*time.Millisecond)
+	select {
+	case <-s.Done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("setup did not exit after the wizard went idle")
+	}
+}
+
+// A stray </style> once closed the stylesheet early, and the rules after it
+// were shown as text on the Welcome page.
+func TestWizardPage_StylesheetIsWellFormed(t *testing.T) {
+	data, err := webFS.ReadFile("web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	open, closing := strings.Count(page, "<style"), strings.Count(page, "</style>")
+	if open != closing {
+		t.Fatalf("index.html has %d <style> and %d </style>", open, closing)
+	}
+	head := page[strings.LastIndex(page, "</style>")+len("</style>"):]
+	if between := strings.TrimSpace(head[:strings.Index(head, "</head>")]); between != "" {
+		t.Errorf("text between the stylesheet and </head> would render on the page: %.80q", between)
 	}
 }

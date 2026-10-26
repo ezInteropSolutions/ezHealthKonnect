@@ -39,7 +39,11 @@ Get-FileHash .\ezHealthKonnect-Setup-Win64.exe -Algorithm SHA256   # compare wit
 
 Run `ezHealthKonnect-Setup-Win64.exe` as an administrator. A setup window
 opens. It checks the machine, asks for the ports and the database, and
-installs.
+installs. If you close the window before finishing, setup exits on its own
+about two minutes later; an install that is already running always
+completes first. Run from a command prompt, the installer also prints the
+setup address there, and the headless commands (`install --config`,
+`upgrade`, `uninstall`) report progress in that window.
 
 ### Linux
 
