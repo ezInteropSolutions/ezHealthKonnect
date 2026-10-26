@@ -119,11 +119,27 @@ sudo ./ezHealthKonnect-Setup-Linux-x64 install --config answers.json
 }
 ```
 
-To use an existing database, set `"dbMode": "external"` together with
-`dbHost`, `dbPort`, `dbName`, `dbUser`, `dbPassword` and `dbSslMode`
+To use an existing PostgreSQL server (another machine, a managed cloud
+service, or one on this machine addressed by host), set `"dbMode": "external"`
+together with `dbHost`, `dbPort`, `dbName`, `dbUser` and `dbSslMode`
 (`require` by default; `disable`, `verify-ca` and `verify-full` are also
-accepted). The installer only connects to it, so the database and the user
-must already exist.
+accepted; a server on this machine normally needs `disable`), and then
+either:
+
+- **an administrator login**: `dbAdminUser` (default `postgres`) and
+  `dbAdminPassword`. Setup signs in once, creates the database and the
+  application user (with a generated password, kept only in `.env`) and
+  never stores the administrator password. Nothing has to exist beforehand.
+  An existing database of that name that already holds tables is refused,
+  never reused. On managed services (RDS, Azure, Cloud SQL) the
+  administrator is not a superuser; that is supported, provided it may
+  create roles and databases.
+- **an existing user**: `dbPassword`, for a database and user that already
+  exist. The database must be empty and owned by that user. Setup only
+  connects to it.
+
+In the wizard this is the **Existing database** option: choose *Create the
+database and user for me* or *They already exist*.
 
 On Windows, if PostgreSQL is already installed on the machine, also set
 `pgAdminPassword` (the `postgres` superuser password). The installer needs it

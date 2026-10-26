@@ -189,19 +189,35 @@ function renderConfig() {
       <div class="form-group"><label for="dbPort">Port</label><input type="text" id="dbPort" value="${esc(c.dbPort)}"></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label for="dbName">Database</label><input type="text" id="dbName" value="${esc(c.dbName)}"></div>
-      <div class="form-group"><label for="dbUser">User</label><input type="text" id="dbUser" value="${esc(c.dbUser)}"></div>
+      <div class="form-group"><label for="dbName">Database name</label><input type="text" id="dbName" value="${esc(c.dbName)}"></div>
+      <div class="form-group"><label for="dbUser">Application user</label><input type="text" id="dbUser" value="${esc(c.dbUser)}"></div>
     </div>
-    <div class="form-row">
-      <div class="form-group"><label for="dbPassword">Password</label><input type="password" id="dbPassword" autocomplete="off"></div>
-      <div class="form-group"><label for="dbSslMode">TLS</label>
-        <select id="dbSslMode">
-          <option value="require" ${c.dbSslMode === 'require' ? 'selected' : ''}>Required</option>
-          <option value="verify-full" ${c.dbSslMode === 'verify-full' ? 'selected' : ''}>Required + verify certificate</option>
-          <option value="disable" ${c.dbSslMode === 'disable' ? 'selected' : ''}>Off (private network only)</option>
-        </select></div>
+    <div class="form-group"><label for="dbSslMode">TLS</label>
+      <select id="dbSslMode">
+        <option value="require" ${c.dbSslMode === 'require' ? 'selected' : ''}>Required</option>
+        <option value="verify-full" ${c.dbSslMode === 'verify-full' ? 'selected' : ''}>Required + verify certificate</option>
+        <option value="disable" ${c.dbSslMode === 'disable' ? 'selected' : ''}>Off (this machine or a private network)</option>
+      </select>
+      <div class="hint">A PostgreSQL on this machine normally has TLS off; it is switched to Off for localhost.</div></div>
+
+    <label class="checkbox-row" for="dbAuthAdmin">
+      <input type="radio" name="dbAuth" id="dbAuthAdmin" value="admin" checked>
+      <div class="cb-text"><strong>Create the database and user for me</strong>
+        <span>Sign in as an administrator once; setup creates both, with a generated password for the user.</span></div>
+    </label>
+    <div id="dbAuthAdminFields" class="form-row">
+      <div class="form-group"><label for="dbAdminUser">Administrator user</label><input type="text" id="dbAdminUser" value="postgres" autocomplete="off"></div>
+      <div class="form-group"><label for="dbAdminPassword">Administrator password</label><input type="password" id="dbAdminPassword" autocomplete="off">
+        <div class="hint">Used once, then forgotten. It is never saved.</div></div>
     </div>
-    <div class="hint">The database must exist, be empty and be owned by this user.</div>
+    <label class="checkbox-row" for="dbAuthExisting">
+      <input type="radio" name="dbAuth" id="dbAuthExisting" value="existing">
+      <div class="cb-text"><strong>They already exist</strong>
+        <span>The database must exist, be empty and be owned by the user above.</span></div>
+    </label>
+    <div id="dbAuthExistingFields" class="form-group" style="display:none">
+      <label for="dbPassword">Password of the application user</label><input type="password" id="dbPassword" autocomplete="off">
+    </div>
   </div>
 
   <div class="section-title">Options</div>
@@ -221,7 +237,12 @@ function collectConfig() {
     dbPort: val('dbPort') || '5432', dbName: val('dbName') || 'ezhealthkonnect', dbUser: val('dbUser') || 'ezhealth_user',
   };
   if (mode === 'external') {
-    c.dbHost = val('dbHost'); c.dbPassword = $('dbPassword').value; c.dbSslMode = val('dbSslMode');
+    c.dbHost = val('dbHost'); c.dbSslMode = val('dbSslMode');
+    if (document.querySelector('input[name="dbAuth"]:checked')?.value === 'existing') {
+      c.dbPassword = $('dbPassword').value;
+    } else {
+      c.dbAdminUser = val('dbAdminUser') || 'postgres'; c.dbAdminPassword = $('dbAdminPassword').value;
+    }
   } else if ($('pgAdminPassword')) {
     c.pgAdminPassword = $('pgAdminPassword').value;
   }
@@ -233,7 +254,11 @@ function validateConfig(c) {
   if (!c.installDir) return 'Choose an install directory.';
   if (!port(c.appPort) || !port(c.apiPort)) return 'Ports must be numbers between 1 and 65535.';
   if (c.appPort === c.apiPort) return 'The web port and the engine port must differ.';
-  if (c.dbMode === 'external' && (!c.dbHost || !c.dbPassword)) return 'Enter the database host and password.';
+  if (c.dbMode === 'external') {
+    if (!c.dbHost) return 'Enter the database host.';
+    if (c.dbAdminPassword !== undefined && !c.dbAdminPassword) return 'Enter the administrator password.';
+    if (c.dbAdminPassword === undefined && !c.dbPassword) return 'Enter the password of the database user.';
+  }
   return '';
 }
 
@@ -449,6 +474,26 @@ async function loadBrowse(path) {
 }
 
 // ── event delegation ──────────────────────────────────────────────────────────
+// Existing server: show the fields for the chosen way of signing in.
+document.addEventListener('change', (e) => {
+  if (e.target && e.target.name === 'dbAuth') {
+    const existing = e.target.value === 'existing';
+    $('dbAuthAdminFields').style.display = existing ? 'none' : '';
+    $('dbAuthExistingFields').style.display = existing ? '' : 'none';
+  }
+});
+// A PostgreSQL on this machine normally has TLS off, and the default
+// "required" would fail against it: follow the host unless the person chose.
+document.addEventListener('input', (e) => {
+  if (e.target && e.target.id === 'dbHost' && $('dbSslMode') && !$('dbSslMode').dataset.chosen) {
+    const local = /^(localhost|127\.0\.0\.1|::1)$/i.test(e.target.value.trim());
+    $('dbSslMode').value = local ? 'disable' : 'require';
+  }
+});
+document.addEventListener('change', (e) => {
+  if (e.target && e.target.id === 'dbSslMode') e.target.dataset.chosen = '1';
+});
+
 document.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-action]');
   if (!el) return;

@@ -29,6 +29,14 @@ type Config struct {
 	DBPassword string `json:"dbPassword"` // external mode only
 	DBSSLMode  string `json:"dbSslMode"`  // external mode: disable | require | verify-full
 
+	// External mode, alternative to DBPassword: an administrator account on
+	// that server (user defaults to "postgres"). With a password, setup signs
+	// in once as the administrator and creates the database and the
+	// application's user itself (generated password) — nothing has to exist
+	// beforehand. The administrator password is used for this and never stored.
+	DBAdminUser     string `json:"dbAdminUser"`
+	DBAdminPassword string `json:"dbAdminPassword"`
+
 	// Only needed when PostgreSQL is already installed on this machine and
 	// cannot be administered through the OS (Windows): its superuser password.
 	PGAdminPassword string `json:"pgAdminPassword"`
@@ -56,6 +64,9 @@ func (c *Config) Normalize() {
 	def(&c.DBPort, "5432")
 	def(&c.DBName, "ezhealthkonnect")
 	def(&c.DBUser, "ezhealth_user")
+	if c.DBMode == "external" && c.DBAdminPassword != "" {
+		def(&c.DBAdminUser, "postgres")
+	}
 	if c.DBMode == "local" {
 		c.DBHost = "localhost"
 		c.DBSSLMode = "disable"
@@ -83,11 +94,17 @@ func (c *Config) Validate() error {
 	switch c.DBMode {
 	case "local":
 	case "external":
-		if c.DBHost == "" || c.DBPassword == "" {
-			return fmt.Errorf("an existing database needs a host and the user's password")
+		if c.DBHost == "" {
+			return fmt.Errorf("an existing PostgreSQL server needs a host")
 		}
-		if strings.ContainsAny(c.DBPassword, "\r\n") {
-			return fmt.Errorf("database password must be a single line")
+		if c.DBAdminPassword == "" && c.DBPassword == "" {
+			return fmt.Errorf("enter an administrator password (setup then creates the database and its user), " +
+				"or the password of a database user that already exists")
+		}
+		for _, p := range []string{c.DBPassword, c.DBAdminPassword, c.DBAdminUser} {
+			if strings.ContainsAny(p, "\r\n") {
+				return fmt.Errorf("database user names and passwords must be a single line")
+			}
 		}
 		switch c.DBSSLMode {
 		case "disable", "require", "verify-ca", "verify-full":

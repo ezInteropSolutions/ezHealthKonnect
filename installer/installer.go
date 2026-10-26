@@ -101,6 +101,8 @@ type Installer struct {
 	Now      func() time.Time
 	// Pg returns client tools for a bin dir (injectable for tests).
 	Pg func(binDir string) PgOps
+	// NewAdmin opens administrator access to an existing server (injectable for tests).
+	NewAdmin func(binDir string, cfg Config) AdminSQL
 	// HealthTimeout bounds the post-start health wait.
 	HealthTimeout time.Duration
 	// KeepBackups is how many upgrade backups to keep.
@@ -184,8 +186,29 @@ func (in *Installer) Install(cfg Config) (*InstallResult, error) {
 		}
 		rep.OK("Database %s and user %s ready", cfg.DBName, cfg.DBUser)
 	}
+	if cfg.DBMode == "external" && cfg.DBAdminPassword != "" {
+		// An administrator login was given: create the database and the
+		// application's user instead of expecting them to exist already.
+		admin := in.externalAdmin(pg.BinDir, cfg)
+		if out, err := admin.Exec("postgres", "SELECT 1"); err != nil {
+			return nil, fmt.Errorf("cannot sign in to %s:%s as %s: %s", cfg.DBHost, cfg.DBPort, cfg.DBAdminUser, firstLine(out, err))
+		}
+		conn.Password = randomPassword()
+		if err := in.refuseExistingData(admin, cfg); err != nil {
+			return nil, err
+		}
+		if err := EnsureRoleAndDatabase(admin, cfg.DBName, cfg.DBUser, conn.Password); err != nil {
+			return nil, err
+		}
+		rep.OK("Database %s and user %s created on %s", cfg.DBName, cfg.DBUser, cfg.DBHost)
+	}
 	if err := tools.Ping(conn); err != nil {
-		return nil, fmt.Errorf("cannot connect to the database as %s: %w", cfg.DBUser, err)
+		hint := ""
+		if cfg.DBMode == "external" && cfg.DBAdminPassword == "" {
+			hint = " — if the user or database does not exist yet, enter an administrator (for example postgres) " +
+				"login instead of the user's password, and setup will create them"
+		}
+		return nil, fmt.Errorf("cannot connect to the database as %s: %w%s", cfg.DBUser, err, hint)
 	}
 	if err := in.checkPgVersions(tools, conn); err != nil {
 		return nil, err
@@ -247,6 +270,15 @@ func (in *Installer) Install(cfg Config) (*InstallResult, error) {
 	}
 	rep.OK("ezHealthKonnect is running at %s", appURL)
 	return result, nil
+}
+
+// externalAdmin is administrator access to the existing server named in cfg.
+func (in *Installer) externalAdmin(binDir string, cfg Config) AdminSQL {
+	if in.NewAdmin != nil {
+		return in.NewAdmin(binDir, cfg)
+	}
+	return psqlAdmin{Psql: psqlPath(binDir), Host: cfg.DBHost, Port: cfg.DBPort,
+		User: cfg.DBAdminUser, Password: cfg.DBAdminPassword, SSLMode: cfg.DBSSLMode}
 }
 
 func (in *Installer) refuseExistingData(admin AdminSQL, cfg Config) error {

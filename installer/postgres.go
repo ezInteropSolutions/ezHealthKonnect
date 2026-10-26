@@ -219,6 +219,11 @@ END $$;`, sqlLiteral(user), user, sqlLiteral(password))
 	if out, err := admin.Exec("postgres", role); err != nil {
 		return fmt.Errorf("create role %s: %s", user, firstLine(out, err))
 	}
+	// Managed PostgreSQL services (RDS, Azure, Cloud SQL) give their
+	// administrator a non-superuser login, which may only create a database
+	// owned by a role it is a member of. Best effort: a real superuser needs
+	// no membership, and the result does not matter then.
+	_, _ = admin.Exec("postgres", fmt.Sprintf("GRANT %s TO CURRENT_USER", user))
 	exists, err := admin.Exec("postgres", fmt.Sprintf("SELECT 1 FROM pg_database WHERE datname = %s", sqlLiteral(dbName)))
 	if err != nil {
 		return fmt.Errorf("check database: %s", firstLine(exists, err))
@@ -230,7 +235,12 @@ END $$;`, sqlLiteral(user), user, sqlLiteral(password))
 	}
 	// PostgreSQL 15+: the database owner owns schema public; be explicit for older layouts.
 	if out, err := admin.Exec(dbName, fmt.Sprintf("ALTER SCHEMA public OWNER TO %s", user)); err != nil {
-		return fmt.Errorf("grant schema: %s", firstLine(out, err))
+		// Managed servers do not let their administrator change the owner of
+		// schema public. The database owner can already create objects in it
+		// (PostgreSQL 15+); an explicit grant covers older servers.
+		if out2, err2 := admin.Exec(dbName, fmt.Sprintf("GRANT ALL ON SCHEMA public TO %s", user)); err2 != nil {
+			return fmt.Errorf("grant schema: %s (changing its owner failed too: %s)", firstLine(out2, err2), firstLine(out, err))
+		}
 	}
 	return nil
 }

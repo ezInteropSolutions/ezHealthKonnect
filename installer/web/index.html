@@ -242,12 +242,12 @@
     background: var(--surface); margin-bottom: 6px; transition: border-color 0.15s;
   }
   .checkbox-row:hover { border-color: var(--navy-light); background: #fff; }
-  .checkbox-row input[type="checkbox"] {
+  .checkbox-row input[type="checkbox"], .checkbox-row input[type="radio"] {
     width: 15px; height: 15px; margin-top: 2px; flex-shrink: 0;
     cursor: pointer; accent-color: var(--navy-mid);
   }
   .checkbox-row .cb-text strong { display: block; font-weight: 600; color: var(--text); }
-  .checkbox-row .cb-text span   { font-size: 11px; color: var(--muted); }
+  .checkbox-row .cb-text span   { font-size: 11px; color: var(--muted); text-transform: none; letter-spacing: normal; font-weight: 400; }
 
   /* DB source toggle */
   .db-source-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
