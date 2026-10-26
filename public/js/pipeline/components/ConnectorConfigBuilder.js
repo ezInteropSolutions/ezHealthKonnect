@@ -3585,12 +3585,11 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
     }
 
     formatGroupName(name) {
-        const icons = {
-            basic: '<i class="fas fa-cog"></i> ',
-            security: '<i class="fas fa-shield-alt"></i> ',
-            advanced: '<i class="fas fa-sliders-h"></i> '
-        };
-        return (icons[name] || '') + name.charAt(0).toUpperCase() + name.slice(1);
+        const icons = { basic: 'fa-cog', security: 'fa-shield-alt', advanced: 'fa-sliders-h' };
+        const label = name.charAt(0).toUpperCase() + name.slice(1);
+        return icons[name]
+            ? HtmlSafe.html`<i class="fas ${icons[name]}"></i> ${label}`
+            : HtmlSafe.html`${label}`;
     }
 
     formatFieldName(name) {
