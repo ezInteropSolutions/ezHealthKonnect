@@ -1,13 +1,14 @@
 # Release Notes
 
-## v26.10 — 2026-10-20
+## v26.10 — 2026-10-27
 
-*Previous release: [v26.08](../../releases/tag/v26.08) (2026-08-30). Migrations V229–V281.*
+*Previous release: [v26.08](../../releases/tag/v26.08) (2026-08-30). Migrations V229–V283.*
 
 This release adds three new standards families — **EDI X12**, **NCPDP** (SCRIPT e-prescribing and
 Telecommunication D.0 pharmacy claims) and **medical-device connectivity** (HL7 over TCP/IP or RS232,
 ASTM, DICOM) — plus a security hardening pass, new healthcare transports, a compliance-grade audit
-trail, and a much better-informed ezCompanion assistant.
+trail, a much better-informed ezCompanion assistant, and an administrator-controlled **access
+policy** for what each role can see.
 
 > **Upgrade notes — read before upgrading**
 > - **Partner real-time endpoints now require credentials.** Calls to `/api/eligibility`,
@@ -15,6 +16,16 @@ trail, and a much better-informed ezCompanion assistant.
 >   engineer sets **Partner Endpoint Authentication** (API key, Basic or Bearer) on the interface.
 > - **Role checks are enforced.** Users with the plain `user` role can no longer change interfaces,
 >   pipelines or code templates, or use ezCompanion; give them `operator` or `viewer`.
+> - **What each role can see is now a setting, and the defaults differ from earlier builds.** Before,
+>   every user (administrators included) saw only the interfaces they had created themselves, so an
+>   operator or viewer added to a team saw an empty system. Now **Settings → Access Policy** decides:
+>   by default operators see all interfaces with full message content, viewers see all interfaces
+>   with **details only** (time, type, status, errors — not message content), and plain users see
+>   only their own. Administrators always see everything. Review the policy after upgrading if you
+>   rely on the old behaviour.
+> - **Forced password resets now really replace the password.** In earlier builds the reset page
+>   reported success but the old password kept working. If you forced a reset to lock out a password
+>   you believed was compromised, force it again after upgrading.
 > - **Credential encryption key.** Installers now generate `APP_CREDENTIAL_KEY` (kept on
 >   re-install). Existing connector passwords/tokens are encrypted at first start. **Back up
 >   `.env`** — losing this key makes stored credentials unreadable.
@@ -124,6 +135,24 @@ trail, and a much better-informed ezCompanion assistant.
   lint gate blocks new unescaped HTML. Unused frontend files (old backups, unreferenced scripts
   and developer test pages) are no longer shipped.
 
+### Access policy, passwords and code translations (new)
+
+- **Access Policy** (Settings → Access Policy, administrators only): for each of operator, viewer
+  and user, choose whether they see **all interfaces** or only their own, and whether they see
+  **full message content** or **details only**. Changes apply within seconds, need no restart and are
+  recorded in the audit log. Administrators cannot be restricted, so a wrong setting can never lock
+  one out. A role set to details only sees a short explanation in the message screens instead of
+  empty content, and content requests from the API are refused with `403`
+  (`MESSAGE_CONTENT_RESTRICTED`).
+- **Change my password**: a button at the bottom of the left menu. It asks for the current password,
+  follows the minimum length set under Settings → Security and is audited.
+- **Code Translations** (Tools → Code Translations): view, add, edit and delete the translations
+  that turn a sending system's local codes into the codes the receiving side expects, import many
+  from a CSV file and export the current view. A translation is **shared** (every interface) or
+  belongs to **one interface**, which wins over a shared one. Viewers can look but not change.
+- Role-aware screens: controls a role cannot use are disabled with the reason, a refused action
+  shows a message instead of failing silently, and admin-only pages say so.
+
 ### Audit logging and compliance
 
 - Unified audit taxonomy shared by the Go and Node services; coverage for interface, message,
@@ -168,7 +197,8 @@ trail, and a much better-informed ezCompanion assistant.
   application and write only its data folders.
 - Every release's installers are tested end to end before publication on Ubuntu 22.04, Ubuntu
   24.04, AlmaLinux 9 and Windows. The tests cover install, an upgrade, a forced upgrade failure
-  that must roll back, a rollback and uninstall.
+  that must roll back, a rollback and uninstall. The browser test suite also runs against a real
+  installed copy on Ubuntu and Windows.
 
 ### Fixes worth noting
 
@@ -177,6 +207,17 @@ trail, and a much better-informed ezCompanion assistant.
 - Template gallery tabs dropped the EDI, NCPDP and CDA categories.
 - Several pipeline-engine fixes found through real interop testing (field validation was inert,
   untaken switch/if branches still ran, single-object repeating segments were dropped on build).
+- **Windows installs stored no raw message content** for TCP/MLLP senders: the sender's address in the
+  message ID contains a colon, which Windows does not allow in a file name. The raw, parsed and
+  transformed content views were empty and recovery had nothing to re-run. Fixed; Linux is unchanged.
+- The wizard sent "Other/Custom" and File Processor flows through the FHIR steps and ended on an
+  "Invalid step" page; they now go straight to the target configuration. A wizard "store only"
+  target also saved a connector type nothing could run, so its messages failed.
+- After a restart, messages that were mid-processing are picked up again from storage (before, the
+  recovery could not re-queue them).
+- `GET /api/ai/status` answered an error whenever the AI service was not installed, which is a
+  normal state; it now reports the state in a normal response.
+- The pipeline editor's "use the last real message as the sample" never worked; it does now.
 
 ### Known limitations
 
@@ -188,6 +229,9 @@ trail, and a much better-informed ezCompanion assistant.
   are x86_64 only.
 - ezCompanion runs on a small local model by default; it can misread detailed schema lists, and
   some answers still favour saved configurations over the reference documentation.
+- "Details only" hides message **content** (raw, transformed and parsed views, the message journey
+  and the mapping log). Status, error text and processing logs stay visible so that errors can be
+  investigated; error text can occasionally quote a fragment of a message.
 
 ---
 
