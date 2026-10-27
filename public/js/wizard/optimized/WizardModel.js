@@ -545,7 +545,9 @@ class WizardModel extends EventTarget {
             if (isFHIRSource) {
                 nextStepNum = 4;
             } else if (flow && flow.skipUploadSteps) {
-                nextStepNum = flow.showMappingUI ? 4 : 5;
+                // Passthrough / FHIR receiver / file processor / custom: no HL7 parsing,
+                // FHIR transform or mapping screens — straight to Target Config (the last step).
+                nextStepNum = 4;
             }
         }
 
@@ -586,15 +588,27 @@ class WizardModel extends EventTarget {
             }
         }
 
-        // If we're on step 5 and the flow skips the mapping step, jump back over step 4
-        if (this.currentStep === 5 && flow && !flow.showMappingUI) {
-            // CDA: came via 1→2→3→5, so go back to 3
-            // sink/custom (skipUploadSteps): came via 1→5, so go back to 1
-            prevStepNum = flow.skipUploadSteps ? 1 : 3;
+        // CDA only: Target Config is model step 5 (came via 1→2→3→5), so go back to 3
+        if (this.currentStep === 5 && flow && !flow.showMappingUI && !flow.skipUploadSteps) {
+            prevStepNum = 3;
             console.log(`🎯 Flow "${transformationFlow}" — skipping mapping step backwards, going to ${prevStepNum}`);
         }
 
         return this.goToStep(prevStepNum);
+    }
+
+    /**
+     * Target type sent to the API. Flows with no FHIR output (FlowRegistry
+     * targetFormat null) must not be labelled FHIR just because the wizard's
+     * out-of-box default is FHIR; derive it from the chosen connector instead.
+     */
+    _payloadTargetType() {
+        const flow = typeof getFlow !== 'undefined' ? getFlow(this.data.transformationFlow) : null;
+        if (flow && flow.targetFormat === null) {
+            const byConnectivity = { file: 'file', database: 'database', tcp: 'hl7' };
+            return byConnectivity[this.data.targetConnectivity] || 'http';
+        }
+        return this.data.targetType || 'fhir';
     }
 
     /**
@@ -638,7 +652,7 @@ class WizardModel extends EventTarget {
             sourceConnectorConfig: this.data.sourceConnectorConfig || null,
 
             // Target configuration
-            targetType: this.data.targetType || 'fhir',
+            targetType: this._payloadTargetType(),
             targetConnectivity: this.data.targetConnectivity || 'http',
             targetConfig: this.data.targetConfig || {},
             targetConnectorConfig: this.data.targetConnectorConfig || null,

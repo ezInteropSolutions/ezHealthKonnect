@@ -1563,9 +1563,10 @@ func (pe *ProcessingEngine) PublishValidationFeedback(feedback *models.Validatio
 // ==================== STARTUP RECOVERY (Phase 2 Durability) ====================
 
 // recoverUnprocessedMessages scans all interface message tables on startup and
-// re-enqueues any messages stuck in 'received' or 'processing' state that have not
+// re-runs any messages stuck in 'received' or 'processing' state that have not
 // progressed in the last 5 minutes (i.e. the process crashed mid-pipeline).
 // Called as a goroutine from Start() after the message queue is running.
+// Covered end to end by tests/playwright/service-restart-recovery.spec.js.
 func (pe *ProcessingEngine) recoverUnprocessedMessages(ctx context.Context) {
 	// Brief startup delay — let connectors initialise before we flood the queue.
 	time.Sleep(10 * time.Second)
@@ -1612,7 +1613,6 @@ func (pe *ProcessingEngine) recoverUnprocessedMessages(ctx context.Context) {
 		// #nosec G201 — table name sourced from pg_tables (system catalog), not user input
 		query := fmt.Sprintf(`
 			SELECT message_id,
-			       COALESCE(message_type, ''),
 			       COALESCE(raw_content_uri, '')
 			FROM %s
 			WHERE status IN ('received', 'processing')
@@ -1625,11 +1625,11 @@ func (pe *ProcessingEngine) recoverUnprocessedMessages(ctx context.Context) {
 			continue
 		}
 
-		type staleMsg struct{ id, msgType, uri string }
+		type staleMsg struct{ id, uri string }
 		var stale []staleMsg
 		for msgRows.Next() {
 			var m staleMsg
-			if scanErr := msgRows.Scan(&m.id, &m.msgType, &m.uri); scanErr == nil {
+			if scanErr := msgRows.Scan(&m.id, &m.uri); scanErr == nil {
 				stale = append(stale, m)
 			}
 		}
@@ -1648,17 +1648,28 @@ func (pe *ProcessingEngine) recoverUnprocessedMessages(ctx context.Context) {
 				log.Printf("⚠️  [Recovery] Skipping %s: raw content could not be read from storage: %v", m.id, readErr)
 				continue
 			}
-			if enqErr := pe.messageQueue.EnqueueForRecovery(interfaceID, m.id, m.msgType, string(data)); enqErr != nil {
-				log.Printf("⚠️  [Recovery] Failed to re-enqueue %s: %v", m.id, enqErr)
+			// Re-run it through the same path as a user's Reprocess: it works on the EXISTING
+			// row (the message id stays stable), reads the content from storage, runs the real
+			// pipeline and records the outcome on that row. Sequential on purpose — recovery is
+			// a background job and must not flood a freshly started engine.
+			//
+			// This used to enqueue into message_processing_queue instead. That could never
+			// work: the queue's message_id column is a UUID and real message ids look like
+			// "tcp_<addr>_<nanos>", so every recovery failed with "invalid input syntax for
+			// type uuid"; and the queue consumer never updated this table's row anyway, so a
+			// "recovered" message would have stayed 'processing' and been re-queued at every
+			// restart.
+			if recErr := pe.ReprocessMessageSync(interfaceID, m.id); recErr != nil {
+				log.Printf("⚠️  [Recovery] Stale message %s (interface: %s) did not recover: %v", m.id, interfaceID, recErr)
 			} else {
 				totalRecovered++
-				log.Printf("♻️  [Recovery] Re-enqueued stale message %s (interface: %s)", m.id, interfaceID)
+				log.Printf("♻️  [Recovery] Re-ran stale message %s (interface: %s)", m.id, interfaceID)
 			}
 		}
 	}
 
 	if totalRecovered > 0 {
-		log.Printf("✅ [Recovery] Startup recovery complete — %d message(s) re-enqueued", totalRecovered)
+		log.Printf("✅ [Recovery] Startup recovery complete — %d message(s) re-run", totalRecovered)
 		if metrics.RecoveryMessagesRequeued != nil {
 			metrics.RecoveryMessagesRequeued.Add(float64(totalRecovered))
 		}

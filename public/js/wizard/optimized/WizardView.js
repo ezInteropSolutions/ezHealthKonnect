@@ -1253,7 +1253,7 @@ class WizardView extends EventTarget {
             <div class="wizard-step-content" data-step="4">
                 <div class="wizard-step-header">
                     <h3>Target Configuration</h3>
-                    <p>${isSinkOnly ? 'Messages will be stored in database only (no external routing)' : 'Configure where FHIR resources will be sent'}</p>
+                    <p>${isSinkOnly ? 'Messages will be stored in database only (no external routing)' : (typeof getFlow !== 'undefined' && getFlow(data.transformationFlow).targetFormat === null ? 'Configure where processed messages will be delivered' : 'Configure where FHIR resources will be sent')}</p>
                 </div>
 
                 <div class="wizard-form">

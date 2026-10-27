@@ -126,11 +126,10 @@ func (c *AIController) GetStatus(ctx *gin.Context) {
 	defer cancel()
 
 	status := c.svc.Status(reqCtx)
-	code := http.StatusOK
-	if !status.ProviderReachable {
-		code = http.StatusServiceUnavailable
-	}
-	ctx.JSON(code, gin.H{"success": status.ProviderReachable, "data": status})
+	// Always 200: "the AI component is not installed / not reachable" is a normal state for a customer install
+	// (ezCompanion is optional), not a server error. The answer is in the body (success / data.provider_reachable).
+	// A 503 here made every dashboard load log a console error on installs without AI.
+	ctx.JSON(http.StatusOK, gin.H{"success": status.ProviderReachable, "data": status})
 }
 
 // ─── POST /api/ai/detect-format ───────────────────────────────────────────────
