@@ -169,6 +169,183 @@ jobs:
       - name: Run the real installer end to end
         run: docker exec el9 bash /work/installer/test/e2e-linux.sh /work/dist/ezHealthKonnect-Setup-Linux-x64 /work/dist/bundle-linux-amd64.zip
 
+  # The whole browser suite against the INSTALLED app (G3). Everything else in CI runs the Docker dev
+  # stack; customers run this: the bundled Node runtime and system services, local-disk object storage
+  # (no MinIO), first-run setup with the one-time token, the built-in migration engine, and the
+  # non-Docker settings page. The first-run project in playwright.config.js completes setup through
+  # the real setup page using SETUP_TOKEN from the installed .env.
+  playwright-installed:
+    name: Playwright — installed app (Ubuntu)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      APP_DIR: /opt/ezhk-pw
+      ADMIN_EMAIL: admin@ezhealthkonnect.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-linux
+          path: dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install test dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Install the app with the real installer
+        run: |
+          chmod +x dist/ezHealthKonnect-Setup-Linux-x64
+          cat > answers.json <<JSON
+          {"installDir":"$APP_DIR","appPort":"3000","apiPort":"8080","dbMode":"local"}
+          JSON
+          sudo dist/ezHealthKonnect-Setup-Linux-x64 install --config answers.json
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3000/api/system/health 2>/dev/null | grep -q '"status":"connected"' && exit 0
+            sleep 2
+          done
+          echo "installed app did not become healthy" >&2; exit 1
+      - name: Install the schema packs (what a customer does from Settings -> Schemas)
+        # The repository does not track the FHIR/HL7 schema files (they ship as separate packs), so a fresh
+        # install has none and every FHIR/HL7/EDI-to-FHIR flow fails until they are installed. Found by running
+        # this suite against a real install locally. Same three packs, same extraction and permission handling as
+        # the Docker CI job in ci.yml.
+        run: |
+          set -euo pipefail
+          for id in fhir-r4-base fhir-r4-us-core hl7-v2-25; do
+            url=$(jq -r --arg id "$id" '.[] | select(.id==$id) | .download_url' schemas/catalog.json)
+            echo "Installing $id from $url"
+            curl -sSL "$url" -o "/tmp/$id.zip"
+            # These zips were built on Windows (backslash separators): unzip extracts them correctly but exits 1.
+            sudo unzip -q -o "/tmp/$id.zip" -d "$APP_DIR/schemas/" || { code=$?; [ "$code" -le 1 ] || exit "$code"; }
+          done
+          sudo chmod -R a+rX "$APP_DIR/schemas"
+          sudo chown -R ezhealthkonnect: "$APP_DIR/schemas"
+          sudo systemctl restart ezhealthkonnect-api ezhealthkonnect
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3000/api/system/health 2>/dev/null | grep -q '"status":"connected"' && exit 0
+            sleep 2
+          done
+          echo "app did not come back after installing the schema packs" >&2; exit 1
+      - name: Give the tests the installed app's token and database
+        run: |
+          envget() { sudo grep "^$1=" "$APP_DIR/.env" | cut -d= -f2-; }
+          echo "::add-mask::$(envget SETUP_TOKEN)"
+          echo "::add-mask::$(envget DB_PASSWORD)"
+          PW="E2e-$(openssl rand -hex 12)"
+          echo "::add-mask::$PW"
+          {
+            echo "SETUP_TOKEN=$(envget SETUP_TOKEN)"
+            echo "ADMIN_PASSWORD=$PW"
+            echo "DATABASE_URL=postgres://$(envget DB_USER):$(envget DB_PASSWORD)@127.0.0.1:$(envget DB_PORT)/$(envget DB_NAME)?sslmode=disable"
+          } >> "$GITHUB_ENV"
+      - name: Run the Playwright suite against the installed app
+        env:
+          BASE_URL: http://127.0.0.1:3000
+          # service-restart-recovery.spec.js restarts the real services.
+          RESTART_COMMAND: sudo systemctl restart ezhealthkonnect-api ezhealthkonnect
+        run: npx playwright test --project=chromium
+      - name: Application logs on failure
+        if: failure()
+        run: |
+          sudo journalctl -u ezhealthkonnect-api -u ezhealthkonnect --no-pager -n 200 || true
+          sudo tail -n 200 "$APP_DIR/logs/application/app.log" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-installed
+          path: tests/playwright-report/
+          retention-days: 7
+
+  # A small, fixed browser smoke set against the INSTALLED Windows build (Windows service under its own
+  # virtual account, Windows PostgreSQL, local-disk storage). The full suite runs on Linux above; this proves
+  # the same product basics work on the platform most customers use: first-run setup with the token, the pages
+  # load, a wizard-created interface receives a real message and stores it, roles, and restart recovery.
+  playwright-windows-smoke:
+    name: Playwright smoke — installed app (Windows)
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 50
+    env:
+      APP_DIR: C:\ezhk-pw
+      ADMIN_EMAIL: admin@ezhealthkonnect.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-windows
+          path: dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install test dependencies
+        shell: pwsh
+        run: |
+          npm ci
+          npx playwright install chromium
+      - name: Install the app with the real installer
+        shell: pwsh
+        run: |
+          # Same PostgreSQL handling as installer/test/e2e-windows.ps1's "existing" scenario.
+          $answers = @{ installDir = $env:APP_DIR; appPort = '3000'; apiPort = '8080'; dbMode = 'local' }
+          $pg = Get-Service 'postgresql*' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($pg -and $env:PGPASSWORD) {
+              Set-Service $pg.Name -StartupType Manual
+              Start-Service $pg.Name
+              $answers.pgAdminPassword = $env:PGPASSWORD
+          }
+          $answers | ConvertTo-Json | Set-Content -Encoding ascii answers.json
+          & .\dist\ezHealthKonnect-Setup-Win64.exe install --config answers.json
+          if ($LASTEXITCODE -ne 0) { throw "install exited $LASTEXITCODE" }
+          for ($i = 0; $i -lt 60; $i++) {
+              try { if ((Invoke-RestMethod 'http://127.0.0.1:3000/api/system/health' -TimeoutSec 10).database.status -eq 'connected') { exit 0 } } catch {}
+              Start-Sleep -Seconds 2
+          }
+          throw 'installed app did not become healthy'
+      - name: Give the tests the installed app's token and database
+        shell: pwsh
+        run: |
+          function EnvGet($k) { ((Get-Content "$env:APP_DIR\.env" | Where-Object { $_ -like "$k=*" }) -split '=', 2)[1] }
+          Write-Host "::add-mask::$(EnvGet 'SETUP_TOKEN')"
+          Write-Host "::add-mask::$(EnvGet 'DB_PASSWORD')"
+          $pw = 'E2e-' + [guid]::NewGuid().ToString('N').Substring(0, 20)
+          Write-Host "::add-mask::$pw"
+          @(
+              "SETUP_TOKEN=$(EnvGet 'SETUP_TOKEN')",
+              "ADMIN_PASSWORD=$pw",
+              "DATABASE_URL=postgres://$(EnvGet 'DB_USER'):$(EnvGet 'DB_PASSWORD')@127.0.0.1:$(EnvGet 'DB_PORT')/$(EnvGet 'DB_NAME')?sslmode=disable"
+          ) | Add-Content -Path $env:GITHUB_ENV
+      - name: Run the smoke set against the installed app
+        shell: pwsh
+        env:
+          BASE_URL: http://127.0.0.1:3000
+          RESTART_COMMAND: powershell -NoProfile -Command "Restart-Service ezhealthkonnect"
+        run: >
+          npx playwright test --project=chromium
+          tests/playwright/02-dashboard.spec.js
+          tests/playwright/03-interfaces.spec.js
+          tests/playwright/06-messages.spec.js
+          tests/playwright/wizard-data-path-e2e.spec.js
+          tests/playwright/roles-and-endpoint-auth.spec.js
+          tests/playwright/service-restart-recovery.spec.js
+      - name: Application logs on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-Service ezhealthkonnect | Format-List | Out-String | Write-Host
+          Get-ChildItem "$env:APP_DIR\logs" -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 60 -ErrorAction SilentlyContinue | Write-Host }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-windows
+          path: tests/playwright-report/
+          retention-days: 7
+
   e2e-windows:
     name: E2E — Windows (${{ matrix.postgres }} PostgreSQL)
     needs: build

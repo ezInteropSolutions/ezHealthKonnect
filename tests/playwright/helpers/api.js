@@ -102,6 +102,45 @@ class ApiHelper {
         return body.interface_scaffold;
     }
 
+    // Creates a real interface + saved pipeline from an OOB template, through the
+    // same three calls the dashboard's "Use Template" button makes (scaffold ->
+    // POST /api/interfaces -> POST /api/pipelines). The interface is NOT activated.
+    // Returns { interfaceId, scaffold }.
+    async createInterfaceFromTemplate(slugOrId, name) {
+        const useRes = await this.request.post(`${this.base}/api/interface-templates/${slugOrId}/use`, {
+            data: { interface_name: name, source_values: {}, target_values: {} },
+        });
+        const useBody = await this._json(useRes, 'useTemplate');
+        if (!useBody.success) throw new Error(`useTemplate: ${useBody.error}`);
+        const s = useBody.interface_scaffold;
+
+        const ifaceRes = await this.request.post(`${this.base}/api/interfaces`, {
+            data: {
+                name: s.name || name,
+                messageType: s.message_type || 'HL7v2',
+                description: `Created from template: ${s.template_name}`,
+                sourceType: '', targetType: '', sourceConfig: {}, targetConfig: {},
+            },
+        });
+        const ifaceBody = await this._json(ifaceRes, 'createInterface(template)');
+        const interfaceId = ifaceBody.interface?.id || ifaceBody.id;
+        if (!interfaceId) throw new Error(`createInterfaceFromTemplate: no interface id in ${JSON.stringify(ifaceBody).slice(0, 200)}`);
+
+        const cfg = s.pipeline_config || {};
+        const groups = (cfg.execution_groups || []).map(g => ({
+            ...g, steps: (g.steps || []).map(({ id, ...step }) => step),
+        }));
+        const pipeRes = await this.request.post(`${this.base}/api/pipelines`, {
+            data: {
+                interface_id: interfaceId, message_type: s.message_type || 'ADT^A01',
+                name: `${name} Pipeline`, execution_groups: groups, pipeline_config: cfg,
+            },
+        });
+        const pipeBody = await this._json(pipeRes, 'savePipeline(template)');
+        if (!pipeBody.success) throw new Error(`savePipeline(template): ${pipeBody.error}`);
+        return { interfaceId, scaffold: s };
+    }
+
     // Like savePipeline, but takes a ready-made execution_groups array
     // as-is (preserving each template's own one-step-per-group shape)
     // instead of wrapping a flat `steps` array into a single group.

@@ -17,8 +17,9 @@
  * upstream of the /api/fhir/* passthrough.
  */
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./helpers/seeded');
 const { ApiHelper }    = require('./helpers/api');
+const { hl7ToFilePayload } = require('./helpers/fixtures');
 const fs               = require('fs');
 const path             = require('path');
 
@@ -34,10 +35,6 @@ const FHIR_BUILD_DEMO_SAMPLE_MESSAGE = fs.readFileSync(
     path.join(__dirname, '../fixtures/fhir_build_demo_sample_message.json'), 'utf8'
 );
 
-// The real FHIR_Build_Demo interface/pipeline — see
-// database/migrations/V198__FHIR_Build_Demo_Additional_Resources.sql.
-const FHIR_BUILD_DEMO_INTERFACE_ID = '8952d74e-9c81-4bae-a1e9-abd83ca094a6';
-const FHIR_BUILD_DEMO_PIPELINE_ID  = '2499db9c-6bb8-499b-85bd-a04d3ac25d82';
 
 // The 10 fhir.build steps + 1 bundle-assembly step, byte-for-byte consistent
 // with V198's INSERTs and fhir_build_bundle_assembly_test.go's Go equivalent.
@@ -331,23 +328,13 @@ test.describe('FHB-E0 FHIR/HL7 Schema API Health', () => {
 
 test.describe('FHB-E1 Pipeline Builder UI', () => {
 
-    // POST /api/interfaces currently 500s on a pre-existing, unrelated bug
-    // ("Named replacement \":sourceType\" has no entry in the replacement
-    // map") — out of scope here. Reuse the known ADT^A01 test interface
-    // (see CLAUDE.md / project memory) instead of creating/deleting a new one.
-    test.beforeAll(async ({ request }) => {
-        const api = new ApiHelper(request, BASE_URL);
-        const KNOWN_TEST_INTERFACE_ID = '762aebb9-0408-4a42-82c5-202f13f28315';
-        try {
-            const all = await api.listInterfaces();
-            if (all.some(i => i.id === KNOWN_TEST_INTERFACE_ID)) {
-                state.interfaceId = KNOWN_TEST_INTERFACE_ID;
-            }
-        } catch (_) { /* leave state.interfaceId null — tests skip */ }
+    // The seeded, activated interface from helpers/seeded.js (created through the real wizard API).
+    test.beforeAll(async ({ seed }) => {
+        state.interfaceId = seed.interfaceId;
     });
 
     test('FHB-E1-001 Add fhir.build step — builder renders with resource-type dropdown', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -383,7 +370,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-002 fhir.build Fields table datalist reflects live Patient catalog', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -409,7 +396,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-005 fhir.build required-elements banner reflects fhir/r4 schema and updates as fields are mapped', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -467,7 +454,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-005b fhir.build completeness banner is cardinality-aware — required children of an unconfigured OPTIONAL group are not flagged', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         // Patient/us-core: communication/link/telecom are all optional (0..*)
         // BackboneElements whose OWN children (communication.language,
@@ -553,7 +540,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-005c fhir.build nested repeatingGroups — add/configure/remove a nested group without disturbing its parent', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         // EDI Phase 5's real shape: ExplanationOfBenefit.item[].adjudication[]
         // — a group nested inside another group, addressed by a dot-joined
@@ -649,7 +636,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-006 fhir.build extension picker adds a field row with the correct predicate path and no transform', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -688,7 +675,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-007 fhir.build "Validate Against Sample" (strict mode) catches an invalid bound code and flags the right row', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -745,7 +732,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-003 Add hl7.build step — builder renders with message-type dropdown', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -780,7 +767,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-004 Add segment to hl7.build step and confirm it is tracked in config', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -816,7 +803,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-008 hl7.build version dropdown is schema-backed, not free text', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -842,7 +829,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-009 fresh hl7.build step for ADT^A01 auto-seeds EVN/PID/PV1', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -870,7 +857,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-010 Add Segment picker excludes already-passed segments (ordering guardrail)', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -904,7 +891,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-011 Custom / Z-segment entry warns on a non-"Z"-prefixed name', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -944,7 +931,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-012 Field-key cell is a live-catalog-backed smart search (type "SSN", get PID.19)', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -988,7 +975,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-013 Cardinality dropdown offers "Repeating" only for segments the schema allows to repeat', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -1031,7 +1018,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-014 Regression: PID does not offer "Repeating" for ORU^R01 even though the grandparent group repeats', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         // ORU_R01's outer "PATIENT RESULT" group repeats (batched
         // multi-patient results), but PID's own immediate parent, "PATIENT",
@@ -1072,7 +1059,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-015 Segment-level "+ Add condition" creates a condition editor and updates config', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -1117,7 +1104,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-016 Field-level condition toggle (⚡) creates a per-field condition without affecting other fields', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -1163,7 +1150,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-017 "+ Add Child Segment" nests a new segment under its parent, addressed by path', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -1215,7 +1202,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     });
 
     test('FHB-E1-018 Removing a child segment only removes that child, not the parent or its siblings', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -1262,7 +1249,7 @@ test.describe('FHB-E1 Pipeline Builder UI', () => {
     // This proves the field-level editor, both group-card editors, and their
     // independent persistence through _syncDOMToConfig all work end to end.
     test('FHB-E1-019 fhir.build: field condition, group condition, and row condition all persist independently', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
@@ -1569,41 +1556,45 @@ test.describe('FHB-E2 Test Pipeline Execution API', () => {
         expect(JSON.parse(body.outbound_payloads[0].content).resourceType).toBe('Bundle');
     });
 
-    test('FHB-E2-005 real FHIR_Build_Demo pipeline (DB-persisted) builds the same 10-entry Bundle', async ({ request }) => {
-        // V198__FHIR_Build_Demo_Additional_Resources.sql's own header is
-        // explicit: it "no-ops safely if the FHIR_Build_Demo interface/
-        // pipeline doesn't exist in this environment (fresh install without
-        // demo data)" — this interface/pipeline was never actually created by
-        // any migration (V198/199/200 only ever UPDATE it), so a genuinely
-        // fresh database has none. The endpoint reflects that correctly:
-        // 200 OK with an empty pipelines array, not a non-2xx. The skip-guard
-        // used to check only res.ok(), which is true either way — it never
-        // actually skipped on a fresh DB, it just let the test run into a
-        // predictable failure a few lines down. Checking the real payload
-        // fixes that; an inner retry (tried previously) couldn't have helped
-        // since this isn't transient.
-        const pipelineCheck = await request.get(`${BASE_URL}/api/pipelines/interface/${FHIR_BUILD_DEMO_INTERFACE_ID}`).catch(() => null);
-        const pipelineBody = pipelineCheck && pipelineCheck.ok() ? await pipelineCheck.json().catch(() => null) : null;
-        const hasPipeline = !!pipelineBody?.pipelines?.length;
-        test.skip(!hasPipeline, 'FHIR_Build_Demo pipeline not present in this environment (never migration-created — see V198\'s own header comment)');
-
-        const res = await request.post(`${BASE_URL}/api/fhir/pipeline/test`, {
-            data: {
-                pipeline_id: FHIR_BUILD_DEMO_PIPELINE_ID,
-                test_message: FHIR_BUILD_DEMO_SAMPLE_MESSAGE,
-            },
+    test('FHB-E2-005 a DB-persisted pipeline of the FHIR_Build_Demo steps builds the same 10-entry Bundle', async ({ request }) => {
+        // No migration creates the FHIR_Build_Demo interface/pipeline (V198-V200 only UPDATE it,
+        // and no-op on a fresh database), so this test persists its own copy of the same steps
+        // through the real save-pipeline API and runs the Test Pipeline endpoint against the
+        // persisted pipeline_id — which is what the original test was proving (a DB-persisted
+        // pipeline, as opposed to the inline `steps` the other FHB-E2 tests post).
+        const api = new ApiHelper(request, BASE_URL);
+        const created = await api.createInterface({
+            ...hl7ToFilePayload(6690, '/tmp/pw-fhb/{timestamp}.hl7'),
+            name: `PW_FHB_DEMO_${Date.now()}`, auto_start: false, status: 'draft',
         });
-        expect(res.ok()).toBeTruthy();
-        const body = await res.json();
-        expect(body.success).toBe(true);
+        const interfaceId = created.interfaceId || created.data?.interfaceId || created.id;
+        expect(interfaceId).toBeTruthy();
+        try {
+            await api.deactivateInterface(interfaceId).catch(() => {});
+            await api.savePipeline({ interfaceId, messageType: 'FHIR:Patient', steps: fhirBuildDemoInlineSteps().map(({ id, ...step }) => step) }); // fresh step ids: a soft-deleted earlier copy keeps the fixed ones
 
-        const bundleStepKey = Object.keys(body.steps).find(k => body.steps[k]?.step_output?.payload);
-        expect(bundleStepKey).toBeTruthy();
-        const bundle = JSON.parse(body.steps[bundleStepKey].step_output.payload);
-        expect(bundle.resourceType).toBe('Bundle');
-        expect(bundle.entry).toHaveLength(10);
-        for (const entry of bundle.entry) {
-            expect(entry.fullUrl).toBeTruthy();
+            const listRes = await request.get(`${BASE_URL}/api/pipelines/interface/${interfaceId}`);
+            expect(listRes.ok()).toBeTruthy();
+            const pipelineId = (await listRes.json()).pipelines?.[0]?.id;
+            expect(pipelineId, 'saved pipeline not found').toBeTruthy();
+
+            const res = await request.post(`${BASE_URL}/api/fhir/pipeline/test`, {
+                data: { pipeline_id: pipelineId, test_message: FHIR_BUILD_DEMO_SAMPLE_MESSAGE },
+            });
+            expect(res.ok()).toBeTruthy();
+            const body = await res.json();
+            expect(body.success).toBe(true);
+
+            const bundleStepKey = Object.keys(body.steps).find(k => body.steps[k]?.step_output?.payload);
+            expect(bundleStepKey).toBeTruthy();
+            const bundle = JSON.parse(body.steps[bundleStepKey].step_output.payload);
+            expect(bundle.resourceType).toBe('Bundle');
+            expect(bundle.entry).toHaveLength(10);
+            for (const entry of bundle.entry) {
+                expect(entry.fullUrl).toBeTruthy();
+            }
+        } finally {
+            await api.deleteInterface(interfaceId).catch(() => {});
         }
     });
 

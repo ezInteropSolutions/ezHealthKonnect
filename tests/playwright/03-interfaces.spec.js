@@ -15,7 +15,7 @@
  * TC-IFACE-011  Interface status badges use valid status classes
  * TC-IFACE-012  Interface card action buttons are accessible (view/edit/pipeline)
  * TC-IFACE-013  Clicking an interface card opens interface-detail page
- * TC-IFACE-014  Status filter dropdown narrows the interface list
+ * TC-IFACE-014  Status filter narrows the interface list (across all pages)
  * TC-IFACE-015  Typing in a search/filter input narrows visible interfaces
  * TC-IFACE-016  Empty state message shown when no interfaces match filter
  * TC-IFACE-017  Wizard step progression — filling name and advancing goes to step 2
@@ -23,7 +23,7 @@
  * TC-IFACE-019  CDA Coverage Audit section shows only for CCD-message-type interfaces
  */
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./helpers/seeded');
 
 test.describe('Interfaces', () => {
 
@@ -122,10 +122,7 @@ test.describe('Interfaces', () => {
         // the old isVisible({timeout: 5000}) call fired before the button existed
         // at all and skipped every run. waitFor() actually polls for up to 5s.
         const nextBtnAppeared = await nextBtn.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
-        if (!nextBtnAppeared) {
-            test.skip();
-            return;
-        }
+        expect(!(!nextBtnAppeared), 'precondition failed (was a skip): !nextBtnAppeared').toBe(true);
         // A disabled button is itself a valid validation pattern
         const isDisabled = await nextBtn.isDisabled().catch(() => false);
         if (isDisabled) return;
@@ -162,141 +159,89 @@ test.describe('Interfaces', () => {
         expect(stillVisible).toBe(false);
     });
 
+    // The interfaces page renders a table: one tr[data-interface-id] per interface.
+    // helpers/seeded.js guarantees two (one active, one inactive).
+    const { interfaceRow: rowFor, goToInterfaceRow: goToRow } = require('./helpers/ui');
+
     // ── TC-IFACE-010 ─────────────────────────────────────────────────────────────
-    test('TC-IFACE-010 interface cards render with name and status badge', async ({ page }) => {
-        const cards = page.locator('.interface-card, [class*="interface-card"], .card').first();
-        const count = await page.locator('.interface-card, [class*="interface-card"], .card').count();
-        if (count === 0) {
-            test.skip(); // No interfaces exist — skip data-dependent test
-            return;
-        }
-        await expect(cards).toBeVisible();
-        // Card should contain text (the interface name)
-        const text = await cards.textContent();
-        expect(text?.trim().length).toBeGreaterThan(0);
+    test('TC-IFACE-010 interface rows render with name and status badge', async ({ page, seed }) => {
+        const row = await goToRow(page, seed.interfaceId);
+        await expect(row.locator('.interface-name')).toHaveText(seed.interfaceName);
+        await expect(row.locator('.interface-status').first()).toBeVisible();
     });
 
     // ── TC-IFACE-011 ─────────────────────────────────────────────────────────────
-    test('TC-IFACE-011 interface card status badges use valid colour classes', async ({ page }) => {
-        const badges = page.locator('.status-badge, [class*="status-badge"], .badge');
-        const count = await badges.count();
-        if (count === 0) {
-            test.skip();
-            return;
-        }
-        // At least one badge should carry a recognised status class
-        let found = false;
-        for (let i = 0; i < Math.min(count, 10); i++) {
-            const cls = await badges.nth(i).getAttribute('class') ?? '';
-            if (/active|paused|error|draft|inactive/i.test(cls)) {
-                found = true;
-                break;
-            }
-        }
-        expect(found).toBe(true);
+    test('TC-IFACE-011 interface status badges render and differ between active and inactive', async ({ page, seed }) => {
+        await goToRow(page, seed.interfaceId);
+        await goToRow(page, seed.idleInterfaceId);
+        const active = await rowFor(page, seed.interfaceId).locator('.interface-status').first().innerText();
+        const idle   = await rowFor(page, seed.idleInterfaceId).locator('.interface-status').first().innerText();
+        expect(active.trim().length).toBeGreaterThan(0);
+        expect(idle.trim().length).toBeGreaterThan(0);
+        expect(active.trim().toLowerCase()).not.toBe(idle.trim().toLowerCase());
     });
 
     // ── TC-IFACE-012 ─────────────────────────────────────────────────────────────
-    test('TC-IFACE-012 interface cards have action buttons', async ({ page }) => {
-        const cards = page.locator('.interface-card, [class*="interface-card"]');
-        if (await cards.count() === 0) {
-            test.skip();
-            return;
-        }
-        const firstCard = cards.first();
-        // Hover to reveal action buttons if they use hover-visibility pattern
-        await firstCard.hover();
-        const actionBtns = firstCard.locator('button, a[href*="interface"]');
-        const btnCount = await actionBtns.count();
-        expect(btnCount).toBeGreaterThan(0);
+    test('TC-IFACE-012 interface rows have action buttons', async ({ page, seed }) => {
+        const row = await goToRow(page, seed.interfaceId);
+        expect(await row.locator('.action-buttons button').count()).toBeGreaterThan(0);
     });
 
     // ── TC-IFACE-013 ─────────────────────────────────────────────────────────────
-    test('TC-IFACE-013 clicking an interface card navigates to detail page', { timeout: 60_000 }, async ({ page }) => {
-        const cards = page.locator('.interface-card, [class*="interface-card"]');
-        if (await cards.count() === 0) {
-            test.skip();
-            return;
-        }
-        // Use a precise href anchor inside the first card — avoids matching unrelated buttons
-        const viewLink = cards.first().locator('a[href*="interface-detail"]').first();
-        const isVisible = await viewLink.isVisible({ timeout: 3000 }).catch(() => false);
-        if (!isVisible) {
-            await cards.first().click();
-        } else {
-            await viewLink.click();
-        }
-        // If navigation completes, check URL — otherwise skip gracefully
-        const navigated = await page.waitForURL(/interface-detail\.html/, { timeout: 8000 }).then(() => true).catch(() => false);
-        if (!navigated) { test.skip(); return; }
-        await expect(page).toHaveURL(/interface-detail\.html/);
+    test('TC-IFACE-013 clicking an interface row navigates to its detail page', { timeout: 60_000 }, async ({ page, seed }) => {
+        const row = await goToRow(page, seed.interfaceId);
+        await row.locator('.interface-name').click();
+        await expect(page).toHaveURL(/interface-detail\.html/, { timeout: 10000 });
+        expect(page.url()).toContain(seed.interfaceId);
     });
 
-    // ── TC-IFACE-014 ─────────────────────────────────────────────────────────────
-    test('TC-IFACE-014 status filter dropdown reduces visible interfaces', async ({ page }) => {
-        const cards = page.locator('.interface-card, [class*="interface-card"]');
-        const totalCount = await cards.count();
-        if (totalCount < 2) {
-            test.skip();
-            return;
-        }
-        const filter = page.locator('select[name*="status"], select[id*="status"], select[class*="filter"]').first();
-        if (!await filter.isVisible().catch(() => false)) {
-            test.skip();
-            return;
-        }
-        await filter.selectOption({ index: 1 }); // Select any non-default option
-        await page.waitForTimeout(500);
-        const filteredCount = await cards.count();
-        // Count should change (may be 0 or less than total)
-        expect(filteredCount).toBeLessThanOrEqual(totalCount);
+    // ── TC-IFACE-014/015/016 ─────────────────────────────────────────────────────
+    // The toolbar (js/components/table-component.js) has a search box (#interfaceSearchInput) and status /
+    // type / format filters; applyFilters() in interfaces.js filters the WHOLE list, not just the visible page.
+    const FILTER_ROWS = 'tr[data-interface-id]';
+
+    test('TC-IFACE-014 status filter narrows the list across all pages', async ({ page, seed }) => {
+        await goToRow(page, seed.interfaceId);
+        const active = (await rowFor(page, seed.interfaceId).locator('.interface-status').first().innerText()).trim().toLowerCase();
+        const idle = (await (await goToRow(page, seed.idleInterfaceId)).locator('.interface-status').first().innerText()).trim().toLowerCase();
+        expect(active).not.toBe(idle);
+
+        // A developer database has many interfaces in each status, spread over several pages, so combine the status
+        // filter with a search for each seeded interface's own (unique) name: exactly one row can match both.
+        const matches = async (status, name) => {
+            await page.locator('#statusFilter').selectOption(status);
+            await page.locator('#interfaceSearchInput').fill(name);
+            return page.locator('tr[data-interface-id]').count();
+        };
+        await expect.poll(() => matches(active, seed.interfaceName), { timeout: 5000 }).toBe(1);
+        await expect.poll(() => matches(active, seed.idleInterfaceName), { timeout: 5000 }).toBe(0);
+        await expect.poll(() => matches(idle, seed.idleInterfaceName), { timeout: 5000 }).toBe(1);
+        await expect.poll(() => matches(idle, seed.interfaceName), { timeout: 5000 }).toBe(0);
+
+        // "All Status" matches both again.
+        await expect.poll(() => matches('all', seed.interfaceName), { timeout: 5000 }).toBe(1);
+        await expect.poll(() => matches('all', seed.idleInterfaceName), { timeout: 5000 }).toBe(1);
     });
 
-    // ── TC-IFACE-015 ─────────────────────────────────────────────────────────────
-    test('TC-IFACE-015 search input filters visible interfaces', async ({ page }) => {
-        const cards = page.locator('.interface-card, [class*="interface-card"]');
-        if (await cards.count() === 0) {
-            test.skip();
-            return;
-        }
-        const search = page.locator('input[type="search"], input[placeholder*="search" i], input[placeholder*="filter" i]').first();
-        if (!await search.isVisible().catch(() => false)) {
-            test.skip();
-            return;
-        }
-        await search.fill('zzzznotamatch99999');
-        await page.waitForTimeout(800);
-        const filteredCount = await cards.count();
-        // Either 0 results or an empty state message. .or() combines separate
-        // locators rather than concatenating a plain CSS selector with an
-        // inline text= engine into one comma-joined string — the latter isn't
-        // valid CSS and throws a parse error that isVisible().catch(() =>
-        // false) below would silently mask as "not visible" (see
-        // TC-MON-010's fix for the same bug caught failing outright, not
-        // just masked).
-        const emptyState = page.locator('[class*="empty"], [class*="no-result"]')
-            .or(page.getByText(/no interfaces/i));
-        const isFiltered = filteredCount === 0 || await emptyState.isVisible().catch(() => false);
-        expect(isFiltered).toBe(true);
+    test('TC-IFACE-015 search finds an interface by name, wherever it is in the list', async ({ page, seed }) => {
+        await page.locator('#interfaceSearchInput').fill(seed.interfaceName);
+        const rows = page.locator(FILTER_ROWS);
+        await expect(rows).toHaveCount(1, { timeout: 5000 });
+        await expect(rows.first()).toHaveAttribute('data-interface-id', seed.interfaceId);
+
+        // Case-insensitive, and the pagination collapses to one page.
+        await page.locator('#interfaceSearchInput').fill(seed.interfaceName.toUpperCase());
+        await expect(rows).toHaveCount(1);
     });
 
-    // ── TC-IFACE-016 ─────────────────────────────────────────────────────────────
-    test('TC-IFACE-016 empty state renders when search matches nothing', async ({ page }) => {
-        const search = page.locator('input[type="search"], input[placeholder*="search" i]').first();
-        if (!await search.isVisible().catch(() => false)) {
-            test.skip();
-            return;
-        }
-        await search.fill('zzzznotamatch99999');
-        await page.waitForTimeout(800);
-        const cards = await page.locator('.interface-card, [class*="interface-card"]').count();
-        if (cards === 0) {
-            // Good — verify some kind of empty-state feedback exists
-            const emptyText = page.locator('text=/no interfaces|no results|nothing found/i');
-            const isEmpty = await emptyText.isVisible().catch(() => false);
-            // Either text OR 0 cards is acceptable empty-state handling
-            expect(isEmpty || cards === 0).toBe(true);
-        }
+    test('TC-IFACE-016 empty state renders when nothing matches the search', async ({ page }) => {
+        await page.locator('#interfaceSearchInput').fill('zzzz-no-such-interface-99999');
+        await expect(page.locator(FILTER_ROWS)).toHaveCount(0, { timeout: 5000 });
+        await expect(page.locator('#interfacesTableBody .empty-state')).toContainText(/No interfaces found/i);
+
+        // Clearing the search restores the list.
+        await page.locator('#interfaceSearchInput').fill('');
+        await expect(page.locator(FILTER_ROWS).first()).toBeVisible({ timeout: 5000 });
     });
 
     // ── TC-IFACE-017 ─────────────────────────────────────────────────────────────
@@ -307,10 +252,7 @@ test.describe('Interfaces', () => {
         // waitFor(), not isVisible({timeout}) -- see TC-IFACE-008's own comment:
         // isVisible() never actually polls regardless of a timeout argument.
         const nameInputAppeared = await nameInput.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
-        if (!nameInputAppeared) {
-            test.skip();
-            return;
-        }
+        expect(!(!nameInputAppeared), 'precondition failed (was a skip): !nameInputAppeared').toBe(true);
         await nameInput.fill('E2E Test Interface');
         // #wizardNext -- see TC-IFACE-008's own comment for why (not a page-wide
         // text filter, and not "#nextBtn" either -- that's a different, unused
@@ -340,30 +282,21 @@ test.describe('Interfaces', () => {
         // wizard's own inner content (name input, Next/Back buttons) renders
         // asynchronously after the modal overlay itself appears.
         const nameInputAppeared = await nameInput.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
-        if (!nameInputAppeared) {
-            test.skip();
-            return;
-        }
+        expect(!(!nameInputAppeared), 'precondition failed (was a skip): !nameInputAppeared').toBe(true);
         await nameInput.fill('E2E Back Button Test');
         // #wizardNext/#wizardPrevious -- see TC-IFACE-008's own comment for why
         // (not page-wide text filters, and not "#nextBtn"/"#prevBtn" either --
         // those belong to a different, unused wizard).
         const nextBtn = page.locator('#wizardNext');
         const nextBtnAppeared = await nextBtn.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
-        if (!nextBtnAppeared) {
-            test.skip();
-            return;
-        }
+        expect(!(!nextBtnAppeared), 'precondition failed (was a skip): !nextBtnAppeared').toBe(true);
         await nextBtn.click();
         await page.waitForTimeout(600);
 
         // Click Back
         const backBtn = page.locator('#wizardPrevious');
         const backBtnAppeared = await backBtn.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
-        if (!backBtnAppeared) {
-            test.skip();
-            return;
-        }
+        expect(!(!backBtnAppeared), 'precondition failed (was a skip): !backBtnAppeared').toBe(true);
         await backBtn.click();
         await page.waitForTimeout(400);
         // Should be back on step 1 — name input should be visible again

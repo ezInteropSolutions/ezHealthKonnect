@@ -40,7 +40,7 @@
  * Run: npx playwright test step-type-fix-validation --project=chromium
  */
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./helpers/seeded');
 const { ApiHelper }    = require('./helpers/api');
 const fs               = require('fs');
 const path             = require('path');
@@ -440,7 +440,7 @@ test.describe.serial('Step-type fix validation (field_validation + control.loop)
     });
 
     test('Field Validation Fix Demo: real Properties Panel renders the saved step (not the generic fallback)', async ({ page }) => {
-        test.skip(!state.fieldValidationInterfaceId, 'Setup failed');
+        expect(state.fieldValidationInterfaceId, 'setup failed: state.fieldValidationInterfaceId missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.fieldValidationInterfaceId}`);
         await page.waitForLoadState('load');
@@ -471,7 +471,7 @@ test.describe.serial('Step-type fix validation (field_validation + control.loop)
     });
 
     test('Field Validation Fix Demo: real Test Pipeline modal rejects a message missing the required Patient ID', async ({ page }) => {
-        test.skip(!state.fieldValidationInterfaceId, 'Setup failed');
+        expect(state.fieldValidationInterfaceId, 'setup failed: state.fieldValidationInterfaceId missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.fieldValidationInterfaceId}`);
         await page.waitForLoadState('load');
@@ -488,7 +488,7 @@ test.describe.serial('Step-type fix validation (field_validation + control.loop)
     });
 
     test('Field Validation Fix Demo: real Test Pipeline modal accepts a complete message', async ({ page }) => {
-        test.skip(!state.fieldValidationInterfaceId, 'Setup failed');
+        expect(state.fieldValidationInterfaceId, 'setup failed: state.fieldValidationInterfaceId missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.fieldValidationInterfaceId}`);
         await page.waitForLoadState('load');
@@ -506,7 +506,7 @@ test.describe.serial('Step-type fix validation (field_validation + control.loop)
     });
 
     test('Control Loop Fix Demo: real Properties Panel renders the saved step (not the generic fallback)', async ({ page }) => {
-        test.skip(!state.controlLoopInterfaceId, 'Setup failed');
+        expect(state.controlLoopInterfaceId, 'setup failed: state.controlLoopInterfaceId missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.controlLoopInterfaceId}`);
         await page.waitForLoadState('load');
@@ -534,7 +534,7 @@ test.describe.serial('Step-type fix validation (field_validation + control.loop)
     });
 
     test('Control Loop Fix Demo: real Test Pipeline modal iterates the bracket-indexed collection and classifies both items', async ({ page }) => {
-        test.skip(!state.controlLoopInterfaceId, 'Setup failed');
+        expect(state.controlLoopInterfaceId, 'setup failed: state.controlLoopInterfaceId missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.controlLoopInterfaceId}`);
         await page.waitForLoadState('load');
@@ -553,7 +553,7 @@ test.describe.serial('Step-type fix validation (field_validation + control.loop)
     });
 
     test('Switch Case Auto-Skip Fix Demo: real Test Pipeline modal runs only the matched branch, with zero manual skipSteps config', async ({ page }) => {
-        test.skip(!state.autoSkipInterfaceId, 'Setup failed');
+        expect(state.autoSkipInterfaceId, 'setup failed: state.autoSkipInterfaceId missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.autoSkipInterfaceId}`);
         await page.waitForLoadState('load');
@@ -591,8 +591,6 @@ test.describe.serial('Step-type fix validation (field_validation + control.loop)
 // FHIR uses the dedicated "FHIR Passthrough Fix Demo" interface created above
 // (state.fhirInterfaceId) rather than a hardcoded ID — see that interface's own
 // comment for why (the MVP smoke suite's own FHIR fixtures are ephemeral).
-const CCD_EXPORT_INTERFACE_ID = 'f1137fe4-14ee-4275-8b6a-e7b6ef5e3ac0'; // CCD to CSV Export (Test)
-const EDI_835_INTERFACE_ID    = '1d40b494-e89e-470c-a947-c8c32482f93f'; // PW EDI-FHIR Test 1788681501486
 
 const FHIR_PATIENT_SAMPLE = JSON.stringify({
     resourceType: 'Patient',
@@ -609,14 +607,18 @@ const EDI_835_SAMPLE = fs.readFileSync(
     path.join(__dirname, '../../edi/testdata/real_samples/emedny_sample.txt'), 'utf8'
 );
 
-async function realInterfaceExists(request, id) {
-    const res = await request.get(`${BASE_URL}/api/interfaces/${id}`);
-    return res.ok();
+// Creates a throwaway interface from an OOB template through the same calls the "Use Template"
+// button makes, runs fn(interfaceId), and always removes it. Replaces the hard-coded IDs of
+// interfaces that only ever existed in one developer's database.
+async function withTemplateInterface(request, slug, label, fn) {
+    const api = new ApiHelper(request, BASE_URL);
+    const { interfaceId } = await api.createInterfaceFromTemplate(slug, `PW_${label}_${Date.now()}`);
+    try { await fn(interfaceId); } finally { await api.deleteInterface(interfaceId).catch(() => {}); }
 }
 
-test.describe('Cross-format Test Pipeline UI check — FHIR, CCD, EDI 835 (real interfaces)', () => {
+test.describe('Cross-format Test Pipeline UI check — FHIR, CCD, EDI 835 (interfaces created from OOB templates)', () => {
     test('FHIR: real Test Pipeline modal on the dedicated demo interface accepts a Patient resource', async ({ page }) => {
-        test.skip(!state.fhirInterfaceId, 'FHIR demo interface setup failed');
+        expect(state.fhirInterfaceId, 'setup failed: state.fhirInterfaceId missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.fhirInterfaceId}`);
         await page.waitForLoadState('load');
@@ -633,41 +635,42 @@ test.describe('Cross-format Test Pipeline UI check — FHIR, CCD, EDI 835 (real 
         await expect(page.locator('.toast, .notification', { hasText: /Test passed/i })).toBeVisible({ timeout: 5000 }).catch(() => {});
     });
 
-    test('CCD: real Test Pipeline modal on the live CCD export interface parses the sample document and extracts sections', async ({ page, request }) => {
-        test.skip(!(await realInterfaceExists(request, CCD_EXPORT_INTERFACE_ID)), 'Known CCD export interface not found — may have been removed');
+    test('CCD: real Test Pipeline modal on a CCD-template interface parses the sample document and extracts sections', async ({ page, request }) => {
+        await withTemplateInterface(request, 'cda-ccd-inbound-fhir-r4', 'CCD_TPL', async (interfaceId) => {
+            await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${interfaceId}`);
+            await page.waitForLoadState('load');
+            await page.waitForFunction(() => window.pipelineBuilder && window.pipelineBuilder.pipeline != null, { timeout: 8000 });
 
-        await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${CCD_EXPORT_INTERFACE_ID}`);
-        await page.waitForLoadState('load');
-        await page.waitForFunction(() => window.pipelineBuilder && window.pipelineBuilder.pipeline != null, { timeout: 8000 });
+            await page.locator('#testPipelineBtn').click();
+            await expect(page.locator('#testModal')).toHaveClass(/active/);
 
-        await page.locator('#testPipelineBtn').click();
-        await expect(page.locator('#testModal')).toHaveClass(/active/);
+            await page.locator('#testMessageInput').fill(CCD_SAMPLE);
+            await page.locator('#runTestBtn').click();
 
-        await page.locator('#testMessageInput').fill(CCD_SAMPLE);
-        await page.locator('#runTestBtn').click();
-
-        const resultsContent = page.locator('#testResultsContent');
-        // allergiesAndIntolerances: 1 is the real, known-correct section count for this fixture.
-        await expect(resultsContent).toContainText(/allergiesAndIntolerances|section_rows|cda_dedupe/i, { timeout: 20000 });
+            const resultsContent = page.locator('#testResultsContent');
+            // allergiesAndIntolerances is a section the sample document really carries.
+            await expect(resultsContent).toContainText(/allergiesAndIntolerances|AllergyIntolerance|section_rows|cda_dedupe/i, { timeout: 20000 });
+        });
     });
 
-    test('EDI 835: real Test Pipeline modal on the user\'s own real interface builds a PaymentReconciliation with correct conditions/loop', async ({ page, request }) => {
-        test.skip(!(await realInterfaceExists(request, EDI_835_INTERFACE_ID)), 'Known EDI 835 interface not found — may have been removed');
+    test('EDI 835: real Test Pipeline modal on an EDI-835-template interface builds a PaymentReconciliation with correct conditions/loop', async ({ page, request }) => {
+        await withTemplateInterface(request, 'edi-835-to-fhir-sftp', 'EDI835_TPL', async (interfaceId) => {
+            await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${interfaceId}`);
+            await page.waitForLoadState('load');
+            await page.waitForFunction(() => window.pipelineBuilder && window.pipelineBuilder.pipeline != null, { timeout: 8000 });
 
-        await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${EDI_835_INTERFACE_ID}`);
-        await page.waitForLoadState('load');
-        await page.waitForFunction(() => window.pipelineBuilder && window.pipelineBuilder.pipeline != null, { timeout: 8000 });
+            await page.locator('#testPipelineBtn').click();
+            await expect(page.locator('#testModal')).toHaveClass(/active/);
 
-        await page.locator('#testPipelineBtn').click();
-        await expect(page.locator('#testModal')).toHaveClass(/active/);
+            await page.locator('#testMessageInput').fill(EDI_835_SAMPLE);
+            await page.locator('#runTestBtn').click();
 
-        await page.locator('#testMessageInput').fill(EDI_835_SAMPLE);
-        await page.locator('#runTestBtn').click();
-
-        const resultsContent = page.locator('#testResultsContent');
-        // Real, previously-verified expected values for this exact sample: BPR04=ACH → disposition
-        // fires; 3 claims (34.25/0/11.5) → row condition drops the $0 one, leaving 2 in detail[].
-        await expect(resultsContent).toContainText(/PaymentReconciliation/i, { timeout: 20000 });
-        await expect(resultsContent).toContainText(/ach-remit|Payment issued via direct ACH deposit/i);
+            const resultsContent = page.locator('#testResultsContent');
+            // The eMedNY sample carries 3 claims: the template builds one ExplanationOfBenefit per claim plus one
+            // PaymentReconciliation. Exact field values are asserted in edi-835-to-fhir-e2e.spec.js; this test's
+            // job is that the real Test Pipeline modal runs an EDI 835 end to end.
+            await expect(resultsContent).toContainText(/PaymentReconciliation/i, { timeout: 20000 });
+            await expect(resultsContent).toContainText(/ExplanationOfBenefit/i);
+        });
     });
 });

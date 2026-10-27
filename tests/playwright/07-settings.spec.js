@@ -60,21 +60,13 @@ test.describe('Settings', () => {
 
     // ── TC-SET-004 ───────────────────────────────────────────────────────────────
     test('TC-SET-004 clicking a section nav item activates it', async ({ page }) => {
-        const navItems = page.locator(
-            '.settings-nav .nav-item, .settings-sidebar li, .section-nav-item, [class*="settings-nav"] a'
-        );
-        const count = await navItems.count();
-        if (count < 2) {
-            test.skip();
-            return;
-        }
-        // Click the second nav item (first is already active by default)
-        await navItems.nth(1).click();
-        await page.waitForTimeout(400);
-        const activeItem = page.locator(
-            '.settings-nav .nav-item.active, .section-nav-item.active, [class*="settings-nav"] .active'
-        ).first();
-        await expect(activeItem).toBeAttached({ timeout: 3000 });
+        const navItems = page.locator('.settings-nav-item');
+        expect(await navItems.count()).toBeGreaterThanOrEqual(10);
+        const security = page.locator('.settings-nav-item[data-section="security"]');
+        await security.click();
+        await expect(security).toHaveClass(/active/);
+        await expect(page.locator('#section-security')).toHaveClass(/active/);
+        await expect(page.locator('.settings-nav-item[data-section="smtp"]')).not.toHaveClass(/active/);
     });
 
     // ── TC-SET-005 ───────────────────────────────────────────────────────────────
@@ -97,158 +89,52 @@ test.describe('Settings', () => {
     });
 
     // ── TC-SET-006 ───────────────────────────────────────────────────────────────
-    test('TC-SET-006 Notifications section is accessible', async ({ page }) => {
-        const notifTab = page.locator(
-            '.settings-nav, .settings-sidebar, .section-nav'
-        ).first().getByText(/notif/i).first();
-        if (!await notifTab.isVisible({ timeout: 3000 }).catch(() => false)) {
-            test.skip(); // Notifications section may not exist in this build
-            return;
-        }
-        await notifTab.click();
-        await page.waitForTimeout(400);
-        // Should see toggles, checkboxes, or notification settings
-        const controls = page.locator(
-            'input[type="checkbox"], input[type="radio"], [class*="toggle"], select'
-        );
-        const count = await controls.count();
-        expect(count).toBeGreaterThanOrEqual(0); // Accept 0 if section exists but no controls yet
+    // The page has no "Notifications" section; notification rules live under Alerts.
+    test('TC-SET-006 Alerts (notification rules) section is accessible', async ({ page }) => {
+        const alerts = page.locator('.settings-nav-item[data-section="alerts"]');
+        await expect(alerts).toBeVisible();
+        await alerts.click();
+        await expect(page.locator('#section-alerts')).toHaveClass(/active/);
+        expect(await page.locator('#section-alerts').locator('input, select').count()).toBeGreaterThan(0);
     });
 
     // ── TC-SET-007 ───────────────────────────────────────────────────────────────
-    test('TC-SET-007 Security section has password change form', async ({ page }) => {
-        const secTab = page.locator(
-            '.settings-nav, .settings-sidebar, .section-nav'
-        ).first().getByText(/security|password/i).first();
-        if (!await secTab.isVisible({ timeout: 3000 }).catch(() => false)) {
-            test.skip();
-            return;
+    test('TC-SET-007 Security section has session, lockout and password-policy fields', async ({ page }) => {
+        await page.locator('.settings-nav-item[data-section="security"]').click();
+        await expect(page.locator('#section-security')).toHaveClass(/active/);
+        for (const id of ['sessionTimeoutMinutes', 'jwtExpiryHours', 'maxLoginAttempts', 'lockoutDurationMinutes', 'passwordMinLength']) {
+            await expect(page.locator('#' + id)).toBeVisible();
         }
-        await secTab.click();
-        await page.waitForTimeout(400);
-
-        // Password fields should be present
-        const passwordFields = page.locator('input[type="password"]');
-        const count = await passwordFields.count();
-        expect(count).toBeGreaterThanOrEqual(1);
     });
 
     // ── TC-SET-008 ───────────────────────────────────────────────────────────────
-    test('TC-SET-008 mismatched passwords shows validation error', async ({ page }) => {
-        const secTab = page.locator(
-            '.settings-nav, .settings-sidebar, .section-nav'
-        ).first().getByText(/security|password/i).first();
-        if (!await secTab.isVisible({ timeout: 3000 }).catch(() => false)) {
-            test.skip();
-            return;
-        }
-        await secTab.click();
-        await page.waitForTimeout(400);
+    // test.fixme, not a silent skip: Settings has no change-password form (the Security section
+    // holds session/lockout/password-policy fields only), so there is nothing to mismatch.
+    test.fixme('TC-SET-008 mismatched passwords shows validation error', async () => {});
 
-        // Only interact with VISIBLE password fields (invisible ones belong to other sections)
-        const passwordFields = page.locator('input[type="password"]:visible');
-        const count = await passwordFields.count();
-        if (count < 2) {
-            test.skip();
-            return;
-        }
-        // Fill first visible field as "new password", second as mismatched "confirm password"
-        await passwordFields.nth(0).fill('NewPass123!');
-        await passwordFields.nth(1).fill('DifferentPass456!');
-
-        const saveBtn = page.locator('button[type="submit"], button').filter({
-            hasText: /save|update|change password/i
-        }).first();
-        if (await saveBtn.isVisible().catch(() => false)) {
-            await saveBtn.click();
-            await page.waitForTimeout(500);
-            // A comma-joined string mixing plain CSS with an inline text=
-            // engine ('.a, .b, text=/.../i') isn't valid CSS and throws a
-            // parse error Playwright can't recover from — .catch(() => false)
-            // was silently converting that into "not visible" rather than a
-            // real check. .or() combines separate locators instead of
-            // concatenating selector text (see TC-MON-010's fix for the same
-            // bug caught failing outright, not just masked).
-            const errorMsg = page.locator('.error, .invalid-feedback, [class*="error"]')
-                .or(page.getByText(/match|mismatch|confirm/i))
-                .first();
-            const hasError = await errorMsg.isVisible({ timeout: 3000 }).catch(() => false);
-            // Either shows error OR the form stayed on the page (didn't navigate away)
-            const stillOnSettings = page.url().includes('settings.html');
-            expect(hasError || stillOnSettings).toBe(true);
-        }
-    });
-
-    // ── TC-SET-009 ───────────────────────────────────────────────────────────────
-    test('TC-SET-009 Database section shows connection fields', async ({ page }) => {
-        const dbTab = page.locator(
-            '.settings-nav, .settings-sidebar, .section-nav'
-        ).first().getByText(/database|connection|db/i).first();
-        if (!await dbTab.isVisible({ timeout: 3000 }).catch(() => false)) {
-            test.skip();
-            return;
-        }
-        await dbTab.click();
-        await page.waitForTimeout(400);
-
-        // Database config fields: host, port, name, user, etc.
-        const fields = page.locator('input[name*="host"], input[name*="port"], input[name*="db"], input[name*="database"]');
-        const count = await fields.count();
-        if (count === 0) {
-            // May display as read-only text or in a different format
-            const dbSection = page.locator('[class*="database"], [class*="connection"], #databaseSettings').first();
-            await expect(dbSection).toBeAttached({ timeout: 5000 });
-        } else {
-            expect(count).toBeGreaterThanOrEqual(1);
-        }
-    });
+    // TC-SET-009 (a "Database" settings section) was removed on purpose: the connection string and password
+    // live in the server's .env, set by the installer. Editing them from a web page could stop the app from
+    // reaching its own database and would put a secret on screen.
 
     // ── TC-SET-010 ───────────────────────────────────────────────────────────────
-    test('TC-SET-010 Schema Registry section is present if feature enabled', async ({ page }) => {
-        const schemaTab = page.locator(
-            '.settings-nav, .settings-sidebar, .section-nav'
-        ).first().getByText(/schema|registry/i).first();
-        if (!await schemaTab.isVisible({ timeout: 3000 }).catch(() => false)) {
-            // Feature may not be in this build — skip gracefully
-            return;
-        }
-        await schemaTab.click();
-        await page.waitForTimeout(400);
-        const section = page.locator('[class*="schema"], [id*="schema"]').first();
-        await expect(section).toBeAttached({ timeout: 5000 });
+    test('TC-SET-010 Schema Registry section is present', async ({ page }) => {
+        await page.locator('.settings-nav-item[data-section="schemas"]').click();
+        await expect(page.locator('#section-schemas')).toHaveClass(/active/);
     });
 
     // ── TC-SET-011 ───────────────────────────────────────────────────────────────
-    test('TC-SET-011 saving a setting shows success feedback', async ({ page }) => {
-        // Try to interact with a safe setting (e.g., a toggle or non-destructive field)
-        const saveBtn = page.locator('button[type="submit"], button').filter({
-            hasText: /save|update|apply/i
-        }).first();
-        if (!await saveBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-            test.skip();
-            return;
-        }
-        await saveBtn.click();
-        await page.waitForTimeout(1000);
-
-        // Success toast, alert, or confirmation message. .or() combines
-        // separate locators rather than concatenating a plain CSS selector
-        // with an inline text= engine into one comma-joined string — the
-        // latter isn't valid CSS and throws a parse error that
-        // isVisible().catch(() => false) below would silently mask as "not
-        // visible" (see TC-MON-010's fix for the same bug caught failing
-        // outright, not just masked).
-        const successMsg = page.locator('.toast, .alert-success, [class*="success"]')
-            .or(page.getByText(/saved|updated|applied/i))
-            .first();
-        const errorMsg = page.locator('.alert-danger, [class*="error"]')
-            .or(page.getByText(/error|failed/i))
-            .first();
-        const hasSuccess = await successMsg.isVisible({ timeout: 3000 }).catch(() => false);
-        const hasError   = await errorMsg.isVisible({ timeout: 3000 }).catch(() => false);
-        // Accept: success toast, error message, OR still on settings page (silent save without toast)
-        const stillOnSettings = page.url().includes('settings.html');
-        expect(hasSuccess || hasError || stillOnSettings).toBe(true);
+    test('TC-SET-011 saving a setting persists it and shows success feedback', async ({ page }) => {
+        await page.locator('.settings-nav-item[data-section="security"]').click();
+        const field = page.locator('#passwordMinLength');
+        await expect(field).toBeVisible();
+        const original = await field.inputValue();   // save the value back unchanged: non-destructive
+        const saved = page.waitForResponse(r => r.url().includes('/api/system/settings') && r.request().method() !== 'GET');
+        await page.locator('#section-security button[onclick="saveSecurity()"]').click();
+        expect((await saved).status()).toBe(200);
+        await expect(page.locator('.toast, .alert-success, [class*="success"]').or(page.getByText(/saved|updated/i)).first()).toBeVisible({ timeout: 5000 });
+        await page.reload();
+        await page.locator('.settings-nav-item[data-section="security"]').click();
+        await expect(page.locator('#passwordMinLength')).toHaveValue(original);
     });
 
     // ── TC-SET-012 ───────────────────────────────────────────────────────────────
@@ -288,24 +174,7 @@ test.describe('Settings', () => {
 
     // ── TC-SET-015 ───────────────────────────────────────────────────────────────
     test('TC-SET-015 settings API returns 200', async ({ page }) => {
-        // Try common settings API patterns
-        const endpoints = [
-            '/api/settings',
-            '/api/settings/general',
-            '/api/users/profile',
-        ];
-        let found200 = false;
-        for (const ep of endpoints) {
-            const resp = await page.request.get(ep).catch(() => null);
-            if (resp && resp.status() === 200) {
-                found200 = true;
-                break;
-            }
-        }
-        // At least one settings-related endpoint should return 200
-        // If none exist yet, we accept the test gracefully
-        if (!found200) {
-            test.skip(); // API not yet implemented
-        }
+        const resp = await page.request.get('/api/system/settings/storage');
+        expect(resp.status()).toBe(200);
     });
 });

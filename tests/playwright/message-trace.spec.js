@@ -15,22 +15,12 @@
  * then trace it through the full pipeline via the UI.
  */
 
-const { test, expect } = require('@playwright/test');
-const net = require('net');
+const { test, expect } = require('./helpers/seeded');
 
-// "Universal HL7 Receiver" test interface — MLLP listener on port 6613 (same
-// fixture interface used by tests/throughput-test.js and tests/hl7-scale-test.js).
-const MLLP_HOST = 'localhost';
-const MLLP_PORT = 6613;
-
-function mllpFrame(hl7) {
-    return Buffer.concat([Buffer.from([0x0B]), Buffer.from(hl7, 'ascii'), Buffer.from([0x1C, 0x0D])]);
-}
-
-/** Sends one ADT^A01 HL7 message over MLLP with the given MSH-10 control ID
- *  (which becomes the message's correlation_id), and resolves once the ACK
- *  is received. */
-function sendTestMessage(controlId) {
+/** Sends one ADT^A01 HL7 message through the seeded MLLP listener (helpers/seeded.js) with the
+ *  given MSH-10 control ID (which becomes the message's correlation_id), and resolves once the
+ *  ACK is received. */
+function sendTestMessage(seed, controlId) {
     const ts = '20260704120000';
     const hl7 = [
         `MSH|^~\\&|PWTEST|HOSP|EZHK|EZHK|${ts}||ADT^A01^ADT_A01|${controlId}|P|2.5`,
@@ -39,21 +29,7 @@ function sendTestMessage(controlId) {
         `PV1|1|I|WARD01^101^A^HOSP`,
     ].join('\r');
 
-    return new Promise((resolve, reject) => {
-        const sock = new net.Socket();
-        const timer = setTimeout(() => { sock.destroy(); reject(new Error('MLLP send timed out')); }, 10000);
-        sock.on('error', (err) => { clearTimeout(timer); reject(err); });
-        let buf = Buffer.alloc(0);
-        sock.on('data', (chunk) => {
-            buf = Buffer.concat([buf, chunk]);
-            if (buf.length >= 2 && buf[buf.length - 1] === 0x0D && buf[buf.length - 2] === 0x1C) {
-                clearTimeout(timer);
-                sock.destroy();
-                resolve();
-            }
-        });
-        sock.connect(MLLP_PORT, MLLP_HOST, () => sock.write(mllpFrame(hl7)));
-    });
+    return seed.sendMessage(hl7);
 }
 
 test.describe('Message Trace', () => {
@@ -93,15 +69,9 @@ test.describe('Message Trace', () => {
     });
 
     // ── TC-TRACE-005 ─────────────────────────────────────────────────────────────
-    // Skipped in CI: relies on a live "Universal HL7 Receiver" MLLP listener on
-    // port 6613, which only exists on long-running local dev databases — no
-    // migration, seed script, or Playwright fixture ever creates it, so a fresh
-    // CI database has nothing listening on this port and sendTestMessage() times
-    // out. Needs a real beforeAll that creates + activates a tcp_mllp_inbound
-    // interface via the wizard API (with teardown) before this can run in CI.
-    test.skip('TC-TRACE-005 real correlation ID renders full timeline', async ({ page }) => {
+        test('TC-TRACE-005 real correlation ID renders full timeline', async ({ page, seed }) => {
         const controlId = 'PW' + Date.now();
-        await sendTestMessage(controlId);
+        await sendTestMessage(seed, controlId);
         await page.waitForTimeout(3000); // allow async pipeline (parse -> transform -> deliver) to finish
 
         await page.locator('#correlationInput').fill(controlId);
@@ -125,10 +95,9 @@ test.describe('Message Trace', () => {
     });
 
     // ── TC-TRACE-006 ─────────────────────────────────────────────────────────────
-    // Skipped in CI: same missing MLLP fixture as TC-TRACE-005 above.
-    test.skip('TC-TRACE-006 deep link auto-runs the trace', async ({ page }) => {
+        test('TC-TRACE-006 deep link auto-runs the trace', async ({ page, seed }) => {
         const controlId = 'PW' + Date.now();
-        await sendTestMessage(controlId);
+        await sendTestMessage(seed, controlId);
         await page.waitForTimeout(3000);
 
         await page.goto('/message-trace.html?correlationId=' + encodeURIComponent(controlId));
