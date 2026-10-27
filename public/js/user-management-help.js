@@ -728,11 +728,12 @@
         // Tab bar
         const tabBar = document.createElement('div');
         tabBar.className = 'um-help-tabs';
-        tabBar.innerHTML = HELP_TABS.map((t, i) => `
+        // HELP_TABS / HELP_CONTENT are the app's own constant help markup.
+        tabBar.innerHTML = HtmlSafe.raw(HELP_TABS.map((t, i) => `
             <button class="um-help-tab${i === 0 ? ' active' : ''}" data-htab="${t.id}">
                 <i class="fas ${t.icon}"></i>
                 <span>${t.label}</span>
-            </button>`).join('');
+            </button>`).join(''));
 
         // Body
         const body = document.createElement('div');
@@ -742,7 +743,7 @@
             const pane = document.createElement('div');
             pane.id = `htab-${t.id}`;
             pane.className = `um-help-pane${i === 0 ? ' active' : ''}`;
-            pane.innerHTML = HELP_CONTENT[t.id] || '<p>Coming soon.</p>';
+            pane.innerHTML = HtmlSafe.raw(HELP_CONTENT[t.id] || '<p>Coming soon.</p>');
             body.appendChild(pane);
         });
 

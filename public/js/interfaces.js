@@ -539,7 +539,7 @@ function addAutoRefreshIndicator() {
         height: 32px;
     `;
     
-    indicator.innerHTML = `
+    indicator.innerHTML = HtmlSafe.html`
         <span class="status-tile-icon" style="width: 6px; height: 6px; background: #22c55e; border-radius: 50%; animation: pulse 2s infinite;"></span>
         <span class="status-tile-label">Auto: ${refreshRate / 1000}s</span>
     `;
@@ -1016,7 +1016,7 @@ function renderInterfacesTable() {
     const endIndex = startIndex + pageSize;
     const pageItems = getSortedInterfaces().slice(startIndex, endIndex);
 
-    tbody.innerHTML = pageItems.map(interface => createCompactTableRow(interface)).join('');
+    tbody.innerHTML = HtmlSafe.html`${pageItems.map(createCompactTableRow)}`;
     updateSortHeaders();
     updatePaginationInfo();
     updatePaginationControls();
@@ -1071,31 +1071,38 @@ function getSourceFormatBadge(iface) {
     const style = CDA_FORMAT_KEYS.has(fmt)
         ? 'color:#92400e;background:#fef3c7;border-color:#fcd34d;'
         : '';
-    return `<span class="msg-type-badge" style="${style}">${label}</span>`;
+    return HtmlSafe.html`<span class="msg-type-badge" style="${style}">${label}</span>`;
+}
+
+// The interface record this page loaded, by id. Inline handlers pass only the
+// id (a server-generated UUID) and look everything else up here — names and
+// other user-entered values must never be placed inside an onclick string,
+// where HTML escaping is undone before the JavaScript runs.
+function interfaceById(interfaceId) {
+    return interfaces.find(i => i.id === interfaceId) || null;
 }
 
 function renderStatusBadge(iface) {
     const status = iface.status || 'unknown';
     if (status !== 'error') {
-        return `<span class="interface-status status-${status}">${status}</span>`;
+        return HtmlSafe.html`<span class="interface-status status-${status}">${status}</span>`;
     }
 
     const err = iface.processingStats && iface.processingStats.error;
     if (!err) {
-        return `<span class="interface-status status-error">ERROR</span>`;
+        return HtmlSafe.html`<span class="interface-status status-error">ERROR</span>`;
     }
 
-    const esc = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const ts = err.timestamp ? new Date(err.timestamp).toLocaleString() : '';
     const tip = [
-        err.reason    ? esc(err.reason) : 'Unknown error',
+        err.reason    ? err.reason : 'Unknown error',
         err.port      ? `Port: ${err.port}` : '',
-        err.directory ? `Directory: ${esc(err.directory)}` : '',
-        err.pattern   ? `Pattern: ${esc(err.pattern)}` : '',
+        err.directory ? `Directory: ${err.directory}` : '',
+        err.pattern   ? `Pattern: ${err.pattern}` : '',
         ts            ? `At: ${ts}` : ''
-    ].filter(Boolean).join('&#10;');
+    ].filter(Boolean).join('\n');
 
-    return `<span class="interface-status status-error status-error-tip" title="${tip}">
+    return HtmlSafe.html`<span class="interface-status status-error status-error-tip" title="${tip}">
         ERROR&nbsp;<i class="fas fa-circle-info" style="font-size:9px;opacity:0.8;"></i>
     </span>`;
 }
@@ -1124,7 +1131,7 @@ function createCompactTableRow(interface) {
     // Get initial status from DB (optimistic UI - no "Checking...")
     const initialStatus = getInitialStatusDisplay(interface);
 
-    return `
+    return HtmlSafe.html`
         <tr data-interface-id="${interface.id}" onclick="showInterfaceDetails('${interface.id}')">
             <td>
                 <div class="interface-name-cell">
@@ -1172,7 +1179,7 @@ function createCompactTableRow(interface) {
                         <span class="stat-label">Success:</span>
                         <span class="success-rate">${successRate}%</span>
                     </div>
-                    ${hasErrors ? `
+                    ${hasErrors ? HtmlSafe.html`
                     <div class="stat-line">
                         <span class="stat-label">Errors:</span>
                         <span class="error-indicator ${errorClass}">${interface.statistics.failed}</span>
@@ -1201,7 +1208,7 @@ function copyInterfaceId(id, btn) {
     navigator.clipboard.writeText(id).then(() => {
         const orig = btn.innerHTML;
         btn.innerHTML = '<i class="fas fa-check"></i>';
-        setTimeout(() => { btn.innerHTML = orig; }, 1500);
+        setTimeout(() => { btn.innerHTML = HtmlSafe.raw(orig); }, 1500); // the button's own markup
     });
 }
 
@@ -1213,8 +1220,8 @@ function getMiniActionButtons(interface) {
     const canDelete  = !initialStatus.isActive && !initialStatus.isPaused;
 
     const runtimeIcon   = showPause
-        ? '<i class="fas fa-pause"></i>'
-        : '<i class="fas fa-play"></i>';
+        ? HtmlSafe.html`<i class="fas fa-pause"></i>`
+        : HtmlSafe.html`<i class="fas fa-play"></i>`;
     const runtimeAction = showPause
         ? `pauseInterfaceProcessing('${interface.id}')`
         : `activateInterfaceProcessing('${interface.id}')`;
@@ -1223,7 +1230,7 @@ function getMiniActionButtons(interface) {
 
     const pendingReview = reviewQueueCounts[interface.id] || 0;
     const reviewBadge = pendingReview > 0
-        ? `<a href="review-queue.html?interfaceId=${interface.id}" onclick="event.stopPropagation()"
+        ? HtmlSafe.html`<a href="review-queue.html?interfaceId=${interface.id}" onclick="event.stopPropagation()"
               class="act-btn act-btn-amber" title="${pendingReview} message${pendingReview > 1 ? 's' : ''} need FHIR review"
               style="position:relative;text-decoration:none;">
                <i class="far fa-triangle-exclamation"></i>
@@ -1237,25 +1244,25 @@ function getMiniActionButtons(interface) {
         ? `Template update available (v${updateVersions}) for: ${pendingUpdates.map(u => u.messageType).join(', ')}`
         : '';
     const updateBadge = pendingUpdates.length > 0
-        ? `<button class="act-btn act-btn-indigo" style="position:relative;" title="${updateTitle}"
-                   onclick="event.stopPropagation(); openMappingUpdateModal('${interface.id}', '${interface.name?.replace(/'/g, "\\'")}')">
+        ? HtmlSafe.html`<button data-requires="write" class="act-btn act-btn-indigo" style="position:relative;" title="${updateTitle}"
+                   onclick="event.stopPropagation(); openMappingUpdateModal('${interface.id}')">
                <i class="fas fa-arrow-up-from-bracket"></i>
                <span style="position:absolute;top:-4px;right:-4px;background:#7c3aed;color:white;border-radius:50%;font-size:9px;font-weight:700;width:14px;height:14px;display:flex;align-items:center;justify-content:center;line-height:1;">${pendingUpdates.length}</span>
            </button>`
         : '';
 
-    return `
+    return HtmlSafe.html`
         <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end;">
             ${updateBadge}
             ${reviewBadge}
 
-            <button class="act-btn ${runtimeColor}" title="${runtimeTitle}"
+            <button data-requires="write" class="act-btn ${runtimeColor}" title="${runtimeTitle}"
                     onclick="event.stopPropagation(); ${runtimeAction}"
                     id="runtime-btn-${interface.id}">
                 ${runtimeIcon}
             </button>
 
-            <button class="act-btn act-btn-red" title="Stop Processing"
+            <button data-requires="write" class="act-btn act-btn-red" title="Stop Processing"
                     onclick="event.stopPropagation(); deactivateInterfaceProcessing('${interface.id}')"
                     id="stop-btn-${interface.id}"
                     ${!showStop ? 'disabled' : ''}>
@@ -1274,10 +1281,10 @@ function getMiniActionButtons(interface) {
                     <i class="fas fa-ellipsis-h"></i>
                 </button>
                 <div class="dropdown-menu-minimal" id="actions-menu-${interface.id}">
-                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); showEditModal('${interface.id}'); closeActionsMenu('${interface.id}')">
+                    <div class="dropdown-item-minimal" data-requires="write" onclick="event.stopPropagation(); showEditModal('${interface.id}'); closeActionsMenu('${interface.id}')">
                         <i class="far fa-edit"></i><span>Edit</span>
                     </div>
-                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); configurePipeline('${interface.id}', '${interface.messageType || 'ADT^A01'}'); closeActionsMenu('${interface.id}')">
+                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); configurePipeline('${interface.id}'); closeActionsMenu('${interface.id}')">
                         <i class="fas fa-network-wired"></i><span>Pipeline</span>
                     </div>
                     <div class="dropdown-item-minimal" onclick="event.stopPropagation(); showInterfaceDetails('${interface.id}'); closeActionsMenu('${interface.id}')">
@@ -1286,18 +1293,18 @@ function getMiniActionButtons(interface) {
                     <div class="dropdown-item-minimal" onclick="event.stopPropagation(); window.location.href='review-queue.html?interfaceId=${interface.id}'; closeActionsMenu('${interface.id}')">
                         <i class="far fa-circle-exclamation"></i><span>Review Queue${pendingReview > 0 ? ` (${pendingReview})` : ''}</span>
                     </div>
-                    ${interface.status === 'error' ? `
-                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); resetInterface('${interface.id}'); closeActionsMenu('${interface.id}')">
+                    ${interface.status === 'error' ? HtmlSafe.html`
+                    <div class="dropdown-item-minimal" data-requires="write" onclick="event.stopPropagation(); resetInterface('${interface.id}'); closeActionsMenu('${interface.id}')">
                         <i class="fas fa-sync"></i><span>Reset</span>
                     </div>` : ''}
-                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); openSaveAsTemplateModal('${interface.id}', '${interface.name?.replace(/'/g, "\\'")}'); closeActionsMenu('${interface.id}')">
+                    <div class="dropdown-item-minimal" data-requires="write" onclick="event.stopPropagation(); openSaveAsTemplateModal('${interface.id}'); closeActionsMenu('${interface.id}')">
                         <i class="far fa-bookmark"></i><span>Save as Template</span>
                     </div>
                     <div class="dropdown-divider-minimal"></div>
-                    ${canDelete ? `
-                    <div class="dropdown-item-minimal danger" onclick="event.stopPropagation(); confirmDeleteInterface('${interface.id}', '${interface.name?.replace(/'/g, "\\'")}'); closeActionsMenu('${interface.id}')">
+                    ${canDelete ? HtmlSafe.html`
+                    <div class="dropdown-item-minimal danger" data-requires="write" onclick="event.stopPropagation(); confirmDeleteInterface('${interface.id}'); closeActionsMenu('${interface.id}')">
                         <i class="far fa-trash-alt"></i><span>Delete</span>
-                    </div>` : `
+                    </div>` : HtmlSafe.html`
                     <div class="dropdown-item-minimal disabled" title="Stop interface first">
                         <i class="far fa-trash-alt"></i><span>Delete</span>
                     </div>`}
@@ -1341,7 +1348,8 @@ function closeActionsMenu(interfaceId) {
 }
 
 // Confirm delete interface with warning
-function confirmDeleteInterface(interfaceId, interfaceName) {
+function confirmDeleteInterface(interfaceId) {
+    const interfaceName = interfaceById(interfaceId)?.name || 'Interface';
     console.log('🗑️ confirmDeleteInterface called:', { interfaceId, interfaceName });
 
     const modal = document.createElement('div');
@@ -1358,7 +1366,7 @@ function confirmDeleteInterface(interfaceId, interfaceName) {
         align-items: center !important;
         justify-content: center !important;
     `;
-    modal.innerHTML = `
+    modal.innerHTML = HtmlSafe.html`
         <div class="modal-content" style="max-width: 550px; width: 90%; border-radius: 8px; border: 1px solid var(--pink-200, #f8bbd9);">
             <div class="modal-header">
                 <h3><i class="fas fa-exclamation-triangle"></i> Delete Interface</h3>
@@ -1657,7 +1665,7 @@ function updatePaginationInfo() {
     const startItem = (currentPage - 1) * pageSize + 1;
     const endItem = Math.min(currentPage * pageSize, totalItems);
     const filtered = totalItems < interfaces.length ? ` (filtered from ${interfaces.length})` : '';
-    infoElement.innerHTML = `Showing <strong>${startItem}–${endItem}</strong> of <strong>${totalItems}</strong> interfaces${filtered}`;
+    infoElement.innerHTML = HtmlSafe.html`Showing <strong>${startItem}–${endItem}</strong> of <strong>${totalItems}</strong> interfaces${filtered}`;
 }
 
 function updatePaginationControls() {
@@ -1709,7 +1717,8 @@ function updatePaginationControls() {
     // Last page
     html += `<button ${btnStyle(currentPage === totalPages, false)} onclick="goToPage(${totalPages})" title="Last page">»</button>`;
 
-    paginationContainer.innerHTML = html;
+    // Page numbers and constant markup only — no data reaches this string.
+    paginationContainer.innerHTML = HtmlSafe.raw(html);
 }
 
 // Interface Actions
@@ -1778,7 +1787,7 @@ function showDeleteModal(interfaceId, interfaceName) {
         return;
     }
 
-    container.innerHTML = `
+    container.innerHTML = HtmlSafe.html`
         <div class="modal-overlay show" id="deleteModal" onclick="if(event.target === this) closeDeleteModal()">
             <div class="modal-content" style="max-width: 600px;">
                 <div class="modal-header">
@@ -2578,6 +2587,24 @@ async function handleEditInterface(event) {
         interfaceData = collectInterfaceFormData();
     }
 
+    // Partner Endpoint Authentication — sent as its own `endpointAuth` field
+    // (undefined = leave unchanged, null = remove); the server never takes it
+    // from sourceConfig. See EndpointAuthEditor.js.
+    if (window.editEndpointAuthEditor) {
+        const endpointAuthError = window.editEndpointAuthEditor.validate();
+        if (endpointAuthError) {
+            AppDialogs.toast(endpointAuthError, 'error');
+            handleEditInterface.isProcessing = false;
+            if (saveButton) {
+                saveButton.textContent = originalText || '💾 Save Changes';
+                saveButton.disabled = false;
+            }
+            return;
+        }
+        const endpointAuth = window.editEndpointAuthEditor.collect();
+        if (endpointAuth !== undefined) interfaceData.endpointAuth = endpointAuth;
+    }
+
     // Always collect FHIR validation policy (not managed by config manager)
     const policySelect = document.getElementById('fhirValidationPolicy');
     if (policySelect && policySelect.value) {
@@ -2653,7 +2680,7 @@ async function handleEditInterface(event) {
         }
     }
 
-    console.log('🔄 Submitting interface update:', interfaceData);
+    console.log('🔄 Submitting interface update:', interfaceData.endpointAuth ? { ...interfaceData, endpointAuth: '[redacted]' } : interfaceData);
 
     try {
         const response = await fetch(`/api/interfaces/${interfaceData.id}`, {
@@ -3367,7 +3394,7 @@ function updateDeleteButtonState(interfaceId, canDelete) {
                 item.onclick = function(e) {
                     e.stopPropagation();
                     const iface = interfaces.find(i => i.id === interfaceId);
-                    confirmDeleteInterface(interfaceId, iface?.name?.replace(/'/g, "\\'") || '');
+                    confirmDeleteInterface(interfaceId);
                     closeActionsMenu(interfaceId);
                 };
             } else {
@@ -3405,7 +3432,7 @@ function updateActionButtonsVisibility(interfaceId, isProcessing, isPaused = fal
             color = '#10b981'; // Green
         }
 
-        runtimeBtn.innerHTML = icon;
+        runtimeBtn.innerHTML = HtmlSafe.raw(icon); // one of the two constant icons above
         runtimeBtn.setAttribute('onclick', `event.stopPropagation(); ${action}`);
         runtimeBtn.setAttribute('title', title);
         runtimeBtn.style.color = color;
@@ -3643,7 +3670,7 @@ function displayProcessingHistoryModal(interfaceId, history) {
     // Create modal HTML
     const modal = document.createElement('div');
     modal.className = 'modal-overlay';
-    modal.innerHTML = `
+    modal.innerHTML = HtmlSafe.html`
         <div class="modal-container processing-history-modal">
             <div class="modal-header">
                 <h2>Processing History</h2>
@@ -3675,7 +3702,7 @@ function displayProcessingHistoryModal(interfaceId, history) {
                             </tr>
                         </thead>
                         <tbody>
-                            ${history.map(h => `
+                            ${history.map(h => HtmlSafe.html`
                                 <tr class="history-row status-${h.status}">
                                     <td class="message-id">${h.message_id}</td>
                                     <td class="status">
@@ -3684,7 +3711,7 @@ function displayProcessingHistoryModal(interfaceId, history) {
                                     <td class="processing-time">${h.transformation_time_ms || 0}ms</td>
                                     <td class="timestamp">${new Date(h.created_at).toLocaleString()}</td>
                                 </tr>
-                            `).join('')}
+                            `)}
                         </tbody>
                     </table>
                 </div>
@@ -3769,7 +3796,7 @@ function setLogLevel(level) {
         }
     });
     const hint = document.getElementById('logLevelHint');
-    if (hint) hint.innerHTML = (LOG_LEVEL_STYLES[level] || LOG_LEVEL_STYLES.debug).hint;
+    if (hint) hint.innerHTML = HtmlSafe.raw((LOG_LEVEL_STYLES[level] || LOG_LEVEL_STYLES.debug).hint); // constant text above
     const cb = document.getElementById('editDebugLogging');
     if (cb) cb.checked = (level !== 'off');
 }
@@ -3799,7 +3826,8 @@ window.addEventListener('beforeunload', function() {
 
 // ── Save as Template ────────────────────────────────────────────────────────
 
-function openSaveAsTemplateModal(interfaceId, interfaceName) {
+function openSaveAsTemplateModal(interfaceId) {
+    const interfaceName = interfaceById(interfaceId)?.name || '';
     // Remove any existing modal
     const existing = document.getElementById('saveAsTemplateModal');
     if (existing) existing.remove();
@@ -3807,7 +3835,7 @@ function openSaveAsTemplateModal(interfaceId, interfaceName) {
     const modal = document.createElement('div');
     modal.id = 'saveAsTemplateModal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center';
-    modal.innerHTML = `
+    modal.innerHTML = HtmlSafe.html`
         <style>
             #satModal { background:#fff;border-radius:12px;width:480px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.25);font-family:inherit; }
             #satModal h3 { margin:0 0 4px;font-size:1.05rem;color:#1a1a2e; }
@@ -3831,7 +3859,7 @@ function openSaveAsTemplateModal(interfaceId, interfaceName) {
             <div style="padding:20px 24px 16px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center">
                 <div>
                     <h3>💾 Save as Template</h3>
-                    <div class="sat-sub">From: <strong>${_escHtmlSat(interfaceName)}</strong></div>
+                    <div class="sat-sub">From: <strong>${interfaceName}</strong></div>
                 </div>
                 <button onclick="document.getElementById('saveAsTemplateModal').remove()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:#888;line-height:1">×</button>
             </div>
@@ -3847,7 +3875,7 @@ function openSaveAsTemplateModal(interfaceId, interfaceName) {
                 </div>
                 <div class="sat-field">
                     <label>Template Name *</label>
-                    <input id="satName" value="${_escHtmlSat(interfaceName)}" placeholder="e.g. Epic ADT Feed">
+                    <input id="satName" value="${interfaceName}" placeholder="e.g. Epic ADT Feed">
                 </div>
                 <div class="sat-field">
                     <label>Category</label>
@@ -3885,10 +3913,6 @@ function openSaveAsTemplateModal(interfaceId, interfaceName) {
     document.body.appendChild(modal);
     modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
     document.getElementById('satName').focus();
-}
-
-function _escHtmlSat(str) {
-    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 async function submitSaveAsTemplate(interfaceId) {
@@ -3930,27 +3954,27 @@ async function submitSaveAsTemplate(interfaceId) {
 }
 
 // ── Template Update Modal ──────────────────────────────────────────────────────
-function openMappingUpdateModal(interfaceId, interfaceName) {
+function openMappingUpdateModal(interfaceId) {
+    const interfaceName = interfaceById(interfaceId)?.name || '';
     const updates = mappingUpdates[interfaceId] || [];
     if (updates.length === 0) return;
 
-    const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const rows = updates.map(u =>
-        `<tr>
-            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${esc(u.messageType)}</td>
-            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#7c3aed;font-weight:600;">v${esc(u.availableVersion)}</td>
+    // The message type travels in a data- attribute, never inside the onclick
+    // JavaScript: there, HTML escaping is undone before the script runs.
+    const rows = updates.map(u => HtmlSafe.html`<tr>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${u.messageType}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#7c3aed;font-weight:600;">v${u.availableVersion}</td>
             <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">
-                <button onclick="applyMappingUpdate('${interfaceId}','${esc(u.messageType)}')"
+                <button data-message-type="${u.messageType}" onclick="applyMappingUpdate('${interfaceId}', this.dataset.messageType)"
                         style="font-size:11px;padding:2px 8px;background:#7c3aed;color:white;border:none;border-radius:4px;cursor:pointer;">
                     Reset to OOB
                 </button>
-                <button onclick="dismissMappingUpdate('${interfaceId}','${esc(u.messageType)}')"
+                <button data-message-type="${u.messageType}" onclick="dismissMappingUpdate('${interfaceId}', this.dataset.messageType)"
                         style="font-size:11px;padding:2px 8px;background:#64748b;color:white;border:none;border-radius:4px;cursor:pointer;margin-left:4px;">
                     Keep Custom
                 </button>
             </td>
-        </tr>`
-    ).join('');
+        </tr>`);
 
     const existing = document.getElementById('mappingUpdateModal');
     if (existing) existing.remove();
@@ -3958,12 +3982,12 @@ function openMappingUpdateModal(interfaceId, interfaceName) {
     const modal = document.createElement('div');
     modal.id = 'mappingUpdateModal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
-    modal.innerHTML = `
+    modal.innerHTML = HtmlSafe.html`
         <div style="background:white;border-radius:8px;padding:24px;max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
                 <h3 style="margin:0;font-size:15px;color:#1e293b;">
                     <i class="fas fa-arrow-up-from-bracket" style="color:#7c3aed;margin-right:6px;"></i>
-                    Template Updates Available — ${esc(interfaceName)}
+                    Template Updates Available — ${interfaceName}
                 </h3>
                 <button onclick="document.getElementById('mappingUpdateModal').remove()"
                         style="background:none;border:none;font-size:18px;cursor:pointer;color:#94a3b8;">✕</button>

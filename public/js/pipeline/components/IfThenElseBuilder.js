@@ -178,7 +178,7 @@ class IfThenElseBuilder {
     createHeader() {
         const header = document.createElement('div');
         header.className = 'ifthen-header';
-        header.innerHTML = `
+        header.innerHTML = HtmlSafe.html`
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <div>
                     <h4 style="margin: 0; color: var(--primary-color); font-size: 1rem;">Conditional Logic</h4>
@@ -240,7 +240,7 @@ class IfThenElseBuilder {
         // Header with name and delete
         const headerDiv = document.createElement('div');
         headerDiv.className = 'ifthen-row-header';
-        headerDiv.innerHTML = `
+        headerDiv.innerHTML = HtmlSafe.html`
             <input type="text"
                    class="ifthen-condition-name-compact"
                    value="${condition.name || 'Condition ' + (index + 1)}"
@@ -262,7 +262,7 @@ class IfThenElseBuilder {
         // IF Section
         const ifSection = document.createElement('div');
         ifSection.className = 'ifthen-if-section';
-        ifSection.innerHTML = `
+        ifSection.innerHTML = HtmlSafe.html`
             <label class="ifthen-section-label-compact if-label">IF</label>
             <div class="field-search-container-compact" id="field-search-${index}"></div>
             <select class="ifthen-select-compact" data-field="operator" data-index="${index}">
@@ -288,7 +288,7 @@ class IfThenElseBuilder {
         // THEN Section
         const thenSection = document.createElement('div');
         thenSection.className = 'ifthen-then-section';
-        thenSection.innerHTML = `
+        thenSection.innerHTML = HtmlSafe.html`
             <label class="ifthen-section-label-compact then-label">THEN (if true)</label>
             <select class="ifthen-select-compact" data-field="action" data-action-type="onTrue" data-index="${index}">
                 ${this.createActionOptions(condition.onTrue.action)}
@@ -306,7 +306,7 @@ class IfThenElseBuilder {
         // ELSE Section
         const elseSection = document.createElement('div');
         elseSection.className = 'ifthen-else-section';
-        elseSection.innerHTML = `
+        elseSection.innerHTML = HtmlSafe.html`
             <label class="ifthen-section-label-compact else-label">ELSE (if false)</label>
             <select class="ifthen-select-compact" data-field="action" data-action-type="onFalse" data-index="${index}">
                 ${this.createActionOptions(condition.onFalse.action)}
@@ -352,11 +352,11 @@ class IfThenElseBuilder {
             { value: 'is_not_empty', label: 'Is Not Empty' }
         ];
 
-        return operators.map(op => `
+        return operators.map(op => HtmlSafe.html`
             <option value="${op.value}" ${selectedOperator === op.value ? 'selected' : ''}>
                 ${op.label}
             </option>
-        `).join('');
+        `);
     }
 
     createActionOptions(selectedAction) {
@@ -369,11 +369,11 @@ class IfThenElseBuilder {
             { value: 'route_to_step', label: 'Route To Step', icon: 'directions', color: '#6366f1' }
         ];
 
-        return actions.map(a => `
+        return actions.map(a => HtmlSafe.html`
             <option value="${a.value}" ${selectedAction === a.value ? 'selected' : ''}>
                 ${a.label}
             </option>
-        `).join('');
+        `);
     }
 
     initializeFieldSearch(containerId, initialValue, onChange) {
@@ -449,7 +449,7 @@ class IfThenElseBuilder {
 
         switch (actionData.action) {
             case 'continue':
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <select class="ifthen-select-compact" data-field="logLevel" data-action-type="${actionType}" data-index="${index}">
                         <option value="none" ${!actionData.logLevel || actionData.logLevel === 'none' ? 'selected' : ''}>No logging</option>
                         <option value="info" ${actionData.logLevel === 'info' ? 'selected' : ''}>Log Info</option>
@@ -465,7 +465,7 @@ class IfThenElseBuilder {
                 break;
 
             case 'stop':
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <input type="text" class="ifthen-input-compact" placeholder="Error message (required)"
                            value="${actionData.message || ''}"
                            data-field="message" data-action-type="${actionType}" data-index="${index}">
@@ -478,7 +478,7 @@ class IfThenElseBuilder {
                 break;
 
             case 'set_value':
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <div class="field-search-container-inline" id="set-value-target-${actionType}-${index}"></div>
                     <select class="ifthen-select-compact" data-field="valueType" data-action-type="${actionType}" data-index="${index}">
                         <option value="constant" ${!actionData.valueType || actionData.valueType === 'constant' ? 'selected' : ''}>Constant Value</option>
@@ -497,7 +497,7 @@ class IfThenElseBuilder {
                 break;
 
             case 'transform':
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <div class="field-search-container-inline" id="transform-source-${actionType}-${index}"></div>
                     <select class="ifthen-select-compact" data-field="transformType" data-action-type="${actionType}" data-index="${index}">
                         <option value="uppercase" ${actionData.transformType === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
@@ -545,7 +545,7 @@ class IfThenElseBuilder {
                 break;
 
             case 'route_to_step':
-                container.innerHTML = `<div id="route-step-select-${actionType}-${index}"></div>`;
+                container.innerHTML = HtmlSafe.html`<div id="route-step-select-${actionType}-${index}"></div>`;
 
                 setTimeout(async () => {
                     const steps = await this.loadPipelineSteps();
@@ -554,7 +554,7 @@ class IfThenElseBuilder {
                     if (!selectContainer) return;
 
                     if (steps.length === 0) {
-                        selectContainer.innerHTML = `
+                        selectContainer.innerHTML = HtmlSafe.html`
                             <div class="ifthen-warning" style="padding: 0.5rem; background: #fef3c7; border: 1px solid #fbbf24; border-radius: 4px; font-size: 0.75rem; color: #92400e;">
                                 <i class="fas fa-exclamation-triangle"></i>
                                 No steps available to route to. Add more steps to pipeline first.
@@ -572,7 +572,7 @@ class IfThenElseBuilder {
 
                         const selectedStepIds = actionData.targetStepIds || [];
 
-                        selectContainer.innerHTML = `
+                        selectContainer.innerHTML = HtmlSafe.html`
                             <div style="display: flex; flex-direction: column; gap: 0.5rem;">
                                 <div>
                                     <label style="font-size: 0.7rem; color: #6b7280; margin-bottom: 0.25rem; display: block;">
@@ -581,11 +581,11 @@ class IfThenElseBuilder {
                                     </label>
                                     <select class="ifthen-select-compact multi-step-add-ite" data-action-type="${actionType}" data-index="${index}">
                                         <option value="">+ Add target step...</option>
-                                        ${steps.map(step => `
+                                        ${steps.map(step => HtmlSafe.html`
                                             <option value="${step.value}">
                                                 ${step.label}
                                             </option>
-                                        `).join('')}
+                                        `)}
                                     </select>
                                     <div class="selected-steps-list-ite" id="selected-steps-${actionType}-${index}" style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; min-height: 24px;">
                                         ${this.renderSelectedStepsITE(selectedStepIds, steps, actionType, index)}
@@ -600,11 +600,11 @@ class IfThenElseBuilder {
                                         <i class="fas fa-info-circle" title="Select steps that should be SKIPPED when this route is taken. Use for exclusive true/false branches."></i>
                                     </label>
                                     <select class="ifthen-select-compact" data-field="skipSteps" data-action-type="${actionType}" data-index="${index}" multiple size="3" style="min-height: 60px;">
-                                        ${steps.filter(s => !selectedStepIds.includes(s.value)).map(step => `
+                                        ${steps.filter(s => !selectedStepIds.includes(s.value)).map(step => HtmlSafe.html`
                                             <option value="${step.value}" ${actionData.skipSteps?.includes(step.value) ? 'selected' : ''}>
                                                 ${step.label}
                                             </option>
-                                        `).join('')}
+                                        `)}
                                     </select>
                                     <div style="font-size: 0.65rem; color: #9ca3af; margin-top: 0.25rem;">
                                         Ctrl+click to select multiple
@@ -671,11 +671,11 @@ class IfThenElseBuilder {
             case 'lowercase':
             case 'trim':
                 // No additional options needed
-                container.innerHTML = `<span style="font-size: 0.7rem; color: #6b7280;">→ Target:</span>`;
+                container.innerHTML = HtmlSafe.html`<span style="font-size: 0.7rem; color: #6b7280;">→ Target:</span>`;
                 break;
 
             case 'concat':
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <input type="text" class="ifthen-input-compact"
                            placeholder="Append text (or leave empty for field)"
                            value="${actionData.appendText || ''}"
@@ -691,7 +691,7 @@ class IfThenElseBuilder {
                 break;
 
             case 'replace':
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <input type="text" class="ifthen-input-compact" placeholder="Find"
                            value="${actionData.findText || ''}"
                            data-field="findText" data-action-type="${actionType}" data-index="${index}">
@@ -703,7 +703,7 @@ class IfThenElseBuilder {
                 break;
 
             case 'regex_replace':
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <input type="text" class="ifthen-input-compact" placeholder="Regex pattern"
                            value="${actionData.regexPattern || ''}"
                            data-field="regexPattern" data-action-type="${actionType}" data-index="${index}">
@@ -715,7 +715,7 @@ class IfThenElseBuilder {
                 break;
 
             case 'substring':
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <input type="number" class="ifthen-input-compact" placeholder="Start index"
                            value="${actionData.startIndex || 0}" style="width: 60px;"
                            data-field="startIndex" data-action-type="${actionType}" data-index="${index}">
@@ -727,7 +727,7 @@ class IfThenElseBuilder {
                 break;
 
             case 'split':
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <input type="text" class="ifthen-input-compact" placeholder="Delimiter"
                            value="${actionData.delimiter || ''}" style="width: 60px;"
                            data-field="delimiter" data-action-type="${actionType}" data-index="${index}">
@@ -740,7 +740,7 @@ class IfThenElseBuilder {
 
             case 'pad_left':
             case 'pad_right':
-                container.innerHTML = `
+                container.innerHTML = HtmlSafe.html`
                     <input type="number" class="ifthen-input-compact" placeholder="Total length"
                            value="${actionData.padLength || 10}" style="width: 60px;"
                            data-field="padLength" data-action-type="${actionType}" data-index="${index}">
@@ -752,7 +752,7 @@ class IfThenElseBuilder {
                 break;
 
             default:
-                container.innerHTML = `<span style="font-size: 0.7rem; color: #6b7280;">→ Target:</span>`;
+                container.innerHTML = HtmlSafe.html`<span style="font-size: 0.7rem; color: #6b7280;">→ Target:</span>`;
         }
     }
 
@@ -793,7 +793,7 @@ class IfThenElseBuilder {
      */
     renderSelectedStepsITE(selectedStepIds, steps, actionType, index) {
         if (!selectedStepIds || selectedStepIds.length === 0) {
-            return '<span style="color: #9ca3af; font-style: italic; font-size: 0.7rem;">No steps selected</span>';
+            return HtmlSafe.raw('<span style="color: #9ca3af; font-style: italic; font-size: 0.7rem;">No steps selected</span>');
         }
 
         const stepMap = new Map(steps.map(s => [s.value, s]));
@@ -802,7 +802,7 @@ class IfThenElseBuilder {
             const step = stepMap.get(stepId);
             const stepLabel = step ? step.label : stepId;
 
-            return `
+            return HtmlSafe.html`
                 <div class="selected-step-chip-ite" data-step-id="${stepId}" style="
                     display: inline-flex;
                     align-items: center;
@@ -814,7 +814,7 @@ class IfThenElseBuilder {
                     font-size: 0.7rem;
                 ">
                     <span style="font-weight: bold; color: #4338ca;">${idx + 1}.</span>
-                    <span>${this.escapeHtml(stepLabel)}</span>
+                    <span>${stepLabel}</span>
                     <button type="button" class="remove-step-btn-ite"
                             data-action-type="${actionType}"
                             data-index="${index}"
@@ -831,7 +831,7 @@ class IfThenElseBuilder {
                             title="Remove step">×</button>
                 </div>
             `;
-        }).join('');
+        });
     }
 
     /**
@@ -848,7 +848,7 @@ class IfThenElseBuilder {
                     // Re-render the selected steps list
                     const listContainer = document.getElementById(`selected-steps-${actionType}-${index}`);
                     if (listContainer) {
-                        listContainer.innerHTML = this.renderSelectedStepsITE(actionData.targetStepIds, steps, actionType, index);
+                        listContainer.innerHTML = HtmlSafe.html`${this.renderSelectedStepsITE(actionData.targetStepIds, steps, actionType, index)}`;
                         this.attachRemoveStepEvents(actionType, index, actionData, steps);
                     }
                     e.target.value = ''; // Reset dropdown
@@ -871,7 +871,7 @@ class IfThenElseBuilder {
             btn.addEventListener('click', (e) => {
                 const stepId = btn.dataset.stepId;
                 actionData.targetStepIds = actionData.targetStepIds.filter(id => id !== stepId);
-                listContainer.innerHTML = this.renderSelectedStepsITE(actionData.targetStepIds, steps, actionType, index);
+                listContainer.innerHTML = HtmlSafe.html`${this.renderSelectedStepsITE(actionData.targetStepIds, steps, actionType, index)}`;
                 this.attachRemoveStepEvents(actionType, index, actionData, steps);
             });
         });
@@ -1082,7 +1082,7 @@ class IfThenElseBuilder {
     showHelp() {
         const helpModal = document.createElement('div');
         helpModal.className = 'ifthen-help-modal';
-        helpModal.innerHTML = `
+        helpModal.innerHTML = HtmlSafe.html`
             <div class="ifthen-help-content">
                 <div class="ifthen-help-header">
                     <h3>Conditional Logic Examples</h3>

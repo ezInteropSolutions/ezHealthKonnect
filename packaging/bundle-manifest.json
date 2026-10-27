@@ -1,0 +1,102 @@
+{
+  "_comment": "What the Standalone application bundle contains. Built ONLY from git-tracked files by cmd/bundle-builder (release.yml). Must cover every runtime COPY in the Dockerfile (enforced by cmd/bundle-builder's tests). 'protected' entries are customer data the installer never moves, replaces or deletes on upgrade; they may never appear in the bundle. 'installerDownloads' are not bundled: the Windows installer downloads PostgreSQL only when it is missing and runs it only if its SHA-256 matches (release.yml passes these to the installer build).",
+  "files": [
+    "package.json",
+    "package-lock.json",
+    "app.js",
+    "server.js",
+    "SYSTEM_DOCUMENTATION.md",
+    "installer/INSTALLER_ARCHITECTURE.md",
+    "LICENSE",
+    "COMMERCIAL_LICENSE.md",
+    "THIRD-PARTY-NOTICES.txt"
+  ],
+  "dirs": [
+    "controllers",
+    "services",
+    "middleware",
+    "routes",
+    "config",
+    "processing",
+    "public",
+    "database",
+    "architecture",
+    "docs",
+    "cda",
+    "edi",
+    "ncpdp",
+    "ncpdptelecom",
+    "astm"
+  ],
+  "exclude": {
+    "suffixes": [
+      ".go",
+      ".test.js",
+      ".spec.js",
+      ".bak",
+      ".old",
+      ".new",
+      ".orig"
+    ],
+    "dirNames": [
+      "testdata",
+      "__tests__",
+      "node_modules"
+    ],
+    "files": [
+      "go.mod",
+      "go.sum"
+    ]
+  },
+  "windowsFiles": {
+    "start-app.ps1": "installer/assets/start-app.ps1"
+  },
+  "protected": [
+    ".env",
+    "install-state.json",
+    "logs",
+    "storage",
+    "schemas",
+    "schema-dist",
+    "uploads",
+    "backups",
+    "git-repos",
+    "cache",
+    "tools"
+  ],
+  "installerDownloads": {
+    "postgresql-windows-amd64": {
+      "version": "17.11",
+      "url": "https://get.enterprisedb.com/postgresql/postgresql-17.11-1-windows-x64.exe",
+      "sha256": "f104c552d8495a6f20738c2a03f643164bc64b9985363329e314dec24559f0b7"
+    }
+  },
+  "runtimes": {
+    "node": {
+      "version": "22.23.4",
+      "targets": {
+        "linux/amd64": {
+          "url": "https://nodejs.org/dist/v22.23.4/node-v22.23.4-linux-x64.tar.gz",
+          "sha256": "b8492284c76a54baf58d61668dd0e41ee0fc98adabf9503d30f05d08f55b4406"
+        },
+        "linux/arm64": {
+          "url": "https://nodejs.org/dist/v22.23.4/node-v22.23.4-linux-arm64.tar.gz",
+          "sha256": "f7a1e486dbc8b286847815b477d4fb5e9fb963ed4489c3e1588853d685f589f9"
+        },
+        "windows/amd64": {
+          "url": "https://nodejs.org/dist/v22.23.4/node-v22.23.4-win-x64.zip",
+          "sha256": "cbc74b5e0982c9dbb41525fd8fb5dcd32fbee237863f7829072f4639a1ce5f20"
+        }
+      }
+    },
+    "winsw": {
+      "version": "2.12.0",
+      "targets": {
+        "windows/amd64": {
+          "url": "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe",
+          "sha256": "05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da"
+        }
+      }
+    }
+  }
+}

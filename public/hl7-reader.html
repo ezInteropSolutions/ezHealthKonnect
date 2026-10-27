@@ -488,9 +488,11 @@
     </div>
 
     <!-- Reuse segment viewer (same as wizard step 2) -->
+    <script src="/js/core/html-safe.js"></script>
     <script src="/js/core/app-dialogs.js"></script>
     <script src="/js/services/AuthService.js"></script>
-    <script src="js/components/sidebar-nav.js?v=3"></script>
+    <script src="/js/core/app-auth.js?v=2"></script>
+    <script src="js/components/sidebar-nav.js?v=7"></script>
     <script src="js/wizard/segment-viewer.js"></script>
 
     <script>
@@ -579,22 +581,22 @@
                 const meta = result.meta || {};
                 const badges = [];
                 if (meta.schemaUsed) {
-                    badges.push(`<span class="meta-badge schema"><i class="fas fa-database" style="margin-right:3px;"></i>Schema Enhanced</span>`);
+                    badges.push(HtmlSafe.html`<span class="meta-badge schema"><i class="fas fa-database" style="margin-right:3px;"></i>Schema Enhanced</span>`);
                 } else if (meta.dictionaryUsed) {
-                    badges.push(`<span class="meta-badge dict"><i class="fas fa-book" style="margin-right:3px;"></i>Dictionary</span>`);
+                    badges.push(HtmlSafe.html`<span class="meta-badge dict"><i class="fas fa-book" style="margin-right:3px;"></i>Dictionary</span>`);
                 } else {
-                    badges.push(`<span class="meta-badge basic">Basic Parse</span>`);
+                    badges.push(HtmlSafe.html`<span class="meta-badge basic">Basic Parse</span>`);
                 }
                 if (meta.parsingTime) {
                     const ms = typeof meta.parsingTime === 'string'
                         ? meta.parsingTime
                         : Math.round(meta.parsingTime / 1e6) + 'ms';
-                    badges.push(`<span class="meta-badge time"><i class="fas fa-clock" style="margin-right:3px;"></i>${ms}</span>`);
+                    badges.push(HtmlSafe.html`<span class="meta-badge time"><i class="fas fa-clock" style="margin-right:3px;"></i>${ms}</span>`);
                 }
                 if (result.data?.version) {
-                    badges.push(`<span class="meta-badge msgtype">v${result.data.version}</span>`);
+                    badges.push(HtmlSafe.html`<span class="meta-badge msgtype">v${result.data.version}</span>`);
                 }
-                document.getElementById('metaBadges').innerHTML = badges.join('');
+                document.getElementById('metaBadges').innerHTML = HtmlSafe.html`${badges}`;
 
                 // Render segments
                 const container = document.getElementById('segmentViewerContainer');
@@ -618,6 +620,6 @@
         // Auth check — redirect to login if session invalid
         window.AuthService.initialize();
     </script>
-    <script src="/js/ai-assistant.js"></script>
+    <script src="/js/ai-assistant.js?v=2"></script>
 </body>
 </html>

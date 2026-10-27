@@ -13,10 +13,14 @@ const { requireAuth: isAuthenticated, requireRole } = require('../middleware/aut
 // RBAC: writes are operator+
 const canWrite = requireRole('admin', 'operator');
 
-// ── Read (public — system + public templates visible without login) ───────────
-router.get('/', ctrl.listTemplates);
-router.get('/categories', ctrl.listCategories);
-router.get('/:id', ctrl.getTemplate);
+// ── Read (session required) ──────────────────────────────────────────────────
+// Previously public ("system + public templates visible without login"). Gated
+// in the 2026-10-19 release hardening: templates carry full pipeline
+// configurations, and the only callers are the authenticated dashboard and
+// interfaces pages (no logged-out page lists templates).
+router.get('/', isAuthenticated, ctrl.listTemplates);
+router.get('/categories', isAuthenticated, ctrl.listCategories);
+router.get('/:id', isAuthenticated, ctrl.getTemplate);
 
 // ── Use a template (increment usage_count, return scaffold) ──────────────────
 // Session auth required — found unauthenticated during a security-validation

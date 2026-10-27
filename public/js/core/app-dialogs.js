@@ -89,6 +89,9 @@
     }
 
     // ─── alert ────────────────────────────────────────────────────────────────
+    // `message` (and title/button text) is shown as text. To format it, build it
+    // with HtmlSafe.html (data inside stays escaped) or HtmlSafe.raw (constant
+    // help text only).
     function alert(message, opts) {
         opts = opts || {};
         ensureStyles();
@@ -96,7 +99,7 @@
         return new Promise(function (resolve) {
             const overlay = buildOverlay();
             overlay._dismiss = close;
-            overlay.innerHTML = `
+            overlay.innerHTML = HtmlSafe.html`
                 <div class="app-dialog-box">
                     <div class="app-dialog-header" style="background:${p.bg};border-bottom-color:${p.border}">
                         <span>${p.icon}</span>
@@ -124,7 +127,7 @@
         return new Promise(function (resolve) {
             const overlay = buildOverlay();
             overlay._dismiss = function () { resolve(false); overlay.remove(); };
-            overlay.innerHTML = `
+            overlay.innerHTML = HtmlSafe.html`
                 <div class="app-dialog-box">
                     <div class="app-dialog-header" style="background:${p.bg};border-bottom-color:${p.border}">
                         <span>${p.icon}</span>
@@ -155,7 +158,7 @@
         return new Promise(function (resolve) {
             const overlay = buildOverlay();
             overlay._dismiss = function () { resolve(null); overlay.remove(); };
-            overlay.innerHTML = `
+            overlay.innerHTML = HtmlSafe.html`
                 <div class="app-dialog-box">
                     <div class="app-dialog-header" style="background:${p.bg};border-bottom-color:${p.border}">
                         <span>${p.icon}</span>
@@ -164,8 +167,8 @@
                     <div class="app-dialog-body">
                         ${message}
                         <input class="app-dialog-input" id="_appDlgInput" type="text"
-                               value="${(opts.defaultValue || '').replace(/"/g,'&quot;')}"
-                               placeholder="${(opts.placeholder || '').replace(/"/g,'&quot;')}">
+                               value="${opts.defaultValue || ''}"
+                               placeholder="${opts.placeholder || ''}">
                     </div>
                     <div class="app-dialog-footer">
                         <button class="app-dialog-btn app-dialog-btn-cancel" id="_appDlgCancel">
@@ -191,6 +194,131 @@
         });
     }
 
+    // ─── form ─────────────────────────────────────────────────────────────────
+    // Multi-field dialog. opts.fields: [{ name, label, type?, value?, placeholder?, required?, autocomplete?,
+    // options? (renders a <select>) }]. opts.onSubmit(values) is awaited; if it throws, the error message is
+    // shown inside the dialog and it stays open so the user can correct and retry. Resolves true after a
+    // successful submit, null if cancelled. All text is set via textContent/DOM, never as markup.
+    function form(opts) {
+        opts = opts || {};
+        ensureStyles();
+        const p = palette(opts.type || 'info');
+        return new Promise(function (resolve) {
+            const overlay = buildOverlay();
+            overlay._dismiss = function () { overlay.remove(); resolve(null); };
+
+            const box = document.createElement('div');
+            box.className = 'app-dialog-box';
+            box.setAttribute('role', 'dialog');
+            box.setAttribute('aria-label', opts.title || 'Form');
+
+            const header = document.createElement('div');
+            header.className = 'app-dialog-header';
+            header.style.background = p.bg;
+            header.style.borderBottomColor = p.border;
+            header.textContent = (opts.title || 'Form');
+
+            const formEl = document.createElement('form');
+            formEl.noValidate = true;
+            const body = document.createElement('div');
+            body.className = 'app-dialog-body';
+            if (opts.description) {
+                const d = document.createElement('div');
+                d.textContent = opts.description;
+                d.style.marginBottom = '4px';
+                body.appendChild(d);
+            }
+
+            const inputs = {};
+            (opts.fields || []).forEach(function (f) {
+                const label = document.createElement('label');
+                label.style.cssText = 'display:block;margin-top:10px;font-size:13px;font-weight:600;color:#374151';
+                label.textContent = f.label || f.name;
+                let input;
+                if (Array.isArray(f.options)) {
+                    input = document.createElement('select');
+                    f.options.forEach(function (o) {
+                        const opt = document.createElement('option');
+                        opt.value = o.value;
+                        opt.textContent = o.label;
+                        if (o.value === f.value) opt.selected = true;
+                        input.appendChild(opt);
+                    });
+                } else {
+                    input = document.createElement('input');
+                    input.type = f.type || 'text';
+                    input.value = f.value || '';
+                    if (f.placeholder) input.placeholder = f.placeholder;
+                    if (f.autocomplete) input.autocomplete = f.autocomplete;
+                }
+                input.className = 'app-dialog-input';
+                input.style.marginTop = '4px';
+                input.name = f.name;
+                input.id = '_appDlgField_' + f.name;
+                label.htmlFor = input.id;
+                if (f.required) input.setAttribute('aria-required', 'true');
+                inputs[f.name] = { el: input, def: f };
+                body.appendChild(label);
+                body.appendChild(input);
+            });
+
+            const err = document.createElement('div');
+            err.setAttribute('role', 'alert');
+            err.style.cssText = 'color:#b91c1c;font-size:13px;margin-top:10px;min-height:1em';
+            body.appendChild(err);
+
+            const footer = document.createElement('div');
+            footer.className = 'app-dialog-footer';
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'app-dialog-btn app-dialog-btn-cancel';
+            cancelBtn.textContent = opts.cancelText || 'Cancel';
+            const okBtn = document.createElement('button');
+            okBtn.type = 'submit';
+            okBtn.className = 'app-dialog-btn app-dialog-btn-confirm';
+            okBtn.style.background = p.btn;
+            okBtn.textContent = opts.submitText || 'Save';
+            footer.appendChild(cancelBtn);
+            footer.appendChild(okBtn);
+
+            formEl.appendChild(body);
+            formEl.appendChild(footer);
+            box.appendChild(header);
+            box.appendChild(formEl);
+            overlay.appendChild(box);
+            document.body.appendChild(overlay);
+
+            const first = formEl.querySelector('input,select');
+            if (first) first.focus();
+
+            cancelBtn.addEventListener('click', overlay._dismiss);
+            formEl.addEventListener('keydown', function (e) { if (e.key === 'Escape') overlay._dismiss(); });
+            formEl.addEventListener('submit', async function (e) {
+                e.preventDefault();
+                err.textContent = '';
+                const values = {};
+                for (const name of Object.keys(inputs)) {
+                    const { el, def } = inputs[name];
+                    values[name] = el.value;
+                    if (def.required && !String(el.value).trim()) {
+                        err.textContent = (def.label || name) + ' is required';
+                        el.focus();
+                        return;
+                    }
+                }
+                okBtn.disabled = true;
+                try {
+                    if (opts.onSubmit) await opts.onSubmit(values);
+                    overlay.remove();
+                    resolve(true);
+                } catch (ex) {
+                    err.textContent = (ex && ex.message) || 'Something went wrong';
+                    okBtn.disabled = false;
+                }
+            });
+        });
+    }
+
     // ─── toast ────────────────────────────────────────────────────────────────
     const TOAST_BG = { success:'#16a34a', error:'#dc2626', warning:'#f59e0b', info:'#3b82f6' };
     function toast(message, type, durationMs) {
@@ -198,6 +326,9 @@
         type = type || 'info';
         durationMs = durationMs || 4000;
         const el = document.createElement('div');
+        // Announced by screen readers, and findable by tests: role=alert for errors, role=status otherwise.
+        el.className = 'app-toast app-toast-' + type;
+        el.setAttribute('role', type === 'error' ? 'alert' : 'status');
         el.style.cssText = `
             position:fixed; top:20px; right:20px; z-index:1000000;
             padding:12px 20px; border-radius:8px; color:#fff;
@@ -214,5 +345,5 @@
         }, durationMs);
     }
 
-    window.AppDialogs = { alert: alert, confirm: confirm, prompt: prompt, toast: toast };
+    window.AppDialogs = { alert: alert, confirm: confirm, prompt: prompt, form: form, toast: toast };
 }());

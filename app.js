@@ -21,17 +21,54 @@ console.log(`Go Backend Port: ${GO_BACKEND_PORT}`);
 console.log(`Go Backend URL: ${GO_BACKEND_URL}`);
 console.log(`Node Environment: ${process.env.NODE_ENV || 'development'}`);
 
+// Reverse-proxy awareness (HTTPS termination in front of the app). Set
+// TRUST_PROXY to the hop count or Express trust-proxy value (e.g. "1",
+// "loopback", "10.0.0.0/8") when the app runs behind nginx/a load balancer, so
+// req.ip is the real client and req.secure reflects the original HTTPS request
+// (required for SESSION_COOKIE_SECURE=auto). Unset = trust nothing (direct).
+if (process.env.TRUST_PROXY) {
+    const tp = process.env.TRUST_PROXY.trim();
+    app.set('trust proxy', /^\d+$/.test(tp) ? parseInt(tp, 10) : (tp === 'true' ? true : tp));
+    console.log(`Trust proxy: ${tp}`);
+}
+
 // SECURITY HEADERS — helmet was already a declared dependency but never wired in.
-// contentSecurityPolicy is disabled: the server-rendered public/ pages use inline
-// scripts/styles throughout, and helmet's default CSP would break them without a
-// full page-by-page audit. crossOriginEmbedderPolicy is disabled too: several pages
-// (interface-builder.html, messages.html, test-xpath-autocomplete.html) load Bootstrap/
+// crossOriginEmbedderPolicy is disabled: several pages
+// (messages.html and others) load Bootstrap/
 // Font Awesome/leader-line from jsdelivr/cloudflare CDNs, and this app doesn't use
 // SharedArrayBuffer or other features COEP exists to gate — no upside, real breakage
 // risk. The other headers (X-Frame-Options, X-Content-Type-Options, HSTS,
 // Referrer-Policy, X-Powered-By removal, etc.) carry no such risk.
 const helmet = require('helmet');
-app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+// Content-Security-Policy (2026-10-19 release hardening). The pages rely on
+// ~900 inline event handlers and inline <script>/<style> blocks, so 'unsafe-inline'
+// is still required for scripts/styles until a page-by-page nonce migration —
+// but the policy now blocks every script/style/font/connection origin other than
+// this app and the two CDNs the UI actually loads (cdnjs, jsdelivr), forbids
+// plugins and <base> hijacking, and stops other sites framing the app.
+// Two helmet defaults are overridden on purpose: script-src-attr 'none' would
+// block every inline onclick handler, and upgrade-insecure-requests would break
+// the plain-HTTP installs the installer sets up by default.
+const CSP_CDNS = ['https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'];
+app.use(helmet({
+    contentSecurityPolicy: {
+        useDefaults: false,
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", ...CSP_CDNS],
+            scriptSrcAttr: ["'unsafe-inline'"],
+            styleSrc: ["'self'", "'unsafe-inline'", ...CSP_CDNS],
+            fontSrc: ["'self'", 'data:', ...CSP_CDNS],
+            imgSrc: ["'self'", 'data:', 'blob:'],
+            connectSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            baseUri: ["'self'"],
+            formAction: ["'self'"],
+            frameAncestors: ["'self'"],
+        },
+    },
+    crossOriginEmbedderPolicy: false,
+}));
 
 // CORS — same-origin by default (the frontend and API already share one origin, so
 // no CORS grant is needed for normal browser use). ADDITIONAL_CORS_ORIGINS was already
@@ -222,6 +259,38 @@ const forwardToGo = async (req, res) => {
             if (req.session.user.role)  options.headers['X-User-Role']  = String(req.session.user.role);
             if (req.session.user.email) options.headers['X-User-Email'] = String(req.session.user.email);
         }
+
+        // Every request through this proxy originates from an outside client.
+        // Go's requireProxiedRequest() rejects client-originated requests that
+        // carry no X-User-ID (outside its small public allow-list), so a route
+        // registered here without _verifyToken fails closed rather than open.
+        // Node's own server-side calls use goBackendClient and never set this.
+        options.headers['X-Proxy-Origin'] = 'client';
+
+        // Caller's real address for Go (audit rows, partner-auth lockout). Set
+        // from Express's own view of the socket (honours TRUST_PROXY below),
+        // never copied from a client-supplied header. Go trusts this header
+        // only from loopback (main.go SetTrustedProxies).
+        if (req.ip) options.headers['X-Forwarded-For'] = req.ip;
+
+        // Partner-facing endpoints authenticate per interface in Go, so the
+        // caller's own credential headers must reach Go. Forward the client's
+        // headers EXCEPT the trust headers this proxy sets itself (which a
+        // client must never be able to supply or override) and hop-by-hop ones.
+        if (req.forwardPartnerCredentials) {
+            const reserved = new Set([
+                'x-internal-proxy-secret', 'x-user-id', 'x-user-role', 'x-user-email',
+                'x-proxy-origin', 'x-forwarded-for', 'x-real-ip', 'forwarded',
+                'cookie', 'host', 'connection', 'content-length',
+                'transfer-encoding', 'keep-alive', 'upgrade', 'te', 'trailer',
+                'content-type', 'accept', 'user-agent',
+            ]);
+            for (const [name, value] of Object.entries(req.headers)) {
+                if (!reserved.has(name.toLowerCase()) && typeof value === 'string') {
+                    options.headers[name] = value;
+                }
+            }
+        }
         
         // Add body for POST/PUT/PATCH/DELETE requests. req.body is one of:
         //   - a Buffer (raw content types like application/xml — forward verbatim,
@@ -336,12 +405,14 @@ try {
 
 const sessionConfig = {
     store: _sessionStore,
-    secret: process.env.SESSION_SECRET || 'your-session-secret',
+    secret: process.env.SESSION_SECRET, // enforced at startup by config/SecretsGuard.js — no fallback
     resave: false,
     saveUninitialized: false,
     name: 'ezhealth.sid',
     cookie: {
-        secure: process.env.SESSION_COOKIE_SECURE === 'true',
+        // 'true' = always Secure; 'auto' = Secure when the original request was
+        // HTTPS (behind a TLS-terminating proxy this needs TRUST_PROXY set).
+        secure: process.env.SESSION_COOKIE_SECURE === 'auto' ? 'auto' : process.env.SESSION_COOKIE_SECURE === 'true',
         httpOnly: true,
         maxAge: _sessionTimeoutMinutes * 60 * 1000,
         sameSite: 'lax'
@@ -353,7 +424,26 @@ app.use(session(sessionConfig));
 // Admin-only fhir routes — must be registered BEFORE the catch-all /api/fhir proxy.
 // verifyToken accepts JWT Bearer from both browser and API callers.
 // requireAdminUser checks that the decoded user has role === 'admin'.
-const { verifyToken: _verifyToken } = require('./middleware/auth');
+const {
+    verifyToken: _verifyToken,
+    attachUserIfPresent: _attachUserIfPresentOnly,
+    forwardPartnerCredentials: _forwardPartnerCredentials,
+    requireRoleByMethod: _requireRoleByMethod,
+} = require('./middleware/auth');
+// Role gate for Go-forwarded groups: reads need a reader role, changes a writer
+// role ('user' — the default non-admin role — is neither, matching Node's own routes).
+const GO_READ_ROLES = ['admin', 'super_admin', 'operator', 'viewer', 'engineer'];
+const GO_WRITE_ROLES = ['admin', 'super_admin', 'operator', 'engineer'];
+const _goRoleGate = _requireRoleByMethod(GO_READ_ROLES, GO_WRITE_ROLES);
+// Message CONTENT (raw / transformed / parsed) is refused for roles whose access policy is 'details only'.
+const _messageContentGate = require('./middleware/messageContentGate').requireMessageContent();
+// ezCompanion: chatting is a POST, so it needs a reader role on every method.
+// Its read-only tools (health, monitoring, DLQ stats, analytics) answer
+// directly, so a no-permission 'user' must not reach it; its actions still
+// require admin approval in Go.
+const _aiReadGate = _requireRoleByMethod(GO_READ_ROLES, GO_READ_ROLES);
+// Partner-facing sync endpoints: optional app-user identity + partner credential forwarding.
+const _partnerEndpoint = [_attachUserIfPresentOnly, _forwardPartnerCredentials];
 const _requireAdminUser = (req, res, next) => {
     const user = req.user || (req.session && req.session.user);
     if (!user) return res.status(401).json({ success: false, message: 'Authentication required' });
@@ -401,7 +491,7 @@ app.use('/api/fhir/dlq', _verifyToken, _requireDLQAccess, forwardToGo);
 app.use('/api/fhir/quality', _verifyToken, _requireSuperAdminUser, forwardToGo);
 
 // Monitoring dashboard — live KPIs, alerts, message feed, per-interface health
-app.use('/api/monitoring', _verifyToken, forwardToGo);
+app.use('/api/monitoring', _verifyToken, _goRoleGate, forwardToGo);
 
 // Settings routes — admin-only. Must be registered BEFORE the catch-all /api/system
 // proxy below, same reasoning as the DLQ/quality carve-outs above: Go's
@@ -419,41 +509,60 @@ app.use('/api/system/settings', _verifyToken, _requireAdminUser, forwardToGo);
 // gate the route would be reachable by any authenticated session, admin or not.
 app.use('/api/cda/dedupe/registry', _verifyToken, _requireAdminUser, forwardToGo);
 
-// Apply explicit route handlers for Go backend routes
-app.use('/api/fhir', forwardToGo);
-app.use('/api/hl7', forwardToGo);
-app.use('/api/system', forwardToGo);
-app.use('/api/processing', forwardToGo);  // NEW: Processing engine routes
-app.use('/api/mllp', forwardToGo);        // NEW: MLLP connectivity routes
+// Apply explicit route handlers for Go backend routes.
+//
+// Every Go-forwarded route requires an authenticated user (_verifyToken: JWT or
+// session). Found during the 2026-10-19 release regression: these groups were
+// forwarded with NO auth, and since forwardToGo always attaches the internal
+// proxy secret, Go's requireProxiedRequest() could not tell an anonymous caller
+// apart — anonymous requests could deactivate interfaces, delete CDA documents /
+// code templates / schema packages, write pipeline code templates, read stored
+// CDA document metadata (patient id/name) and browse the server filesystem.
+// Go now also rejects client-originated requests without a verified user
+// (admin_auth.go, defense in depth). The only deliberately public Go route is
+// the liveness probe below; the four synchronous partner endpoints further down
+// authenticate per interface instead (see requireSyncEndpointAuth in Go).
+app.get('/api/system/health', forwardToGo);
+app.use('/api/fhir', _verifyToken, _goRoleGate, forwardToGo);
+app.use('/api/hl7', _verifyToken, _goRoleGate, forwardToGo);
+app.use('/api/system', _verifyToken, _goRoleGate, forwardToGo);
+app.use('/api/processing', _verifyToken, _goRoleGate, forwardToGo);  // Processing engine routes
+app.use('/api/mllp', _verifyToken, _goRoleGate, forwardToGo);        // MLLP connectivity routes
 // Session auth required — found unauthenticated during the device-connectivity
 // test-planning pass (GET /api/connectivity/serial-ports, and every other
 // route in this group including interface connectivity CRUD and ad-hoc
 // connector testing, returned 200 with zero session cookie). _verifyToken is
 // already required above (line ~356); reused here rather than a second
 // require of the same module under a different alias.
-app.use('/api/connectivity', _verifyToken, forwardToGo); // Connector types + interface connectivity
-app.use('/api/zsegments',   forwardToGo); // Enterprise Z-segment mapping configuration
-app.use('/api/cda', forwardToGo);          // CDA schema browser + mapping delta APIs
-app.use('/api/edi', forwardToGo);          // EDI X12 schema browser API
-app.use('/api/ncpdp', forwardToGo);        // NCPDP SCRIPT schema browser API
-app.use('/api/ncpdp-telecom', forwardToGo); // NCPDP Telecommunication D.0 schema browser API
-app.use('/api/pharmacy-claim', forwardToGo); // Synchronous NCPDP Telecom D.0 B1 pharmacy claim submit
-app.use('/api/eligibility', forwardToGo);  // Synchronous 270/271 eligibility check
-app.use('/api/claim-status', forwardToGo); // Synchronous 276/277 claim status check
-app.use('/api/prior-auth', forwardToGo); // Synchronous 278 prior authorization check
+app.use('/api/connectivity', _verifyToken, _goRoleGate, forwardToGo); // Connector types + interface connectivity
+app.use('/api/zsegments', _verifyToken, _goRoleGate, forwardToGo);     // Enterprise Z-segment mapping configuration
+app.use('/api/cda', _verifyToken, _goRoleGate, forwardToGo);           // CDA schema browser + mapping delta APIs
+app.use('/api/edi', _verifyToken, _goRoleGate, forwardToGo);           // EDI X12 schema browser API
+app.use('/api/ncpdp', _verifyToken, _goRoleGate, forwardToGo);         // NCPDP SCRIPT schema browser API
+app.use('/api/ncpdp-telecom', _verifyToken, _goRoleGate, forwardToGo); // NCPDP Telecommunication D.0 schema browser API
+// Synchronous partner-facing endpoints: called machine-to-machine by payer /
+// pharmacy / provider systems that have no app session. NOT gated by
+// _verifyToken — each interface carries its own endpoint authentication
+// (API key / Basic / Bearer), enforced in Go by requireSyncEndpointAuth.
+// _partnerEndpoint still forwards a logged-in app user's identity (in-app
+// testing), and the partner's own credential headers are forwarded verbatim.
+app.use('/api/pharmacy-claim', _partnerEndpoint, forwardToGo); // Synchronous NCPDP Telecom D.0 B1 pharmacy claim submit
+app.use('/api/eligibility', _partnerEndpoint, forwardToGo);    // Synchronous 270/271 eligibility check
+app.use('/api/claim-status', _partnerEndpoint, forwardToGo);   // Synchronous 276/277 claim status check
+app.use('/api/prior-auth', _partnerEndpoint, forwardToGo);     // Synchronous 278 prior authorization check
 // NOTE: /api/ai routes are registered after session middleware below (require req.session.user)
-app.use('/api/code-templates', forwardToGo); // Code Template Libraries (JS function injection into script steps)
+app.use('/api/code-templates', _verifyToken, _goRoleGate, forwardToGo); // Code Template Libraries (JS function injection into script steps)
 // /api/git is registered below (after session middleware, with requireAuth)
-app.post('/api/pipeline/reference-variables', forwardToGo);  // Exact match - avoid intercepting /api/pipelines/*
+app.post('/api/pipeline/reference-variables', _verifyToken, _goRoleGate, forwardToGo);  // Exact match - avoid intercepting /api/pipelines/*
 
 // Database query testing routes - use explicit route matching
-app.post('/api/database/test-query', forwardToGo);  // NEW: Database query testing
+app.post('/api/database/test-query', _verifyToken, _goRoleGate, forwardToGo);
 console.log('✅ Database test-query route registered');
 console.log('✅ Pipeline routes registered (generic, reusable)');
 
 // File parser routes - preview + template listing + server file browser
-app.get('/api/file-parser/browse', forwardToGo);   // explicit GET before the catch-all use()
-app.use('/api/file-parser', forwardToGo);           // file-parser/preview + file-parser/templates
+app.get('/api/file-parser/browse', _verifyToken, _goRoleGate, forwardToGo);   // explicit GET before the catch-all use()
+app.use('/api/file-parser', _verifyToken, _goRoleGate, forwardToGo);           // file-parser/preview + file-parser/templates
 console.log('✅ File parser routes registered (preview + templates + browse)');
 
 console.log('Simple proxy configured successfully');
@@ -471,12 +580,12 @@ app.use(setupCheckMiddleware);
 
 // Analytics + Alerts + Git + Migration routes — require session auth before forwarding to Go
 const { requireAuth: _analyticsAuth, requireAdmin: _requireAdminAuth } = require('./middleware/auth');
-app.use('/api/analytics', _analyticsAuth, forwardToGo);
-app.use('/api/alerts',    _analyticsAuth, forwardToGo);
+app.use('/api/analytics', _analyticsAuth, _goRoleGate, forwardToGo);
+app.use('/api/alerts',    _analyticsAuth, _goRoleGate, forwardToGo);
 // Override the early /api/git registration with an auth-protected version (session is now initialized)
-app.use('/api/git',       _analyticsAuth, forwardToGo);
+app.use('/api/git',       _analyticsAuth, _goRoleGate, forwardToGo);
 // Mirth Connect migration — auth required
-app.use('/api/migration', _analyticsAuth, forwardToGo);
+app.use('/api/migration', _analyticsAuth, _goRoleGate, forwardToGo);
 
 // AI assistant — session is now available; admin-only for privileged operations.
 // Specific-path rules must be registered before the catch-all /api/ai.
@@ -484,7 +593,7 @@ app.use('/api/ai/ingest',                    _analyticsAuth, _requireAdminAuth, 
 app.use('/api/ai/models/pull',               _analyticsAuth, _requireAdminAuth, forwardToGo);
 app.use('/api/ai/feedback/export',           _analyticsAuth, _requireAdminAuth, forwardToGo);
 app.use('/api/ai/feedback/submit-to-team',   _analyticsAuth, _requireAdminAuth, forwardToGo);
-app.use('/api/ai', _analyticsAuth, forwardToGo);
+app.use('/api/ai', _analyticsAuth, _aiReadGate, forwardToGo);
 
 // Admin smoke-test — session auth + admin role required; streams SSE
 const smokeTestRoutes = require('./routes/adminSmokeTest');
@@ -529,6 +638,7 @@ console.log('🔄 Mounting /api/auth...');
 app.use('/api/auth', authRoutes);
 console.log('🔄 Mounting /api/users...');
 app.use('/api/users', userRoutes);
+app.use('/api/access-policy', require('./routes/accessPolicy')); // Settings -> Access policy (admin only inside)
 console.log('🔄 Mounting /api/audit-logs...');
 const auditLogRoutes = require('./controllers/auditController');
 app.use('/api/audit-logs', auditLogRoutes);
@@ -542,17 +652,17 @@ app.use('/api/interface-templates', interfaceTemplateRoutes);
 const ifaceTemplateCtrl = require('./controllers/interfaceTemplateController');
 const { requireAuth: _isAuth } = require('./middleware/auth');
 app.post('/api/interfaces/:interfaceId/save-as-template', _isAuth, ifaceTemplateCtrl.saveInterfaceAsTemplate);
-app.post('/api/interfaces/:interfaceId/template-preview', ifaceTemplateCtrl.previewSanitization);
+app.post('/api/interfaces/:interfaceId/template-preview', _isAuth, ifaceTemplateCtrl.previewSanitization);
 console.log('✅ Interface template routes mounted');
 console.log('🔄 Mounting /api/wizard...');
 app.use('/api/wizard', wizardRoutes);
 // Forward object-storage endpoints to Go BEFORE local message routes
-app.get('/api/messages/:messageId/raw', forwardToGo);
-app.get('/api/messages/:messageId/transformed', forwardToGo);
-app.get('/api/messages/:messageId/logs', forwardToGo);
-app.get('/api/messages/:messageId/mapping-log', forwardToGo);
-app.get('/api/messages/:messageId/parsed-cda', forwardToGo);
-app.get('/api/messages/:messageId/parsed-content', forwardToGo);
+app.get('/api/messages/:messageId/raw', _verifyToken, _goRoleGate, _messageContentGate, forwardToGo);
+app.get('/api/messages/:messageId/transformed', _verifyToken, _goRoleGate, _messageContentGate, forwardToGo);
+app.get('/api/messages/:messageId/logs', _verifyToken, _goRoleGate, forwardToGo);
+app.get('/api/messages/:messageId/mapping-log', _verifyToken, _goRoleGate, _messageContentGate, forwardToGo);
+app.get('/api/messages/:messageId/parsed-cda', _verifyToken, _goRoleGate, _messageContentGate, forwardToGo);
+app.get('/api/messages/:messageId/parsed-content', _verifyToken, _goRoleGate, _messageContentGate, forwardToGo);
 console.log('🔄 Mounting /api/messages...');
 app.use('/api/messages', messageRoutes);
 
@@ -568,11 +678,9 @@ const deploymentRoutes = require('./routes/deploymentRoutes');
 app.use('/api/deployment', deploymentRoutes);
 console.log('✅ Deployment routes mounted at /api/deployment');
 
-// FHIR Receiver routes - Node.js handles incoming FHIR resources
-console.log('🔄 Mounting /fhir (FHIR Receiver)...');
-const fhirReceiverRoutes = require('./routes/fhirReceiverRoutes');
-app.use('/fhir', fhirReceiverRoutes);
-console.log('✅ FHIR Receiver routes mounted at /fhir');
+// FHIR resources are received by the HTTP FHIR Receiver connector
+// (http_fhir_inbound), not by Node. The former Node /fhir/receiver routes
+// (optional auth, never ran a pipeline) were removed in v26.10.
 
 // Pipeline Builder routes - with debug logging
 console.log('🔄 Mounting /api/pipelines...');
@@ -616,7 +724,8 @@ app.use('/api/user-info', (req, res, next) => {
 });
 
 // TEST ROUTE TO VERIFY SERVER IS WORKING
-app.get('/api/test-route', (req, res) => {
+// Debug routes: admin-only (2026-10-19 release hardening — they exposed internal ports/URLs anonymously).
+app.get('/api/test-route', _verifyToken, _requireAdminUser, (req, res) => {
     console.log('🧪 TEST ROUTE HIT!');
     res.json({ message: 'Test route works', timestamp: new Date().toISOString() });
 });
@@ -654,6 +763,8 @@ app.get('/api/dashboard/recent-activity', async (req, res) => {
     try {
         const { sequelize } = require('./config/database');
         const { QueryTypes } = require('sequelize');
+        // Everyone's activity for roles allowed to see all interfaces; otherwise only the user's own.
+        const canSeeAll = await require('./services/AccessPolicyService').canSeeAllInterfaces(req.session.user);
         const rows = await sequelize.query(`
             SELECT
                 al.action,
@@ -663,9 +774,10 @@ app.get('/api/dashboard/recent-activity', async (req, res) => {
                 u.name AS user_name
             FROM audit_logs al
             LEFT JOIN users u ON u.id = al.user_id
+            WHERE (al.user_id = :uid OR ${canSeeAll})
             ORDER BY al.created_at DESC
             LIMIT 8
-        `, { type: QueryTypes.SELECT });
+        `, { type: QueryTypes.SELECT, replacements: { uid: req.session.user.id } });
         res.json({ success: true, activity: rows });
     } catch (e) {
         res.json({ success: false, error: e.message });
@@ -673,7 +785,7 @@ app.get('/api/dashboard/recent-activity', async (req, res) => {
 });
 
 // PROXY TEST ROUTES FOR DEBUGGING
-app.get('/api/proxy/test', async (req, res) => {
+app.get('/api/proxy/test', _verifyToken, _requireAdminUser, async (req, res) => {
     console.log('Proxy test endpoint called');
     
     const backendHealthy = await testGoBackendConnectivity();
@@ -721,7 +833,7 @@ app.post('/api/login', async (req, res) => {
         
         const token = jwt.sign(
             { userId: user.id, email: user.email, role: user.role },
-            process.env.JWT_SECRET || 'your-secret-key-change-this-in-production',
+            process.env.JWT_SECRET, // enforced at startup by config/SecretsGuard.js — no fallback
             { expiresIn: '24h' }
         );
         
@@ -777,16 +889,9 @@ app.get('/api/status', async (req, res) => {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         authenticated: !!req.session.user,
-        proxy: {
-            enabled: true,
-            backend_url: GO_BACKEND_URL,
-            backend_healthy: backendHealthy,
-            proxy_type: 'custom_simple'
-        },
-        ports: {
-            frontend: FRONTEND_PORT,
-            backend: GO_BACKEND_PORT
-        }
+        // Public liveness/readiness probe: internal backend URL and ports are no
+        // longer disclosed here (2026-10-19 hardening) — admins can use /api/proxy/test.
+        backend_healthy: backendHealthy
     });
 });
 

@@ -366,7 +366,9 @@
     </div>
 </div>
 
-<script src="js/components/sidebar-nav.js"></script>
+<script src="/js/core/html-safe.js"></script>
+<script src="/js/core/app-auth.js?v=2"></script>
+<script src="js/components/sidebar-nav.js?v=7"></script>
 <script src="js/alert-docs.js"></script>
 <script src="js/interface-detail.js"></script>
 <script>
@@ -385,7 +387,7 @@
                 html += `<a class="toc-item sub" data-id="${sub.id}" onclick="docShowSection('${sub.id}')">${sub.title}</a>`;
             });
         });
-        toc.innerHTML = html;
+        toc.innerHTML = HtmlSafe.raw(html); // the app's own ALERT_DOCS content
     }
 
     function buildContent() {
@@ -397,7 +399,7 @@
                 html += `<div class="doc-section-block" id="doc-block-${sub.id}"><div class="doc-subsection"><h4>${sub.title}</h4>${sub.body}</div></div>`;
             });
         });
-        el.innerHTML = html;
+        el.innerHTML = HtmlSafe.raw(html); // the app's own ALERT_DOCS content
     }
 
     window.docShowSection = function (id) {
@@ -430,6 +432,6 @@
     buildContent();
 })();
 </script>
-    <script src="/js/ai-assistant.js"></script>
+    <script src="/js/ai-assistant.js?v=2"></script>
 </body>
 </html>

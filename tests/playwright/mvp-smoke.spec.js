@@ -60,7 +60,7 @@ test.describe('MVP-S0 Infrastructure Health', () => {
     });
 
     test('MVP-S0-002 Node.js frontend is reachable', async ({ request }) => {
-        const res = await request.get('http://localhost:3000/login.html');
+        const res = await request.get('/login.html');
         expect(res.ok()).toBeTruthy();
     });
 
@@ -123,7 +123,7 @@ test.describe('MVP-S1 Interface Creation', () => {
         // (belt-and-suspenders in case auto_start didn't fire in the container)
         // Must go through the Node.js proxy on port 3000 so it gets X-Internal-Proxy-Secret
         await Promise.all(state.ids.map(id =>
-            request.post(`http://localhost:3000/api/processing/interfaces/${id}/activate`)
+            request.post(`/api/processing/interfaces/${id}/activate`)
                    .catch(e => console.warn(`  Activation for ${id}: ${e.message}`))
         ));
 
@@ -196,9 +196,13 @@ test.describe('MVP-S2 HL7→FHIR ADT', () => {
         const api      = new ApiHelper(request);
         const messages = await api.getMessages(state.adtId);
         if (messages.length === 0) test.skip();
-        // Accept any terminal state: completed/delivered (success) or failed (pipeline ran, delivery failed)
-        const ok = messages.some(m => /completed|delivered|processed|failed/i.test(m.status || ''));
-        expect(ok).toBeTruthy();
+        // Processing is asynchronous, so poll. Accept any terminal state:
+        // completed/delivered (success) or failed (pipeline ran, delivery failed).
+        const isTerminal = m => /completed|delivered|processed|failed/i.test(m.status || '');
+        await expect.poll(async () => (await api.getMessages(state.adtId)).some(isTerminal), {
+            timeout: 30000,
+            message: 'at least one ADT message should reach a terminal pipeline state',
+        }).toBe(true);
     });
 });
 
@@ -290,10 +294,11 @@ test.describe('MVP-S5 HL7→File', () => {
 test.describe('MVP-S6 UI Smoke', () => {
     test('MVP-S6-001 MVP_SMOKE interfaces appear on the Interfaces page', async ({ page }) => {
         await page.goto('/interfaces.html');
-        await page.waitForLoadState('load');
-        await page.waitForTimeout(2500);
-        const text = await page.locator('body').innerText();
-        expect(text).toContain('MVP_SMOKE');
+        await page.waitForSelector('.interface-card, [data-interface-id]', { timeout: 15000 });
+        // The list is paginated (25/page); on a populated install the seeded
+        // interfaces need not land on page 1, so find them via the page's own search.
+        await page.fill('#interfaceSearchInput', 'MVP_SMOKE');
+        await expect(page.locator('body')).toContainText('MVP_SMOKE', { timeout: 10000 });
     });
 
     test('MVP-S6-002 Interface cards have status badges', async ({ page }) => {
@@ -397,7 +402,7 @@ test.describe('MVP-S8 Monitoring', () => {
         // /api/monitoring is registered before session middleware in app.js (needs Bearer).
         // /api/analytics/monitoring/summary is registered AFTER session middleware — uses
         // requireAuth which accepts the storageState session cookie from the request fixture.
-        const res = await request.get('http://localhost:3000/api/analytics/monitoring/summary');
+        const res = await request.get('/api/analytics/monitoring/summary');
         expect(res.ok()).toBeTruthy();
     });
 });

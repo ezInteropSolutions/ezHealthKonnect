@@ -22,7 +22,7 @@
     }
 
     function statusBadge(status) {
-        return `<span class="badge-status badge-${esc(status)}">${esc(status)}</span>`;
+        return HtmlSafe.html`<span class="badge-status badge-${status}">${status}</span>`;
     }
 
     // ─── Auth headers ─────────────────────────────────────────────────────────
@@ -68,9 +68,9 @@
     function _buildInterfaceDatalist(list) {
         const dl = el('ifaceDatalist');
         if (!dl) return;
-        dl.innerHTML = list.map(i =>
-            `<option value="${esc(i.name || i.id)}" data-id="${esc(i.id)}">`
-        ).join('');
+        dl.innerHTML = HtmlSafe.html`${list.map(i =>
+            HtmlSafe.html`<option value="${i.name || i.id}" data-id="${i.id}">`
+        )}`;
     }
 
     // Resolve the text in #filterInterface to an interface ID for the API call.
@@ -102,8 +102,8 @@
         const notice = document.createElement('div');
         notice.style.cssText = 'background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;' +
             'padding:8px 14px;font-size:12px;color:#92400e;display:flex;align-items:center;gap:8px;margin-bottom:10px;';
-        notice.innerHTML = `<i class="fas fa-filter"></i> Showing DLQ rows for message <strong>${msgId}</strong>` +
-            `<button onclick="this.parentElement.remove(); delete document.getElementById('filterInterface').dataset.lockedMessageId; window._dlq.load();"` +
+        notice.innerHTML = HtmlSafe.html`<i class="fas fa-filter"></i> Showing DLQ rows for message <strong>${msgId}</strong>` +
+            HtmlSafe.html`<button onclick="this.parentElement.remove(); delete document.getElementById('filterInterface').dataset.lockedMessageId; window._dlq.load();"` +
             ` style="margin-left:auto;background:none;border:none;cursor:pointer;color:#92400e;font-size:13px;">✕ Clear</button>`;
         const layout = document.querySelector('.dlq-layout');
         if (layout) layout.insertBefore(notice, layout.firstChild);
@@ -172,53 +172,53 @@
             renderTable(_rows);
         } catch (err) {
             el('dlqTableBody').innerHTML =
-                `<tr class="loading-row"><td colspan="11" style="color:#dc2626;">` +
-                `<i class="fas fa-exclamation-circle"></i> ${esc(err.message)}</td></tr>`;
+                HtmlSafe.html`<tr class="loading-row"><td colspan="11" style="color:#dc2626;">` +
+                HtmlSafe.html`<i class="fas fa-exclamation-circle"></i> ${err.message}</td></tr>`;
         }
     }
 
     function renderTable(rows) {
         if (!rows.length) {
             el('dlqTableBody').innerHTML =
-                `<tr><td colspan="11"><div class="empty-state">` +
-                `<i class="fas fa-inbox"></i><p>No DLQ rows for this filter</p></div></td></tr>`;
+                HtmlSafe.html`<tr><td colspan="11"><div class="empty-state">` +
+                HtmlSafe.html`<i class="fas fa-inbox"></i><p>No DLQ rows for this filter</p></div></td></tr>`;
             return;
         }
-        el('dlqTableBody').innerHTML = rows.map(r => {
+        el('dlqTableBody').innerHTML = HtmlSafe.html`${rows.map(r => {
             const isAbandoned = r.Status === 'abandoned';
             const redriveLabel = isAbandoned ? 'Reactivate' : 'Redrive';
             const redriveIcon  = isAbandoned ? 'fa-rotate-right' : 'fa-redo';
-            return `
-            <tr id="row-${esc(r.ID)}" class="${_selected.has(r.ID) ? 'selected' : ''} ${isAbandoned ? 'row-abandoned' : ''}">
+            return HtmlSafe.html`
+            <tr id="row-${r.ID}" class="${_selected.has(r.ID) ? 'selected' : ''} ${isAbandoned ? 'row-abandoned' : ''}">
                 <td><input type="checkbox" ${_selected.has(r.ID) ? 'checked' : ''}
-                    onchange="window._dlq.toggleRow('${esc(r.ID)}', this)"></td>
+                    onchange="window._dlq.toggleRow('${r.ID}', this)"></td>
                 <td>${statusBadge(r.Status)}</td>
-                <td><span class="truncate" title="${esc(r.InterfaceID)}">${esc(ifaceName(r.InterfaceID))}</span></td>
-                <td><span class="mono truncate" title="${esc(r.MessageID)}">${esc(r.MessageID || '—')}</span></td>
-                <td><span class="truncate" title="${esc(r.StepName)}">${esc(r.StepName || '—')}</span></td>
-                <td><span class="mono-sm">${esc(r.ConnectorType || '—')}</span></td>
-                <td><span class="err-cell" title="${esc(r.ErrorMessage)}">${esc(r.ErrorMessage)}</span></td>
+                <td><span class="truncate" title="${r.InterfaceID}">${ifaceName(r.InterfaceID)}</span></td>
+                <td><span class="mono truncate" title="${r.MessageID}">${r.MessageID || '—'}</span></td>
+                <td><span class="truncate" title="${r.StepName}">${r.StepName || '—'}</span></td>
+                <td><span class="mono-sm">${r.ConnectorType || '—'}</span></td>
+                <td><span class="err-cell" title="${r.ErrorMessage}">${r.ErrorMessage}</span></td>
                 <td style="text-align:center;">${r.AttemptCount}</td>
                 <td>${r.Status === 'pending' ? fmtDate(r.NextRetryAt) : '—'}</td>
                 <td>${fmtDate(r.CreatedAt)}</td>
                 <td>
                     <button class="btn-sm btn-redrive" title="${redriveLabel}"
-                        onclick="window._dlq.openRedriveModal('${esc(r.ID)}')">
+                        onclick="window._dlq.openRedriveModal('${r.ID}')">
                         <i class="fas ${redriveIcon}"></i>
                     </button>
                     <button class="btn-sm btn-abandon" title="Abandon" style="margin-left:4px;"
-                        onclick="window._dlq.abandonOne('${esc(r.ID)}')"
-                        ${isAbandoned ? 'disabled style="margin-left:4px;opacity:0.4;cursor:not-allowed;"' : ''}>
+                        onclick="window._dlq.abandonOne('${r.ID}')"
+                        ${isAbandoned ? HtmlSafe.raw('disabled style="margin-left:4px;opacity:0.4;cursor:not-allowed;"') : ''}>
                         <i class="fas fa-ban"></i>
                     </button>
                     <button class="btn-sm btn-secondary" title="Detail"
                         style="margin-left:4px; padding:4px 8px;"
-                        onclick="window._dlq.openDrawer('${esc(r.ID)}')">
+                        onclick="window._dlq.openDrawer('${r.ID}')">
                         <i class="fas fa-search"></i>
                     </button>
                 </td>
             </tr>`;
-        }).join('');
+        })}`;
     }
 
     // ─── Selection ────────────────────────────────────────────────────────────
@@ -383,7 +383,7 @@
         _scheduleOpen  = false;
         _resetModeSelection();
         const n = _selected.size;
-        el('modalTitle').innerHTML    = `<i class="fas fa-redo" style="color:#2563eb;"></i> Redrive ${n} Message${n !== 1 ? 's' : ''}`;
+        el('modalTitle').innerHTML    = HtmlSafe.html`<i class="fas fa-redo" style="color:#2563eb;"></i> Redrive ${n} Message${n !== 1 ? 's' : ''}`;
         el('modalSubtitle').textContent = 'Choose how to re-run the selected messages through the pipeline.';
         _renderSchedulePanel(false);
         el('redriveModal').classList.add('open');
@@ -395,7 +395,7 @@
         _scheduleOpen  = true;
         _resetModeSelection();
         const n = _selected.size;
-        el('modalTitle').innerHTML    = `<i class="fas fa-calendar-alt" style="color:#2563eb;"></i> Schedule ${n} Message${n !== 1 ? 's' : ''}`;
+        el('modalTitle').innerHTML    = HtmlSafe.html`<i class="fas fa-calendar-alt" style="color:#2563eb;"></i> Schedule ${n} Message${n !== 1 ? 's' : ''}`;
         el('modalSubtitle').textContent = 'Pick a time and the selected messages will be redriven then.';
         el('redriveModal').classList.add('open');
         _renderSchedulePanel(true);
@@ -475,7 +475,7 @@
             if (!res.success) throw new Error(res.error);
             renderDrawer(res.data);
         } catch (err) {
-            el('drawerContent').innerHTML = `<p style="color:#dc2626;">${esc(err.message)}</p>`;
+            el('drawerContent').innerHTML = HtmlSafe.html`<p style="color:#dc2626;">${err.message}</p>`;
         }
     }
 
@@ -486,27 +486,27 @@
 
     function renderDrawer(r) {
         const isAbandoned = r.Status === 'abandoned';
-        el('drawerContent').innerHTML = `
+        el('drawerContent').innerHTML = HtmlSafe.html`
             <div class="detail-section">
                 <h4>Identity</h4>
                 <div class="detail-grid">
-                    <span class="key">ID</span>           <span class="val mono">${esc(r.ID)}</span>
-                    <span class="key">Message ID</span>   <span class="val mono">${esc(r.MessageID)}</span>
-                    <span class="key">Interface</span>    <span class="val">${esc(ifaceName(r.InterfaceID))}
-                        <span class="mono" style="font-size:10px;color:#9ca3af;"> ${esc(r.InterfaceID)}</span></span>
-                    <span class="key">Pipeline ID</span>  <span class="val mono">${esc(r.PipelineID || '—')}</span>
-                    <span class="key">Failed Step</span>  <span class="val">${esc(r.StepName || '—')}</span>
-                    <span class="key">Step ID</span>      <span class="val mono">${esc(r.FailedStepID || '—')}</span>
+                    <span class="key">ID</span>           <span class="val mono">${r.ID}</span>
+                    <span class="key">Message ID</span>   <span class="val mono">${r.MessageID}</span>
+                    <span class="key">Interface</span>    <span class="val">${ifaceName(r.InterfaceID)}
+                        <span class="mono" style="font-size:10px;color:#9ca3af;"> ${r.InterfaceID}</span></span>
+                    <span class="key">Pipeline ID</span>  <span class="val mono">${r.PipelineID || '—'}</span>
+                    <span class="key">Failed Step</span>  <span class="val">${r.StepName || '—'}</span>
+                    <span class="key">Step ID</span>      <span class="val mono">${r.FailedStepID || '—'}</span>
                 </div>
             </div>
             <div class="detail-section">
                 <h4>Delivery</h4>
                 <div class="detail-grid">
-                    <span class="key">Connector</span>    <span class="val mono">${esc(r.ConnectorType || '—')}</span>
-                    <span class="key">Content Type</span> <span class="val">${esc(r.ContentType || '—')}</span>
+                    <span class="key">Connector</span>    <span class="val mono">${r.ConnectorType || '—'}</span>
+                    <span class="key">Content Type</span> <span class="val">${r.ContentType || '—'}</span>
                     <span class="key">Status</span>       <span class="val">${statusBadge(r.Status)}</span>
                     <span class="key">Attempts</span>     <span class="val">${r.AttemptCount}</span>
-                    <span class="key">Redrive Mode</span> <span class="val">${esc(r.RedriveMode)}</span>
+                    <span class="key">Redrive Mode</span> <span class="val">${r.RedriveMode}</span>
                     <span class="key">Next Retry</span>   <span class="val">${fmtDate(r.NextRetryAt)}</span>
                     <span class="key">Expires At</span>   <span class="val">${fmtDate(r.ExpiresAt) || 'never'}</span>
                     <span class="key">Created At</span>   <span class="val">${fmtDate(r.CreatedAt)}</span>
@@ -514,22 +514,22 @@
             </div>
             <div class="detail-section">
                 <h4>Error</h4>
-                <pre class="payload" style="color:#fca5a5;">${esc(r.ErrorMessage)}</pre>
+                <pre class="payload" style="color:#fca5a5;">${r.ErrorMessage}</pre>
             </div>
-            ${r.Payload ? `
+            ${r.Payload ? HtmlSafe.html`
             <div class="detail-section">
                 <h4>Payload (failed delivery content)</h4>
-                <pre class="payload">${esc(r.Payload.length > 4000
+                <pre class="payload">${r.Payload.length > 4000
                     ? r.Payload.slice(0, 4000) + '\n… (truncated)'
-                    : r.Payload)}</pre>
+                    : r.Payload}</pre>
             </div>` : ''}
             <div class="detail-section" style="margin-top:18px;">
-                <button class="btn-redrive btn-sm" onclick="window._dlq.openRedriveModal('${esc(r.ID)}')">
+                <button class="btn-redrive btn-sm" onclick="window._dlq.openRedriveModal('${r.ID}')">
                     <i class="fas ${isAbandoned ? 'fa-rotate-right' : 'fa-redo'}"></i>
                     ${isAbandoned ? 'Reactivate' : 'Redrive'}
                 </button>
-                ${isAbandoned ? '' : `
-                <button class="btn-abandon btn-sm" onclick="window._dlq.abandonOne('${esc(r.ID)}')"
+                ${isAbandoned ? '' : HtmlSafe.html`
+                <button class="btn-abandon btn-sm" onclick="window._dlq.abandonOne('${r.ID}')"
                     style="margin-left:8px;">
                     <i class="fas fa-ban"></i> Abandon
                 </button>`}

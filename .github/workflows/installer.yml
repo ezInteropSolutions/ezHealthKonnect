@@ -1,0 +1,384 @@
+name: Installer — Build and End-to-End Test
+
+# Builds the real Standalone bundles and installers, then runs the real
+# installer headless on fresh GitHub Linux and Windows hosts: install, setup
+# token, data, upgrade, a failing upgrade (must roll back), manual rollback
+# and uninstall. release.yml calls this workflow and publishes only what it
+# built and tested.
+
+on:
+  pull_request:
+    paths:
+      - 'installer/**'
+      - 'cmd/bundle-builder/**'
+      - 'packaging/**'
+      - 'database/migrations/**'
+      - 'services/migrator/**'
+      - 'migrate_command.go'
+      - 'Dockerfile'
+      - 'controllers/setupController.js'
+      - '.github/workflows/installer.yml'
+  push:
+    branches: [main, 'release/**']
+    paths:
+      - 'installer/**'
+      - 'cmd/bundle-builder/**'
+      - 'packaging/**'
+      - 'database/migrations/**'
+      - 'services/migrator/**'
+      - 'migrate_command.go'
+      - 'Dockerfile'
+      - 'controllers/setupController.js'
+      - '.github/workflows/installer.yml'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+
+env:
+  GO_VERSION: '1.26.10'
+  NODE_VERSION: '22'
+
+jobs:
+  unit:
+    name: Installer unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+      - name: Installer (Linux + Windows builds)
+        working-directory: installer
+        run: |
+          go vet ./...
+          GOOS=windows go vet ./...
+          GOOS=windows go test -c -o /dev/null .
+          go test -count=1 ./...
+      - name: Bundle builder
+        run: go test -count=1 ./cmd/bundle-builder
+
+  build:
+    name: Build ${{ matrix.os }} installer
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            ext: ''
+            bundle: bundle-linux-amd64.zip
+            setup: ezHealthKonnect-Setup-Linux-x64
+          - os: windows
+            ext: '.exe'
+            bundle: bundle-windows.zip
+            setup: ezHealthKonnect-Setup-Win64.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Version
+        id: ver
+        run: echo "value=${{ inputs.version || 'v0.0.1-ci' }}" >> "$GITHUB_OUTPUT"
+      - name: Build go-api
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: go build -ldflags "-s -w -X main.version=${{ steps.ver.outputs.value }}" -o dist/go-api${{ matrix.ext }} .
+      - name: Build application bundle
+        run: |
+          go run ./cmd/bundle-builder -os ${{ matrix.os }} -arch amd64 -version ${{ steps.ver.outputs.value }} \
+            -go-api dist/go-api${{ matrix.ext }} -out installer/assets/${{ matrix.bundle }}
+          cp installer/assets/${{ matrix.bundle }} dist/
+      - name: Build installer
+        working-directory: installer
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          LDFLAGS="-s -w -X main.version=${{ steps.ver.outputs.value }}"
+          if [ "${{ matrix.os }}" = windows ]; then
+            PG_URL=$(jq -r '.installerDownloads["postgresql-windows-amd64"].url' ../packaging/bundle-manifest.json)
+            PG_SHA=$(jq -r '.installerDownloads["postgresql-windows-amd64"].sha256' ../packaging/bundle-manifest.json)
+            LDFLAGS="$LDFLAGS -X main.pgInstallerURL=$PG_URL -X main.pgInstallerSHA256=$PG_SHA"
+          fi
+          go build -tags embedded -ldflags "$LDFLAGS" -o ../dist/${{ matrix.setup }} .
+          ls -la ../dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os }}
+          path: |
+            dist/${{ matrix.setup }}
+            dist/${{ matrix.bundle }}
+          retention-days: 7
+
+  e2e-linux:
+    name: E2E — ${{ matrix.runner }}
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-linux
+          path: dist
+      - name: Run the real installer end to end
+        run: |
+          chmod +x dist/ezHealthKonnect-Setup-Linux-x64
+          sudo bash installer/test/e2e-linux.sh dist/ezHealthKonnect-Setup-Linux-x64 dist/bundle-linux-amd64.zip
+
+  e2e-rhel:
+    name: E2E — AlmaLinux 9 (RHEL family)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-linux
+          path: dist
+      - name: Start an AlmaLinux 9 host with systemd
+        run: |
+          chmod +x dist/ezHealthKonnect-Setup-Linux-x64
+          docker run -d --name el9 --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            -v "$PWD:/work" almalinux/9-init
+          for i in $(seq 1 30); do
+            docker exec el9 systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded' && break
+            sleep 2
+          done
+          docker exec el9 dnf install -y -q python3 procps-ng openssl
+      - name: Run the real installer end to end
+        run: docker exec el9 bash /work/installer/test/e2e-linux.sh /work/dist/ezHealthKonnect-Setup-Linux-x64 /work/dist/bundle-linux-amd64.zip
+
+  # The whole browser suite against the INSTALLED app (G3). Everything else in CI runs the Docker dev
+  # stack; customers run this: the bundled Node runtime and system services, local-disk object storage
+  # (no MinIO), first-run setup with the one-time token, the built-in migration engine, and the
+  # non-Docker settings page. The first-run project in playwright.config.js completes setup through
+  # the real setup page using SETUP_TOKEN from the installed .env.
+  playwright-installed:
+    name: Playwright — installed app (Ubuntu)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      APP_DIR: /opt/ezhk-pw
+      ADMIN_EMAIL: admin@ezhealthkonnect.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-linux
+          path: dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install test dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Install the app with the real installer
+        run: |
+          chmod +x dist/ezHealthKonnect-Setup-Linux-x64
+          cat > answers.json <<JSON
+          {"installDir":"$APP_DIR","appPort":"3000","apiPort":"8080","dbMode":"local"}
+          JSON
+          sudo dist/ezHealthKonnect-Setup-Linux-x64 install --config answers.json
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3000/api/system/health 2>/dev/null | grep -q '"status":"connected"' && exit 0
+            sleep 2
+          done
+          echo "installed app did not become healthy" >&2; exit 1
+      - name: Install the schema packs (what a customer does from Settings -> Schemas)
+        # The repository does not track the FHIR/HL7 schema files (they ship as separate packs), so a fresh
+        # install has none and every FHIR/HL7/EDI-to-FHIR flow fails until they are installed. Found by running
+        # this suite against a real install locally. Same three packs, same extraction and permission handling as
+        # the Docker CI job in ci.yml.
+        run: |
+          set -euo pipefail
+          for id in fhir-r4-base fhir-r4-us-core hl7-v2-25; do
+            url=$(jq -r --arg id "$id" '.[] | select(.id==$id) | .download_url' schemas/catalog.json)
+            echo "Installing $id from $url"
+            curl -sSL "$url" -o "/tmp/$id.zip"
+            # These zips were built on Windows (backslash separators): unzip extracts them correctly but exits 1.
+            sudo unzip -q -o "/tmp/$id.zip" -d "$APP_DIR/schemas/" || { code=$?; [ "$code" -le 1 ] || exit "$code"; }
+          done
+          sudo chmod -R a+rX "$APP_DIR/schemas"
+          sudo chown -R ezhealthkonnect: "$APP_DIR/schemas"
+          sudo systemctl restart ezhealthkonnect-api ezhealthkonnect
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3000/api/system/health 2>/dev/null | grep -q '"status":"connected"' && exit 0
+            sleep 2
+          done
+          echo "app did not come back after installing the schema packs" >&2; exit 1
+      - name: Give the tests the installed app's token and database
+        run: |
+          envget() { sudo grep "^$1=" "$APP_DIR/.env" | cut -d= -f2-; }
+          echo "::add-mask::$(envget SETUP_TOKEN)"
+          echo "::add-mask::$(envget DB_PASSWORD)"
+          PW="E2e-$(openssl rand -hex 12)"
+          echo "::add-mask::$PW"
+          {
+            echo "SETUP_TOKEN=$(envget SETUP_TOKEN)"
+            echo "ADMIN_PASSWORD=$PW"
+            echo "DATABASE_URL=postgres://$(envget DB_USER):$(envget DB_PASSWORD)@127.0.0.1:$(envget DB_PORT)/$(envget DB_NAME)?sslmode=disable"
+          } >> "$GITHUB_ENV"
+      - name: Run the Playwright suite against the installed app
+        env:
+          BASE_URL: http://127.0.0.1:3000
+          RECEIVER_HOST: 127.0.0.1
+          # service-restart-recovery.spec.js restarts the real services.
+          RESTART_COMMAND: sudo systemctl restart ezhealthkonnect-api ezhealthkonnect
+        run: npx playwright test --project=chromium
+      - name: Application logs on failure
+        if: failure()
+        run: |
+          sudo journalctl -u ezhealthkonnect-api -u ezhealthkonnect --no-pager -n 4000 || true
+          sudo tail -n 4000 "$APP_DIR/logs/application/app.log" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-installed
+          path: tests/playwright-report/
+          retention-days: 7
+
+  # A small, fixed browser smoke set against the INSTALLED Windows build (Windows service under its own
+  # virtual account, Windows PostgreSQL, local-disk storage). The full suite runs on Linux above; this proves
+  # the same product basics work on the platform most customers use: first-run setup with the token, the pages
+  # load, a wizard-created interface receives a real message and stores it, roles, and restart recovery.
+  playwright-windows-smoke:
+    name: Playwright smoke — installed app (Windows)
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 50
+    env:
+      APP_DIR: C:\ezhk-pw
+      ADMIN_EMAIL: admin@ezhealthkonnect.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-windows
+          path: dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install test dependencies
+        shell: pwsh
+        run: |
+          npm ci
+          npx playwright install chromium
+      - name: Install the app with the real installer
+        shell: pwsh
+        run: |
+          # Same PostgreSQL handling as installer/test/e2e-windows.ps1's "existing" scenario.
+          $answers = @{ installDir = $env:APP_DIR; appPort = '3000'; apiPort = '8080'; dbMode = 'local' }
+          $pg = Get-Service 'postgresql*' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($pg -and $env:PGPASSWORD) {
+              Set-Service $pg.Name -StartupType Manual
+              Start-Service $pg.Name
+              $answers.pgAdminPassword = $env:PGPASSWORD
+          }
+          $answers | ConvertTo-Json | Set-Content -Encoding ascii answers.json
+          & .\dist\ezHealthKonnect-Setup-Win64.exe install --config answers.json
+          if ($LASTEXITCODE -ne 0) { throw "install exited $LASTEXITCODE" }
+          for ($i = 0; $i -lt 60; $i++) {
+              try { if ((Invoke-RestMethod 'http://127.0.0.1:3000/api/system/health' -TimeoutSec 10).database.status -eq 'connected') { exit 0 } } catch {}
+              Start-Sleep -Seconds 2
+          }
+          throw 'installed app did not become healthy'
+      - name: Give the tests the installed app's token and database
+        shell: pwsh
+        run: |
+          function EnvGet($k) { ((Get-Content "$env:APP_DIR\.env" | Where-Object { $_ -like "$k=*" }) -split '=', 2)[1] }
+          Write-Host "::add-mask::$(EnvGet 'SETUP_TOKEN')"
+          Write-Host "::add-mask::$(EnvGet 'DB_PASSWORD')"
+          $pw = 'E2e-' + [guid]::NewGuid().ToString('N').Substring(0, 20)
+          Write-Host "::add-mask::$pw"
+          @(
+              "SETUP_TOKEN=$(EnvGet 'SETUP_TOKEN')",
+              "ADMIN_PASSWORD=$pw",
+              "DATABASE_URL=postgres://$(EnvGet 'DB_USER'):$(EnvGet 'DB_PASSWORD')@127.0.0.1:$(EnvGet 'DB_PORT')/$(EnvGet 'DB_NAME')?sslmode=disable"
+          ) | Add-Content -Path $env:GITHUB_ENV
+      - name: Install the schema packs (what a customer does from Settings -> Schemas)
+        shell: pwsh
+        # Without them no HL7/FHIR message can be parsed, so every message the tests send ends up failed.
+        run: |
+          $catalog = Get-Content schemas/catalog.json -Raw | ConvertFrom-Json
+          foreach ($id in 'fhir-r4-base', 'fhir-r4-us-core', 'hl7-v2-25') {
+              $url = ($catalog | Where-Object { $_.id -eq $id }).download_url
+              Invoke-WebRequest $url -OutFile (Join-Path $env:RUNNER_TEMP "$id.zip")
+              Expand-Archive -Path (Join-Path $env:RUNNER_TEMP "$id.zip") -DestinationPath (Join-Path $env:APP_DIR "schemas") -Force
+          }
+          Restart-Service ezhealthkonnect
+          for ($i = 0; $i -lt 60; $i++) {
+              try { if ((Invoke-RestMethod 'http://127.0.0.1:3000/api/system/health' -TimeoutSec 10).database.status -eq 'connected') { exit 0 } } catch {}
+              Start-Sleep -Seconds 2
+          }
+          throw 'app did not come back after installing the schema packs'
+      - name: Run the smoke set against the installed app
+        shell: pwsh
+        env:
+          BASE_URL: http://127.0.0.1:3000
+          RECEIVER_HOST: 127.0.0.1
+          RESTART_COMMAND: powershell -NoProfile -Command "Restart-Service ezhealthkonnect"
+        run: >
+          npx playwright test --project=chromium
+          tests/playwright/02-dashboard.spec.js
+          tests/playwright/03-interfaces.spec.js
+          tests/playwright/06-messages.spec.js
+          tests/playwright/wizard-data-path-e2e.spec.js
+          tests/playwright/roles-and-endpoint-auth.spec.js
+          tests/playwright/service-restart-recovery.spec.js
+      - name: Application logs on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-Service ezhealthkonnect | Format-List | Out-String | Write-Host
+          Get-ChildItem "$env:APP_DIR\logs" -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 1500 -ErrorAction SilentlyContinue | Write-Host }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-windows
+          path: tests/playwright-report/
+          retention-days: 7
+
+  e2e-windows:
+    name: E2E — Windows (${{ matrix.postgres }} PostgreSQL)
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: [fresh, existing]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-windows
+          path: dist
+      - name: Run the real installer end to end
+        shell: pwsh
+        run: ./installer/test/e2e-windows.ps1 -Installer dist/ezHealthKonnect-Setup-Win64.exe -BundleV1 dist/bundle-windows.zip -PostgresMode ${{ matrix.postgres }}

@@ -43,7 +43,7 @@ class SegmentViewer {
         // ✅ Build field metadata cache from actual data
         this.buildFieldMetadataCache(segments);
 
-        const segmentListHTML = `
+        const segmentListHTML = HtmlSafe.html`
             <div class="compact-segment-viewer">
                 ${this.renderCompactHeader(validationErrors, data.messageType, segments, data)}
                 ${this.renderMissingSegmentsBanner(validationErrors)}
@@ -178,7 +178,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
     // ✅ Dynamic schema information
     const schemaInfo = this.getSchemaInfo(data);
     
-    return `
+    return HtmlSafe.html`
         <div class="segment-header-compact">
             <div class="message-summary">
                 <div class="message-info">
@@ -189,8 +189,8 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                 <div class="metrics-row">
                     <span class="metric">${segments.length} segments</span>
                     <span class="metric">${totalFields} fields</span>
-                    ${errorCount > 0 ? `<span class="metric error">${errorCount} errors</span>` : ''}
-                    ${warningCount > 0 ? `<span class="metric warning">${warningCount} warnings</span>` : ''}
+                    ${errorCount > 0 ? HtmlSafe.html`<span class="metric error">${errorCount} errors</span>` : ''}
+                    ${warningCount > 0 ? HtmlSafe.html`<span class="metric warning">${warningCount} warnings</span>` : ''}
                     <span class="metric info">v${data.version || '2.5'}</span>
                 </div>
             </div>
@@ -220,7 +220,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
             return '';
         }
         const names = missing.map(err => this.escapeHtml(err.segment || '?'));
-        return `
+        return HtmlSafe.html`
             <div class="missing-segments-banner">
                 <i class="fas fa-triangle-exclamation"></i>
                 <span><strong>Missing Required Segment${names.length > 1 ? 's' : ''}:</strong> ${names.join(', ')}</span>
@@ -257,8 +257,8 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
             used: schemaUsed,
             source: schemaSource,
             html: schemaUsed ? 
-                `<span class="schema-indicator schema-loaded">📋 ${schemaSource}</span>` :
-                `<span class="schema-indicator basic-parser">💡 ${schemaSource}</span>`
+                HtmlSafe.html`<span class="schema-indicator schema-loaded">📋 ${schemaSource}</span>` :
+                HtmlSafe.html`<span class="schema-indicator basic-parser">💡 ${schemaSource}</span>`
         };
     }
 
@@ -276,11 +276,11 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
      * Compact view with minimal vertical space usage
      */
     renderCompactView(segments, validationErrors) {
-        return `
+        return HtmlSafe.html`
             <div class="segments-compact">
                 ${segments.map(([segName, segment]) => 
                     this.renderCompactSegment(segName, segment, validationErrors)
-                ).join('')}
+                )}
             </div>
         `;
     }
@@ -289,7 +289,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
      * Table view showing all segments in a grid
      */
     renderTableView(segments, validationErrors) {
-        return `
+        return HtmlSafe.html`
             <div class="segments-table-container">
                 <table class="segments-table">
                     <thead>
@@ -305,7 +305,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                     <tbody>
                         ${segments.map(([segName, segment]) => 
                             this.renderSegmentTableRow(segName, segment, validationErrors)
-                        ).join('')}
+                        )}
                     </tbody>
                 </table>
             </div>
@@ -340,7 +340,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
         
         const keyFields = this.getKeyFields(baseSeg, segment);
 
-        return `
+        return HtmlSafe.html`
             <div class="segment-compact ${hasIssues ? 'has-issues' : ''} ${isExpanded ? 'expanded' : ''} ${missingRequiredFields.length > 0 ? 'has-missing-required' : ''}">
                 <div class="segment-row" onclick="console.log('🔥 Click detected for segment:', '${segName}'); window.toggleSegmentGlobal('${segName}')">
                     <div class="segment-info">
@@ -351,7 +351,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                         </div>
                         <div class="segment-summary">
                             <span class="seg-desc">${this.truncateText(segment.description || `${baseSeg} Segment`, 40)}</span>
-                            ${keyFields.length > 0 ? `<span class="key-values">${keyFields.join(' • ')}</span>` : ''}
+                            ${keyFields.length > 0 ? HtmlSafe.html`<span class="key-values">${keyFields.join(' • ')}</span>` : ''}
                             ${this.renderRequiredFieldsSummary(missingRequiredFields, emptyRequiredFields, trulyMissingFields)}
                         </div>
                     </div>
@@ -395,7 +395,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
             badges.push('<span class="badge-mini custom" title="Custom segment">Z</span>');
         }
 
-        return badges.join('');
+        return badges;
     }
 
     /**
@@ -404,7 +404,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
     renderRequiredFieldsBadge(missingRequiredFields) {
         if (missingRequiredFields.length === 0) return '';
         
-        return `<span class="badge-mini missing-required" title="${missingRequiredFields.length} missing required field${missingRequiredFields.length > 1 ? 's' : ''}">${missingRequiredFields.length}!</span>`;
+        return HtmlSafe.html`<span class="badge-mini missing-required" title="${missingRequiredFields.length} missing required field${missingRequiredFields.length > 1 ? 's' : ''}">${missingRequiredFields.length}!</span>`;
     }
 
     /**
@@ -431,7 +431,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
             summaryParts.push(`⚠️ Empty: ${fieldNames}`);
         }
         
-        return `<div class="missing-required-summary">${summaryParts.join(' | ')}</div>`;
+        return HtmlSafe.html`<div class="missing-required-summary">${summaryParts.join(' | ')}</div>`;
     }
 
     /**
@@ -465,11 +465,11 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
         
         // Otherwise show first error
         const firstError = segmentErrors[0];
-        return `
+        return HtmlSafe.html`
             <div class="inline-validation">
                 <span class="validation-icon">${firstError.severity === 'error' || firstError.severity === 'ERROR' ? '❌' : '⚠️'}</span>
                 <span class="validation-text">${this.truncateText(firstError.message, 60)}</span>
-                ${segmentErrors.length > 1 ? `<span class="more-count">+${segmentErrors.length - 1} more</span>` : ''}
+                ${segmentErrors.length > 1 ? HtmlSafe.html`<span class="more-count">+${segmentErrors.length - 1} more</span>` : ''}
             </div>
         `;
     }
@@ -485,11 +485,11 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
         const displayText = fieldNames.join(', ');
         const remainingCount = missingRequiredFields.length - 3;
         
-        return `
+        return HtmlSafe.html`
             <div class="inline-validation missing-required">
                 <span class="validation-icon">❌</span>
                 <span class="validation-text">Missing required: ${displayText}</span>
-                ${remainingCount > 0 ? `<span class="more-count">+${remainingCount} more</span>` : ''}
+                ${remainingCount > 0 ? HtmlSafe.html`<span class="more-count">+${remainingCount} more</span>` : ''}
             </div>
         `;
     }
@@ -503,7 +503,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
         const hasIssues = segmentErrors.length > 0;
         const keyFields = this.getKeyFields(baseSeg, segment);
 
-        return `
+        return HtmlSafe.html`
             <tr class="segment-table-row ${hasIssues ? 'has-issues' : ''}" onclick="window.viewSegmentDetailsGlobal('${segName}')">
                 <td class="seg-name-cell">
                     <span class="seg-name">${baseSeg}</span>
@@ -513,8 +513,8 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                 <td class="field-count-cell">${segment.fieldCount || 0}</td>
                 <td class="status-cell">
                     ${hasIssues ? 
-                        `<span class="status-badge error">${segmentErrors.length} issue${segmentErrors.length > 1 ? 's' : ''}</span>` :
-                        `<span class="status-badge ok">✓</span>`
+                        HtmlSafe.html`<span class="status-badge error">${segmentErrors.length} issue${segmentErrors.length > 1 ? 's' : ''}</span>` :
+                        HtmlSafe.html`<span class="status-badge ok">✓</span>`
                     }
                 </td>
                 <td class="key-values-cell">${keyFields.join(', ')}</td>
@@ -532,7 +532,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
      */
     renderSegmentFields(segName, segment, validationErrors) {
         if (!segment.fields || segment.fields.length === 0) {
-            return `<div class="no-fields">No field data available</div>`;
+            return HtmlSafe.html`<div class="no-fields">No field data available</div>`;
         }
 
         // ✅ CRITICAL FIX: Ensure fields are sorted by position, not array order
@@ -546,7 +546,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
         const schemaSource = segment.dictionarySource || 'Unknown';
         const isSchemaEnhanced = schemaSource.includes('Schema') || schemaSource.includes('RealSchemaLoader');
 
-        return `
+        return HtmlSafe.html`
             <div class="fields-compact">
                 <div class="fields-header">
                     <span class="fields-title">Fields (${fields.length})</span>
@@ -557,13 +557,13 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                         }
                     </span>
                 </div>
-                ${fieldGroups.map(group => `
+                ${fieldGroups.map(group => HtmlSafe.html`
                     <div class="field-group">
                         ${group.map(field => 
                             this.renderCompactField(segName, field, fieldErrors)
-                        ).join('')}
+                        )}
                     </div>
-                `).join('')}
+                `)}
             </div>
         `;
     }
@@ -613,26 +613,26 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
         // ✅ Check if this is a required field
         const isRequired = field.optionality === 'R';
 
-        return `
+        return HtmlSafe.html`
             <div class="field-compact ${hasIssues ? 'has-issues' : ''} ${isMissingRequired ? 'missing-required' : ''} ${isEmptyRequired ? 'empty-required' : ''} ${isRequired ? 'required-field' : ''}" 
                  onclick="console.log('🔥 Field click:', '${segName}', '${field.key}'); window.toggleFieldGlobal('${segName}', '${field.key}')">
                 <div class="field-header-compact">
                     <div class="field-label">
                         <span class="field-key">${field.key}</span>
-                        ${isRequired ? '<span class="required-indicator">*</span>' : ''}
+                        ${isRequired ? HtmlSafe.raw('<span class="required-indicator">*</span>') : ''}
                         <span class="field-name">${this.truncateText(field.name || `Field ${field.position}`, 25)}</span>
                         <span class="data-type-badge">${field.dataType || 'ST'}</span>
-                        ${isMissingRequired ? '<span class="missing-required-icon" title="Required field is missing">❌</span>' : ''}
-                        ${isEmptyRequired ? '<span class="empty-required-icon" title="Required field is empty">⚠️</span>' : ''}
-                        ${hasIssues && !isMissingRequired && !isEmptyRequired ? '<span class="field-error-icon">!</span>' : ''}
+                        ${isMissingRequired ? HtmlSafe.raw('<span class="missing-required-icon" title="Required field is missing">❌</span>') : ''}
+                        ${isEmptyRequired ? HtmlSafe.raw('<span class="empty-required-icon" title="Required field is empty">⚠️</span>') : ''}
+                        ${hasIssues && !isMissingRequired && !isEmptyRequired ? HtmlSafe.raw('<span class="field-error-icon">!</span>') : ''}
                     </div>
                     <div class="field-value-preview">
                         ${field.hasValue ?
-                            `<span class="value-text">${this.truncateValue(field.value, 35)}</span>` :
-                            `<span class="no-value ${isMissingRequired || isEmptyRequired ? 'missing-required-value' : ''}">—</span>`
+                            HtmlSafe.html`<span class="value-text">${this.truncateValue(field.value, 35)}</span>` :
+                            HtmlSafe.html`<span class="no-value ${isMissingRequired || isEmptyRequired ? 'missing-required-value' : ''}">—</span>`
                         }
-                        ${field.length ? `<span class="field-length">[${field.length}]</span>` : ''}
-                        ${field.tableId ? `<span class="table-id-badge">T${field.tableId}</span>` : ''}
+                        ${field.length ? HtmlSafe.html`<span class="field-length">[${field.length}]</span>` : ''}
+                        ${field.tableId ? HtmlSafe.html`<span class="table-id-badge">T${field.tableId}</span>` : ''}
                     </div>
                 </div>
                 
@@ -646,45 +646,45 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
      * ✅ ENHANCED: Detailed field view when expanded with dynamic data
      */
     renderFieldDetails(segName, field, fieldValidationErrors) {
-        return `
+        return HtmlSafe.html`
             <div class="field-details-compact">
                 <div class="field-metadata-row">
                     <span>Type: ${field.dataType || 'ST'}</span>
                     <span>Usage: ${this.getUsageDescription(field.optionality || 'O')}</span>
-                    ${field.cardinality ? `<span>Repeat: ${field.cardinality}</span>` : ''}
-                    ${field.length ? `<span>Max Length: ${field.length}</span>` : ''}
+                    ${field.cardinality ? HtmlSafe.html`<span>Repeat: ${field.cardinality}</span>` : ''}
+                    ${field.length ? HtmlSafe.html`<span>Max Length: ${field.length}</span>` : ''}
                     <span>Position: ${field.position}</span>
                 </div>
                 
-                ${field.description ? `
+                ${field.description ? HtmlSafe.html`
                     <div class="field-description-row">
                         <strong>Description:</strong> ${field.description}
                     </div>
                 ` : ''}
                 
-                ${field.hasValue && field.value ? `
+                ${field.hasValue && field.value ? HtmlSafe.html`
                     <div class="field-value-row">
                         <strong>Full Value:</strong>
-                        <code class="value-display">${this.escapeHtml(field.value)}</code>
+                        <code class="value-display">${field.value}</code>
                         ${this.analyzeValue(field)}
                     </div>
                 ` : ''}
                 
-                ${field.subfields && field.subfields.length > 0 ? `
+                ${field.subfields && field.subfields.length > 0 ? HtmlSafe.html`
                     <div class="subfields-section">
                         <strong>Components (${field.subfields.length}):</strong>
                         ${this.renderEnhancedSubfields(field.subfields)}
                     </div>
                 ` : ''}
                 
-                ${fieldValidationErrors.length > 0 ? `
+                ${fieldValidationErrors.length > 0 ? HtmlSafe.html`
                     <div class="field-validation-row">
-                        ${fieldValidationErrors.map(error => `
+                        ${fieldValidationErrors.map(error => HtmlSafe.html`
                             <div class="validation-item ${error.severity}">
                                 ${error.message}
-                                ${error.suggestion ? `<br><em>💡 ${error.suggestion}</em>` : ''}
+                                ${error.suggestion ? HtmlSafe.html`<br><em>💡 ${error.suggestion}</em>` : ''}
                             </div>
-                        `).join('')}
+                        `)}
                     </div>
                 ` : ''}
             </div>
@@ -696,7 +696,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
      */
     renderEnhancedSubfields(subfields) {
         if (!subfields || subfields.length === 0) {
-            return '<div class="no-subfields">No components defined</div>';
+            return HtmlSafe.raw('<div class="no-subfields">No components defined</div>');
         }
         
         // ✅ Sort subfields by position
@@ -707,7 +707,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
             return (a.sequence || 0) - (b.sequence || 0);
         });
         
-        return `
+        return HtmlSafe.html`
             <div class="rich-subfields-container">
                 <div class="subfields-header">
                     <span class="subfields-title">Components (${sortedSubfields.length})</span>
@@ -716,7 +716,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                     </button>
                 </div>
                 <div class="rich-subfields-list">
-                    ${sortedSubfields.map((subfield, index) => this.renderEnhancedSubfield(subfield, index)).join('')}
+                    ${sortedSubfields.map((subfield, index) => this.renderEnhancedSubfield(subfield, index))}
                 </div>
             </div>
         `;
@@ -730,7 +730,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
         const isEmpty = !subfield.hasValue || !subfield.value;
         const isMissingRequired = isRequired && isEmpty;
         
-        return `
+        return HtmlSafe.html`
             <div class="enhanced-subfield ${subfield.hasValue ? 'has-value' : 'no-value'} ${isMissingRequired ? 'missing-required' : ''}" 
                  onclick="event.stopPropagation(); this.classList.toggle('subfield-expanded')">
                 
@@ -739,13 +739,13 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                     <div class="subfield-label-section">
                         <span class="subfield-position">${subfield.position}</span>
                         <span class="subfield-name">${subfield.name || `Component ${subfield.position}`}</span>
-                        ${isRequired ? '<span class="required-indicator">*</span>' : ''}
-                        ${isMissingRequired ? '<span class="missing-required-icon">⚠️</span>' : ''}
+                        ${isRequired ? HtmlSafe.raw('<span class="required-indicator">*</span>') : ''}
+                        ${isMissingRequired ? HtmlSafe.raw('<span class="missing-required-icon">⚠️</span>') : ''}
                     </div>
                     
                     <div class="subfield-value-section">
                         <span class="subfield-value ${isEmpty ? 'empty-value' : ''}">
-                            ${subfield.hasValue ? this.escapeHtml(this.truncateValue(subfield.value, 20)) : '—'}
+                            ${subfield.hasValue ? this.truncateValue(subfield.value, 20) : '—'}
                         </span>
                         <span class="subfield-datatype-badge">${subfield.dataType || 'ST'}</span>
                     </div>
@@ -770,7 +770,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                                 ${this.getUsageDescription(subfield.usage)}
                             </span>
                         </div>
-                        ${subfield.length ? `
+                        ${subfield.length ? HtmlSafe.html`
                             <div class="metadata-row">
                                 <span class="metadata-label">Max Length:</span>
                                 <span class="metadata-value">${subfield.length}</span>
@@ -782,24 +782,24 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                         </div>
                     </div>
                     
-                    ${subfield.description ? `
+                    ${subfield.description ? HtmlSafe.html`
                         <div class="subfield-description-section">
                             <div class="description-label">Description:</div>
                             <div class="description-text">${subfield.description}</div>
                         </div>
                     ` : ''}
                     
-                    ${subfield.hasValue && subfield.value ? `
+                    ${subfield.hasValue && subfield.value ? HtmlSafe.html`
                         <div class="subfield-value-section-detailed">
                             <div class="value-label">Full Value:</div>
                             <div class="value-display">
-                                <code>${this.escapeHtml(subfield.value)}</code>
+                                <code>${subfield.value}</code>
                                 <span class="value-stats">(${subfield.value.length} chars)</span>
                             </div>
                         </div>
                     ` : ''}
                     
-                    ${subfield.tableId ? `
+                    ${subfield.tableId ? HtmlSafe.html`
                         <div class="subfield-table-section">
                             <div class="table-label">Value Set:</div>
                             <div class="table-info">
@@ -809,7 +809,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
                         </div>
                     ` : ''}
                     
-                    ${isMissingRequired ? `
+                    ${isMissingRequired ? HtmlSafe.html`
                         <div class="missing-required-alert">
                             <span class="alert-icon">⚠️</span>
                             <span class="alert-text">This required component is missing a value</span>
@@ -836,13 +836,13 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
         const error = requiredErrors[0];
         const isMissing = error.code === 'MISSING_REQUIRED_FIELD';
         
-        return `
+        return HtmlSafe.html`
             <div class="missing-required-warning ${isMissing ? 'truly-missing' : 'empty-value'}">
                 <span class="warning-icon">${isMissing ? '❌' : '⚠️'}</span>
                 <span class="warning-text">
                     ${isMissing ? 'Required field is completely missing' : 'Required field is present but empty'}
                 </span>
-                ${error.suggestion ? `<div class="warning-suggestion">💡 ${error.suggestion}</div>` : ''}
+                ${error.suggestion ? HtmlSafe.html`<div class="warning-suggestion">💡 ${error.suggestion}</div>` : ''}
                 <div class="warning-rule">Rule: ${error.ruleId || 'REQ_FIELD'}</div>
             </div>
         `;
@@ -868,13 +868,13 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
     renderTableValues(subfield) {
         if (!subfield.tableId) return '';
 
-        return `
+        return HtmlSafe.html`
             <div class="table-values">
-                ${subfield.value ? `
+                ${subfield.value ? HtmlSafe.html`
                     <span class="table-value current-value">
                         Current: <strong>${subfield.value}</strong>
                     </span>
-                ` : `
+                ` : HtmlSafe.html`
                     <span class="table-value no-value">
                         No value set
                     </span>
@@ -960,7 +960,7 @@ renderCompactHeader(validationErrors, messageType, segments, data) {
         }
         
         if (analysis.length > 0) {
-            return `<span class="value-analysis">(${analysis.join(', ')})</span>`;
+            return HtmlSafe.html`<span class="value-analysis">(${analysis.join(', ')})</span>`;
         }
         
         return '';

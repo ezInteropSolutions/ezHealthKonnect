@@ -348,7 +348,7 @@ class FlowchartConnector {
 
         switch (connection.type) {
             case 'sequential':
-                content = `
+                content = HtmlSafe.html`
                     <div><strong>Sequential Flow</strong></div>
                     <div>From: ${fromStep.stepName}</div>
                     <div>To: ${toStep.stepName}</div>
@@ -356,7 +356,7 @@ class FlowchartConnector {
                 break;
 
             case 'true-branch':
-                content = `
+                content = HtmlSafe.html`
                     <div style="color: #22c55e;"><strong>✓ TRUE Branch</strong></div>
                     <div>Condition passed</div>
                     <div>→ ${toStep.stepName}</div>
@@ -364,7 +364,7 @@ class FlowchartConnector {
                 break;
 
             case 'false-branch':
-                content = `
+                content = HtmlSafe.html`
                     <div style="color: #ef4444;"><strong>✗ FALSE Branch</strong></div>
                     <div>Condition failed</div>
                     <div>→ ${toStep.stepName}</div>
@@ -372,7 +372,7 @@ class FlowchartConnector {
                 break;
 
             case 'merge':
-                content = `
+                content = HtmlSafe.html`
                     <div><strong>Merge Point</strong></div>
                     <div>Branches rejoin here</div>
                     <div>→ ${toStep.stepName}</div>
@@ -380,7 +380,7 @@ class FlowchartConnector {
                 break;
 
             case 'route-to':
-                content = `
+                content = HtmlSafe.html`
                     <div style="color: #f59e0b;"><strong>🔀 Route To</strong></div>
                     <div>Conditional skip</div>
                     <div>→ ${toStep.stepName}</div>

@@ -1,6 +1,7 @@
 // services/ai/knowledge_ingestion.go
-// Walks local schema files (HL7, FHIR) and built-in X12/CCD definitions,
-// chunks them, embeds them, and stores them in the ai_knowledge_chunks table.
+// Ingests static knowledge (schema digests, schema trees, docs and built-in
+// overviews — see knowledge_sources.go Sources()), chunks it, embeds it, and
+// stores it in the ai_knowledge_chunks table.
 package ai
 
 import (
@@ -17,11 +18,13 @@ import (
 // KnowledgeIngestionService rebuilds the AI knowledge base from schema files.
 type KnowledgeIngestionService struct {
 	embedding *EmbeddingService
+	store     KnowledgeSourceStore // records per-source fingerprints; nil disables change detection
 }
 
-// NewKnowledgeIngestionService creates a new KnowledgeIngestionService.
-func NewKnowledgeIngestionService(embedding *EmbeddingService) *KnowledgeIngestionService {
-	return &KnowledgeIngestionService{embedding: embedding}
+// NewKnowledgeIngestionService creates a new KnowledgeIngestionService. store
+// may be nil (every ingestion then runs unconditionally).
+func NewKnowledgeIngestionService(embedding *EmbeddingService, store KnowledgeSourceStore) *KnowledgeIngestionService {
+	return &KnowledgeIngestionService{embedding: embedding, store: store}
 }
 
 // IngestionResult reports the outcome of ingesting one source type.
@@ -32,117 +35,10 @@ type IngestionResult struct {
 	Errors       []string `json:"errors,omitempty"`
 }
 
-// IngestAll rebuilds the entire knowledge base from all available sources.
+// IngestAll rebuilds the entire static knowledge base from every source in
+// Sources(), recording each source's fingerprint.
 func (k *KnowledgeIngestionService) IngestAll(ctx context.Context, schemaDir string) []IngestionResult {
-	var results []IngestionResult
-
-	if r := k.IngestHL7Schemas(ctx, filepath.Join(schemaDir, "hl7")); r != nil {
-		results = append(results, *r)
-	}
-	if r := k.IngestFHIRSchemas(ctx, filepath.Join(schemaDir, "fhir")); r != nil {
-		results = append(results, *r)
-	}
-	if r := k.IngestX12BuiltinKnowledge(ctx); r != nil {
-		results = append(results, *r)
-	}
-	if r := k.IngestCCDBuiltinKnowledge(ctx); r != nil {
-		results = append(results, *r)
-	}
-	if r := k.IngestCDASchemas(ctx, filepath.Join(".", "cda", "schemas")); r != nil {
-		results = append(results, *r)
-	}
-	for _, r := range k.IngestAppDocs(ctx, ".") {
-		results = append(results, r)
-	}
-	return results
-}
-
-// IngestHL7Schemas walks schemas/hl7/ and ingests all JSON/YAML/text files.
-func (k *KnowledgeIngestionService) IngestHL7Schemas(ctx context.Context, dir string) *IngestionResult {
-	result := &IngestionResult{SourceType: "hl7_v2"}
-
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		result.Errors = append(result.Errors, fmt.Sprintf("directory not found: %s", dir))
-		return result
-	}
-	if err := k.embedding.ClearSourceType(ctx, "hl7_v2"); err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("clear: %v", err))
-	}
-
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if ext != ".json" && ext != ".txt" && ext != ".yaml" && ext != ".yml" {
-			return nil
-		}
-
-		result.FilesScanned++
-		text, ref, readErr := readSchemaFile(path)
-		if readErr != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", path, readErr))
-			return nil
-		}
-
-		// Prepend segment name hint for 3-letter filenames (e.g. PID.json)
-		base := strings.ToUpper(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
-		if len(base) == 3 {
-			text = fmt.Sprintf("HL7 v2 Segment: %s\n\n%s", base, text)
-		}
-
-		n, embedErr := k.embedding.IngestText(ctx, "hl7_v2", ref, path, text, nil)
-		result.ChunksStored += n // count whatever succeeded even if some chunks in this file failed
-		if embedErr != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s embed: %v", path, embedErr))
-		}
-		return nil
-	})
-
-	log.Printf("✅ AI KB — HL7 v2: %d files, %d chunks, %d errors",
-		result.FilesScanned, result.ChunksStored, len(result.Errors))
-	return result
-}
-
-// IngestFHIRSchemas walks schemas/fhir/ and ingests all JSON files.
-func (k *KnowledgeIngestionService) IngestFHIRSchemas(ctx context.Context, dir string) *IngestionResult {
-	result := &IngestionResult{SourceType: "fhir_r4"}
-
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		result.Errors = append(result.Errors, fmt.Sprintf("directory not found: %s", dir))
-		return result
-	}
-	if err := k.embedding.ClearSourceType(ctx, "fhir_r4"); err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("clear: %v", err))
-	}
-
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if ext != ".json" && ext != ".txt" {
-			return nil
-		}
-
-		result.FilesScanned++
-		text, ref, readErr := readSchemaFile(path)
-		if readErr != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", path, readErr))
-			return nil
-		}
-
-		n, embedErr := k.embedding.IngestText(ctx, "fhir_r4", ref, path, text, nil)
-		result.ChunksStored += n // count whatever succeeded even if some chunks in this file failed
-		if embedErr != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s embed: %v", path, embedErr))
-		}
-		return nil
-	})
-
-	log.Printf("✅ AI KB — FHIR R4: %d files, %d chunks, %d errors",
-		result.FilesScanned, result.ChunksStored, len(result.Errors))
-	return result
+	return k.IngestSources(ctx, k.Sources(schemaDir, "."), false)
 }
 
 // IngestX12BuiltinKnowledge ingests static X12 835/837/270/271 definitions.
@@ -173,36 +69,13 @@ func (k *KnowledgeIngestionService) IngestX12BuiltinKnowledge(ctx context.Contex
 // so no implementation details are exposed to users through the AI assistant.
 // rootDir should be the project root (e.g. "." when running inside the container).
 func (k *KnowledgeIngestionService) IngestAppDocs(ctx context.Context, rootDir string) []IngestionResult {
-	var results []IngestionResult
-	if r := k.ingestDocDir(ctx, filepath.Join(rootDir, "architecture"), "app_docs", "arch"); r != nil {
-		results = append(results, *r)
+	var docs []KnowledgeSource
+	for _, src := range k.Sources(".", rootDir) {
+		if src.Docs {
+			docs = append(docs, src)
+		}
 	}
-	if r := k.ingestDocDir(ctx, filepath.Join(rootDir, "connectivity"), "app_docs", "connectivity"); r != nil {
-		results = append(results, *r)
-	}
-	// docs/ (INSTALL_GUIDE.md, RUNBOOK.md) and installer/ (ONE_CLICK_INSTALLER_GUIDE.md)
-	// — walked the same way as architecture/, so any future doc dropped in either
-	// directory is picked up automatically rather than needing a new hardcoded path.
-	if r := k.ingestDocDir(ctx, filepath.Join(rootDir, "docs"), "app_docs", "docs"); r != nil {
-		results = append(results, *r)
-	}
-	if r := k.ingestDocDir(ctx, filepath.Join(rootDir, "installer"), "app_docs", "installer"); r != nil {
-		results = append(results, *r)
-	}
-	// SYSTEM_DOCUMENTATION.md is CLAUDE.md's own "master reference" doc, but it
-	// lives at the project root next to files that should NOT be swept in
-	// (README.md, STANDARDS.md, COMMERCIAL_LICENSE.md, CLAUDE.md itself) — a
-	// single named file, not a directory walk.
-	if r := k.ingestSingleDoc(ctx, filepath.Join(rootDir, "SYSTEM_DOCUMENTATION.md"), "app_docs", "system_docs"); r != nil {
-		results = append(results, *r)
-	}
-	if r := k.IngestBuiltinAppKnowledge(ctx); r != nil {
-		results = append(results, *r)
-	}
-	if r := k.IngestPipelineStepDocs(ctx, filepath.Join(rootDir, "architecture", "generated", "pipeline_step_docs.json")); r != nil {
-		results = append(results, *r)
-	}
-	return results
+	return k.IngestSources(ctx, docs, false)
 }
 
 // ingestDocDir walks a directory and ingests all markdown (.md) files.

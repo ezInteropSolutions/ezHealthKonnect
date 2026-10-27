@@ -22,7 +22,7 @@ class DatabaseQueryTester {
     }
 
     render() {
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="database-query-tester">
                 <div class="tester-header">
                     <div class="tester-title">
@@ -76,7 +76,7 @@ class DatabaseQueryTester {
         const paramEntries = Object.entries(queryParams);
 
         if (paramEntries.length === 0) {
-            container.innerHTML = `
+            container.innerHTML = HtmlSafe.html`
                 <div class="empty-params-state">
                     <i class="fas fa-info-circle"></i>
                     <p>No query parameters defined yet</p>
@@ -86,31 +86,31 @@ class DatabaseQueryTester {
             return;
         }
 
-        let html = '<table class="test-params-table">';
-        html += '<thead><tr>';
-        html += '<th style="width: 80px;">Parameter</th>';
-        html += '<th>Field Path</th>';
-        html += '<th>Test Value</th>';
-        html += '</tr></thead><tbody>';
+        const html = [HtmlSafe.raw('<table class="test-params-table">')];
+        html.push(HtmlSafe.raw('<thead><tr>'));
+        html.push(HtmlSafe.raw('<th style="width: 80px;">Parameter</th>'));
+        html.push(HtmlSafe.raw('<th>Field Path</th>'));
+        html.push(HtmlSafe.raw('<th>Test Value</th>'));
+        html.push(HtmlSafe.raw('</tr></thead><tbody>'));
 
         paramEntries.forEach(([paramName, fieldPath], index) => {
-            html += `
+            html.push(HtmlSafe.html`
                 <tr>
                     <td><code>$${index + 1}</code></td>
-                    <td><code>${this.escapeHtml(fieldPath)}</code></td>
+                    <td><code>${fieldPath}</code></td>
                     <td>
                         <input type="text"
                                class="form-control form-control-sm test-param-value"
-                               data-param="${this.escapeHtml(paramName)}"
+                               data-param="${paramName}"
                                placeholder="Enter test value"
                                value="">
                     </td>
                 </tr>
-            `;
+            `);
         });
 
-        html += '</tbody></table>';
-        container.innerHTML = html;
+        html.push(HtmlSafe.raw('</tbody></table>'));
+        container.innerHTML = HtmlSafe.html`${html}`;
     }
 
     attachEventListeners() {
@@ -203,7 +203,7 @@ class DatabaseQueryTester {
             this.displayError(error.message);
         } finally {
             runBtn.disabled = false;
-            runBtn.innerHTML = originalContent;
+            runBtn.innerHTML = HtmlSafe.html`${originalContent}`;
         }
     }
 
@@ -213,7 +213,7 @@ class DatabaseQueryTester {
         const resultsStatus = this.container.querySelector('.results-status');
 
         resultsSection.style.display = 'block';
-        resultsStatus.innerHTML = `
+        resultsStatus.innerHTML = HtmlSafe.html`
             <i class="fas fa-check-circle" style="color: #28a745;"></i>
             Query Result (${rows.length} row${rows.length !== 1 ? 's' : ''})
         `;
@@ -226,45 +226,45 @@ class DatabaseQueryTester {
 
         if (rows.length === 0) {
             // Show column names with "Add to Mapping" buttons even when no rows returned
-            let html = `
+            const html = [HtmlSafe.html`
                 <div class="no-results">
                     <i class="fas fa-info-circle"></i>
                     <p>Query executed successfully but returned 0 rows</p>
                     <small style="color: #6c757d;">No matching data found with test parameters. You can still configure field mappings below.</small>
-            `;
+            `];
 
             if (columns && columns.length > 0) {
-                html += `
+                html.push(HtmlSafe.html`
                     <div class="column-info">
                         <strong>Available Columns (${columns.length})</strong>
                         <div class="result-fields">
-                `;
+                `);
 
                 columns.forEach(column => {
-                    html += `
+                    html.push(HtmlSafe.html`
                         <div class="result-field">
                             <div class="field-info">
-                                <span class="field-name"><i class="fas fa-database"></i> ${this.escapeHtml(column)}</span>
+                                <span class="field-name"><i class="fas fa-database"></i> ${column}</span>
                                 <span class="field-value"><em class="text-muted">No data available</em></span>
                             </div>
                             <button type="button"
                                     class="btn btn-sm btn-outline-primary add-mapping-btn"
-                                    data-column="${this.escapeHtml(column)}"
+                                    data-column="${column}"
                                     title="Add to Result Mapping">
                                 <i class="fas fa-plus"></i> Add to Mapping
                             </button>
                         </div>
-                    `;
+                    `);
                 });
 
-                html += `
+                html.push(HtmlSafe.html`
                         </div>
                     </div>
-                `;
+                `);
             }
 
-            html += '</div>';
-            resultsContent.innerHTML = html;
+            html.push(HtmlSafe.raw('</div>'));
+            resultsContent.innerHTML = HtmlSafe.html`${html}`;
 
             // Attach add mapping handlers
             this.attachAddMappingHandlers();
@@ -273,31 +273,31 @@ class DatabaseQueryTester {
 
         // Display first row with "Add to Mapping" buttons
         const firstRow = rows[0];
-        let html = '<div class="query-result-row">';
-        html += '<div class="result-fields">';
+        const html = [HtmlSafe.raw('<div class="query-result-row">')];
+        html.push(HtmlSafe.raw('<div class="result-fields">'));
 
         Object.entries(firstRow).forEach(([column, value]) => {
-            html += `
+            html.push(HtmlSafe.html`
                 <div class="result-field">
                     <div class="field-info">
-                        <span class="field-name"><i class="fas fa-database"></i> ${this.escapeHtml(column)}</span>
+                        <span class="field-name"><i class="fas fa-database"></i> ${column}</span>
                         <span class="field-value">${this.formatValue(value)}</span>
                     </div>
                     <button type="button"
                             class="btn btn-sm btn-outline-primary add-mapping-btn"
-                            data-column="${this.escapeHtml(column)}"
+                            data-column="${column}"
                             title="Add to Result Mapping">
                         <i class="fas fa-plus"></i> Add to Mapping
                     </button>
                 </div>
-            `;
+            `);
         });
 
-        html += '</div></div>';
+        html.push(HtmlSafe.raw('</div></div>'));
 
         // Show all rows as JSON (collapsed)
         if (rows.length > 1) {
-            html += `
+            html.push(HtmlSafe.html`
                 <details class="all-rows-details">
                     <summary>
                         <i class="fas fa-chevron-right"></i>
@@ -305,9 +305,9 @@ class DatabaseQueryTester {
                     </summary>
                     <pre class="all-rows-json">${JSON.stringify(rows, null, 2)}</pre>
                 </details>
-            `;
+            `);
         } else {
-            html += `
+            html.push(HtmlSafe.html`
                 <details class="all-rows-details">
                     <summary>
                         <i class="fas fa-chevron-right"></i>
@@ -315,19 +315,19 @@ class DatabaseQueryTester {
                     </summary>
                     <pre class="all-rows-json">${JSON.stringify(rows, null, 2)}</pre>
                 </details>
-            `;
+            `);
         }
 
         // Add helpful tip
-        html += `
+        html.push(HtmlSafe.html`
             <div class="tester-tip">
                 <i class="fas fa-lightbulb"></i>
                 <strong>Tip:</strong> Click <span class="badge badge-primary"><i class="fas fa-plus"></i> Add to Mapping</span>
                 to automatically add fields to the Result Mapping Builder above
             </div>
-        `;
+        `);
 
-        resultsContent.innerHTML = html;
+        resultsContent.innerHTML = HtmlSafe.html`${html}`;
 
         // Attach add mapping handlers
         this.attachAddMappingHandlers();
@@ -369,7 +369,7 @@ class DatabaseQueryTester {
         btn.disabled = true;
 
         setTimeout(() => {
-            btn.innerHTML = originalContent;
+            btn.innerHTML = HtmlSafe.html`${originalContent}`;
             btn.classList.remove('btn-success');
             btn.classList.add('btn-outline-primary');
             btn.disabled = false;
@@ -395,21 +395,21 @@ class DatabaseQueryTester {
 
     formatValue(value) {
         if (value === null) {
-            return '<em class="null-value">null</em>';
+            return HtmlSafe.raw('<em class="null-value">null</em>');
         }
         if (typeof value === 'string') {
-            return `<code>"${this.escapeHtml(value)}"</code>`;
+            return HtmlSafe.html`<code>"${value}"</code>`;
         }
         if (typeof value === 'boolean') {
-            return `<code class="boolean-value">${value}</code>`;
+            return HtmlSafe.html`<code class="boolean-value">${value}</code>`;
         }
         if (typeof value === 'number') {
-            return `<code class="number-value">${value}</code>`;
+            return HtmlSafe.html`<code class="number-value">${value}</code>`;
         }
         if (value instanceof Date) {
-            return `<code class="date-value">${value.toISOString()}</code>`;
+            return HtmlSafe.html`<code class="date-value">${value.toISOString()}</code>`;
         }
-        return `<code>${this.escapeHtml(String(value))}</code>`;
+        return HtmlSafe.html`<code>${String(value)}</code>`;
     }
 
     escapeHtml(text) {

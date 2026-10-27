@@ -268,7 +268,10 @@ class TransformationPipelineService {
         // pre-built pipeline, which bypasses this function entirely).
         const LEGACY_ALIASES = {
             inbound:  { tcp: 'tcp_mllp', http: 'http_rest', fhir: 'http_fhir_inbound', file: 'file_listener', database: 'postgresql_inbound' },
-            outbound: { http: 'http_outbound', fhir: 'http_outbound', tcp: 'tcp_mllp_outbound', file: 'file_writer', database: 'postgresql_outbound' },
+            // 'sink' is what the wizard sends for store-only flows (Passthrough, FHIR Receiver); the
+            // registered connector is sink_outbound. Without this alias the step was saved with an
+            // unknown connector type and every message to such an interface failed at delivery.
+            outbound: { http: 'http_outbound', fhir: 'http_outbound', tcp: 'tcp_mllp_outbound', file: 'file_writer', database: 'postgresql_outbound', sink: 'sink_outbound' },
         };
         const typeName = (LEGACY_ALIASES[direction] || {})[connectivityType] || connectivityType;
 
@@ -340,7 +343,8 @@ class TransformationPipelineService {
             'fhir':     'http_outbound',
             'tcp':      'tcp_mllp_outbound',
             'file':     'file_writer',
-            'database': 'postgresql_outbound'
+            'database': 'postgresql_outbound',
+            'sink':     'sink_outbound'
         };
         const SOURCE_TYPE_MAP = {
             'tcp':      'tcp_mllp',
@@ -421,6 +425,16 @@ class TransformationPipelineService {
         if (connectorTypeName === 'tcp_mllp' || connectorTypeName === 'tcp_mllp_inbound' || connectorTypeName === 'tcp_mllp_outbound') {
             if (wizardConfig.host) normalized.host = wizardConfig.host;
             if (wizardConfig.port) normalized.port = parseInt(wizardConfig.port, 10) || wizardConfig.port;
+            return normalized;
+        }
+
+        if (connectorTypeName === 'sink_outbound') {
+            // The wizard stores camelCase options; the Go connector reads snake_case keys.
+            const sinkKeys = { enableLogging: 'enable_logging', enableValidation: 'enable_validation', retentionDays: 'retention_days', generateAck: 'generate_ack' };
+            for (const [wizardKey, connectorKey] of Object.entries(sinkKeys)) {
+                const value = wizardConfig[connectorKey] !== undefined ? wizardConfig[connectorKey] : wizardConfig[wizardKey];
+                if (value !== undefined) normalized[connectorKey] = value;
+            }
             return normalized;
         }
 

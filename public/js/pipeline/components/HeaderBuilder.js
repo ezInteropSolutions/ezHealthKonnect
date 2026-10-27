@@ -17,7 +17,7 @@ class HeaderBuilder {
         // Create header
         const header = document.createElement('div');
         header.className = 'header-builder-header';
-        header.innerHTML = `
+        header.innerHTML = HtmlSafe.html`
             <h4>HTTP Headers</h4>
             <button class="btn btn-sm btn-primary add-header-btn" type="button">
                 <i class="fas fa-plus"></i> Add Header
@@ -28,7 +28,7 @@ class HeaderBuilder {
         // Create table
         const table = document.createElement('div');
         table.className = 'header-builder-table';
-        table.innerHTML = `
+        table.innerHTML = HtmlSafe.html`
             <div class="header-row header-row-labels">
                 <div class="header-col-checkbox"></div>
                 <div class="header-col-key">Key</div>
@@ -66,22 +66,22 @@ class HeaderBuilder {
         row.className = 'header-row';
         row.dataset.enabled = enabled;
 
-        row.innerHTML = `
+        row.innerHTML = HtmlSafe.html`
             <div class="header-col-checkbox">
                 <input type="checkbox" class="header-enabled" ${enabled ? 'checked' : ''}>
             </div>
             <div class="header-col-key">
                 <input type="text" class="form-control form-control-sm header-key"
-                       value="${this.escapeHtml(key)}"
+                       value="${key}"
                        placeholder="Header name"
                        list="preset-headers-${this.rows.length}">
                 <datalist id="preset-headers-${this.rows.length}">
-                    ${this.presetHeaders.map(h => `<option value="${h.key}">${h.description}</option>`).join('')}
+                    ${this.presetHeaders.map(h => HtmlSafe.html`<option value="${h.key}">${h.description}</option>`)}
                 </datalist>
             </div>
             <div class="header-col-value">
                 <input type="text" class="form-control form-control-sm header-value"
-                       value="${this.escapeHtml(value)}"
+                       value="${value}"
                        placeholder="Header value">
             </div>
             <div class="header-col-actions">

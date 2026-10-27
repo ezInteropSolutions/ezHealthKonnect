@@ -101,7 +101,7 @@ class RedisQueryBuilder {
      * Render the visual builder UI
      */
     render() {
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="redis-query-builder">
                 <div class="builder-header">
                     <h4>
@@ -161,7 +161,7 @@ class RedisQueryBuilder {
                                     <input type="text"
                                            id="keyPrefix"
                                            class="form-control"
-                                           value="${this.escapeHtml(this.keyPrefix)}"
+                                           value="${this.keyPrefix}"
                                            placeholder="patient">
                                     <small class="text-muted">Examples: patient, user, order, session</small>
                                 </div>
@@ -173,7 +173,7 @@ class RedisQueryBuilder {
                                     <input type="text"
                                            id="separator"
                                            class="form-control text-center"
-                                           value="${this.escapeHtml(this.separator)}"
+                                           value="${this.separator}"
                                            placeholder=":"
                                            title="Character to separate key parts (usually ':')">
                                     <small class="text-muted" style="text-align: center;">Usually :</small>
@@ -188,7 +188,7 @@ class RedisQueryBuilder {
                                     <input type="text"
                                            id="subPrefix"
                                            class="form-control"
-                                           value="${this.escapeHtml(this.subPrefix)}"
+                                           value="${this.subPrefix}"
                                            placeholder="(optional)">
                                     <small class="text-muted">Examples: details, cache, summary</small>
                                 </div>
@@ -204,7 +204,7 @@ class RedisQueryBuilder {
                                     <input type="text"
                                            id="hlField"
                                            class="form-control"
-                                           value="${this.escapeHtml(this.hlField)}"
+                                           value="${this.hlField}"
                                            placeholder="Type field path or click Browse">
                                     <button type="button"
                                             class="btn btn-outline-primary"
@@ -230,7 +230,7 @@ class RedisQueryBuilder {
                         <input type="text"
                                id="keyPattern"
                                class="form-control"
-                               value="${this.escapeHtml(this.keyPattern || 'patient:*')}"
+                               value="${this.keyPattern || 'patient:*'}"
                                placeholder="patient:*">
                         <small class="form-text text-muted">
                             Use * for wildcards. Example: patient:* matches all patient keys
@@ -247,7 +247,7 @@ class RedisQueryBuilder {
                         <input type="text"
                                id="hashField"
                                class="form-control"
-                               value="${this.escapeHtml(this.hashField)}"
+                               value="${this.hashField}"
                                placeholder="insurance_id">
                         <small class="form-text text-muted">
                             Specific field name to retrieve from the hash
@@ -440,7 +440,7 @@ class RedisQueryBuilder {
             overflow-y: auto;
         `;
 
-        modalContent.innerHTML = `
+        modalContent.innerHTML = HtmlSafe.html`
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <div>
                     <h4 style="margin: 0;">Browse Available Fields</h4>
@@ -577,7 +577,7 @@ class RedisQueryBuilder {
             setTimeout(() => {
                 const fieldSearchResults = searchContainer.querySelector('.field-search-results');
                 if (fieldSearchResults && fieldSearchResults.children.length === 0) {
-                    fieldSearchResults.innerHTML = `
+                    fieldSearchResults.innerHTML = HtmlSafe.html`
                         <div style="padding: 20px; text-align: center; background: #fef3c7; border-radius: 6px; border: 1px solid #fbbf24;">
                             <p style="margin: 0; font-size: 14px; color: #92400e;">
                                 <strong>ℹ️ No HL7 message loaded</strong><br>
@@ -591,7 +591,7 @@ class RedisQueryBuilder {
                 }
             }, 100);
         } else {
-            searchContainer.innerHTML = `
+            searchContainer.innerHTML = HtmlSafe.html`
                 <div style="padding: 20px; text-align: center; background: #fee2e2; border-radius: 6px; border: 1px solid #fca5a5;">
                     <p style="margin: 0; font-size: 14px; color: #991b1b;">
                         <strong>⚠️ Component not available</strong><br>

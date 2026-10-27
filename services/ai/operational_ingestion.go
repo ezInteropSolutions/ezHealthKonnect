@@ -42,10 +42,14 @@ func (o *OperationalIngestionService) IngestInterface(ctx context.Context, inter
 		SELECT
 			name,
 			COALESCE(description, ''),
-			source_type,
-			COALESCE(source_connectivity, ''),
-			target_type,
-			COALESCE(target_connectivity, ''),
+			COALESCE(source_type, ''),
+			-- source/target_connectivity are JSONB {type, config}: only the
+			-- connector type name is embedded, never the config (credentials).
+			-- COALESCE(jsonb, '') failed for every row ('' is not valid JSON),
+			-- so no interface was ever ingested before 2026-10-19.
+			COALESCE(source_connectivity->>'type', ''),
+			COALESCE(target_type, ''),
+			COALESCE(target_connectivity->>'type', ''),
 			COALESCE(message_type, ''),
 			COALESCE(status, ''),
 			COALESCE(interface_status, ''),

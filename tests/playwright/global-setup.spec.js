@@ -31,6 +31,8 @@ async function completeFirstRunSetupIfNeeded(page) {
             lastName:  'Administrator',
             email:     ADMIN_EMAIL,
             password:  ADMIN_PASSWORD,
+            // Installed servers require the installer's one-time token (.env SETUP_TOKEN).
+            setupToken: process.env.SETUP_TOKEN || '',
         },
     });
     if (!res.ok()) {

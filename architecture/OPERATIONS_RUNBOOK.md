@@ -1,7 +1,7 @@
 # ezHealthKonnect Operations Runbook
 
 **Audience**: On-call engineers, DevOps  
-**Last updated**: 2026-05-24
+**Last updated**: 2026-10-20 (Standalone installs; Docker is development-only)
 
 ---
 
@@ -26,34 +26,35 @@ A `503` on `/readyz` means traffic should **not** be routed to this instance.
 
 **Diagnosis**:
 ```bash
-docker compose logs db | tail -50
-docker compose exec db pg_isready -U ezhealth_user -d ezhealthkonnect
+pg_isready -h <DB_HOST> -p <DB_PORT> -U ezhealth_user -d ezhealthkonnect
+systemctl status postgresql-17      # RHEL family; Debian/Ubuntu: postgresql
 ```
+On Windows: `Get-Service postgresql-x64-17`.
 
 **Resolution**:
-1. If container crashed: `docker compose up -d db`
-2. If disk full: free space, then `docker compose restart db`
+1. If PostgreSQL stopped: start it (`systemctl start postgresql-17` / `Start-Service postgresql-x64-17`).
+2. If disk full: free space, then restart PostgreSQL.
 3. If connection pool exhausted: check `DB_MAX_OPEN_CONNECTIONS` in `.env`; default is 25
 
 **Recovery**: Once DB is healthy, `/readyz` returns 200 automatically. No restart needed.
 
 ---
 
-### 2. Object storage unreachable (MinIO / S3)
+### 2. Object storage unreachable (local disk / S3)
 
 **Symptoms**: `/readyz` returns `503`, `checks.object_storage.ok = false`. Messages are received and ACK'd, but raw HL7 and FHIR bundles cannot be stored. Pipeline will queue messages until storage recovers.
 
 **Diagnosis**:
 ```bash
-# MinIO
-docker compose exec minio mc ready local
+# Local driver (default): LOCAL_STORAGE_PATH must exist and be writable by the service user
+df -h /opt/ezhealthkonnect/storage
 
 # S3 — check AWS credentials and bucket policy
 aws s3 ls s3://<OBJECT_STORAGE_BUCKET> --region <AWS_REGION>
 ```
 
 **Resolution**:
-1. MinIO: `docker compose restart minio`
+1. Local: free disk space or fix the directory's ownership (`ezhealthkonnect` user on Linux)
 2. S3: verify `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` in `.env`
 3. If bucket was deleted: re-create and restart the app (bucket is auto-created on startup)
 
@@ -107,43 +108,47 @@ curl http://localhost:3000/api/fhir/quality/flagged?message_type=ORU%5ER01
 
 ### 5. Go API process crash / OOM
 
-**Symptoms**: Docker restarts the `app` container (`restart: always` policy). Requests return `502` for a few seconds. The restart loop in `CMD` (`while true; do ./go-api; done`) brings it back automatically.
+**Symptoms**: Requests to engine-backed pages return `502` for a few seconds. systemd restarts `ezhealthkonnect-api` automatically (Linux); on Windows the service wrapper restarts `go-api`.
 
 **Diagnosis**:
 ```bash
-docker compose logs app --tail=100 | grep -E "panic:|FATAL|OOM|killed"
-docker stats --no-stream app  # check memory usage
+journalctl -u ezhealthkonnect-api -n 200 --no-pager | grep -E "panic:|FATAL|OOM|killed"
+systemctl status ezhealthkonnect-api    # memory, restarts
+# Windows: C:\ezHealthKonnect\logs
 ```
 
 **Resolution**:
-1. If OOM: increase container memory limit in `docker-compose.yml`.
-2. If panic: capture the stack trace from logs and file a bug.
-3. If crash loop: `docker compose exec app cat /tmp/go-api-crash.log` (if crash handler writes one).
-4. Emergency: `docker compose restart app` — the DLQ will hold failed messages for redrive.
+1. If OOM: add memory to the server, or reduce concurrency settings.
+2. If panic: capture the stack trace from the logs and file a bug.
+3. Emergency: `systemctl restart ezhealthkonnect-api` (Windows: `Restart-Service ezhealthkonnect`) — the DLQ holds failed messages for redrive.
 
 ---
 
 ## Maintenance Procedures
 
-### Applying Flyway migrations
+### Applying migrations
+Upgrades apply migrations automatically (with a backup and automatic rollback — see `docs/INSTALL_GUIDE.md`). To inspect or apply by hand, from the install directory:
 ```bash
-docker compose run --rm flyway migrate
+./go-api migrate --status          # applied / pending / warnings
+./go-api migrate                   # apply pending migrations (stop the services first)
 ```
 
 ### Rolling back a migration (V137–V141)
 ```bash
-# 1. Stop the app to prevent new writes
-docker compose stop app
+# Prefer `ezHealthKonnect-Setup-* rollback --yes`, which restores the pre-upgrade backup.
+# Manual single-migration rollback:
+# 1. Stop the services to prevent new writes
+systemctl stop ezhealthkonnect ezhealthkonnect-api
 
 # 2. Apply the rollback script
 psql -U ezhealth_user -d ezhealthkonnect -f database/rollbacks/U141__Interface_DLQ_Config.sql
 
-# 3. Remove the Flyway history entry
+# 3. Remove the migration history entry
 psql -U ezhealth_user -d ezhealthkonnect \
   -c "DELETE FROM flyway_schema_history WHERE version = '141'"
 
 # 4. Restart on the previous code version
-docker compose up -d app
+systemctl start ezhealthkonnect-api ezhealthkonnect
 ```
 See `database/rollbacks/` for rollback scripts per migration.
 
@@ -163,10 +168,9 @@ EOF
 
 ### Restarting the Go API without restarting Node.js
 ```bash
-# The go-api process runs in the same container as Node.js
-# Kill go-api — the restart loop brings it back in ~1 second
-docker compose exec app pkill go-api
+systemctl restart ezhealthkonnect-api     # Linux: the engine is its own service
 ```
+On Windows both run under one service (`Restart-Service ezhealthkonnect` restarts both).
 
 ---
 

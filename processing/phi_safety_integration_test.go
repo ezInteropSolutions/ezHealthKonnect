@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -20,7 +21,6 @@ import (
 )
 
 const (
-	testDBConnStr  = "host=postgres port=5432 user=ezhealth_user password=secure_password_change_me dbname=ezhealthkonnect sslmode=disable"
 	conflictPort   = 19876 // use an obscure port so we don't clash with real services
 	testInterfaceA = "00000000-0000-0000-0000-aaaaaaaaaaaa"
 	testInterfaceB = "00000000-0000-0000-0000-bbbbbbbbbbbb"
@@ -63,7 +63,13 @@ func TestPortConflictHalt_HelperPipeline(t *testing.T) {
 // real PostgreSQL instance.  Requires TEST_INFRA_HOST to be set in the environment
 // (same pattern used by Sprint 8 integration tests).
 func TestPortConflictHalt_DBAndAudit(t *testing.T) {
-	db, err := sql.Open("postgres", testDBConnStr)
+	// Same DATABASE_URL convention as every other real-DB test — no committed
+	// credentials in test code.
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("DATABASE_URL not set — skipping real-database test")
+	}
+	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		t.Skipf("cannot open test DB: %v", err)
 	}

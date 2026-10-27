@@ -23,20 +23,21 @@ const rrfK = 60
 
 // RAGService retrieves knowledge chunks and builds augmented LLM prompts.
 type RAGService struct {
-	db      *sql.DB
-	ollama  *OllamaClient  // kept for backward compat
-	chat    LLMProvider    // generation provider
-	embeddr LLMProvider    // embed provider (Ollama for RAG consistency)
+	db          *sql.DB
+	ollama      *OllamaClient        // kept for backward compat
+	chat        LLMProvider          // generation provider
+	embeddr     LLMProvider          // embed provider (Ollama for RAG consistency)
+	reservation retrievalReservation // documentation share of every retrieval (rag_reservation.go)
 }
 
 // NewRAGService creates a new RAGService using OllamaClient (backward compat).
 func NewRAGService(db *sql.DB, ollama *OllamaClient) *RAGService {
-	return &RAGService{db: db, ollama: ollama, chat: ollama, embeddr: ollama}
+	return &RAGService{db: db, ollama: ollama, chat: ollama, embeddr: ollama, reservation: defaultDocReservation}
 }
 
 // newRAGServiceWithProvider creates a RAGService with injected providers.
 func newRAGServiceWithProvider(db *sql.DB, chat, embeddr LLMProvider) *RAGService {
-	return &RAGService{db: db, chat: chat, embeddr: embeddr}
+	return &RAGService{db: db, chat: chat, embeddr: embeddr, reservation: defaultDocReservation}
 }
 
 // RetrievedChunk is a knowledge chunk returned by similarity search.
@@ -80,8 +81,16 @@ func (r *RAGService) Retrieve(ctx context.Context, query string, topK int, filte
 	}
 	embeddingStr := float32SliceToPGVector(queryEmbedding)
 
+	fetchReserved := func(ctx context.Context, limit int, types []string) ([]RetrievedChunk, error) {
+		return r.denseRetrieve(ctx, embeddingStr, limit, types)
+	}
+
 	if !services.GetAppSettings().GetAIConfig().HybridRetrievalEnabled {
-		return r.denseRetrieve(ctx, embeddingStr, topK, filterSourceTypes)
+		chunks, err := r.denseRetrieve(ctx, embeddingStr, topK, filterSourceTypes)
+		if err != nil {
+			return nil, err
+		}
+		return r.reservation.reserveSlots(ctx, chunks, topK, filterSourceTypes, fetchReserved), nil
 	}
 
 	// Hybrid path: widen the candidate pool on each leg so RRF has enough overlap
@@ -96,49 +105,70 @@ func (r *RAGService) Retrieve(ctx context.Context, query string, topK int, filte
 	// should degrade to dense-only, not break the answer.
 	lexicalChunks, _ := r.lexicalRetrieve(ctx, query, embeddingStr, pool, filterSourceTypes)
 
-	return fuseRRF(denseChunks, lexicalChunks, topK), nil
+	fused := fuseRRF(denseChunks, lexicalChunks, topK)
+	return r.reservation.reserveSlots(ctx, fused, topK, filterSourceTypes, fetchReserved), nil
 }
 
 // denseRetrieve runs the pure pgvector cosine-similarity search — the same query
 // Retrieve has always run, factored out so both the pure-dense and hybrid paths
 // share one implementation.
 func (r *RAGService) denseRetrieve(ctx context.Context, embeddingStr string, limit int, filterSourceTypes []string) ([]RetrievedChunk, error) {
-	var (
-		rows     *sql.Rows
-		queryErr error
-	)
-
-	if len(filterSourceTypes) > 0 {
-		placeholders := make([]string, len(filterSourceTypes))
-		args := make([]interface{}, 0, len(filterSourceTypes)+2)
-		args = append(args, embeddingStr, limit)
-		for i, st := range filterSourceTypes {
-			placeholders[i] = fmt.Sprintf("$%d", i+3)
-			args = append(args, st)
-		}
-		sql := fmt.Sprintf(`
-			SELECT id, source_type, COALESCE(source_ref,''), content,
-			       1 - (embedding <=> $1::vector) AS similarity
-			FROM ai_knowledge_chunks
-			WHERE source_type IN (%s)
-			ORDER BY embedding <=> $1::vector
-			LIMIT $2
-		`, strings.Join(placeholders, ","))
-		rows, queryErr = r.db.QueryContext(ctx, sql, args...)
-	} else {
-		rows, queryErr = r.db.QueryContext(ctx, `
+	if len(filterSourceTypes) == 0 {
+		rows, err := r.db.QueryContext(ctx, `
 			SELECT id, source_type, COALESCE(source_ref,''), content,
 			       1 - (embedding <=> $1::vector) AS similarity
 			FROM ai_knowledge_chunks
 			ORDER BY embedding <=> $1::vector
 			LIMIT $2
 		`, embeddingStr, limit)
+		if err != nil {
+			return nil, fmt.Errorf("similarity search: %w", err)
+		}
+		defer rows.Close()
+		return scanRetrievedChunks(rows), nil
 	}
-	if queryErr != nil {
-		return nil, fmt.Errorf("similarity search: %w", queryErr)
+
+	placeholders := make([]string, len(filterSourceTypes))
+	args := make([]interface{}, 0, len(filterSourceTypes)+2)
+	args = append(args, embeddingStr, limit)
+	for i, st := range filterSourceTypes {
+		placeholders[i] = fmt.Sprintf("$%d", i+3)
+		args = append(args, st)
+	}
+	query := fmt.Sprintf(`
+		SELECT id, source_type, COALESCE(source_ref,''), content,
+		       1 - (embedding <=> $1::vector) AS similarity
+		FROM ai_knowledge_chunks
+		WHERE source_type IN (%s)
+		ORDER BY embedding <=> $1::vector
+		LIMIT $2
+	`, strings.Join(placeholders, ","))
+
+	// The HNSW index returns its ~40 nearest neighbours and only THEN applies
+	// the WHERE filter. When the filtered source types are a minority of the
+	// table (documentation vs. thousands of operational chunks) every one of
+	// those neighbours can be filtered out and the search returns nothing —
+	// found 2026-10-19: the documentation search returned 0 rows. pgvector
+	// 0.8's iterative scan keeps walking the graph until LIMIT filtered rows
+	// are found; strict_order keeps exact distance order. SET LOCAL scopes it
+	// to this transaction only.
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("similarity search: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // read-only; rollback ends the transaction
+	if _, err := tx.ExecContext(ctx, `SET LOCAL hnsw.iterative_scan = strict_order`); err != nil {
+		return nil, fmt.Errorf("similarity search: enable iterative scan: %w", err)
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("similarity search: %w", err)
 	}
 	defer rows.Close()
+	return scanRetrievedChunks(rows), nil
+}
 
+func scanRetrievedChunks(rows *sql.Rows) []RetrievedChunk {
 	var chunks []RetrievedChunk
 	for rows.Next() {
 		var c RetrievedChunk
@@ -147,7 +177,7 @@ func (r *RAGService) denseRetrieve(ctx context.Context, embeddingStr string, lim
 		}
 		chunks = append(chunks, c)
 	}
-	return chunks, nil
+	return chunks
 }
 
 // lexicalRetrieve finds chunks via Postgres full-text search (content_tsv, added in

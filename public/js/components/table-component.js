@@ -21,10 +21,10 @@
                         <span class="engine-text" id="engine-text">Processing Engine: Checking...</span>
                     </div>
                     <div class="engine-controls">
-                        <button class="engine-btn start" id="start-engine-btn" onclick="startProcessingEngine()">
+                        <button class="engine-btn start" id="start-engine-btn" data-requires="write" onclick="startProcessingEngine()">
                             <i class="far fa-play-circle"></i> Start Engine
                         </button>
-                        <button class="engine-btn stop" id="stop-engine-btn" onclick="stopProcessingEngine()" style="display:none">
+                        <button class="engine-btn stop" id="stop-engine-btn" data-requires="write" onclick="stopProcessingEngine()" style="display:none">
                             <i class="far fa-stop-circle"></i> Stop Engine
                         </button>
                     </div>

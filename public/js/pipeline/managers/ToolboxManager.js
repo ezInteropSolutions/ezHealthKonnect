@@ -900,7 +900,7 @@ class ToolboxManager {
         const container = document.getElementById('custom-steps-list');
         if (!container) return;
 
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
             <div class="step-card" id="addCustomScript" style="cursor: pointer; text-align: center; padding: 1.5rem;">
                 <i class="fas fa-plus-circle" style="font-size: 2rem; color: #2563eb; margin-bottom: 0.5rem;"></i>
                 <div style="font-size: 0.875rem; font-weight: 500;">Add Custom Script</div>
@@ -920,7 +920,7 @@ class ToolboxManager {
         const card = document.createElement('div');
         card.className = 'step-card';
 
-        card.innerHTML = `
+        card.innerHTML = HtmlSafe.html`
             <div class="step-card-header">
                 <div class="step-card-icon">
                     <i class="${template.icon}"></i>
@@ -931,7 +931,7 @@ class ToolboxManager {
             <div class="step-card-hint" style="font-size: 0.75rem; color: #6b7280; margin-top: 0.5rem; font-style: italic;">
                 Double-click to preview
             </div>
-            ${template.isSystem ? '<span class="step-card-badge">Built-in</span>' : ''}
+            ${template.isSystem ? HtmlSafe.raw('<span class="step-card-badge">Built-in</span>') : ''}
         `;
 
         // Simple double-click to preview (avoids drag conflict)
@@ -1057,7 +1057,7 @@ class ToolboxManager {
         }
         if (emptyState) {
             if (query && totalVisible === 0) {
-                emptyState.innerHTML = `<i class="fas fa-search"></i><p>No steps match "<strong>${query}</strong>"</p>`;
+                emptyState.innerHTML = HtmlSafe.html`<i class="fas fa-search"></i><p>No steps match "<strong>${query}</strong>"</p>`;
                 emptyState.style.display = '';
             } else {
                 emptyState.style.display = 'none';

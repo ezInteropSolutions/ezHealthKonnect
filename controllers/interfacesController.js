@@ -1,12 +1,13 @@
 // controllers/interfacesController.js - UPDATED WITH CONNECTIVITY SUPPORT
 console.log('🔧 Loading Enhanced Interfaces Controller with Format + Connectivity Support...');
 const { GO_BACKEND_URL: _GO_URL, internalHeaders: _goHeaders, goClient: _goClient } = require('../services/goBackendClient');
+const accessPolicy = require('../services/AccessPolicyService');
 const auditService = require('../services/auditService');
 // Reuses pipelineController.js's own credential-key heuristic and encryption
 // (mirrors Go's isSensitiveKey()/EncryptConfigFields) rather than a second,
 // drifting definition of "what looks like a credential" — see
 // containsSensitiveField/maskSensitiveFields/resolveMaskedFields below.
-const { isSensitiveConfigKey, encryptSensitiveConfigFields } = require('./pipelineController');
+const { isSensitiveConfigKey, encryptSensitiveConfigFields } = require('../services/credentialCrypto');
 
 // MASK_PLACEHOLDER matches services/credential_store.go's own
 // MaskSensitiveFields exactly (same literal string) — a connector config
@@ -98,6 +99,38 @@ function resolveMaskedFields(incoming, existing) {
     return result;
 }
 
+// ── Partner-endpoint authentication (source_config.endpoint_auth) ─────────────
+// Credentials a payer/pharmacy/provider system must present to call this
+// interface's synchronous endpoints (/api/eligibility, /api/claim-status,
+// /api/prior-auth, /api/pharmacy-claim). Verified in Go by
+// controllers/sync_endpoint_auth.go, which decrypts them. Written ONLY through
+// the dedicated `endpointAuth` request field (see _applyEndpointAuth), never via
+// a wholesale sourceConfig replace, so the edit modal's connector-config saves
+// can neither wipe it nor write a masked placeholder back into it.
+const ENDPOINT_AUTH_KEY = 'endpoint_auth';
+const ENDPOINT_AUTH_TYPES = ['api_key', 'basic_auth', 'bearer_token'];
+
+// One protector for the interface's own source_config/target_config (incl.
+// endpoint_auth): encrypt secret fields on write, mask them on read.
+const configProtector = require('../services/InterfaceConfigProtector').default;
+
+function stripEndpointAuth(sourceConfig) {
+    if (!sourceConfig || typeof sourceConfig !== 'object' || !(ENDPOINT_AUTH_KEY in sourceConfig)) return sourceConfig;
+    const { [ENDPOINT_AUTH_KEY]: _omit, ...rest } = sourceConfig;
+    return rest;
+}
+
+// Returns an error message for an invalid endpointAuth payload, or null.
+// null/undefined are valid (clear / leave unchanged).
+function validateEndpointAuth(endpointAuth) {
+    if (endpointAuth === undefined || endpointAuth === null) return null;
+    if (typeof endpointAuth !== 'object' || Array.isArray(endpointAuth)) return 'endpointAuth must be an object or null';
+    if (!ENDPOINT_AUTH_TYPES.includes(endpointAuth.authentication_type)) {
+        return `endpointAuth.authentication_type must be one of: ${ENDPOINT_AUTH_TYPES.join(', ')}`;
+    }
+    return null;
+}
+
 class InterfacesController {
     constructor() {
         console.log('🔍 Constructor called...');
@@ -149,6 +182,7 @@ class InterfacesController {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             
             console.log(`🔍 Fetching interfaces for user: ${userEmail} (ID: ${userId})`);
@@ -213,7 +247,7 @@ class InterfacesController {
                      ORDER BY ts.sequence LIMIT 1) AS outbound_step_id
                 FROM interfaces i
                 LEFT JOIN users u ON i.created_by = u.id
-                WHERE i.user_id = :userId AND i.is_active = true
+                WHERE (i.user_id = :userId OR ${allInterfaces}) AND i.is_active = true
                 ORDER BY i.updated_at DESC
             `, {
                 replacements: { userId },
@@ -231,13 +265,13 @@ class InterfacesController {
 
                 // ✅ UPDATED: Include source and target connectivity
                 sourceType: item.source_type,
-                sourceConnectivity: item.source_connectivity,
+                sourceConnectivity: configProtector.maskForDisplay(item.source_connectivity),
                 sourceFormat: this.deriveSourceFormat(item.source_connectivity),
                 targetType: item.target_type,
-                targetConnectivity: item.target_connectivity,
+                targetConnectivity: configProtector.maskForDisplay(item.target_connectivity),
 
-                sourceConfig: this.parseJsonField(item.source_config),
-                targetConfig: this.parseJsonField(item.target_config),
+                sourceConfig: configProtector.maskForDisplay(this.parseJsonField(item.source_config)),
+                targetConfig: configProtector.maskForDisplay(this.parseJsonField(item.target_config)),
                 messageType: item.message_type,
                 acceptedMessageFamilies: this.parseJsonField(item.accepted_message_families) || null,
                 processingRules: this.parseJsonField(item.processing_rules),
@@ -339,6 +373,7 @@ class InterfacesController {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             
             const {
@@ -412,13 +447,18 @@ class InterfacesController {
                 userId,
                 name,
                 description: description || '',
-                sourceType,
+                // Optional at create time (configured later, e.g. from a template).
+                // An omitted key reached Sequelize as `undefined`, which it treats as a
+                // MISSING named replacement and throws; '' matches what the UI already
+                // sends for "not yet configured" (source_type/target_type are NOT NULL).
+                sourceType: sourceType || '',
                 sourceConnectivity: finalSourceConnectivity,
-                targetType,
+                targetType: targetType || '',
                 targetConnectivity: finalTargetConnectivity,
                 messageType: messageType || 'auto-detect',
-                sourceConfig,
-                targetConfig,
+                // Secret fields encrypted at rest (endpoint_auth is only set via update's endpointAuth field).
+                sourceConfig: configProtector.protectForStorage(stripEndpointAuth(sourceConfig), {}),
+                targetConfig: configProtector.protectForStorage(targetConfig, {}),
                 processingRules,
                 transformationMapping,
                 deploymentMode: finalDeploymentMode,
@@ -489,12 +529,12 @@ class InterfacesController {
                 
                 // ✅ UPDATED: Include connectivity fields
                 sourceType: newInterfaceItem.source_type,
-                sourceConnectivity: newInterfaceItem.source_connectivity,
+                sourceConnectivity: configProtector.maskForDisplay(newInterfaceItem.source_connectivity),
                 targetType: newInterfaceItem.target_type,
-                targetConnectivity: newInterfaceItem.target_connectivity,
+                targetConnectivity: configProtector.maskForDisplay(newInterfaceItem.target_connectivity),
                 
-                sourceConfig: this.parseJsonField(newInterfaceItem.source_config),
-                targetConfig: this.parseJsonField(newInterfaceItem.target_config),
+                sourceConfig: configProtector.maskForDisplay(this.parseJsonField(newInterfaceItem.source_config)),
+                targetConfig: configProtector.maskForDisplay(this.parseJsonField(newInterfaceItem.target_config)),
                 messageType: newInterfaceItem.message_type,
                 processingRules: this.parseJsonField(newInterfaceItem.processing_rules),
                 transformationMapping: this.parseJsonField(newInterfaceItem.transformation_mapping),
@@ -518,9 +558,9 @@ class InterfacesController {
                 newValues: {
                     name: newInterfaceItem.name,
                     sourceType: newInterfaceItem.source_type,
-                    sourceConnectivity: newInterfaceItem.source_connectivity,
+                    sourceConnectivity: configProtector.maskForDisplay(newInterfaceItem.source_connectivity),
                     targetType: newInterfaceItem.target_type,
-                    targetConnectivity: newInterfaceItem.target_connectivity,
+                    targetConnectivity: configProtector.maskForDisplay(newInterfaceItem.target_connectivity),
                     messageType: newInterfaceItem.message_type
                 },
                 ipAddress: req.ip,
@@ -569,6 +609,7 @@ class InterfacesController {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
@@ -615,7 +656,7 @@ class InterfacesController {
                      ORDER BY ts.sequence LIMIT 1) AS outbound_step_id
                 FROM interfaces i
                 LEFT JOIN users u ON i.created_by = u.id
-                WHERE i.id = :interfaceId AND i.user_id = :userId AND i.is_active = true
+                WHERE i.id = :interfaceId AND (i.user_id = :userId OR ${allInterfaces}) AND i.is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -637,12 +678,12 @@ class InterfacesController {
                 
                 // Connectivity metadata (display/fallback only — Go reads from connectorSteps below)
                 sourceType: item.source_type,
-                sourceConnectivity: item.source_connectivity,
+                sourceConnectivity: configProtector.maskForDisplay(item.source_connectivity),
                 sourceFormat: this.deriveSourceFormat(item.source_connectivity),
                 targetType: item.target_type,
-                targetConnectivity: item.target_connectivity,
-                sourceConfig: this.parseJsonField(item.source_config),
-                targetConfig: this.parseJsonField(item.target_config),
+                targetConnectivity: configProtector.maskForDisplay(item.target_connectivity),
+                sourceConfig: configProtector.maskForDisplay(this.parseJsonField(item.source_config)),
+                targetConfig: configProtector.maskForDisplay(this.parseJsonField(item.target_config)),
 
                 // Single source of truth: connector step configs from transformation_steps
                 // Edit modal Source/Target tabs read from and write to these, not source_connectivity.
@@ -744,6 +785,7 @@ class InterfacesController {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
@@ -752,7 +794,7 @@ class InterfacesController {
             // Get current interface
             const interfaceData = await this.database.sequelize.query(`
                 SELECT id, name, status FROM interfaces 
-                WHERE id = :interfaceId AND user_id = :userId AND is_active = true
+                WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces}) AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -812,6 +854,7 @@ class InterfacesController {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
@@ -820,7 +863,7 @@ class InterfacesController {
             // Get current interface
             const interfaceData = await this.database.sequelize.query(`
                 SELECT id, name, status FROM interfaces 
-                WHERE id = :interfaceId AND user_id = :userId AND is_active = true
+                WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces}) AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -880,6 +923,7 @@ class InterfacesController {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
@@ -888,7 +932,7 @@ class InterfacesController {
             // Get current interface
             const interfaceData = await this.database.sequelize.query(`
                 SELECT id, name, status FROM interfaces 
-                WHERE id = :interfaceId AND user_id = :userId AND is_active = true
+                WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces}) AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -955,6 +999,7 @@ class InterfacesController {
             await this.ensureDatabase();
 
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
@@ -979,7 +1024,7 @@ class InterfacesController {
             // Get current interface
             const interfaceData = await this.database.sequelize.query(`
                 SELECT id, name, status FROM interfaces
-                WHERE id = :interfaceId AND user_id = :userId AND is_active = true
+                WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces}) AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -1195,6 +1240,45 @@ class InterfacesController {
     /**
      * Update an existing interface
      */
+    // Current (encrypted) endpoint_auth for an interface, or null.
+    async _getStoredEndpointAuth(interfaceId) {
+        const rows = await this.database.sequelize.query(
+            `SELECT source_config -> '${ENDPOINT_AUTH_KEY}' AS endpoint_auth FROM interfaces WHERE id = :interfaceId`,
+            { replacements: { interfaceId }, type: this.database.sequelize.QueryTypes.SELECT }
+        );
+        const value = rows.length > 0 ? this.parseJsonField(rows[0].endpoint_auth) : null;
+        return value && typeof value === 'object' && Object.keys(value).length > 0 ? value : null;
+    }
+
+    // Writes source_config.endpoint_auth after the main UPDATE.
+    //   endpointAuth undefined -> restore what was stored before (survives a wholesale sourceConfig write)
+    //   endpointAuth null      -> remove it
+    //   endpointAuth object    -> masked placeholders resolved to the stored values, secrets encrypted
+    async _applyEndpointAuth(interfaceId, endpointAuth, existingEndpointAuth) {
+        let finalAuth;
+        if (endpointAuth === undefined) {
+            finalAuth = existingEndpointAuth;
+        } else if (endpointAuth === null) {
+            finalAuth = null;
+        } else {
+            finalAuth = configProtector.protectForStorage(endpointAuth, existingEndpointAuth || {});
+        }
+
+        if (finalAuth) {
+            await this.database.sequelize.query(
+                `UPDATE interfaces
+                 SET source_config = jsonb_set(COALESCE(source_config, '{}'::jsonb), '{${ENDPOINT_AUTH_KEY}}', :auth::jsonb, true)
+                 WHERE id = :interfaceId`,
+                { replacements: { interfaceId, auth: JSON.stringify(finalAuth) }, type: this.database.sequelize.QueryTypes.UPDATE }
+            );
+        } else {
+            await this.database.sequelize.query(
+                `UPDATE interfaces SET source_config = COALESCE(source_config, '{}'::jsonb) - '${ENDPOINT_AUTH_KEY}' WHERE id = :interfaceId`,
+                { replacements: { interfaceId }, type: this.database.sequelize.QueryTypes.UPDATE }
+            );
+        }
+    }
+
     async updateInterface(req, res) {
         console.log('\n=== UPDATE INTERFACE ===');
 
@@ -1202,6 +1286,7 @@ class InterfacesController {
             await this.ensureDatabase();
 
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
@@ -1257,14 +1342,22 @@ class InterfacesController {
                 retain_error_logs_forever,
                 // FHIR Validation Policy (V66)
                 fhirValidationPolicy,
-                fhir_validation_policy
+                fhir_validation_policy,
+                // Partner-endpoint credentials (source_config.endpoint_auth):
+                // undefined = leave unchanged, null = remove, object = set.
+                endpointAuth
             } = req.body;
+            // Never let endpoint_auth ride in on a wholesale sourceConfig write
+            // (it may be a masked echo of what GET returned) — it is written only
+            // through endpointAuth, by _applyEndpointAuth below.
+            const sourceConfigForWrite = stripEndpointAuth(sourceConfig);
 
             console.log(`🔍 Updating interface ${interfaceId} for user: ${userEmail}`);
             console.log(`   New name: ${name}`);
             console.log(`   Source Type: ${sourceType} | Target Type: ${targetType}`);
-            console.log(`   Source Config (type: ${typeof sourceConfig}):`, sourceConfig);
-            console.log(`   Target Config (type: ${typeof targetConfig}):`, targetConfig);
+            // Masked: these may carry connector credentials and must never reach server logs in plaintext.
+            console.log(`   Source Config (type: ${typeof sourceConfig}):`, configProtector.maskForDisplay(sourceConfig));
+            console.log(`   Target Config (type: ${typeof targetConfig}):`, configProtector.maskForDisplay(targetConfig));
             console.log(`   Processing Rules (type: ${typeof processingRules}):`, processingRules);
             console.log(`   Transformation Mapping (type: ${typeof transformationMapping}):`, transformationMapping);
             console.log(`   Deployment: mode=${deployment_mode}, auto_start=${auto_start}, delay=${deployment_delay_seconds}s`);
@@ -1273,8 +1366,8 @@ class InterfacesController {
 
             // Verify interface exists and belongs to user
             const existingInterface = await this.database.sequelize.query(`
-                SELECT id, name, status FROM interfaces
-                WHERE id = :interfaceId AND user_id = :userId AND is_active = true
+                SELECT id, name, status, source_config, target_config FROM interfaces
+                WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces}) AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -1286,6 +1379,23 @@ class InterfacesController {
                     error: 'Interface not found or access denied'
                 });
             }
+
+            // Column values to store: masked placeholders the browser echoed back
+            // resolve to the stored values, secret fields are encrypted. The raw
+            // incoming configs are still what _updateStep and the credential-change
+            // audit check below look at (they apply their own resolution).
+            const sourceConfigStored = configProtector.protectForStorage(
+                sourceConfigForWrite, this.parseJsonField(existingInterface[0].source_config) || {});
+            const targetConfigStored = configProtector.protectForStorage(
+                targetConfig, this.parseJsonField(existingInterface[0].target_config) || {});
+
+            const endpointAuthError = validateEndpointAuth(endpointAuth);
+            if (endpointAuthError) {
+                return res.status(400).json({ success: false, error: endpointAuthError });
+            }
+            // Read BEFORE the main UPDATE: a wholesale source_config write below
+            // would otherwise drop the stored endpoint_auth.
+            const existingEndpointAuth = await this._getStoredEndpointAuth(interfaceId);
 
             // OOB: Build V30 JSONB structures for connectivity columns
             // V30 migration changed source_connectivity and target_connectivity to JSONB: {type, config}
@@ -1300,17 +1410,17 @@ class InterfacesController {
             // source_connectivity had been clobbered to {"type":"tcp","config":{}}
             // despite its real pipeline being a file_listener connector.
             const sourceConnectivityJsonb = (sourceConnectivity || sourceType || sourceConfig)
-                ? { type: sourceConnectivity || this.getDefaultConnectivity('source', sourceType), config: sourceConfig || {} }
+                ? { type: sourceConnectivity || this.getDefaultConnectivity('source', sourceType), config: sourceConfigStored || {} }
                 : null;
 
             const targetConnectivityJsonb = (targetConnectivity || targetType || targetConfig)
-                ? { type: targetConnectivity || this.getDefaultConnectivity('target', targetType), config: targetConfig || {} }
+                ? { type: targetConnectivity || this.getDefaultConnectivity('target', targetType), config: targetConfigStored || {} }
                 : null;
 
-            console.log('🔧 V30 JSONB structures:', {
+            console.log('🔧 V30 JSONB structures:', configProtector.maskForDisplay({
                 sourceConnectivityJsonb,
                 targetConnectivityJsonb
-            });
+            }));
 
             // OOB: Use centralized JSONB preparation (now includes connectivity JSONB objects)
             const replacements = this.prepareJsonbReplacements({
@@ -1322,8 +1432,8 @@ class InterfacesController {
                 targetType,
                 targetConnectivity: targetConnectivityJsonb,  // V30 JSONB: {type, config}
                 messageType,
-                sourceConfig,
-                targetConfig,
+                sourceConfig: sourceConfigStored,
+                targetConfig: targetConfigStored,
                 processingRules,
                 transformationMapping,
                 userId
@@ -1501,6 +1611,8 @@ class InterfacesController {
                 type: this.database.sequelize.QueryTypes.UPDATE
             });
 
+            await this._applyEndpointAuth(interfaceId, endpointAuth, existingEndpointAuth);
+
             // ── PRIMARY WRITE: update transformation_steps directly ──────────────────
             // transformation_steps is the single source of truth for connector config.
             // When the client sends a full sourceConnectorConfig (from ConnectorConfigBuilder),
@@ -1614,7 +1726,7 @@ class InterfacesController {
                 }
             };
 
-            await _updateStep(sourceConnectorConfig, sourceConfig, inboundStepId,  'connector.inbound');
+            await _updateStep(sourceConnectorConfig, sourceConfigForWrite, inboundStepId,  'connector.inbound');
             await _updateStep(targetConnectorConfig, targetConfig, outboundStepId, 'connector.outbound');
 
             // Tell the Go engine to reload the filter cache for this interface
@@ -1646,7 +1758,7 @@ class InterfacesController {
             // risk_level as renaming the interface — indistinguishable in
             // the audit trail from a cosmetic edit, which is the wrong
             // signal for security review.
-            const credentialFieldChanged = [sourceConfig, targetConfig, sourceConnectorConfig, targetConnectorConfig]
+            const credentialFieldChanged = [sourceConfigForWrite, targetConfig, sourceConnectorConfig, targetConnectorConfig, endpointAuth]
                 .some(containsSensitiveField);
             if (credentialFieldChanged) {
                 auditService.logEvent({
@@ -1949,3 +2061,5 @@ module.exports.containsSensitiveField = containsSensitiveField;
 module.exports.maskSensitiveFields = maskSensitiveFields;
 module.exports.resolveMaskedFields = resolveMaskedFields;
 module.exports.MASK_PLACEHOLDER = MASK_PLACEHOLDER;
+module.exports.stripEndpointAuth = stripEndpointAuth;
+module.exports.validateEndpointAuth = validateEndpointAuth;

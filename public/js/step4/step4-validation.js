@@ -43,18 +43,10 @@ class Step4Validation {
         const errors = this.getFilteredErrors();
         const warnings = this.getFilteredWarnings();
         
-        let html = '';
-        
-        if (errors.length === 0 && warnings.length === 0) {
-            html = '<div class="validation-success">✅ All validations passed!</div>';
-        } else {
-            errors.forEach(error => {
-                html += `<div class="validation-error">❌ ${error}</div>`;
-            });
-            warnings.forEach(warning => {
-                html += `<div class="validation-warning">⚠️ ${warning}</div>`;
-            });
-        }
+        const html = (errors.length === 0 && warnings.length === 0)
+            ? HtmlSafe.raw('<div class="validation-success">✅ All validations passed!</div>')
+            : HtmlSafe.html`${errors.map(error => HtmlSafe.html`<div class="validation-error">❌ ${error}</div>`)}${
+                warnings.map(warning => HtmlSafe.html`<div class="validation-warning">⚠️ ${warning}</div>`)}`;
         
         return { html, errors, warnings };
     }

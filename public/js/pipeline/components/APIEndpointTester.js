@@ -34,7 +34,7 @@ class APIEndpointTester {
             this.getStepConfig = () => stepConfigOrGetter;
         }
 
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="api-endpoint-tester">
                 <div class="test-section">
                     <h4>🧪 Test API Endpoint</h4>
@@ -173,11 +173,11 @@ class APIEndpointTester {
         container.style.display = 'block';
 
         if (!result.success) {
-            container.innerHTML = `
+            container.innerHTML = HtmlSafe.html`
                 <div class="alert alert-error">
                     <strong>❌ API Call Failed</strong>
                     <p>${result.error || 'Unknown error'}</p>
-                    ${result.request ? `
+                    ${result.request ? HtmlSafe.html`
                         <details>
                             <summary>Request Details</summary>
                             <pre>${JSON.stringify(result.request, null, 2)}</pre>
@@ -190,7 +190,7 @@ class APIEndpointTester {
 
         const response = result.response;
 
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
             <div class="alert alert-success">
                 <strong>✅ API Call Successful</strong>
                 <p>Status: ${response.status_code} ${response.status_text} (${response.duration_ms}ms)</p>
@@ -239,20 +239,20 @@ class APIEndpointTester {
         const pickerList = this.container.querySelector('#field-picker-list');
         if (!pickerList) return;
 
-        pickerList.innerHTML = `
+        pickerList.innerHTML = HtmlSafe.html`
             <div class="field-list">
-                ${fields.map(field => `
-                    <div class="field-item" data-path="${this.escapeHtml(field.path)}">
+                ${fields.map(field => HtmlSafe.html`
+                    <div class="field-item" data-path="${field.path}">
                         <div class="field-info">
-                            <code class="field-path">${this.escapeHtml(field.path)}</code>
+                            <code class="field-path">${field.path}</code>
                             <span class="field-type badge badge-${field.type}">${field.type}</span>
                         </div>
                         <div class="field-sample">${this.formatSample(field.sample)}</div>
-                        <button class="btn-add-field" data-path="${this.escapeHtml(field.path)}" data-type="${field.type}">
+                        <button class="btn-add-field" data-path="${field.path}" data-type="${field.type}">
                             + Add to Mapping
                         </button>
                     </div>
-                `).join('')}
+                `)}
             </div>
         `;
 
@@ -335,9 +335,9 @@ class APIEndpointTester {
      */
     formatSample(sample) {
         if (typeof sample === 'object') {
-            return this.escapeHtml(JSON.stringify(sample));
+            return JSON.stringify(sample);
         }
-        return this.escapeHtml(String(sample));
+        return String(sample);
     }
 
     /**

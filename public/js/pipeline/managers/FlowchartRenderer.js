@@ -206,7 +206,7 @@ class FlowchartRenderer {
         // Icon
         const icon = document.createElement('div');
         icon.className = 'step-icon-large';
-        icon.innerHTML = this.getStepIcon(step);
+        icon.innerHTML = HtmlSafe.html`${this.getStepIcon(step)}`;
 
         // Name
         const name = document.createElement('div');
@@ -605,7 +605,7 @@ class FlowchartRenderer {
      * Render empty state
      */
     renderEmptyState() {
-        this.flowchartCanvas.innerHTML = `
+        this.flowchartCanvas.innerHTML = HtmlSafe.html`
             <div class="flowchart-empty-state">
                 <i class="fas fa-project-diagram"></i>
                 <h3>No Steps in Pipeline</h3>
@@ -1279,9 +1279,9 @@ class FlowchartRenderer {
         `;
 
         const showCancelBtn = type === 'info';
-        notification.innerHTML = `
+        notification.innerHTML = HtmlSafe.html`
             <span>${message}</span>
-            ${showCancelBtn ? '<button style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 4px 8px; border-radius: 4px; cursor: pointer; margin-left: 8px;" onclick="window.pipelineBuilder?.flowchartRenderer?.cancelConnectionMode()">Cancel (Esc)</button>' : ''}
+            ${showCancelBtn ? HtmlSafe.raw('<button style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 4px 8px; border-radius: 4px; cursor: pointer; margin-left: 8px;" onclick="window.pipelineBuilder?.flowchartRenderer?.cancelConnectionMode()">Cancel (Esc)</button>') : ''}
         `;
 
         document.body.appendChild(notification);

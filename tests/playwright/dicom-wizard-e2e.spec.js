@@ -13,7 +13,7 @@
 // wire (checked: no DICOM package is in package.json; libraries like dcmjs
 // only parse files). The real device-side client here is the permanent Go
 // fixture at tests/playwright/fixtures/dicom_scu_client — invoked via
-// `docker run --network host golang:1.25-alpine go run main.go ...`, never
+// `docker run --network host golang:1.26-alpine go run main.go ...`, never
 // run directly on the host, per this repo's own standing Go-build rule.
 const { test, expect } = require('@playwright/test');
 const { execFileSync } = require('child_process');
@@ -31,7 +31,7 @@ function runDicomSCUClient({ addr, aeTitle, patientId }) {
         '-v', `${FIXTURE_DIR}:/app`, '-w', '/app',
         '-v', 'ehk-gomodcache:/go/pkg/mod',
         '-v', 'ehk-gobuildcache:/root/.cache/go-build',
-        'golang:1.25-alpine',
+        'golang:1.26-alpine',
         'go', 'run', 'main.go',
         '-addr', addr, '-ae', aeTitle, '-patient-id', patientId,
     ];
@@ -64,6 +64,21 @@ async function openTemplateModal(page) {
 
 test.describe.serial('Connect a Device wizard ("DICOM Storage SCP" template)', () => {
     test.describe.configure({ retries: 0 });
+
+    // A crashed earlier run leaves its interface holding the fixed SCP port, and
+    // the next run's activation then (correctly) halts on the port conflict.
+    // Clear any leftover from this spec before starting.
+    test.beforeAll(async ({ request }) => {
+        const res = await request.get('/api/interfaces');
+        const body = await res.json();
+        const list = body.data || body.interfaces || body || [];
+        for (const iface of list) {
+            if ((iface.name || '').startsWith('PW DICOM Wizard')) {
+                await request.post(`/api/runtime/interfaces/${iface.id}/deactivate`).catch(() => {});
+                await request.delete(`/api/interfaces/${iface.id}`).catch(() => {});
+            }
+        }
+    });
 
     test('Devices tab lists the DICOM Storage SCP template alongside the lab-instrument templates', async ({ page }) => {
         await page.goto('/dashboard.html');

@@ -5,6 +5,7 @@
 
 const interfaceService = require('../services/interfaceService');
 const auditService = require('../services/auditService');
+const accessPolicy = require('../services/AccessPolicyService');
 const TransformationPipelineService = require('../services/TransformationPipelineService');
 const MessageTypeMappingService = require('../services/MessageTypeMappingService');
 const { v4: uuidv4 } = require('uuid');
@@ -499,7 +500,7 @@ class WizardController {
                         port: process.env.DB_PORT || 5432,
                         database: process.env.DB_NAME || 'ezhealthkonnect',
                         user: process.env.DB_USER || 'postgres',
-                        password: process.env.DB_PASSWORD || 'password'
+                        password: process.env.DB_PASSWORD || ''
                     };
                 }
             } catch (configError) {
@@ -509,7 +510,7 @@ class WizardController {
                     port: process.env.DB_PORT || 5432,
                     database: process.env.DB_NAME || 'ezhealthkonnect',
                     user: process.env.DB_USER || 'postgres',
-                    password: process.env.DB_PASSWORD || 'password'
+                    password: process.env.DB_PASSWORD || ''
                 };
             }
             
@@ -1139,7 +1140,7 @@ class WizardController {
                     status:              interfaceData.status,
                     auto_start:          interfaceData.auto_start,
                     deployment_mode:     interfaceData.deployment_mode,
-                }, userId);
+                }, userId, await accessPolicy.canSeeAllInterfaces(req.session?.user || req.user));
 
                 // Sync credentials into the matching connector.outbound step
                 await this.pipelineService.syncConnectorStepFromWizard(

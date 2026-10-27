@@ -13,7 +13,7 @@
  *   GO_URL         default: http://localhost:8080
  */
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./helpers/seeded');
 const { ApiHelper }    = require('./helpers/api');
 const fs               = require('fs');
 const path             = require('path');
@@ -59,7 +59,7 @@ test.describe('CDA-E0 Schema API Health', () => {
             const sectRes = await request.get(`${BASE_URL}/api/cda/schema/sections`);
             const sects   = (await sectRes.json()).sections || [];
             const first   = sects.find(s => !s.isHeader);
-            if (!first) { test.skip(); return; }
+            expect(first, 'schema returned no non-header section').toBeTruthy();
             const res2 = await request.get(`${BASE_URL}/api/cda/schema/sections/${encodeURIComponent(first.key)}/fields`);
             expect(res2.ok()).toBeTruthy();
             const body2 = await res2.json();
@@ -115,173 +115,64 @@ test.describe('CDA-E0 Schema API Health', () => {
 
 test.describe('CDA-E1 Pipeline Builder UI', () => {
 
-    test.beforeAll(async ({ request }) => {
-        // Create a minimal CDA interface so we have a pipelineId to navigate to.
-        const api = new ApiHelper(request, BASE_URL);
-        try {
-            const all   = await api.listInterfaces();
-            const stale = all.filter(i => (i.name || '').startsWith('CDA_E2E'));
-            for (const iface of stale) {
-                await api.deleteInterface(iface.id).catch(() => {});
-            }
-        } catch (_) { /* ignore cleanup errors */ }
-
-        // POST to Node.js wizard complete to create a placeholder interface
-        const res = await request.post(`${BASE_URL}/api/interfaces`, {
-            data: {
-                name:         'CDA_E2E_Test',
-                description:  'CDA Sprint E E2E test interface',
-                direction:    'inbound',
-                status:       'inactive',
-                message_type: 'CCD',
-            },
-        });
-        if (res.ok()) {
-            const body = await res.json();
-            state.interfaceId = body.id || (body.data && body.data.id);
-            if (state.interfaceId) state.ids.push(state.interfaceId);
-        }
+    // The seeded, activated interface from helpers/seeded.js (created through the real wizard API).
+    test.beforeAll(async ({ seed }) => {
+        state.interfaceId = seed.interfaceId;
     });
 
-    test.afterAll(async ({ request }) => {
-        const api = new ApiHelper(request, BASE_URL);
-        for (const id of state.ids) {
-            await api.deleteInterface(id).catch(() => {});
-        }
-    });
-
-    test('CDA-E1-001 Add cda.parse step — step appears on canvas and builder opens', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
-
+    // Opens a step's properties panel the way the app does: a VisualStep added to the builder, then
+    // showStepProperties. The default config comes from the toolbox template, like a dragged-in step.
+    async function openStepPanel(page, stepType) {
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
-        await page.waitForLoadState('load');
+        await page.waitForSelector('#all-steps-list .step-card', { timeout: 15000 });
+        // The interface's pipeline loads asynchronously; adding a step before it exists throws.
+        await page.waitForFunction(() => !!(window.pipelineBuilder && window.pipelineBuilder.pipeline), { timeout: 15000 });
+        await page.evaluate((st) => {
+            const tpl = window.pipelineBuilder.toolboxManager.templates.find(t => t.type === st);
+            const step = new VisualStep({ stepName: 'Test ' + st, stepType: st, config: tpl ? JSON.parse(JSON.stringify(tpl.defaultConfig || {})) : {} });
+            window.pipelineBuilder.addStep(step);
+            window.pipelineBuilder.propertiesPanel.showStepProperties(step, false);
+        }, stepType);
+        await page.waitForSelector('#stepPropertiesModal', { state: 'visible', timeout: 5000 });
+    }
 
-        // Wait for the pipeline builder to initialise
-        await page.waitForFunction(() => typeof window.pipelineBuilder !== 'undefined', { timeout: 8000 });
+    test('CDA-E1-001 Add cda.parse step — step is on the canvas and its builder opens', async ({ page }) => {
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
+        await openStepPanel(page, 'cda.parse');
 
-        // Find the cda.parse step type in the toolbox
-        const toolboxItem = page.locator('[data-step-type="cda.parse"], [data-type="cda.parse"]').first();
-        if (!(await toolboxItem.isVisible({ timeout: 3000 }).catch(() => false))) {
-            // Step type may be under a category — open all categories first
-            await page.locator('[data-category], .toolbox-category').first().click({ force: true }).catch(() => {});
-            await page.waitForTimeout(200);
-        }
-
-        // Use API to directly add a step and verify the builder dispatches correctly
-        await page.evaluate(() => {
-            if (window.pipelineBuilder && window.pipelineBuilder.addStep) {
-                window.pipelineBuilder.addStep({ stepType: 'cda.parse', name: 'Parse CDA XML', config: {} });
-            }
-        });
-        await page.waitForTimeout(300);
-
-        // The canvas should now show a step node for cda.parse
-        const stepNode = page.locator('[data-step-type="cda.parse"], .step-node').first();
-        // Accept that the step exists in the pipeline model even if the node isn't DOM-visible yet
-        const pipelineHasStep = await page.evaluate(() => {
-            const pb = window.pipelineBuilder;
-            if (!pb || !pb.pipeline) return false;
-            const steps = pb.pipeline.steps || pb.pipeline.getSteps?.() || [];
-            return steps.some(s => (s.stepType || s.step_type) === 'cda.parse');
-        });
-        expect(pipelineHasStep).toBe(true);
+        // CdaParseStepBuilder's own fields prove the cda.parse builder (not a generic panel) was dispatched.
+        await expect(page.locator('#cdaParseSourceField')).toBeVisible();
+        await expect(page.locator('#cdaParseOutputField')).toBeVisible();
+        await expect(page.locator('#cdaParseDocTypeHint')).toBeVisible();
     });
 
     test('CDA-E1-002 Add cda.to_fhir step — 4-tab builder is dispatched', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
+        await openStepPanel(page, 'cda.to_fhir');
 
-        await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
-        await page.waitForLoadState('load');
-        await page.waitForFunction(() => typeof window.pipelineBuilder !== 'undefined', { timeout: 8000 });
-
-        // Inject a cda.to_fhir step and open its PropertiesPanel
-        await page.evaluate(() => {
-            const step = { stepType: 'cda.to_fhir', name: 'CDA→FHIR', config: {} };
-            if (window.pipelineBuilder?.addStep) {
-                window.pipelineBuilder.addStep(step);
-            }
-        });
-        await page.waitForTimeout(300);
-
-        // Simulate clicking on the step to open the properties panel
-        await page.evaluate(() => {
-            const pb = window.pipelineBuilder;
-            if (!pb || !pb.pipeline) return;
-            const steps = pb.pipeline.steps || pb.pipeline.getSteps?.() || [];
-            const fhirStep = steps.find(s => (s.stepType || s.step_type) === 'cda.to_fhir');
-            if (fhirStep && pb.propertiesPanel?.show) {
-                pb.propertiesPanel.show(fhirStep);
-            }
-        });
-        await page.waitForTimeout(500);
-
-        // CdaToFhirStepBuilder renders an element with id="cdaToFhirBuilder"
-        const builder = page.locator('#cdaToFhirBuilder');
-        if (await builder.isVisible({ timeout: 2000 }).catch(() => false)) {
-            // Tab buttons must be present
-            await expect(page.locator('#cdaToFhirTabBtn-general')).toBeVisible();
-            await expect(page.locator('#cdaToFhirTabBtn-sections')).toBeVisible();
-            await expect(page.locator('#cdaToFhirTabBtn-terminology')).toBeVisible();
-            await expect(page.locator('#cdaToFhirTabBtn-advanced')).toBeVisible();
-        } else {
-            // Builder may not be visible in headless without a canvas click — verify via model
-            const hasFhirStep = await page.evaluate(() => {
-                const pb = window.pipelineBuilder;
-                if (!pb?.pipeline) return false;
-                const steps = pb.pipeline.steps || pb.pipeline.getSteps?.() || [];
-                return steps.some(s => (s.stepType || s.step_type) === 'cda.to_fhir');
-            });
-            expect(hasFhirStep).toBe(true);
+        await expect(page.locator('#cdaToFhirBuilder')).toBeVisible();
+        for (const tab of ['general', 'sections', 'terminology', 'advanced']) {
+            await expect(page.locator(`#cdaToFhirTabBtn-${tab}`)).toBeVisible();
         }
     });
 
     test('CDA-E1-003 Sections tab shows section list with field counts', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
+        await openStepPanel(page, 'cda.to_fhir');
 
-        await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
-        await page.waitForLoadState('load');
-        await page.waitForFunction(() => typeof window.pipelineBuilder !== 'undefined', { timeout: 8000 });
-
-        await page.evaluate(() => {
-            const step = { stepType: 'cda.to_fhir', name: 'CDA→FHIR', config: { documentType: 'CCD' } };
-            const pb = window.pipelineBuilder;
-            if (pb?.addStep) pb.addStep(step);
-        });
-        await page.waitForTimeout(300);
-
-        // Open properties panel
-        await page.evaluate(() => {
-            const pb = window.pipelineBuilder;
-            if (!pb?.pipeline) return;
-            const steps = pb.pipeline.steps || pb.pipeline.getSteps?.() || [];
-            const s = steps.find(s => (s.stepType || s.step_type) === 'cda.to_fhir');
-            if (s && pb.propertiesPanel?.show) pb.propertiesPanel.show(s);
-        });
-        await page.waitForTimeout(600);
-
-        const builder = page.locator('#cdaToFhirBuilder');
-        if (!(await builder.isVisible({ timeout: 1500 }).catch(() => false))) {
-            test.skip(); return;
-        }
-
-        // Click Sections tab
         await page.locator('#cdaToFhirTabBtn-sections').click();
-        // Wait for async section load (fetch /api/cda/schema/sections)
-        await page.waitForTimeout(1500);
-
-        const sectionsPanel = page.locator('#cdaToFhirTab-sections');
-        // Should have at least one checkbox row after load
-        const checkboxes = sectionsPanel.locator('.cda-section-checkbox');
-        const count = await checkboxes.count();
-        expect(count).toBeGreaterThan(0);
+        const rows = page.locator('#cdaToFhirTab-sections .cda-section-checkbox');
+        await expect(rows.first()).toBeVisible({ timeout: 15000 });
+        expect(await rows.count()).toBeGreaterThan(5);
+        await expect(page.locator('#cdaToFhirTab-sections').getByText(/\d+ fields/).first()).toBeVisible();
     });
 
     test('CDA-E1-004 OOB upgrade banner is hidden when no template version set', async ({ page }) => {
-        test.skip(!state.interfaceId, 'Interface creation failed in beforeAll');
+        expect(state.interfaceId, 'seeded interface missing').toBeTruthy();
 
         await page.goto(`${BASE_URL}/pipeline-builder.html?interfaceId=${state.interfaceId}`);
         await page.waitForLoadState('load');
-        await page.waitForFunction(() => typeof window.pipelineBuilder !== 'undefined', { timeout: 8000 });
+        await page.waitForFunction(() => !!(window.pipelineBuilder && window.pipelineBuilder.pipeline), { timeout: 15000 });
 
         // Step with no basedOnVersion → banner stays hidden
         await page.evaluate(() => {
@@ -314,7 +205,7 @@ test.describe('CDA-E1 Pipeline Builder UI', () => {
 test.describe('CDA-E2 Transform API', () => {
 
     test('CDA-E2-001 CDA parse executor returns parsedCDA JSON', async ({ request }) => {
-        test.skip(!CCD_FIXTURE_XML, 'CCD fixture file not found at tests/fixtures/cda/ccd_minimal.xml');
+        expect(CCD_FIXTURE_XML, 'CCD fixture file not found at tests/fixtures/cda/ccd_minimal.xml').toBeTruthy();
 
         // POST directly to Go backend pipeline test endpoint with a cda.parse step
         const res = await request.post(`${BASE_URL}/api/fhir/pipeline/test`, {
@@ -342,7 +233,7 @@ test.describe('CDA-E2 Transform API', () => {
     });
 
     test('CDA-E2-002 CDA→FHIR executor returns FHIR Bundle resourceType', async ({ request }) => {
-        test.skip(!CCD_FIXTURE_XML, 'CCD fixture file not found');
+        expect(CCD_FIXTURE_XML, 'CCD fixture file not found').toBeTruthy();
 
         const res = await request.post(`${BASE_URL}/api/fhir/pipeline/test`, {
             data: {
@@ -447,46 +338,10 @@ test.describe('CDA-E2 Transform API', () => {
 // SECTION 3: Translation table CRUD
 // ─────────────────────────────────────────────────────────────────────────────
 
-test.describe('CDA-E3 Translation Table CRUD', () => {
-
-    let createdTranslationId = null;
-
-    test('CDA-E3-001 GET /api/cda/mappings/translations returns empty array or list', async ({ request }) => {
-        const res = await request.get(`${BASE_URL}/api/cda/mappings/translations`);
-        expect([200, 404, 501, 503]).toContain(res.status());
-        if (res.ok()) {
-            const body = await res.json();
-            expect(body.success).toBe(true);
-            expect(Array.isArray(body.translations)).toBe(true);
-        }
-    });
-
-    test('CDA-E3-002 POST /api/cda/mappings/translations creates a row', async ({ request }) => {
-        const res = await request.post(`${BASE_URL}/api/cda/mappings/translations`, {
-            data: {
-                source_system: 'ICD-9-CM',
-                source_code:   '250.00',
-                target_system: 'ICD-10-CM',
-                target_code:   'E11.9',
-            },
-        });
-        expect([200, 201, 404, 501, 503]).toContain(res.status());
-        if (res.ok()) {
-            const body = await res.json();
-            expect(body.success).toBe(true);
-            if (body.id || body.data?.id) {
-                createdTranslationId = body.id || body.data.id;
-            }
-        }
-    });
-
-    test('CDA-E3-003 DELETE /api/cda/mappings/translations/:id removes the row', async ({ request }) => {
-        test.skip(!createdTranslationId, 'Translation row not created in previous test');
-        const res = await request.delete(`${BASE_URL}/api/cda/mappings/translations/${createdTranslationId}`);
-        expect([200, 204, 404, 501, 503]).toContain(res.status());
-    });
-
-});
+// The translation table now has a real API and page (/api/cda/code-translations, code-translations.html);
+// its list / create / update / delete / import / export behaviour is covered by code-translations.spec.js and
+// controllers/cda_code_translations_controller_test.go. The placeholders that used to be here assumed a
+// different, never-built path (/api/cda/mappings/translations).
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION 4: OOB pipeline template
@@ -512,37 +367,21 @@ test.describe('CDA-E4 OOB Pipeline Template', () => {
         }
     });
 
-    test('CDA-E4-002 Using CDA/CCD OOB template creates an interface with a pipeline', async ({ request }) => {
-        // Find the CDA template slug
-        const listRes = await request.get(`${BASE_URL}/api/interfaces/templates`);
-        if (!listRes.ok()) { test.skip(); return; }
-
-        const body     = await listRes.json();
+    test('CDA-E4-002 Using the CDA/CCD OOB template scaffolds an interface with a CDA pipeline', async ({ request }) => {
+        const listRes = await request.get(`${BASE_URL}/api/interface-templates`);
+        expect(listRes.ok()).toBeTruthy();
+        const body = await listRes.json();
         const templates = body.templates || body.data || [];
-        const cdaTemplate = templates.find(t =>
-            /(CDA|CCD)/i.test(t.name || '') || /(CDA|CCD)/i.test(t.description || '')
-        );
-        if (!cdaTemplate) { test.skip(); return; }
+        const cdaTemplate = templates.find(t => t.slug === 'cda-ccd-inbound-fhir-r4' || /CDA\/CCD Inbound/i.test(t.name || ''));
+        expect(cdaTemplate, 'CDA/CCD OOB template not found in /api/interface-templates').toBeTruthy();
 
-        const slugOrId = cdaTemplate.slug || cdaTemplate.id;
-        const useRes = await request.post(`${BASE_URL}/api/interfaces/from-template`, {
-            data: {
-                templateId: slugOrId,
-                name:       'CDA_E2E_OOB_Template_Test',
-            },
-        });
-
-        expect([200, 201, 400, 404, 503]).toContain(useRes.status());
-        if (useRes.ok()) {
-            const useBody = await useRes.json();
-            if (useBody.interfaceId || useBody.id) {
-                const newId = useBody.interfaceId || useBody.id;
-                state.ids.push(newId);
-                // Verify a pipeline was created
-                const api = new ApiHelper(request, BASE_URL);
-                await api.deleteInterface(newId).catch(() => {});
-            }
-        }
+        // The same scaffold call the "Use Template" button makes (creates nothing by itself).
+        const api = new ApiHelper(request, BASE_URL);
+        const scaffold = await api.getTemplateScaffold(cdaTemplate.slug || cdaTemplate.id);
+        const groups = scaffold.pipeline_config?.execution_groups || [];
+        expect(groups.length).toBeGreaterThan(0);
+        const stepTypes = groups.flatMap(g => (g.steps || []).map(s => s.step_type || s.stepType));
+        expect(stepTypes.some(t => /^cda\./.test(t))).toBe(true);
     });
 
 });

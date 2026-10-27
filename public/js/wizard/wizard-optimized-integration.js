@@ -173,7 +173,7 @@
         removeExistingNotifications();
 
         const notification = createNotification(message, 'loading');
-        notification.innerHTML = `
+        notification.innerHTML = HtmlSafe.html`
             <div style="display: flex; align-items: center; gap: 10px;">
                 <div class="spinner"></div>
                 <span>${message}</span>

@@ -21,7 +21,7 @@ class InterfaceConfigComponents {
      */
     static getSourceTypeSelector(selectedValue = '', config = {}) {
         const idPrefix = config.idPrefix || '';
-        return `
+        return HtmlSafe.html`
             <div class="form-group">
                 <label for="${idPrefix}sourceType" class="form-label required">
                     Source Format
@@ -39,7 +39,7 @@ class InterfaceConfigComponents {
                     <option value="xml" ${selectedValue === 'xml' ? 'selected' : ''}>XML</option>
                     <option value="csv" ${selectedValue === 'csv' ? 'selected' : ''}>CSV</option>
                 </select>
-                ${config.showHint !== false ? '<div class="form-hint">OOB: HL7 v2.x is most common in healthcare</div>' : ''}
+                ${config.showHint !== false ? HtmlSafe.raw('<div class="form-hint">OOB: HL7 v2.x is most common in healthcare</div>') : ''}
             </div>
         `;
     }
@@ -51,7 +51,7 @@ class InterfaceConfigComponents {
      */
     static getSourceConnectivitySelector(selectedValue = '', config = {}) {
         const idPrefix = config.idPrefix || '';
-        return `
+        return HtmlSafe.html`
             <div class="form-group">
                 <label for="${idPrefix}sourceConnectivity" class="form-label required">
                     Connectivity
@@ -69,7 +69,7 @@ class InterfaceConfigComponents {
                     <option value="rabbitmq" ${selectedValue === 'rabbitmq' ? 'selected' : ''}>RabbitMQ</option>
                     <option value="kafka" ${selectedValue === 'kafka' ? 'selected' : ''}>Apache Kafka</option>
                 </select>
-                ${config.showHint !== false ? '<div class="form-hint">OOB: TCP/MLLP for HL7, HTTP for FHIR</div>' : ''}
+                ${config.showHint !== false ? HtmlSafe.raw('<div class="form-hint">OOB: TCP/MLLP for HL7, HTTP for FHIR</div>') : ''}
             </div>
         `;
     }
@@ -113,7 +113,7 @@ class InterfaceConfigComponents {
                 return this.getKafkaConfig('source', config, idPrefix);
 
             default:
-                return '<div class="config-placeholder">Select connectivity type to configure</div>';
+                return HtmlSafe.raw('<div class="config-placeholder">Select connectivity type to configure</div>');
         }
     }
 
@@ -128,10 +128,10 @@ class InterfaceConfigComponents {
         const prefix = idPrefix + direction;
         const label = direction.charAt(0).toUpperCase() + direction.slice(1);
 
-        return `
+        return HtmlSafe.html`
             <div class="config-group">
                 <h4>TCP/MLLP Configuration</h4>
-                ${isSource ? `
+                ${isSource ? HtmlSafe.html`
                     <div class="form-row">
                         <div class="form-group">
                             <label for="${prefix}Host" class="form-label required">Host</label>
@@ -155,7 +155,7 @@ class InterfaceConfigComponents {
                             </div>
                         </div>
                     </div>
-                ` : `
+                ` : HtmlSafe.html`
                     <div class="form-group">
                         <label for="${prefix}Endpoint" class="form-label required">Remote Endpoint</label>
                         <input type="text" id="${prefix}Endpoint" class="form-control"
@@ -183,7 +183,7 @@ class InterfaceConfigComponents {
                         </select>
                     </div>
                 </div>
-                ${isSource ? `
+                ${isSource ? HtmlSafe.html`
                     <div class="form-group">
                         <label class="checkbox-label">
                             <input type="checkbox" id="${prefix}TlsEnabled" name="${direction}TlsEnabled"
@@ -206,7 +206,7 @@ class InterfaceConfigComponents {
         const prefix = idPrefix + direction;
         const isSource = direction === 'source';
 
-        return `
+        return HtmlSafe.html`
             <div class="config-group">
                 <h4>HTTP/REST Configuration</h4>
                 <div class="form-group">
@@ -223,7 +223,7 @@ class InterfaceConfigComponents {
                         <select id="${prefix}Method" class="form-control" name="${direction}Method">
                             <option value="POST" ${!config.method || config.method === 'POST' ? 'selected' : ''}>POST</option>
                             <option value="PUT" ${config.method === 'PUT' ? 'selected' : ''}>PUT</option>
-                            ${isSource ? '<option value="GET" ' + (config.method === 'GET' ? 'selected' : '') + '>GET</option>' : ''}
+                            ${isSource ? HtmlSafe.html`<option value="GET" ${config.method === 'GET' ? 'selected' : ''}>GET</option>` : ''}
                         </select>
                     </div>
                     <div class="form-group">
@@ -251,7 +251,7 @@ class InterfaceConfigComponents {
      */
     static getHttpAuthConfig(config = {}, idPrefix = '') {
         console.log('getHttpAuthConfig called with:', { config, idPrefix });
-        return `
+        return HtmlSafe.html`
             <div class="config-group http-auth-config">
                 <h4>HTTP Authentication</h4>
                 <div class="form-hint" style="background: #e7f3ff; padding: 8px; margin-bottom: 10px; border-left: 3px solid #0066cc;">
@@ -261,7 +261,7 @@ class InterfaceConfigComponents {
                 <div class="form-group">
                     <label for="${idPrefix}HttpAuthType" class="form-label required">
                         Authentication Type
-                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('Secure your HTTP endpoint:<br><br>• <b>No Auth</b> — Development only<br>• <b>API Key</b> — Simple token in header<br>• <b>Basic Auth</b> — Username/password (use HTTPS!)<br>• <b>Bearer Token</b> — OAuth or JWT tokens<br>• <b>OAuth 2.0</b> — Industry standard (SMART on FHIR)<br>• <b>mTLS</b> — Certificate-based, highest security<br><br>Production: OAuth 2.0 or mTLS', { title: 'HTTP Authentication Help', type: 'info' });" title="Click for help">ⓘ</a>
+                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert(HtmlSafe.raw('Secure your HTTP endpoint:<br><br>• <b>No Auth</b> — Development only<br>• <b>API Key</b> — Simple token in header<br>• <b>Basic Auth</b> — Username/password (use HTTPS!)<br>• <b>Bearer Token</b> — OAuth or JWT tokens<br>• <b>OAuth 2.0</b> — Industry standard (SMART on FHIR)<br>• <b>mTLS</b> — Certificate-based, highest security<br><br>Production: OAuth 2.0 or mTLS'), { title: 'HTTP Authentication Help', type: 'info' });" title="Click for help">ⓘ</a>
                     </label>
                     <select id="${idPrefix}HttpAuthType" class="form-control http-auth-type-selector" name="authType">
                         <option value="none" ${!config.authType || config.authType === 'none' ? 'selected' : ''}>No Authentication (Development)</option>
@@ -291,7 +291,7 @@ class InterfaceConfigComponents {
     static getHttpAuthDetailsPanel(authType, config = {}, idPrefix = '') {
         switch (authType) {
             case 'none':
-                return `
+                return HtmlSafe.html`
                     <div class="auth-info">
                         <div class="alert alert-warning">
                             <strong>No Authentication</strong> - Endpoint is publicly accessible. Only use in development environments.
@@ -300,7 +300,7 @@ class InterfaceConfigComponents {
                 `;
 
             case 'api_key':
-                return `
+                return HtmlSafe.html`
                     <div class="auth-fields">
                         <div class="form-group">
                             <label for="${idPrefix}HttpAuthApiKeyHeader" class="form-label">Header Name</label>
@@ -329,7 +329,7 @@ class InterfaceConfigComponents {
                 `;
 
             case 'basic':
-                return `
+                return HtmlSafe.html`
                     <div class="auth-fields">
                         <div class="alert alert-info">
                             Basic Authentication encodes credentials in Base64. <strong>Always use HTTPS</strong> to protect credentials in transit.
@@ -362,7 +362,7 @@ class InterfaceConfigComponents {
                 `;
 
             case 'bearer':
-                return `
+                return HtmlSafe.html`
                     <div class="auth-fields">
                         <div class="form-group">
                             <label for="${idPrefix}HttpAuthBearerToken" class="form-label">Bearer Token</label>
@@ -391,7 +391,7 @@ class InterfaceConfigComponents {
                 `;
 
             case 'oauth2':
-                return `
+                return HtmlSafe.html`
                     <div class="auth-fields">
                         <div class="alert alert-info">
                             OAuth 2.0 configuration. For FHIR endpoints, this supports SMART on FHIR workflows.
@@ -431,7 +431,7 @@ class InterfaceConfigComponents {
                 `;
 
             case 'mtls':
-                return `
+                return HtmlSafe.html`
                     <div class="auth-fields">
                         <div class="alert alert-info">
                             Mutual TLS (mTLS) requires both server and client certificates. Highest security level.
@@ -485,7 +485,7 @@ class InterfaceConfigComponents {
         const reservedPorts = [3000, 8080, 8081, 8090, 8091, 8092, 8093, 8094, 8095, 8096, 8097, 5432, 27017];
         const reservedPortsStr = reservedPorts.join(', ');
 
-        return `
+        return HtmlSafe.html`
             <div class="config-group http-receiver-config">
                 <h4>HTTP/REST Receiver Configuration</h4>
                 <div class="form-hint" style="background: #fff3cd; padding: 10px; border-left: 4px solid #ffc107; margin-bottom: 15px;">
@@ -500,7 +500,7 @@ class InterfaceConfigComponents {
                         <div class="form-group" style="flex: 2;">
                             <label for="${idPrefix}sourcePort" class="form-label required">
                                 Listen Port
-                                <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('Port where ezHealthKonnect will LISTEN for incoming HTTP requests.<br><br><b>Recommended:</b><br>• 8082-8089 (HTTP receivers)<br>• 9000-9999 (additional services)<br><br>External systems will POST/GET to:<br><code>http://your-server:[THIS PORT][CONTEXT PATH]</code>', { title: 'Listen Port Help', type: 'info' });" title="Click for help">ⓘ</a>
+                                <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert(HtmlSafe.raw('Port where ezHealthKonnect will LISTEN for incoming HTTP requests.<br><br><b>Recommended:</b><br>• 8082-8089 (HTTP receivers)<br>• 9000-9999 (additional services)<br><br>External systems will POST/GET to:<br><code>http://your-server:[THIS PORT][CONTEXT PATH]</code>'), { title: 'Listen Port Help', type: 'info' });" title="Click for help">ⓘ</a>
                             </label>
                             <input type="number" id="${idPrefix}sourcePort" class="form-control"
                                    value="${config.port || '8082'}"
@@ -533,7 +533,7 @@ class InterfaceConfigComponents {
                 <div class="form-group">
                     <label for="${idPrefix}httpContextPath" class="form-label required">
                         Context Path
-                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('URL path where messages will be received.<br><br><b>Examples:</b><br>• <code>/api/receive</code> — Simple path<br>• <code>/hl7/inbound</code> — HL7-specific<br>• <code>/webhook/{id}</code> — With parameters<br>• <code>/integration/epic</code> — Partner-specific<br><br>External systems POST to: <code>http://your-server:port[THIS PATH]</code>', { title: 'Context Path Help', type: 'info' });" title="Click for help">ⓘ</a>
+                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert(HtmlSafe.raw('URL path where messages will be received.<br><br><b>Examples:</b><br>• <code>/api/receive</code> — Simple path<br>• <code>/hl7/inbound</code> — HL7-specific<br>• <code>/webhook/{id}</code> — With parameters<br>• <code>/integration/epic</code> — Partner-specific<br><br>External systems POST to: <code>http://your-server:port[THIS PATH]</code>'), { title: 'Context Path Help', type: 'info' });" title="Click for help">ⓘ</a>
                     </label>
                     <input type="text" id="${idPrefix}httpContextPath" class="form-control"
                            value="${config.contextPath || '/api/receive'}"
@@ -547,7 +547,7 @@ class InterfaceConfigComponents {
                 <div class="form-group">
                     <label class="form-label">
                         Allowed HTTP Methods
-                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('Which HTTP methods to accept:<br><br>• <b>POST</b> — Most common for sending data<br>• <b>PUT</b> — Update/replace operations<br>• <b>GET</b> — Query/retrieve operations<br>• <b>PATCH</b> — Partial updates<br><br>Recommendation: Start with POST only', { title: 'HTTP Methods Help', type: 'info' });" title="Click for help">ⓘ</a>
+                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert(HtmlSafe.raw('Which HTTP methods to accept:<br><br>• <b>POST</b> — Most common for sending data<br>• <b>PUT</b> — Update/replace operations<br>• <b>GET</b> — Query/retrieve operations<br>• <b>PATCH</b> — Partial updates<br><br>Recommendation: Start with POST only'), { title: 'HTTP Methods Help', type: 'info' });" title="Click for help">ⓘ</a>
                     </label>
                     <div class="checkbox-group">
                         <label class="checkbox-label">
@@ -642,7 +642,7 @@ class InterfaceConfigComponents {
      * @param {string} idPrefix - ID prefix for form fields
      */
     static getFhirReceiverConfig(config = {}, idPrefix = '') {
-        return `
+        return HtmlSafe.html`
             <div class="config-group fhir-receiver-config">
                 <h4>FHIR Receiver Configuration</h4>
 
@@ -653,7 +653,7 @@ class InterfaceConfigComponents {
                         <div class="form-group" style="flex: 2;">
                             <label for="${idPrefix}sourcePort" class="form-label required">
                                 Listen Port
-                                <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('Port where ezHealthKonnect will LISTEN for incoming FHIR requests from external systems.<br><br><b>Recommended Ports:</b><br>• 8082-8089 (FHIR receivers)<br>• 9000-9999 (additional services)<br><br>Port will be validated for availability.', { title: 'FHIR Listen Port Help', type: 'info' });" title="Click for help">ⓘ</a>
+                                <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert(HtmlSafe.raw('Port where ezHealthKonnect will LISTEN for incoming FHIR requests from external systems.<br><br><b>Recommended Ports:</b><br>• 8082-8089 (FHIR receivers)<br>• 9000-9999 (additional services)<br><br>Port will be validated for availability.'), { title: 'FHIR Listen Port Help', type: 'info' });" title="Click for help">ⓘ</a>
                             </label>
                             <input type="number" id="${idPrefix}sourcePort" class="form-control fhir-port-input"
                                    value="${config.port || '8082'}"
@@ -708,7 +708,7 @@ class InterfaceConfigComponents {
                 <div class="form-group">
                     <label class="form-label">
                         Supported REST Operations
-                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('Choose which FHIR REST API operations to enable:<br><br>• <b>CREATE (POST)</b> — Most common<br>• <b>READ (GET)</b> — Retrieve by ID<br>• <b>UPDATE (PUT)</b> — Replace entire resource<br>• <b>PATCH</b> — Partial updates<br>• <b>DELETE</b> — Remove resources<br>• <b>SEARCH</b> — Query with parameters<br>• <b>BATCH/TRANSACTION</b> — Multiple operations<br><br>Recommendation: Start with CREATE only', { title: 'FHIR Operations Help', type: 'info' });" title="Click for help">ⓘ</a>
+                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert(HtmlSafe.raw('Choose which FHIR REST API operations to enable:<br><br>• <b>CREATE (POST)</b> — Most common<br>• <b>READ (GET)</b> — Retrieve by ID<br>• <b>UPDATE (PUT)</b> — Replace entire resource<br>• <b>PATCH</b> — Partial updates<br>• <b>DELETE</b> — Remove resources<br>• <b>SEARCH</b> — Query with parameters<br>• <b>BATCH/TRANSACTION</b> — Multiple operations<br><br>Recommendation: Start with CREATE only'), { title: 'FHIR Operations Help', type: 'info' });" title="Click for help">ⓘ</a>
                     </label>
                     <div class="checkbox-group">
                         <label class="checkbox-label">
@@ -838,7 +838,7 @@ class InterfaceConfigComponents {
             'Coverage', 'Claim', 'ExplanationOfBenefit'
         ];
 
-        return commonResources.map(resource => `
+        return HtmlSafe.html`${commonResources.map(resource => HtmlSafe.html`
             <label class="checkbox-label">
                 <input type="checkbox" class="fhir-resource-checkbox" value="${resource}"
                        name="resource_${resource}"
@@ -846,7 +846,7 @@ class InterfaceConfigComponents {
                        ${selectedResources.includes(resource) ? 'checked' : ''}>
                 <span>${resource}</span>
             </label>
-        `).join('');
+        `)}`;
     }
 
     /**
@@ -859,7 +859,7 @@ class InterfaceConfigComponents {
         const prefix = idPrefix + direction;
         const isSource = direction === 'source';
 
-        return `
+        return HtmlSafe.html`
             <div class="config-group">
                 <h4>📂 File ${isSource ? 'Listener' : 'Writer'} Configuration</h4>
                 <div class="form-group">
@@ -870,7 +870,7 @@ class InterfaceConfigComponents {
                            name="${direction}DirectoryPath">
                     <div class="form-hint">${isSource ? '📁 Directory to monitor for new files' : '📁 Directory where files will be written'}</div>
                 </div>
-                ${isSource ? `
+                ${isSource ? HtmlSafe.html`
                     <div class="form-group">
                         <label for="${prefix}FilePattern" class="form-label">File Pattern</label>
                         <input type="text" id="${prefix}FilePattern" class="form-control"
@@ -914,7 +914,7 @@ class InterfaceConfigComponents {
                         </label>
                         <div class="form-hint">📁 Automatically create the watch directory on first use</div>
                     </div>
-                ` : `
+                ` : HtmlSafe.html`
                     <div class="form-group">
                         <label for="${prefix}FilenamePattern" class="form-label">File Naming Pattern</label>
                         <input type="text" id="${prefix}FilenamePattern" class="form-control"
@@ -974,7 +974,7 @@ class InterfaceConfigComponents {
         // Database type detection from config or default to PostgreSQL
         const dbType = config.db_type || config.dbType || 'postgresql';
 
-        return `
+        return HtmlSafe.html`
             <div class="config-group database-config">
                 <h4 style="margin-bottom: 20px; color: #343a40;">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom; margin-right: 8px;">
@@ -1020,7 +1020,7 @@ class InterfaceConfigComponents {
                 </div>
 
                 <!-- Query Configuration (Source only) -->
-                ${isSource ? `
+                ${isSource ? HtmlSafe.html`
                     <div class="form-group" style="margin-top: 20px;">
                         <h5 style="margin-bottom: 15px; color: #495057; border-bottom: 1px solid #e9ecef; padding-bottom: 8px;">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom; margin-right: 6px;">
@@ -1162,7 +1162,7 @@ class InterfaceConfigComponents {
                             <div class="form-hint">Target table for archiving processed records. Must have identical schema as source table. Records are copied here then deleted from source.</div>
                         </div>
                     </div>
-                ` : `
+                ` : HtmlSafe.html`
                     <div class="form-group" style="margin-top: 20px;">
                         <h5 style="margin-bottom: 15px; color: #495057; border-bottom: 1px solid #e9ecef; padding-bottom: 8px;">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom; margin-right: 6px;">
@@ -1252,7 +1252,7 @@ class InterfaceConfigComponents {
             'clickhouse': 8123
         };
 
-        return `
+        return HtmlSafe.html`
             <div class="form-row">
                 <div class="form-group">
                     <label for="${prefix}Host" class="form-label required">Host</label>
@@ -1321,7 +1321,7 @@ class InterfaceConfigComponents {
      * Snowflake connection fields
      */
     static getSnowflakeConnectionFields(direction, config, prefix) {
-        return `
+        return HtmlSafe.html`
             <div class="form-group">
                 <label for="${prefix}Account" class="form-label required">Account Identifier</label>
                 <input type="text" id="${prefix}Account" class="form-control"
@@ -1377,7 +1377,7 @@ class InterfaceConfigComponents {
      * Databricks connection fields
      */
     static getDatabricksConnectionFields(direction, config, prefix) {
-        return `
+        return HtmlSafe.html`
             <div class="form-group">
                 <label for="${prefix}Host" class="form-label required">Databricks Host</label>
                 <input type="text" id="${prefix}Host" class="form-control"
@@ -1411,7 +1411,7 @@ class InterfaceConfigComponents {
      * BigQuery connection fields
      */
     static getBigQueryConnectionFields(direction, config, prefix) {
-        return `
+        return HtmlSafe.html`
             <div class="form-group">
                 <label for="${prefix}ProjectId" class="form-label required">Google Cloud Project ID</label>
                 <input type="text" id="${prefix}ProjectId" class="form-control"
@@ -1442,7 +1442,7 @@ class InterfaceConfigComponents {
      * MongoDB connection fields
      */
     static getMongoDBConnectionFields(direction, config, prefix) {
-        return `
+        return HtmlSafe.html`
             <div class="form-group">
                 <label for="${prefix}ConnectionString" class="form-label required">MongoDB Connection String</label>
                 <input type="text" id="${prefix}ConnectionString" class="form-control"
@@ -1488,12 +1488,12 @@ class InterfaceConfigComponents {
         const direction = prefix.replace('source', '').replace('target', '') ? 'target' : 'source';
 
         // Re-render connection fields based on new database type
-        connectionFieldsContainer.innerHTML = this.getDatabaseConnectionFields(
+        connectionFieldsContainer.innerHTML = HtmlSafe.html`${this.getDatabaseConnectionFields(
             direction,
             dbType,
             {}, // Empty config for new selection
             prefix
-        );
+        )}`;
     }
 
     /**
@@ -1579,7 +1579,7 @@ class InterfaceConfigComponents {
      */
     static getSftpConfig(direction = 'source', config = {}, idPrefix = '') {
         const prefix = idPrefix + direction;
-        return `
+        return HtmlSafe.html`
             <div class="config-group">
                 <h4>SFTP Configuration</h4>
                 <div class="alert alert-info">
@@ -1597,7 +1597,7 @@ class InterfaceConfigComponents {
      */
     static getRabbitMQConfig(direction = 'source', config = {}, idPrefix = '') {
         const prefix = idPrefix + direction;
-        return `
+        return HtmlSafe.html`
             <div class="config-group">
                 <h4>RabbitMQ Configuration</h4>
                 <div class="alert alert-info">
@@ -1615,7 +1615,7 @@ class InterfaceConfigComponents {
      */
     static getKafkaConfig(direction = 'source', config = {}, idPrefix = '') {
         const prefix = idPrefix + direction;
-        return `
+        return HtmlSafe.html`
             <div class="config-group">
                 <h4>Apache Kafka Configuration</h4>
                 <div class="alert alert-info">
@@ -1727,25 +1727,25 @@ class InterfaceConfigComponents {
         }
 
         if (reservedPorts.includes(portNum)) {
-            validationElement.innerHTML = `<strong>Port ${portNum} is reserved</strong> for system services. Please choose another port.`;
+            validationElement.innerHTML = HtmlSafe.html`<strong>Port ${portNum} is reserved</strong> for system services. Please choose another port.`;
             validationElement.style.color = '#856404';
             validationElement.style.background = '#fff3cd';
             validationElement.style.padding = '8px';
             validationElement.style.borderRadius = '4px';
         } else if (portNum >= 8082 && portNum <= 8089) {
-            validationElement.innerHTML = `<strong>Port ${portNum} is recommended</strong> for FHIR receivers`;
+            validationElement.innerHTML = HtmlSafe.html`<strong>Port ${portNum} is recommended</strong> for FHIR receivers`;
             validationElement.style.color = '#155724';
             validationElement.style.background = '#d4edda';
             validationElement.style.padding = '8px';
             validationElement.style.borderRadius = '4px';
         } else if (portNum >= 9000 && portNum <= 9999) {
-            validationElement.innerHTML = `<strong>Port ${portNum} is available</strong> - good choice`;
+            validationElement.innerHTML = HtmlSafe.html`<strong>Port ${portNum} is available</strong> - good choice`;
             validationElement.style.color = '#155724';
             validationElement.style.background = '#d4edda';
             validationElement.style.padding = '8px';
             validationElement.style.borderRadius = '4px';
         } else {
-            validationElement.innerHTML = `Port ${portNum} - will be validated on save`;
+            validationElement.innerHTML = HtmlSafe.html`Port ${portNum} - will be validated on save`;
             validationElement.style.color = '#004085';
             validationElement.style.background = '#cce5ff';
             validationElement.style.padding = '8px';
@@ -1767,7 +1767,7 @@ class InterfaceConfigComponents {
 
                 const authDetailsPanel = containerElement.querySelector(`#${idPrefix}HttpAuthDetails`);
                 if (authDetailsPanel) {
-                    authDetailsPanel.innerHTML = this.getHttpAuthDetailsPanel(authType, {}, idPrefix);
+                    authDetailsPanel.innerHTML = HtmlSafe.html`${this.getHttpAuthDetailsPanel(authType, {}, idPrefix)}`;
 
                     // Re-attach nested listeners (like bearer token validation)
                     this.attachEventListeners(containerElement, idPrefix);
@@ -1786,7 +1786,7 @@ class InterfaceConfigComponents {
      */
     static getTargetConnectivitySelector(selectedValue = '', config = {}) {
         const idPrefix = config.idPrefix || '';
-        return `
+        return HtmlSafe.html`
             <div class="form-group">
                 <label for="${idPrefix}targetConnectivity" class="form-label required">
                     Target Connectivity
@@ -1802,7 +1802,7 @@ class InterfaceConfigComponents {
                     <option value="file" ${selectedValue === 'file' ? 'selected' : ''}>File Output</option>
                     <option value="database" ${selectedValue === 'database' ? 'selected' : ''}>Database</option>
                 </select>
-                ${config.showHint !== false ? '<div class="form-hint">Sink stores messages without routing to external systems</div>' : ''}
+                ${config.showHint !== false ? HtmlSafe.raw('<div class="form-hint">Sink stores messages without routing to external systems</div>') : ''}
             </div>
         `;
     }
@@ -1829,7 +1829,7 @@ class InterfaceConfigComponents {
             case 'database':
                 return this.getDatabaseTargetConfig(config, idPrefix);
             default:
-                return '<div class="config-placeholder">Select target connectivity type to configure</div>';
+                return HtmlSafe.raw('<div class="config-placeholder">Select target connectivity type to configure</div>');
         }
     }
 
@@ -1837,7 +1837,7 @@ class InterfaceConfigComponents {
      * Get Sink target configuration (store only, no routing)
      */
     static getSinkTargetConfig(config = {}, idPrefix = '') {
-        return `
+        return HtmlSafe.html`
             <div class="config-group">
                 <h4>Sink Configuration</h4>
                 <div class="alert alert-info" style="background: #e7f3ff; padding: 15px; border-left: 4px solid #2196F3; margin-bottom: 20px;">
@@ -1904,7 +1904,7 @@ class InterfaceConfigComponents {
      * Get HTTP/REST target configuration (FHIR server)
      */
     static getHttpTargetConfig(config = {}, idPrefix = '') {
-        return `
+        return HtmlSafe.html`
             <div class="config-group">
                 <h4>FHIR Server Configuration</h4>
                 <div class="form-group">
@@ -1943,7 +1943,7 @@ class InterfaceConfigComponents {
      * Get TCP/MLLP target configuration
      */
     static getTcpTargetConfig(config = {}, idPrefix = '') {
-        return `
+        return HtmlSafe.html`
             <div class="config-group">
                 <h4>🔌 TCP/MLLP Output Configuration</h4>
                 <div class="form-row">
@@ -2000,7 +2000,7 @@ class InterfaceConfigComponents {
      * Get File Output target configuration
      */
     static getFileTargetConfig(config = {}, idPrefix = '') {
-        return `
+        return HtmlSafe.html`
             <div class="config-group">
                 <h4>📁 File Output Configuration</h4>
                 <div class="form-group">
@@ -2071,7 +2071,7 @@ class InterfaceConfigComponents {
         const autoStart = config.auto_start !== undefined ? config.auto_start : (config.autoStart || false);
         const delaySeconds = config.deployment_delay_seconds || config.deploymentDelaySeconds || 0;
 
-        return `
+        return HtmlSafe.html`
             <div class="deployment-settings">
                 <h4>Deployment Settings</h4>
                 <div class="form-group">

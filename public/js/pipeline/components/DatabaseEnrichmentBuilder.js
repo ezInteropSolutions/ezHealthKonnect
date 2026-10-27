@@ -119,7 +119,7 @@ class DatabaseEnrichmentBuilder {
         const isDynamo  = dbType === 'dynamodb';
         const isSQLfam  = !isMongo && !isRedis && !isDynamo;
 
-        return `
+        return HtmlSafe.html`
 <div class="deb-builder">
 <style>
 .deb-builder { font-size:13px; color:#1e3a5f; }
@@ -214,12 +214,12 @@ class DatabaseEnrichmentBuilder {
   </div>
   <div class="deb-sbody" id="debSType">
     <div class="deb-db-grid" id="debDbTypePicker">
-      ${DatabaseEnrichmentBuilder.DB_TYPES.map(({ value, icon, label }) => `
+      ${DatabaseEnrichmentBuilder.DB_TYPES.map(({ value, icon, label }) => HtmlSafe.html`
         <button class="deb-db-btn${dbType === value ? ' active' : ''}" data-dbtype="${value}" type="button">
           <span class="deb-db-icon">${icon}</span>${label}
-        </button>`).join('')}
+        </button>`)}
     </div>
-    <input type="hidden" id="debDbType" value="${esc(dbType)}">
+    <input type="hidden" id="debDbType" value="${dbType}">
   </div>
 </div>
 
@@ -244,25 +244,25 @@ class DatabaseEnrichmentBuilder {
       <div class="deb-irow">
         <div class="deb-col" style="flex:2">
           <span class="deb-label">Host</span>
-          <input id="debDbHost" class="deb-inp" value="${esc(cfg.dbHost)}" placeholder="localhost">
+          <input id="debDbHost" class="deb-inp" value="${cfg.dbHost}" placeholder="localhost">
         </div>
         <div class="deb-col" style="width:80px">
           <span class="deb-label">Port</span>
-          <input id="debDbPort" class="deb-inp" type="number" value="${esc(cfg.dbPort || this._defaultPort(dbType))}" placeholder="5432">
+          <input id="debDbPort" class="deb-inp" type="number" value="${cfg.dbPort || this._defaultPort(dbType)}" placeholder="5432">
         </div>
       </div>
       <div class="deb-irow">
         <div class="deb-col">
           <span class="deb-label">Database Name</span>
-          <input id="debDbName" class="deb-inp" value="${esc(cfg.dbName)}" placeholder="mydb">
+          <input id="debDbName" class="deb-inp" value="${cfg.dbName}" placeholder="mydb">
         </div>
         <div class="deb-col">
           <span class="deb-label">Username</span>
-          <input id="debDbUser" class="deb-inp" value="${esc(cfg.dbUser)}" placeholder="postgres">
+          <input id="debDbUser" class="deb-inp" value="${cfg.dbUser}" placeholder="postgres">
         </div>
         <div class="deb-col">
           <span class="deb-label">Password</span>
-          <input id="debDbPassword" class="deb-inp" type="password" value="${esc(cfg.dbPassword)}" placeholder="••••••••">
+          <input id="debDbPassword" class="deb-inp" type="password" value="${cfg.dbPassword}" placeholder="••••••••">
         </div>
       </div>
     </div>
@@ -270,7 +270,7 @@ class DatabaseEnrichmentBuilder {
     <div id="debConnString" class="deb-conn-panel${connMode==='string'?' active':''}">
       <div class="deb-col">
         <span class="deb-label">Connection String</span>
-        <input id="debConnStr" class="deb-inp" value="${esc(cfg.connectionString)}"
+        <input id="debConnStr" class="deb-inp" value="${cfg.connectionString}"
                placeholder="postgresql://user:pass@host:5432/dbname">
         <span class="deb-hint">Supports all standard DSN formats including MongoDB URI</span>
       </div>
@@ -280,7 +280,7 @@ class DatabaseEnrichmentBuilder {
       <div class="deb-col">
         <span class="deb-label">Timeout (ms)</span>
         <input id="debTimeoutMs" class="deb-inp" type="number" min="100" max="60000"
-               value="${esc(cfg.timeoutMs ?? 3000)}" style="width:100px">
+               value="${cfg.timeoutMs ?? 3000}" style="width:100px">
       </div>
     </div>
   </div>
@@ -297,7 +297,7 @@ class DatabaseEnrichmentBuilder {
     <div class="deb-query-section${isSQLfam?' active':''}" id="debQuerSQL">
       <div class="deb-col">
         <span class="deb-label">SQL Query</span>
-        <textarea id="debQuery" class="deb-ta" placeholder="SELECT * FROM patients WHERE patient_id = $1">${esc(cfg.query)}</textarea>
+        <textarea id="debQuery" class="deb-ta" placeholder="SELECT * FROM patients WHERE patient_id = $1">${cfg.query}</textarea>
         <span class="deb-hint">Use $1, $2, … (PostgreSQL/Oracle) or ? (MySQL/SQL Server) for params. Map them in Query Parameters below.</span>
       </div>
     </div>
@@ -306,18 +306,18 @@ class DatabaseEnrichmentBuilder {
     <div class="deb-query-section${isMongo?' active':''}" id="debQuerMongo">
       <div class="deb-col" style="margin-bottom:8px">
         <span class="deb-label">Collection *</span>
-        <input id="debCollection" class="deb-inp" value="${esc(cfg.collection)}" placeholder="patients">
+        <input id="debCollection" class="deb-inp" value="${cfg.collection}" placeholder="patients">
       </div>
       <div class="deb-col" style="margin-bottom:8px">
         <span class="deb-label">Filter (JSON)</span>
         <textarea id="debMongoFilter" class="deb-ta" style="min-height:70px"
-                  placeholder='{"patient_id": "{{patientId}}"}'>${esc(cfg.filter ? JSON.stringify(cfg.filter, null, 2) : '')}</textarea>
+                  placeholder='{"patient_id": "{{patientId}}"}'>${cfg.filter ? JSON.stringify(cfg.filter, null, 2) : ''}</textarea>
         <span class="deb-hint">Use {"field": "{{paramName}}"} — paramName is resolved from Query Parameters.</span>
       </div>
       <div class="deb-col">
         <span class="deb-label">Projection (JSON, optional)</span>
         <textarea id="debMongoProjection" class="deb-ta" style="min-height:50px"
-                  placeholder='{"_id": 0, "name": 1, "dob": 1}'>${esc(cfg.projection ? JSON.stringify(cfg.projection, null, 2) : '')}</textarea>
+                  placeholder='{"_id": 0, "name": 1, "dob": 1}'>${cfg.projection ? JSON.stringify(cfg.projection, null, 2) : ''}</textarea>
       </div>
     </div>
 
@@ -326,14 +326,14 @@ class DatabaseEnrichmentBuilder {
       <div class="deb-irow">
         <div class="deb-col grow">
           <span class="deb-label">Key Pattern</span>
-          <input id="debRedisKey" class="deb-inp" value="${esc(cfg.redisKey)}" placeholder="patient:{patientId}">
+          <input id="debRedisKey" class="deb-inp" value="${cfg.redisKey}" placeholder="patient:{patientId}">
           <span class="deb-hint">Use {paramName} — resolved from Query Parameters below</span>
         </div>
         <div class="deb-col" style="width:140px">
           <span class="deb-label">Command</span>
           <select id="debRedisCommand" class="deb-sel">
             ${['GET','HGETALL','SMEMBERS','LRANGE','ZRANGE','MGET'].map(c =>
-              `<option value="${c}"${(cfg.redisCommand||'GET')===c?' selected':''}>${c}</option>`).join('')}
+              HtmlSafe.html`<option value="${c}"${(cfg.redisCommand||'GET')===c?' selected':''}>${c}</option>`)}
           </select>
         </div>
       </div>
@@ -343,16 +343,16 @@ class DatabaseEnrichmentBuilder {
     <div class="deb-query-section${isDynamo?' active':''}" id="debQuerDynamo">
       <div class="deb-col" style="margin-bottom:8px">
         <span class="deb-label">Table Name</span>
-        <input id="debDynamoTable" class="deb-inp" value="${esc(cfg.dynamodbTable)}" placeholder="PatientRecords">
+        <input id="debDynamoTable" class="deb-inp" value="${cfg.dynamodbTable}" placeholder="PatientRecords">
       </div>
       <div class="deb-col" style="margin-bottom:8px">
         <span class="deb-label">Key Condition Expression</span>
-        <input id="debDynamoKeyCondition" class="deb-inp" value="${esc(cfg.keyCondition)}"
+        <input id="debDynamoKeyCondition" class="deb-inp" value="${cfg.keyCondition}"
                placeholder="PatientId = :patientId">
       </div>
       <div class="deb-col">
         <span class="deb-label">Filter Expression (optional)</span>
-        <input id="debDynamoFilter" class="deb-inp" value="${esc(cfg.filterExpression)}"
+        <input id="debDynamoFilter" class="deb-inp" value="${cfg.filterExpression}"
                placeholder="Status = :status">
       </div>
     </div>
@@ -371,7 +371,7 @@ class DatabaseEnrichmentBuilder {
       <span>Param Name</span><span>Pipeline Field Path</span><span></span>
     </div>
     <div id="debQPTable">
-      ${Object.entries(cfg.queryParams || {}).map(([k, v]) => this._qpRow(k, v, esc)).join('')}
+      ${Object.entries(cfg.queryParams || {}).map(([k, v]) => this._qpRow(k, v, esc))}
     </div>
     <button class="deb-add" id="debAddQP" type="button">+ Add Parameter</button>
   </div>
@@ -388,7 +388,7 @@ class DatabaseEnrichmentBuilder {
       <span>DB Column</span><span>Output Field Name</span><span></span>
     </div>
     <div id="debRMTable">
-      ${Object.entries(cfg.resultMapping || {}).map(([k, v]) => this._kvRow(k, v, esc)).join('')}
+      ${Object.entries(cfg.resultMapping || {}).map(([k, v]) => this._kvRow(k, v, esc))}
     </div>
     <button class="deb-add" id="debAddRM" type="button">+ Add Mapping</button>
   </div>
@@ -411,13 +411,13 @@ class DatabaseEnrichmentBuilder {
       <div class="deb-col">
         <span class="deb-label">Cache TTL</span>
         <input id="debCacheTTL" class="deb-inp" type="number" min="0" max="86400"
-               value="${esc(cfg.cacheTTL ?? 0)}" style="width:100px">
+               value="${cfg.cacheTTL ?? 0}" style="width:100px">
         <span class="deb-hint">seconds (0 = disabled)</span>
       </div>
       <div class="deb-col">
         <span class="deb-label">Max Entries</span>
         <input id="debCacheMaxEntries" class="deb-inp" type="number" min="1" max="100000"
-               value="${esc(cfg.cacheMaxEntries ?? 1000)}" style="width:100px">
+               value="${cfg.cacheMaxEntries ?? 1000}" style="width:100px">
       </div>
     </div>
   </div>
@@ -433,17 +433,17 @@ class DatabaseEnrichmentBuilder {
       <div class="deb-col">
         <span class="deb-label">Max Open</span>
         <input id="debPoolMaxOpen" class="deb-inp" type="number" min="1" max="500"
-               value="${esc(cfg.poolMaxOpen ?? 10)}" style="width:80px">
+               value="${cfg.poolMaxOpen ?? 10}" style="width:80px">
       </div>
       <div class="deb-col">
         <span class="deb-label">Max Idle</span>
         <input id="debPoolMaxIdle" class="deb-inp" type="number" min="0" max="100"
-               value="${esc(cfg.poolMaxIdle ?? 5)}" style="width:80px">
+               value="${cfg.poolMaxIdle ?? 5}" style="width:80px">
       </div>
       <div class="deb-col">
         <span class="deb-label">Max Lifetime</span>
         <input id="debPoolMaxLifetime" class="deb-inp" type="number" min="1" max="120"
-               value="${esc(cfg.poolMaxLifetimeMinutes ?? 5)}" style="width:80px">
+               value="${cfg.poolMaxLifetimeMinutes ?? 5}" style="width:80px">
         <span class="deb-hint">minutes</span>
       </div>
     </div>
@@ -456,9 +456,9 @@ class DatabaseEnrichmentBuilder {
 
     _kvRow(k, v, esc) {
         if (!esc) esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-        return `<div class="deb-kv-row">
-            <input class="deb-inp deb-kv-key" value="${esc(k)}" placeholder="Column">
-            <input class="deb-inp deb-kv-val" value="${esc(v)}" placeholder="Output field">
+        return HtmlSafe.html`<div class="deb-kv-row">
+            <input class="deb-inp deb-kv-key" value="${k}" placeholder="Column">
+            <input class="deb-inp deb-kv-val" value="${v}" placeholder="Output field">
             <button class="deb-rm" type="button" title="Remove">×</button>
         </div>`;
     }
@@ -466,9 +466,9 @@ class DatabaseEnrichmentBuilder {
     _qpRow(k, v, esc) {
         if (!esc) esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
         const uid = `debQpV_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        return `<div class="deb-qp-row">
-            <input class="deb-inp deb-qp-key" value="${esc(k)}" placeholder="patientId">
-            <input class="deb-inp deb-qp-val" id="${uid}" value="${esc(v)}" placeholder="e.g. PID.3">
+        return HtmlSafe.html`<div class="deb-qp-row">
+            <input class="deb-inp deb-qp-key" value="${k}" placeholder="patientId">
+            <input class="deb-inp deb-qp-val" id="${uid}" value="${v}" placeholder="e.g. PID.3">
             <button class="deb-rm" type="button" title="Remove">×</button>
         </div>`;
     }
@@ -509,7 +509,7 @@ class DatabaseEnrichmentBuilder {
             const table = document.querySelector('#debQPTable');
             if (!table) return;
             const div = document.createElement('div');
-            div.innerHTML = this._qpRow('', '');
+            div.innerHTML = HtmlSafe.html`${this._qpRow('', '')}`;
             const row = div.firstElementChild;
             this._wireRemoveBtn(row, '.deb-rm');
             table.appendChild(row);
@@ -558,7 +558,7 @@ class DatabaseEnrichmentBuilder {
         const table = document.querySelector(tableSelector);
         if (!table) return;
         const div = document.createElement('div');
-        div.innerHTML = rowFn('', '');
+        div.innerHTML = HtmlSafe.html`${rowFn('', '')}`;
         const row = div.firstElementChild;
         this._wireRemoveBtn(row, '.deb-rm');
         table.appendChild(row);

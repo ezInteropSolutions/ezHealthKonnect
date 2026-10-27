@@ -38,8 +38,8 @@ const EDI_TRANSFORM_OPTIONS = [
 
 function ediTransformOptionsHTML(selected) {
     return EDI_TRANSFORM_OPTIONS.map(o =>
-        `<option value="${ediEsc(o.value)}" ${o.value === (selected || '') ? 'selected' : ''}>${ediEsc(o.label)}</option>`
-    ).join('');
+        HtmlSafe.html`<option value="${o.value}" ${o.value === (selected || '') ? 'selected' : ''}>${o.label}</option>`
+    );
 }
 
 // 835 (Health Care Claim Payment/Advice), 837P (Professional), 837I
@@ -54,8 +54,8 @@ const EDI_TRANSACTION_SETS = ['835', '837P', '837I', '999', '270', '271', '276',
 
 function ediTransactionSetOptionsHTML(selected) {
     return EDI_TRANSACTION_SETS.map(ts =>
-        `<option value="${ediEsc(ts)}" ${ts === (selected || '835') ? 'selected' : ''}>${ediEsc(ts)}</option>`
-    ).join('');
+        HtmlSafe.html`<option value="${ts}" ${ts === (selected || '835') ? 'selected' : ''}>${ts}</option>`
+    );
 }
 
 // ── EdiParseStepBuilder ──────────────────────────────────────────────────────
@@ -71,10 +71,10 @@ class EdiParseStepBuilder {
         if (!step.config) step.config = {};
         const cfg = step.config;
 
-        const sourceField = ediEsc(cfg.sourceField || 'raw');
-        const outputField = ediEsc(cfg.outputField || 'parsedEDI');
+        const sourceField = (cfg.sourceField || 'raw');
+        const outputField = (cfg.outputField || 'parsedEDI');
 
-        return `
+        return HtmlSafe.html`
         <div class="edi-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Parse step.</strong> Converts raw X12 EDI content into a structured JSON document
@@ -139,14 +139,14 @@ class EdiBuildStepBuilder {
         if (!step.config) step.config = {};
         const cfg = step.config;
 
-        const sourceField = ediEsc(cfg.sourceField || 'parsedEDI');
-        const outputField = ediEsc(cfg.outputField || 'ediX12');
-        const isaSenderId = ediEsc(cfg.isaSenderId || '');
-        const isaReceiverId = ediEsc(cfg.isaReceiverId || '');
-        const gsSenderCode = ediEsc(cfg.gsSenderCode || '');
-        const gsReceiverCode = ediEsc(cfg.gsReceiverCode || '');
+        const sourceField = (cfg.sourceField || 'parsedEDI');
+        const outputField = (cfg.outputField || 'ediX12');
+        const isaSenderId = (cfg.isaSenderId || '');
+        const isaReceiverId = (cfg.isaReceiverId || '');
+        const gsSenderCode = (cfg.gsSenderCode || '');
+        const gsReceiverCode = (cfg.gsReceiverCode || '');
 
-        return `
+        return HtmlSafe.html`
         <div class="edi-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Build step.</strong> Builds a complete ISA...IEA X12 interchange from canonical
@@ -323,10 +323,10 @@ class EdiValidateStepBuilder {
 
     _renderAll() {
         const cfg = this._step.config;
-        const sourceField = ediEsc(cfg.sourceField || 'raw');
-        const outputField = ediEsc(cfg.outputField || 'ediValidation');
+        const sourceField = (cfg.sourceField || 'raw');
+        const outputField = (cfg.outputField || 'ediValidation');
 
-        return `
+        return HtmlSafe.html`
         <div id="ediValidateBuilder" class="edi-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Validate step.</strong> Re-checks raw EDI content against the base X12 5010
@@ -361,64 +361,64 @@ class EdiValidateStepBuilder {
                     <button type="button" class="btn btn-sm btn-outline-primary" style="font-size:0.75rem;"
                         onclick="window._ediValidateBuilder && window._ediValidateBuilder.addRule()">+ Add Custom Rule</button>
                 </div>
-                ${this._segmentsCatalog ? '' : '<div style="font-size:0.78rem;color:#94a3b8;">Loading segment catalog…</div>'}
-                ${cfg.customRules.map((rule, i) => this._renderRule(rule, i)).join('')}
-                ${cfg.customRules.length === 0 ? '<div style="font-size:0.78rem;color:#94a3b8;">No custom rules added — only the base X12 5010 standard rules apply.</div>' : ''}
+                ${this._segmentsCatalog ? '' : HtmlSafe.raw('<div style="font-size:0.78rem;color:#94a3b8;">Loading segment catalog…</div>')}
+                ${cfg.customRules.map((rule, i) => this._renderRule(rule, i))}
+                ${cfg.customRules.length === 0 ? HtmlSafe.raw('<div style="font-size:0.78rem;color:#94a3b8;">No custom rules added — only the base X12 5010 standard rules apply.</div>') : ''}
             </div>
         </div>`;
     }
 
     _renderOOBRulesSection() {
         if (!this._segmentsCatalog) {
-            return '<div style="font-size:0.78rem;color:#94a3b8;">Loading OOB rules…</div>';
+            return HtmlSafe.raw('<div style="font-size:0.78rem;color:#94a3b8;">Loading OOB rules…</div>');
         }
         const segmentsWithRules = this._segmentsCatalog.filter(s => Array.isArray(s.syntaxRules) && s.syntaxRules.length > 0);
         if (segmentsWithRules.length === 0) {
-            return '<div style="font-size:0.78rem;color:#94a3b8;">No OOB business-rule constraints in this schema.</div>';
+            return HtmlSafe.raw('<div style="font-size:0.78rem;color:#94a3b8;">No OOB business-rule constraints in this schema.</div>');
         }
         const disabled = this._step.config.disabledRules || [];
-        return segmentsWithRules.map(seg => `
+        return segmentsWithRules.map(seg => HtmlSafe.html`
             <div style="margin-bottom:0.7rem;">
-                <div style="font-size:0.78rem;font-weight:600;color:#334155;margin-bottom:0.25rem;"><code>${ediEsc(seg.id)}</code>${seg.name ? ' — ' + ediEsc(seg.name) : ''}</div>
+                <div style="font-size:0.78rem;font-weight:600;color:#334155;margin-bottom:0.25rem;"><code>${seg.id}</code>${seg.name ? ' — ' + (seg.name) : ''}</div>
                 ${seg.syntaxRules.map((r, i) => {
                     const isDisabled = disabled.some(d => d.segmentId === seg.id && d.type === r.type && ediPositionsEqual(d.positions, r.positions));
                     const typeInfo = EDI_RULE_TYPES.find(t => t.value === r.type) || {};
-                    const fieldsLabel = ediEsc((r.elementKeys && r.elementKeys.length ? r.elementKeys : r.positions || []).join(' + '));
-                    return `
+                    const fieldsLabel = ((r.elementKeys && r.elementKeys.length ? r.elementKeys : r.positions || []).join(' + '));
+                    return HtmlSafe.html`
                     <label style="display:flex;align-items:flex-start;gap:0.4rem;font-size:0.78rem;padding:0.15rem 0 0.15rem 0.75rem;cursor:pointer;">
                         <input type="checkbox" ${isDisabled ? '' : 'checked'} style="margin-top:0.2rem;"
-                            onchange="window._ediValidateBuilder && window._ediValidateBuilder.toggleOOBRule('${ediEsc(seg.id)}', ${i}, this.checked)">
-                        <span><strong>${ediEsc(typeInfo.label || r.type)}</strong> — ${fieldsLabel}<br>
-                            <span style="color:#94a3b8;">${ediEsc(typeInfo.description || '')}</span></span>
+                            onchange="window._ediValidateBuilder && window._ediValidateBuilder.toggleOOBRule('${seg.id}', ${i}, this.checked)">
+                        <span><strong>${typeInfo.label || r.type}</strong> — ${fieldsLabel}<br>
+                            <span style="color:#94a3b8;">${typeInfo.description || ''}</span></span>
                     </label>`;
-                }).join('')}
+                })}
             </div>
-        `).join('');
+        `);
     }
 
     _renderRule(rule, index) {
         const catalog = this._segmentsCatalog || [];
         const segOptions = ['<option value="">-- Select Segment --</option>']
-            .concat(catalog.map(s => `<option value="${ediEsc(s.id)}" ${s.id === rule.segmentId ? 'selected' : ''}>${ediEsc(s.id)}${s.name ? ' — ' + ediEsc(s.name) : ''}</option>`))
-            .join('');
+            .concat(catalog.map(s => HtmlSafe.html`<option value="${s.id}" ${s.id === rule.segmentId ? 'selected' : ''}>${s.id}${s.name ? ' — ' + (s.name) : ''}</option>`))
+            ;
 
         const typeOptions = EDI_RULE_TYPES.map(t =>
-            `<option value="${t.value}" ${t.value === rule.type ? 'selected' : ''}>${ediEsc(t.label)}</option>`
-        ).join('');
+            HtmlSafe.html`<option value="${t.value}" ${t.value === rule.type ? 'selected' : ''}>${t.label}</option>`
+        );
         const typeDesc = (EDI_RULE_TYPES.find(t => t.value === rule.type) || {}).description || '';
 
         const seg = this._segmentByID(rule.segmentId);
         const positions = Array.isArray(rule.positions) ? rule.positions : [];
-        const checkboxesHTML = !seg ? '<div style="font-size:0.75rem;color:#94a3b8;">Select a segment to choose fields.</div>' :
-            (seg.elements || []).map(el => `
+        const checkboxesHTML = !seg ? HtmlSafe.raw('<div style="font-size:0.75rem;color:#94a3b8;">Select a segment to choose fields.</div>') :
+            (seg.elements || []).map(el => HtmlSafe.html`
                 <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;padding:0.15rem 0;cursor:pointer;">
                     <input type="checkbox" ${positions.includes(el.key) ? 'checked' : ''}
-                        onchange="window._ediValidateBuilder && window._ediValidateBuilder.toggleRulePosition(${index}, '${ediEsc(el.key)}', this.checked)">
-                    <span><code style="font-size:0.75rem;">${ediEsc(el.pos)}</code> ${ediEsc(el.key)}${el.name ? ' — ' + ediEsc(el.name) : ''}</span>
+                        onchange="window._ediValidateBuilder && window._ediValidateBuilder.toggleRulePosition(${index}, '${el.key}', this.checked)">
+                    <span><code style="font-size:0.75rem;">${el.pos}</code> ${el.key}${el.name ? ' — ' + (el.name) : ''}</span>
                 </label>
-            `).join('');
+            `);
 
-        return `
+        return HtmlSafe.html`
         <div style="border:1px solid #e2e8f0;border-radius:6px;padding:0.7rem 0.8rem;margin-bottom:0.6rem;background:#f8fafc;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem;">
                 <div style="flex:1;">
@@ -432,7 +432,7 @@ class EdiValidateStepBuilder {
                             ${typeOptions}
                         </select>
                     </div>
-                    <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.5rem;">${ediEsc(typeDesc)}</div>
+                    <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.5rem;">${typeDesc}</div>
                     <div>${checkboxesHTML}</div>
                 </div>
                 <button type="button" class="btn btn-sm btn-outline-danger" style="font-size:0.72rem;padding:0.15rem 0.5rem;"
@@ -507,7 +507,7 @@ class EdiValidateStepBuilder {
     _rerender() {
         const root = document.getElementById('ediValidateBuilder');
         if (!root || !root.parentElement) return;
-        root.outerHTML = this._renderAll();
+        root.outerHTML = HtmlSafe.html`${this._renderAll()}`;
     }
 
     collectConfig(step) {
@@ -589,7 +589,7 @@ class EdiMapToCanonicalStepBuilder {
     // right tree instead of silently keeping the previous transaction set's.
     _loadLoopsCatalog() {
         if (this._loopsCatalog) return;
-        const txSet = ediEsc(this._step.config.transactionSet || '835');
+        const txSet = encodeURIComponent(this._step.config.transactionSet || '835');
         fetch(`/api/edi/schema/transaction-sets/${txSet}/loops`, { signal: this._ac.signal })
             .then(r => r.ok ? r.json() : null)
             .then(data => {
@@ -648,22 +648,22 @@ class EdiMapToCanonicalStepBuilder {
     _segOptionsHTML(segmentIds, selectedId) {
         return ['<option value="">-- Segment --</option>']
             .concat((segmentIds || []).map(sid =>
-                `<option value="${ediEsc(sid)}" ${sid === selectedId ? 'selected' : ''}>${ediEsc(sid)}</option>`))
-            .join('');
+                HtmlSafe.html`<option value="${sid}" ${sid === selectedId ? 'selected' : ''}>${sid}</option>`))
+            ;
     }
 
     _elementOptionsHTML(segmentId, selectedKey) {
         const seg = this._segmentByID(segmentId);
-        if (!seg) return '<option value="">-- Select Segment First --</option>';
+        if (!seg) return HtmlSafe.raw('<option value="">-- Select Segment First --</option>');
         return ['<option value="">-- Element --</option>']
             .concat((seg.elements || []).map(el =>
-                `<option value="${ediEsc(el.key)}" ${el.key === selectedKey ? 'selected' : ''}>${ediEsc(el.pos)} ${ediEsc(el.key)}</option>`))
-            .join('');
+                HtmlSafe.html`<option value="${el.key}" ${el.key === selectedKey ? 'selected' : ''}>${el.pos} ${el.key}</option>`))
+            ;
     }
 
     _renderAll() {
         const cfg = this._step.config;
-        return `
+        return HtmlSafe.html`
         <div id="ediMapToCanonicalBuilder" class="edi-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Map to Canonical step.</strong> No-code field mapping from any source shape
@@ -674,7 +674,7 @@ class EdiMapToCanonicalStepBuilder {
             <div class="config-group" style="margin-bottom:1.1rem;">
                 <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Output Field</label>
                 <input id="ediMapOutputField" type="text" class="form-control form-control-sm"
-                    value="${ediEsc(cfg.outputField)}" placeholder="canonicalEDI"
+                    value="${cfg.outputField}" placeholder="canonicalEDI"
                     style="font-family:monospace;font-size:0.82rem;">
             </div>
             <div class="config-group" style="margin-bottom:1.1rem;">
@@ -695,9 +695,9 @@ class EdiMapToCanonicalStepBuilder {
     _renderHeaderSection() {
         const cfg = this._step.config;
         if (!this._segmentsCatalog) {
-            return `<div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;font-size:0.78rem;color:#94a3b8;">Loading segment catalog…</div>`;
+            return HtmlSafe.html`<div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;font-size:0.78rem;color:#94a3b8;">Loading segment catalog…</div>`;
         }
-        return `
+        return HtmlSafe.html`
         <div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
                 <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;">Header Fields</div>
@@ -705,8 +705,8 @@ class EdiMapToCanonicalStepBuilder {
                     onclick="window._ediMapBuilder && window._ediMapBuilder.addHeaderField()">+ Add Field</button>
             </div>
             <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.5rem;">Flat, single-instance header segments (ST, BPR, TRN, CUR, REF, DTM).</div>
-            ${cfg.header.map((f, i) => this._renderFieldRow('header', null, f, i)).join('')}
-            ${cfg.header.length === 0 ? '<div style="font-size:0.78rem;color:#94a3b8;">No header fields mapped.</div>' : ''}
+            ${cfg.header.map((f, i) => this._renderFieldRow('header', null, f, i))}
+            ${cfg.header.length === 0 ? HtmlSafe.raw('<div style="font-size:0.78rem;color:#94a3b8;">No header fields mapped.</div>') : ''}
         </div>`;
     }
 
@@ -714,30 +714,30 @@ class EdiMapToCanonicalStepBuilder {
 
     _renderLoopsSection() {
         if (!this._loopsCatalog) {
-            return `<div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;font-size:0.78rem;color:#94a3b8;">Loading loop catalog…</div>`;
+            return HtmlSafe.html`<div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;font-size:0.78rem;color:#94a3b8;">Loading loop catalog…</div>`;
         }
-        return `
+        return HtmlSafe.html`
         <div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;">
             <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;margin-bottom:0.3rem;">Loops</div>
             <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.5rem;">Check a loop to map fields into it. Set Rows Path on a repeating loop to map one entry per source row.</div>
-            ${this._loopsCatalog.map(node => this._renderLoopNode(node, node.id)).join('')}
+            ${this._loopsCatalog.map(node => this._renderLoopNode(node, node.id))}
         </div>`;
     }
 
     _renderLoopNode(schemaNode, idPath) {
         const depth = idPath.split('.').length;
         const included = !!this._configLoopAt(idPath);
-        const repeatHint = schemaNode.repeat && schemaNode.repeat !== '1' ? ' <span style="color:#94a3b8;">(repeats)</span>' : '';
+        const repeatHint = schemaNode.repeat && schemaNode.repeat !== '1' ? HtmlSafe.raw(' <span style="color:#94a3b8;">(repeats)</span>') : '';
         const children = (schemaNode.loops || [])
             .map(child => this._renderLoopNode(child, idPath + '.' + child.id))
-            .join('');
+            ;
 
-        return `
+        return HtmlSafe.html`
         <div style="margin-left:${depth > 1 ? '1.25rem' : '0'};${depth > 1 ? 'border-left:2px solid #e2e8f0;padding-left:0.75rem;' : ''}margin-bottom:0.4rem;">
             <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;cursor:pointer;">
                 <input type="checkbox" ${included ? 'checked' : ''}
                     onchange="window._ediMapBuilder && window._ediMapBuilder.toggleLoop('${idPath}', this.checked)">
-                <strong>${ediEsc(schemaNode.id)}</strong> ${ediEsc(schemaNode.name || '')}${repeatHint}
+                <strong>${schemaNode.id}</strong> ${schemaNode.name || ''}${repeatHint}
             </label>
             ${included ? this._renderLoopCard(schemaNode, idPath) : ''}
             ${children}
@@ -748,15 +748,15 @@ class EdiMapToCanonicalStepBuilder {
         const node = this._configLoopAt(idPath);
         if (!node) return '';
         const fields = Array.isArray(node.fields) ? node.fields : (node.fields = []);
-        return `
+        return HtmlSafe.html`
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:0.6rem 0.7rem;margin:0.4rem 0 0.6rem;">
             <div class="config-group" style="margin-bottom:0.5rem;">
                 <label style="font-size:0.7rem;color:#64748b;display:block;margin-bottom:0.2rem;">Rows Path (blank = single-instance loop)</label>
-                <input type="text" value="${ediEsc(node.rowsPath || '')}" placeholder="e.g. claims"
+                <input type="text" value="${node.rowsPath || ''}" placeholder="e.g. claims"
                     style="width:100%;font-family:monospace;font-size:0.78rem;"
                     onblur="window._ediMapBuilder && window._ediMapBuilder.updateLoopRowsPath('${idPath}', this.value)">
             </div>
-            ${fields.map((f, fi) => this._renderFieldRow('loop', idPath, f, fi, schemaNode.segmentIds)).join('')}
+            ${fields.map((f, fi) => this._renderFieldRow('loop', idPath, f, fi, schemaNode.segmentIds))}
             <button type="button" class="btn btn-sm btn-outline-primary" style="font-size:0.72rem;"
                 onclick="window._ediMapBuilder && window._ediMapBuilder.addLoopField('${idPath}')">+ Add Field</button>
         </div>`;
@@ -776,7 +776,7 @@ class EdiMapToCanonicalStepBuilder {
             ? `window._ediMapBuilder.removeHeaderField(${index})`
             : `window._ediMapBuilder.removeLoopField('${idPath}', ${index})`;
 
-        return `
+        return HtmlSafe.html`
         <div style="display:flex;gap:0.4rem;align-items:center;margin-bottom:0.4rem;flex-wrap:wrap;">
             <select style="flex:1;min-width:110px;font-size:0.76rem;" class="form-select form-select-sm"
                 onchange="${segChangePrefix}, this.value)">
@@ -786,14 +786,14 @@ class EdiMapToCanonicalStepBuilder {
                 onchange="${prefix}, 'elementKey', this.value)">
                 ${this._elementOptionsHTML(f.segmentId, f.elementKey)}
             </select>
-            <input type="text" placeholder="source path" value="${ediEsc(f.sourcePath || '')}"
+            <input type="text" placeholder="source path" value="${f.sourcePath || ''}"
                 style="flex:1;min-width:100px;font-family:monospace;font-size:0.76rem;" class="form-control form-control-sm"
                 onblur="${prefix}, 'sourcePath', this.value)">
             <select style="width:130px;font-size:0.76rem;" class="form-select form-select-sm"
                 onchange="${prefix}, 'transform', this.value)">
                 ${ediTransformOptionsHTML(f.transform)}
             </select>
-            <input type="text" placeholder="literal (if no source)" value="${ediEsc(f.literalValue || '')}"
+            <input type="text" placeholder="literal (if no source)" value="${f.literalValue || ''}"
                 style="flex:1;min-width:90px;font-family:monospace;font-size:0.76rem;" class="form-control form-control-sm"
                 onblur="${prefix}, 'literalValue', this.value)">
             <button type="button" class="btn btn-sm btn-outline-danger" style="font-size:0.7rem;padding:0.1rem 0.4rem;"
@@ -876,7 +876,7 @@ class EdiMapToCanonicalStepBuilder {
     _rerender() {
         const root = document.getElementById('ediMapToCanonicalBuilder');
         if (!root || !root.parentElement) return;
-        root.outerHTML = this._renderAll();
+        root.outerHTML = HtmlSafe.html`${this._renderAll()}`;
     }
 
     collectConfig(step) {

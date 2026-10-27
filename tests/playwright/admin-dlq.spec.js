@@ -120,6 +120,8 @@ test.afterAll(async () => {
 test('TC-DLQ-UI001 Page loads and stats bar is visible', async ({ page }) => {
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.waitForLoadState('load');
     await expect(page.locator('#statsBar')).toBeVisible();
 });
@@ -127,6 +129,8 @@ test('TC-DLQ-UI001 Page loads and stats bar is visible', async ({ page }) => {
 test('TC-DLQ-UI002 Stats show numeric values after load', async ({ page }) => {
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     // Wait up to 20s for stats to populate — Go backend may be warming up
     await page.waitForFunction(() => {
         const el = document.getElementById('statPending');
@@ -139,6 +143,8 @@ test('TC-DLQ-UI002 Stats show numeric values after load', async ({ page }) => {
 test('TC-DLQ-UI003 Table renders correct column headers', async ({ page }) => {
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.waitForLoadState('load');
     const headers = await page.locator('.dlq-table thead th').allTextContents();
     const headerStr = headers.join(' ');
@@ -151,6 +157,8 @@ test('TC-DLQ-UI003 Table renders correct column headers', async ({ page }) => {
 test('TC-DLQ-UI004 Empty-state message shown when no rows', async ({ page }) => {
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     // Filter to abandoned — likely zero rows in test env
     await page.selectOption('#filterStatus', 'abandoned');
     // Apply filter with interface that doesn't exist → guaranteed empty
@@ -167,6 +175,8 @@ test('TC-DLQ-UI005 Seeded pending rows visible in table', async ({ page }) => {
     test.skip(!db, 'No DATABASE_URL — skipping seeded-row visibility test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     // Filter to our test interface
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
@@ -182,6 +192,8 @@ test('TC-DLQ-UI005 Seeded pending rows visible in table', async ({ page }) => {
 test('TC-DLQ-UI006 Status filter — "Resolved" shows different (usually empty) result', async ({ page }) => {
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'resolved');
     await page.click('button:has-text("Apply")');
@@ -197,6 +209,8 @@ test('TC-DLQ-UI007 Checkbox selects a row and highlights it', async ({ page }) =
     test.skip(!db, 'No DATABASE_URL — skipping row-selection test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
     await page.click('button:has-text("Apply")');
@@ -213,6 +227,8 @@ test('TC-DLQ-UI008 Select-all checkbox selects all visible rows', async ({ page 
     test.skip(!db, 'No DATABASE_URL — skipping select-all test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
     await page.click('button:has-text("Apply")');
@@ -231,6 +247,8 @@ test('TC-DLQ-UI009 Bulk bar appears when rows are selected', async ({ page }) =>
     test.skip(!db, 'No DATABASE_URL — skipping bulk-bar test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
     await page.click('button:has-text("Apply")');
@@ -247,6 +265,8 @@ test('TC-DLQ-UI010 Bulk bar hides when Clear is clicked', async ({ page }) => {
     test.skip(!db, 'No DATABASE_URL — skipping bulk-bar clear test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
     await page.click('button:has-text("Apply")');
@@ -263,6 +283,8 @@ test('TC-DLQ-UI011 Row Redrive button opens the redrive modal', async ({ page })
     test.skip(!db, 'No DATABASE_URL — skipping redrive modal test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
     await page.click('button:has-text("Apply")');
@@ -277,6 +299,8 @@ test('TC-DLQ-UI012 Redrive modal has both mode options', async ({ page }) => {
     test.skip(!db, 'No DATABASE_URL — skipping redrive modal options test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
     await page.click('button:has-text("Apply")');
@@ -292,6 +316,8 @@ test('TC-DLQ-UI013 Selecting "From Start" highlights that option', async ({ page
     test.skip(!db, 'No DATABASE_URL — skipping mode selection test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
     await page.click('button:has-text("Apply")');
@@ -311,6 +337,8 @@ test('TC-DLQ-UI014 Cancel button closes the redrive modal', async ({ page }) => 
     test.skip(!db, 'No DATABASE_URL — skipping modal cancel test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
     await page.click('button:has-text("Apply")');
@@ -327,6 +355,8 @@ test('TC-DLQ-UI015 Detail drawer opens on search icon click', async ({ page }) =
     test.skip(!db, 'No DATABASE_URL — skipping detail drawer test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
     await page.click('button:has-text("Apply")');
@@ -342,6 +372,8 @@ test('TC-DLQ-UI016 Detail drawer shows Identity section', async ({ page }) => {
     test.skip(!db, 'No DATABASE_URL — skipping drawer content test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
     await page.click('button:has-text("Apply")');
@@ -362,6 +394,8 @@ test('TC-DLQ-UI017 Drawer closes when X button clicked', async ({ page }) => {
     test.skip(!db, 'No DATABASE_URL — skipping drawer close test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
     await page.click('button:has-text("Apply")');
@@ -378,6 +412,8 @@ test('TC-DLQ-UI018 Abandon button shows browser confirm (dismiss = no change)', 
     test.skip(!db, 'No DATABASE_URL — skipping abandon confirm test');
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.fill('#filterInterface', TEST_IFACE_ID);
     await page.selectOption('#filterStatus', 'pending');
     await page.click('button:has-text("Apply")');
@@ -398,6 +434,8 @@ test('TC-DLQ-UI018 Abandon button shows browser confirm (dismiss = no change)', 
 test('TC-DLQ-UI019 Refresh button reloads the table', async ({ page }) => {
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     // Wait for initial load to complete
     await page.waitForFunction(() => {
         const tbody = document.getElementById('dlqTableBody');
@@ -417,6 +455,8 @@ test('TC-DLQ-UI019 Refresh button reloads the table', async ({ page }) => {
 test('TC-DLQ-UI020 Unknown interface ID filter returns empty state', async ({ page }) => {
     await loginAndStoreToken(page);
     await page.goto('/admin-dlq.html');
+    // The page loads the table itself on start (and a load clears any selection); let that finish first.
+    await expect(page.locator('#dlqTableBody .loading-row')).toHaveCount(0, { timeout: 15000 });
     await page.selectOption('#filterStatus', 'pending');
     await page.fill('#filterInterface', 'ffffffff-ffff-ffff-ffff-ffffffffffff');
     await page.click('button:has-text("Apply")');

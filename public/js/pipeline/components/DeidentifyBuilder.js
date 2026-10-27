@@ -54,7 +54,7 @@ class DeidentifyBuilder {
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
         const fmt = cfg.format || 'auto';
 
-        return `
+        return HtmlSafe.html`
 <div class="dei-builder">
 <style>
 .dei-builder { font-size:13px; color:#1e3a5f; }
@@ -139,7 +139,7 @@ class DeidentifyBuilder {
         <span class="dei-label">Message Format</span>
         <select id="deiFormat" class="dei-sel" style="max-width:180px">
           ${[['auto','Auto-detect'],['hl7v2','HL7 v2'],['fhir','FHIR R4'],['json','Generic JSON']].map(
-            ([v,l]) => `<option value="${v}"${fmt===v?' selected':''}>${l}</option>`).join('')}
+            ([v,l]) => HtmlSafe.html`<option value="${v}"${fmt===v?' selected':''}>${l}</option>`)}
         </select>
         <span class="dei-hint">Auto-detect inspects enhancedSegments / resourceType</span>
       </div>
@@ -171,7 +171,7 @@ class DeidentifyBuilder {
     <div id="deiHashSaltRow" style="${cfg.auditHash !== false || cfg.pseudonymize ? '' : 'display:none'}">
       <div class="dei-col" style="max-width:320px">
         <span class="dei-label">Hash Salt (optional)</span>
-        <input id="deiHashSalt" class="dei-inp" type="password" value="${esc(cfg.hashSalt)}"
+        <input id="deiHashSalt" class="dei-inp" type="password" value="${cfg.hashSalt}"
                placeholder="secret pepper applied to hash">
         <span class="dei-hint">Stored in step config (encrypted at rest). Adds resistance to rainbow-table attacks.</span>
       </div>
@@ -187,8 +187,8 @@ class DeidentifyBuilder {
   <div class="dei-sbody" id="deiSCoverage">
     <div class="dei-phi-grid">
       ${DeidentifyBuilder.SAFE_HARBOR_IDS.map(({ id, name }) =>
-        `<div class="dei-phi-item"><span class="dei-phi-dot"></span><span>#${id} ${name}</span></div>`
-      ).join('')}
+        HtmlSafe.html`<div class="dei-phi-item"><span class="dei-phi-dot"></span><span>#${id} ${name}</span></div>`
+      )}
     </div>
     <p class="dei-hint" style="margin-top:8px">
       Identifiers #12 (vehicle), #14 (URLs), #15 (IP), #16 (photos), #17 (biometric)
@@ -210,7 +210,7 @@ class DeidentifyBuilder {
     </p>
     <div class="dei-chip-wrap" id="deiExcludeWrap">
       <div class="dei-chips" id="deiExcludeChips">
-        ${(cfg.excludeFields || []).map(f => this._chipHTML(f, 'deiExclude')).join('')}
+        ${(cfg.excludeFields || []).map(f => this._chipHTML(f, 'deiExclude'))}
         <input class="dei-chip-input" id="deiExclude" placeholder="Field path + Enter to add…">
       </div>
     </div>
@@ -229,7 +229,7 @@ class DeidentifyBuilder {
     </p>
     <div class="dei-chip-wrap" id="deiExtraWrap">
       <div class="dei-chips" id="deiExtraChips">
-        ${(cfg.includeExtraFields || []).map(f => this._chipHTML(f, 'deiExtra')).join('')}
+        ${(cfg.includeExtraFields || []).map(f => this._chipHTML(f, 'deiExtra'))}
         <input class="dei-chip-input" id="deiExtra" placeholder="Field path + Enter to add…">
       </div>
     </div>
@@ -242,8 +242,8 @@ class DeidentifyBuilder {
 
     _chipHTML(value, chipId) {
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-        return `<span class="dei-chip" data-chip-id="${esc(chipId)}" data-value="${esc(value)}">
-            ${esc(value)}
+        return HtmlSafe.html`<span class="dei-chip" data-chip-id="${chipId}" data-value="${value}">
+            ${value}
             <button class="dei-chip-rm" type="button" title="Remove">×</button>
         </span>`;
     }
@@ -269,7 +269,7 @@ class DeidentifyBuilder {
         if (existing.includes(val)) return;
         // Insert chip before input
         const div = document.createElement('span');
-        div.innerHTML = this._chipHTML(val, inputId);
+        div.innerHTML = HtmlSafe.html`${this._chipHTML(val, inputId)}`;
         const chip = div.firstElementChild;
         chip.querySelector('.dei-chip-rm').addEventListener('click', () => chip.remove());
         container.insertBefore(chip, input);

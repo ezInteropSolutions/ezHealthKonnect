@@ -79,14 +79,14 @@ class VariablePanelBuilder {
             return;
         }
 
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="variable-panel">
                 <div class="variable-panel-header">
                     <h4>
                         <i class="fas fa-cube"></i>
                         Available Variables
                     </h4>
-                    ${this.options.showSearch ? `
+                    ${this.options.showSearch ? HtmlSafe.html`
                         <div class="variable-search">
                             <i class="fas fa-search"></i>
                             <input
@@ -130,7 +130,7 @@ class VariablePanelBuilder {
         const filteredGroups = this.filterVariables();
 
         if (Object.keys(filteredGroups).length === 0) {
-            listContainer.innerHTML = `
+            listContainer.innerHTML = HtmlSafe.html`
                 <div class="text-center text-muted p-3">
                     <i class="fas fa-inbox"></i>
                     <p class="mt-2">No variables found</p>
@@ -140,14 +140,14 @@ class VariablePanelBuilder {
         }
 
         // Build HTML for grouped variables
-        let html = '<div class="variable-groups">';
+        const html = [HtmlSafe.raw('<div class="variable-groups">')];
 
         Object.keys(filteredGroups).sort().forEach(stepName => {
             const vars = filteredGroups[stepName];
             const stepDisplayName = this.formatStepName(stepName);
             const stepId = stepName.replace(/[^a-z0-9]/gi, '_');
 
-            html += `
+            html.push(HtmlSafe.html`
                 <div class="variable-group" data-step="${stepName}">
                     <div class="variable-group-header ${this.options.collapsible ? 'collapsible' : ''}"
                          data-toggle="collapse"
@@ -158,14 +158,14 @@ class VariablePanelBuilder {
                         <span class="badge badge-secondary ml-2">${vars.length}</span>
                     </div>
                     <div id="vars_${stepId}" class="collapse show variable-group-body">
-                        ${vars.map(v => this.renderVariableItem(v)).join('')}
+                        ${vars.map(v => this.renderVariableItem(v))}
                     </div>
                 </div>
-            `;
+            `);
         });
 
-        html += '</div>';
-        listContainer.innerHTML = html;
+        html.push(HtmlSafe.raw('</div>'));
+        listContainer.innerHTML = HtmlSafe.html`${html}`;
 
         // Attach drag event listeners
         this.attachDragListeners();
@@ -181,7 +181,7 @@ class VariablePanelBuilder {
         const varName = variable.name;
         const sampleValue = this.formatSampleValue(variable.sample_value, variable.type);
 
-        return `
+        return HtmlSafe.html`
             <div class="variable-item"
                  draggable="true"
                  data-var-path="${varPath}"
@@ -191,14 +191,14 @@ class VariablePanelBuilder {
                 <div class="variable-item-main">
                     <span class="type-icon" style="color: ${typeColor}">${typeIcon}</span>
                     <span class="variable-name">${varName}</span>
-                    ${this.options.showTypes ? `
+                    ${this.options.showTypes ? HtmlSafe.html`
                         <span class="badge badge-sm badge-${this.getTypeBadgeClass(variable.type)}">${variable.type}</span>
                     ` : ''}
                     <button class="btn-copy-var" data-var-path="${varPath}" title="Copy to clipboard">
                         <i class="fas fa-copy"></i>
                     </button>
                 </div>
-                ${sampleValue ? `
+                ${sampleValue ? HtmlSafe.html`
                     <div class="variable-sample">
                         <code>${sampleValue}</code>
                     </div>
@@ -417,7 +417,7 @@ class VariablePanelBuilder {
     showError(message) {
         const listContainer = document.getElementById('variableList');
         if (listContainer) {
-            listContainer.innerHTML = `
+            listContainer.innerHTML = HtmlSafe.html`
                 <div class="alert alert-danger m-3">
                     <i class="fas fa-exclamation-triangle"></i>
                     ${message}
@@ -433,7 +433,7 @@ class VariablePanelBuilder {
         // Create toast element
         const toast = document.createElement('div');
         toast.className = `toast-notification toast-${type}`;
-        toast.innerHTML = `
+        toast.innerHTML = HtmlSafe.html`
             <i class="fas fa-${type === 'success' ? 'check' : 'info'}-circle"></i>
             ${message}
         `;

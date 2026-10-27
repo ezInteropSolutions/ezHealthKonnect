@@ -800,33 +800,18 @@
             var profile = data.profile || data.format || 'CDA';
             var sections = data.sections || {};
             var sectionNames = Object.keys(sections);
-            var html = '<strong>Profile:</strong> ' + escapeWiz(profile) + '<br>';
-            if (sectionNames.length > 0) {
-                html += '<strong>Sections found (' + sectionNames.length + '):</strong> ';
-                html += sectionNames.map(function(k) { return escapeWiz(k); }).join(', ');
-                html += '<br>';
-            }
             var header = data.header || {};
             var patient = header.patient || {};
-            if (patient.firstName || patient.lastName) {
-                html += '<strong>Patient:</strong> ' + escapeWiz((patient.firstName || '') + ' ' + (patient.lastName || '')) + '<br>';
-            }
-            if (patient.dateOfBirth) {
-                html += '<strong>DOB:</strong> ' + escapeWiz(patient.dateOfBirth);
-            }
-            previewContent.innerHTML = html;
+            previewContent.innerHTML = HtmlSafe.html`<strong>Profile:</strong> ${profile}<br>${
+                sectionNames.length > 0 ? HtmlSafe.html`<strong>Sections found (${sectionNames.length}):</strong> ${sectionNames.join(', ')}<br>` : ''}${
+                patient.firstName || patient.lastName ? HtmlSafe.html`<strong>Patient:</strong> ${(patient.firstName || '') + ' ' + (patient.lastName || '')}<br>` : ''}${
+                patient.dateOfBirth ? HtmlSafe.html`<strong>DOB:</strong> ${patient.dateOfBirth}` : ''}`;
         })
         .catch(function(err) {
             previewContent.textContent = 'Preview unavailable: ' + err.message;
         });
     }
 
-    function escapeWiz(s) {
-        return String(s)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-    }
 
     // Load component when DOM is ready
     if (document.readyState === 'loading') {

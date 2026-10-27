@@ -195,9 +195,12 @@ Key environment variables in `.env`:
 - Concurrent execution via `concurrently` package
 
 ### Database Setup
-- PostgreSQL required for production mode
-- Sequelize handles schema migration and synchronization
-- Default admin credentials: admin@ezhealthkonnect.com / admin123
+- PostgreSQL required (new installs: 17; supported: 15+)
+- Schema migrations: `database/migrations/V*__*.sql`, applied by the built-in engine `go-api migrate` (`services/migrator`, Flyway-compatible history and checksums; Flyway is retired). Docker dev: the `migrate` compose service runs it before `app`. Never edit an applied migration — the checksum mismatch is reported, not silently repaired.
+- No default admin account: the first administrator is created via `/setup.html?token=<SETUP_TOKEN from .env>`
+
+### Production installation (v26.10+) — Standalone only
+Docker (`docker-compose.yml`) is development-only. Customers use `installer/` (one self-contained installer per OS; bundle from `cmd/bundle-builder` + `packaging/bundle-manifest.json`, git-tracked files only). Upgrades back up (pg_dump + app files) and auto-restore on failure; protected data entries are never touched. Design: [installer/INSTALLER_ARCHITECTURE.md](installer/INSTALLER_ARCHITECTURE.md). User guide: [docs/INSTALL_GUIDE.md](docs/INSTALL_GUIDE.md). E2E: `.github/workflows/installer.yml`. A new runtime directory the app reads at runtime must be added to BOTH the Dockerfile and the bundle manifest (a bundle-builder test enforces this). **Windows file names**: a TCP message ID contains the sender's `IP:port` (`tcp_127.0.0.1:52244_<nanos>`) and an object key ends with the message ID, but a colon is invalid in a Windows file name, so on a Windows install the raw content of every TCP/MLLP message was silently never stored (found by the Windows installed-app CI job: `raw_content_uri` NULL, `/raw` 404). `services/storage/filename_codec.go` now percent-encodes what Windows rejects and decodes it again when listing (Linux/macOS keep names as they were, so existing stores stay readable). Anything else that writes a file named after a message or connection id must go through the storage driver or sanitize the same way.
 
 ## Development Notes
 
@@ -779,7 +782,7 @@ Configurable acknowledgment behaviour on the TCP/MLLP Inbound connector. Each in
 ```go
 type ACKConfig struct {
     Mode            string // "immediate" (default) | "none"
-    OnError         string // "suppress" (default — always AA) | "nack" (send AE on queue full)
+    OnError         string // "nack" (default — AE on queue full, sender retries) | "suppress" (opt-in: AA even though the message is dropped)
     SendingApp      string // MSH-3 in generated ACK (default: "ezHealthKonnect")
     SendingFacility string // MSH-4 in generated ACK (default: "EHK")
     TextSuccess     string // MSA-3 on AA (default: "Message received successfully")
@@ -806,8 +809,13 @@ MSA|<AA|AE|AR>|<controlID>|<textMessage>\r\n
 ### On Error Behaviour
 | onError | Behaviour |
 |---|---|
-| `suppress` | Always send AA regardless of errors (sender retries externally) |
-| `nack` | Send AE when queue is full or critical processing error occurs |
+| `nack` (default since 2026-10-19) | Send AE when a valid message cannot be queued — the sender retries |
+| `suppress` (explicit opt-in) | Send AA anyway — the message is DROPPED and never retried; only for senders that cannot handle AE |
+
+**Non-HL7 frames** (no structurally valid MSH segment — `isHL7v2Message`) are always answered with **AR** and never queued, regardless of `on_error` (a custom `buildACK` script still sees `defaultCode: "AR"` and may override). Before 2026-10-19 both a garbage frame and a queue-full drop got AA — a device told "accepted" never resends, which is silent data loss for a clinical feed. The `device-hl7-tcp` template was switched to `nack` by V279 (template only; existing interfaces keep their stored setting).
+
+### Shared with HL7 over RS232
+Framing (`ReadMLLPFrameFrom`/`WriteMLLPFrameTo`), `isHL7v2Message`, MSH helpers and the ACK builder (`HL7Acknowledger`, `parseACKConfig`) live in `services/connectors/hl7_mllp_session.go`, transport-agnostic (`*bufio.Reader`/`io.Writer`). `tcp_mllp_inbound.go` delegates to them; `serial_inbound` uses them in its `hl7_mllp` protocol mode (`serial_protocols.go` — a protocol registry: `astm` default, `hl7_mllp`; a new serial protocol is one type + one registry row). Serial HL7 skips line noise before the start byte (TCP still treats a non-VT first byte as a framing error) and has no host-query. Template `device-hl7-serial` (V281). Decision record: `docs/DECISION_LOG.md`.
 
 ### Custom ACK Script (goja JS runtime)
 Script runs in a goja VM (Go). Function must be named `buildACK`:
@@ -3126,3 +3134,111 @@ DICOM/device connectors specifically — named but not attempted this round.
   `go.mod` (`replace` directive), `dicom/pdv_interop_test.go`
 - Migration: `database/migrations/V278__DICOM_Add_MaxInstanceSize_And_MutualTLS.sql`
 - Regression test: `tests/playwright/dicom-wizard-e2e.spec.js` (new case 5)
+
+## API Authentication Hardening + Per-Interface Partner Endpoint Auth (October 2026)
+
+### Why
+The 2026-10-19 release regression found whole Go-forwarded route groups (`/api/fhir`, `/api/hl7`, `/api/system`, `/api/processing`, `/api/mllp`, `/api/zsegments`, `/api/cda`, `/api/edi`, `/api/ncpdp*`, `/api/code-templates`, `/api/file-parser`, `/api/database/test-query`, `/api/messages/:id/raw|…`) registered in `app.js` as bare `forwardToGo` with no auth. Go's `requireProxiedRequest()` only checked the proxy secret — which `forwardToGo` attaches to EVERY request — so anonymous callers could deactivate interfaces, delete CDA documents/code templates/schema packages, write pipeline code templates, read CDA document metadata (patient id/name), browse the server filesystem, and run the 4 synchronous partner pipelines.
+
+### Two layers (both required — do not remove either)
+1. **Node (`app.js`)**: every `forwardToGo` registration carries an auth middleware (`_verifyToken` etc.). Only `GET /api/system/health` is public. Enforced by `tests/unit/app.forwardToGoAuth.test.js` — a GENERAL rule over every registration, with a reasoned allow-list; a new unprotected route fails Jest.
+2. **Go (`admin_auth.go`)**: `forwardToGo` stamps `X-Proxy-Origin: client` (headers are built from scratch, so a client can't forge it or `X-User-ID`). `requireProxiedRequest()` rejects client-origin requests with no `X-User-ID` unless on `publicClientRoutes` (health + the 4 partner prefixes). Node's server-to-server calls (`services/goBackendClient.js`) never set the header, so boot-time auto-activation etc. is unaffected. Adding to `publicClientRoutes` is a deliberate security decision.
+
+### Partner endpoints: per-interface credentials
+`/api/eligibility`, `/api/claim-status`, `/api/prior-auth`, `/api/pharmacy-claim` are called machine-to-machine (no app session). Each interface carries `source_config.endpoint_auth` (`authentication_type`: `api_key` | `basic_auth` | `bearer_token`; **no `none`** — secure by default, an unconfigured interface returns 401), configured by the engineer in the Edit Interface modal ("Partner Endpoint Authentication", `public/js/components/EndpointAuthEditor.js`).
+- Verified in Go by `controllers/sync_endpoint_auth.go` (group middleware in `main.go`; handlers unchanged), reusing `services/connectors/inbound_auth.go` — the ONE constant-time inbound credential check, also used by `http_rest_inbound` (empty configured secret never matches).
+- A verified app user (`X-User-ID`) bypasses partner auth (in-app testing; they can already run pipelines via Test Pipeline).
+- Node forwards the caller's credential headers only for these routes (`_partnerEndpoint` = `attachUserIfPresent` + `forwardPartnerCredentials`, `middleware/auth.js`); internal trust headers are never taken from the client.
+- Storage: written ONLY via the dedicated `endpointAuth` request field (`interfacesController._applyEndpointAuth`: undefined = keep, null = remove, object = set); any `endpoint_auth` inside a wholesale `sourceConfig` is stripped. Secrets encrypted (`ENC:v1:`), masked on every read; `api_key_header` deliberately kept plaintext/readable.
+- Failed attempts audited as `SYNC_ENDPOINT_AUTH_FAILED`.
+- **Known, deliberate scope boundary**: the rest of `interfaces.source_config` is still neither encrypted nor masked (the legacy engine fallback and Node `ConnectorFactory` read it as plaintext) — only `endpoint_auth` is protected.
+
+### Secrets policy (2026-10-20) — no committed secrets, no defaults
+The dev `docker-compose.yml` once committed a working `APP_CREDENTIAL_KEY` plus session/JWT/DB/MinIO secrets to this PUBLIC repo, and code had literal fallback secrets. Now:
+- Every secret comes from `.env` (`npm run setup:env` → `scripts/init-dev-env.js`; never overwrites). `docker-compose.yml` uses `${VAR:?...}` and refuses to start without them. **Never add a literal secret or a `|| 'fallback'` / `getEnv("..SECRET..", "default")`** — `tests/unit/noCommittedSecrets.test.js` fails Jest on both; the `ezhk-app-secret-literal` gitleaks rule and `.githooks/pre-commit` catch config literals too.
+- `config/compromised_secrets.json` = SHA-256 fingerprints of every published value + placeholders. Production refuses to start on a match — Node (`config/SecretsGuard.js`) AND Go (`services/secretguard`, `main.go` `enforceNoPubliclyKnownSecrets`, needed because Standalone runs Go without Node). Add a leak: `node scripts/fingerprint-secret.js "<note>" < file`.
+- `verifyProxySecret` fails closed (no secret → every proxied request rejected), constant-time exact match.
+- CI generates per-run secrets (`init-dev-env.js` in the Playwright job, `openssl rand` in publish-image); only the test-go throwaway service container keeps the burned `secure_password_change_me` (fingerprinted, exempted by name).
+
+### Dependency/CVE state
+Go 1.26.9 (`go.mod`, Dockerfile, CI, installer scripts) + x/net 0.60, x/crypto 0.57, amqp091 1.13, gosnowflake 2.2 → govulncheck 0 reachable; CI pins `govulncheck@v1.9.0` (`@latest` silently began requiring newer Go). npm: `npm audit fix`, unused `http-proxy-middleware` removed → 0 production vulns; CI audits with `--omit=dev` (the image installs `--omit=dev`).
+
+### Follow-up hardening (same day)
+- **Authorization, not just authentication**: every Go-forwarded route also carries a role gate — `_goRoleGate` (`requireRoleByMethod`: GET/HEAD/OPTIONS need admin/super_admin/operator/viewer/engineer; other methods admin/super_admin/operator/engineer), `/api/ai` uses `_aiReadGate` (reader roles on every method, since chatting is a POST and its read-only tools answer directly; actions still need admin approval in Go). Found by a live probe: a no-permission `user` could deactivate any interface via `/api/processing`, write code templates and delete CDA documents. `tests/unit/app.forwardToGoAuth.test.js` now also fails a route that has a login check but no role check.
+- **Partner-endpoint brute-force lockout**: `services/authguard` (`FailureLimiter`, in-memory, injected into `SyncEndpointAuth`) — 10 failures / 15 min per client IP + interface → 15 min `429` + `Retry-After`, audited; success resets.
+- **Real client IP in Go**: `forwardToGo` sets `X-Forwarded-For` from `req.ip`; Go trusts it only from loopback (`router.SetTrustedProxies`). Before this every proxied request reached Go as 127.0.0.1 (wrong IPs in Go audit rows). `TRUST_PROXY` env configures Express behind a reverse proxy; `SESSION_COOKIE_SECURE=auto` marks cookies Secure for HTTPS requests.
+- **CSP**: helmet CSP enabled — `'unsafe-inline'` still required (≈900 inline handlers) but only self + cdnjs/jsdelivr origins, `object-src 'none'`, `frame-ancestors 'self'`; `script-src-attr` and `upgrade-insecure-requests` deliberately overridden. Guarded by `tests/playwright/csp-every-page.spec.js` (every page in `public/`).
+- **Interface config encryption at rest**: `services/InterfaceConfigProtector.js` (+ `services/credentialCrypto.js`, moved out of `pipelineController.js`) encrypts secret fields of `interfaces.source_config`/`target_config` and `source_connectivity`/`target_connectivity` `.config` on every write path (interfacesController create/update, interfaceService create + the newly-implemented `updateInterface` the wizard re-run called but which never existed), masks them on every read and in logs; `api_key_header` kept readable. Go readers decrypt via `DecryptConfigFields` (engine legacy fallback, HL7→FHIR delivery). `services/InterfaceCredentialMigrator.js` encrypts pre-existing plaintext rows at startup (idempotent; needs the key).
+- **Credential key provisioning**: no installer generated `APP_CREDENTIAL_KEY`, so customer installs ran credential encryption in plaintext passthrough. `installer/env_secrets.go` (`credentialKeyFor`) + `install.sh` generate it once and **reuse an existing key on re-install**; `docker-compose.prod.yml` passes it through; Go accepts standard or URL-safe base64. `config/SecretsGuard.js` refuses production start with missing/placeholder/short `SESSION_SECRET`/`JWT_SECRET` and warns on a missing key or non-Secure cookies.
+- Smaller: debug routes (`/api/test-route`, `/api/proxy/test`) admin-only, `/api/status` no longer discloses internal URL/ports, template reads and `runtime-mapping` require login, new-user creation no longer logs the plaintext password, the wizard's direct `http://localhost:8080` fetch now goes through the proxy.
+
+### Key Files
+`app.js`, `middleware/auth.js`, `admin_auth.go` (+ `admin_auth_test.go`), `controllers/sync_endpoint_auth.go` (+ test), `services/connectors/inbound_auth.go` (+ test), `controllers/interfacesController.js`, `public/js/components/EndpointAuthEditor.js`, `services/audit/audit_events.json`, `tests/unit/app.forwardToGoAuth.test.js`, `tests/unit/controllers/interfacesController.endpointAuth.test.js`, `tests/unit/middleware/partnerEndpoint.test.js`, `tests/playwright/sync-endpoint-auth-e2e.spec.js`, `services/authguard/`, `services/InterfaceConfigProtector.js`, `services/InterfaceCredentialMigrator.js`, `services/credentialCrypto.js`, `config/SecretsGuard.js`, `installer/env_secrets.go`, `tests/playwright/csp-every-page.spec.js`.
+
+## Frontend HTML Escaping — HtmlSafe (October 2026)
+
+All markup in `public/` is built with `HtmlSafe.html` (`public/js/core/html-safe.js`), which escapes every `${}` value unless it is already SafeHtml. `HtmlSafe.raw` is for constant markup only; `HtmlSafe.sanitize` is for third-party rich text. `npm run lint:xss` (CI-blocking, `eslint.config.js`) rejects any HTML sink that receives anything else. **Full rules and the bug each one came from: [docs/SECURITY_FRONTEND_HTML.md](docs/SECURITY_FRONTEND_HTML.md).** The ones most often missed:
+- No data inside `onclick="..."` strings; use `data-*` + `this.dataset`.
+- No `+` / `+=` on SafeHtml values (they become escaped strings); push to an array instead.
+- Arrays are always truthy: `items.length ? items : HtmlSafe.raw('<empty state>')`, never `items || '...'`.
+- Escape once: no `escapeHtml()` inside `HtmlSafe.html`, and helpers whose output is interpolated return SafeHtml, not escaped strings.
+- Keep `.join(...)` on TEXT arrays; only markup arrays inside `HtmlSafe.html` don't need it.
+- Pipeline step builders' `render()` must return SafeHtml (`PropertiesPanel._builderMarkup` shows a plain string as text; `toolbox-step-coverage.spec.js` enforces it). `DOMUtils.createElement` inserts a plain-string content as text.
+- New pages: load `/js/core/html-safe.js` before page scripts, and add a hostile-input case to `tests/playwright/ui-xss-regression.spec.js`.
+
+## Role-Aware UI — AppAuth (October 2026)
+
+The SERVER enforces every permission; `public/js/core/app-auth.js` (`window.appAuth`) only keeps the UI honest with it — nobody is offered a control that is certain to fail, and a refused action is never silent. It owns the single `/api/auth/session` request (the sidebar reuses it).
+- **Capabilities mirror server rules** (`CAPABILITIES` table in that file ↔ `GO_READ_ROLES`/`GO_WRITE_ROLES` in `app.js`, Node `requireRole(...)`, Go `requireProxiedAdmin`/`requireProxiedSuperAdmin`). Change a server rule → change the table. Roles: admin/super_admin = everything; **operator** = day-to-day integration engineer (read+write interfaces, messages, pipelines, tests, templates; no users/settings); **viewer** = read-only; **user** = HL7 Reader only. The Dead-Letter queue API is admin-only in Go, so the DLQ nav item and its pollers are too.
+- **Declarative markup**: `data-requires="write"` → control is disabled with an explanatory tooltip for roles that can't write (a capture-phase click guard also blocks it if a page script re-enables it, and says why); `data-requires="admin"` / `data-requires-mode="hide"` → hidden; `<body data-requires-page="admin">` (or `superAdmin`) → "Access denied" panel instead of an empty shell. A MutationObserver applies this to markup rendered later, so rendered rows/buttons just need the attribute.
+- **Refused writes are visible**: a non-GET `fetch` answered 403 with a JSON `message` raises one toast ("Not allowed: Access requires one of: admin, operator").
+- **Role-restricted background calls must be gated** with `appAuth.can('<capability>')` (DLQ stats, AI settings) — an ungated poll is a console 403 on every page for every non-admin; `roles-and-endpoint-auth.spec.js` fails on any refused request for viewer/operator.
+- **New page**: add `<script src="/js/core/app-auth.js?v=1">` before `sidebar-nav.js` (it is already on every page that has the sidebar), mark its write controls `data-requires="write"`, and an admin-only page with `data-requires-page="admin"`.
+- Toasts (`AppDialogs.toast`) carry `role="alert"` (errors) / `role="status"` and class `app-toast` — tests and screen readers find them that way.
+
+## Access Policy, Change Password, Code Translations (October 2026)
+
+### Access policy — what a role may SEE is a setting, not code
+Route guards decide who may *change* things (fixed per role); `services/AccessPolicyService.js` decides what each role may *see*, from `system_settings` key `access_policy` (edited at Settings → Access Policy, `GET/PUT /api/access-policy`, `routes/accessPolicy.js`, admin-only, audited `ACCESS_POLICY_CHANGED`). Two choices per role (operator, viewer, user): `interfaceScope` all|own and `messageContent` full|metadata. Defaults: operator all/full, viewer all/metadata, user own/full; admin/super_admin are never restricted (cannot be locked out); an unknown role gets own/metadata. Read with a 10 s cache (`settingsService.getSetting(key, default, ttlMs)`); a save invalidates the cache in the process that saved it.
+- **Before this, every ownership check ignored roles**: all ~30 `user_id = :userId` checks in `interfacesController.js`/`MessageController.js` (plus `InterfaceLifecycleController`, `interfaceService.updateInterface`, `WizardMappingController.verifyInterfaceOwnership`) meant even an admin saw only interfaces they created, and an operator or viewer in a team saw an empty system. They now read `(user_id = :userId OR ${allInterfaces})`, where `allInterfaces` is a JS boolean from `accessPolicy.canSeeAllInterfaces(user)` interpolated as a literal (never user input). Exception kept on purpose: the interface-name uniqueness check stays per owner. A new ownership check must use the same pattern; `canSeeAllInterfaces` is async.
+- **Content gate**: `middleware/messageContentGate.js` (`requireMessageContent()`) returns `403 {code: 'MESSAGE_CONTENT_RESTRICTED', error}` on every route that returns what is inside a message: Node `messageRoutes.js` (`/parsed`, `/fhir-output`, `/lineage`, `/dedupe-suppressions`, `/coverage-audit`) and the Go-forwarded `raw`, `transformed`, `mapping-log`, `parsed-cda`, `parsed-content` in `app.js`. It fails closed. A new route that returns message content must carry it. `getMessageDetail`, `errors`, `logs` return stored columns/diagnostics only and are not gated.
+- `/api/auth/session` includes `access`; `appAuth.canViewMessageContent()` lets `messages.js` show a notice (`_restrictedNotice`) in the Content, Journey, Transformations and Mapping Log tabs instead of an empty/failed panel. `/api/dashboard/recent-activity` shows only the user's own entries when `interfaceScope` is `own`.
+- Tests: `tests/unit/services/AccessPolicyService.test.js`, `tests/playwright/access-policy.spec.js` (real operator/viewer users against an admin-owned interface; flips the policy through the API and the Settings page).
+
+### Change my own password
+`POST /api/auth/change-password` (`routes/auth.js`, login required, 5/min/IP, current password required, honours `password_min_length`, audited `PASSWORD_CHANGED`); UI: "Change password" button in the sidebar (`sidebar-nav.js`, uses the reusable `AppDialogs.form()`, which also lazy-loads `app-dialogs.js` on pages that lack it). **The `User` model's attribute is `password_hash`** — `user.update({ password: ... })` is silently ignored by Sequelize. That mistake made the existing forced-reset (`/api/auth/reset-password`) leave the **old password valid** after a "successful" reset; fixed and guarded by `change-password.spec.js`.
+
+### Code translations
+`cda_code_translations` rows (source system+code → target system+code) can be shared (`interface_id` NULL) or per interface (an interface's own wins). API `/api/cda/code-translations` (list/create/update/delete/import; `controllers/cda_code_translations_controller.go`, repo methods in `services/cda_terminology/translation_admin.go`; read = viewer+, write = operator+ via the existing `/api/cda` proxy gate; audited `CDA_CODE_TRANSLATION_*`). Page `code-translations.html` + `js/code-translations.js` (CSV import/export). **V283** adds the missing uniqueness for shared rows: the original `UNIQUE (interface_id, ...)` never applied to NULL `interface_id`, so `Upsert` could store duplicates of a shared translation. Tests: `controllers/cda_code_translations_controller_test.go` (real Postgres), `tests/playwright/code-translations.spec.js`.
+
+## Playwright Suite Conventions (October 2026)
+
+- **Never skip for "no data"**: `tests/playwright/helpers/seeded.js` — import `test`/`expect` from it and take `seed` (an activated store-only MLLP interface with 3 real messages, plus an inactive second interface; worker-scoped, cleaned up at the end). A spec may skip only for a stated environment reason (`DATABASE_URL`/`RESTART_COMMAND` unset, setup already done) or be `test.fixme` for a feature the product genuinely lacks.
+- Other helpers: `helpers/users.js` (viewer/operator users), `helpers/ui.js` (paginated interface row lookup), `ApiHelper.createInterfaceFromTemplate`. A second-user/anonymous context **must** pass `storageState: { cookies: [], origins: [] }` — the project's admin state is applied to every new context otherwise. `POST /api/auth/login` is limited to 10/min/IP: log in once per role and reuse the session.
+- **Never hardcode a host in a spec**: no `http://localhost:3000`, no `host.docker.internal`. Use relative URLs (`page.goto('/x')`, `request.get('/api/x')`) or `process.env.BASE_URL`. CI runs the installed-app jobs at `127.0.0.1`, and the saved login cookie belongs to that host, so a request to `localhost` is anonymous (401) or lands on the login page. `ApiHelper` follows `BASE_URL`. A listener the test starts for the app to call uses `process.env.RECEIVER_HOST` (the installed jobs set `127.0.0.1`; the dev default is the Docker host name).
+- **Installed-app runs**: the same suite runs against a real install (`installer.yml`: `playwright-installed`, `playwright-windows-smoke`). An install has **no schema packs** until they're installed (Settings → Schemas; CI downloads `fhir-r4-base`, `fhir-r4-us-core`, `hl7-v2-25`), and DB/restart-dependent specs need `DATABASE_URL` + `RESTART_COMMAND`. To prove it locally without CI: build the installer in a throwaway `golang:1.26.10-alpine` container, run it inside an `almalinux/9-init` systemd container (publish 3000, 6610-6670, 8080-8099, 11112-11120, 2575; tunnel PostgreSQL with `socat`), stop the dev app container first (port clash), and remove everything afterwards (disk).
+
+## ezCompanion Knowledge — What It Learns From, and Keeping It Current (October 2026)
+
+### Why this section exists
+The 2026-10-19 release review found ezCompanion answering "I don't have specific product documentation" for 6 of 7 questions about this release's own features, and giving a **wrong** answer to "can I connect an RS232 device that sends HL7" (it said yes, via TCP/MLLP). Its knowledge had silently fallen behind: the step-docs snapshot predated EDI, 12 step types (NCPDP SCRIPT ×4, D.0 ×4, ASTM ×3, DICOM ×1) had no in-app documentation at all, and the EDI/NCPDP/D.0/ASTM schemas were never ingested.
+
+### Knowledge sources (`services/ai/knowledge_ingestion.go` `IngestAll`, admin `POST /api/ai/ingest`; docs + step docs only: `POST /api/ai/ingest/docs`)
+
+**Per-source refresh (fixed 2026-10-19)**: every static source is an entry in `KnowledgeIngestionService.Sources()` (`services/ai/knowledge_sources.go`) with a content fingerprint; startup (`IngestChanged`) re-embeds only sources whose fingerprint differs from the one recorded in `ai_knowledge_sources` (V280) at their last *healthy* ingestion (≤5% file errors — a run with the embedding model down is retried next boot). Bump `knowledgeFormatVersion` when chunk rendering changes. Admin `/api/ai/ingest` and `/ingest/docs` run unconditionally and record fingerprints. A new knowledge source = one `Sources()` entry.
+
+**Documentation reservation**: `RAGService.Retrieve` tops every result up to 2 documentation chunks (`app_docs`, `pipeline_step_docs`; capped at half of top-K; respects the caller's filter) — `services/ai/rag_reservation.go`. Operational chunks (one per configured interface/pipeline) otherwise crowd the docs out. **Filtered vector searches need pgvector's iterative scan**: the HNSW index returns its ~40 nearest neighbours and only then applies `WHERE source_type IN (...)`, so a filter on a minority type (docs vs ~3,800 operational chunks) returned **0 rows**. `denseRetrieve` runs filtered searches in a read-only tx with `SET LOCAL hnsw.iterative_scan = strict_order` (pgvector ≥ 0.8). Guarded by `TestDenseRetrieve_FilteredMinorityTypesStillFound` (real Postgres). Any new filtered `<=>` query needs the same.
+
+**Operational (per-interface) knowledge was never ingested before 2026-10-19**: `OperationalIngestionService.IngestInterface` and `ContextBuilder.fetchInterfaceContext` used `COALESCE(source_connectivity, '')` on a JSONB column — Postgres rejects `''` as JSON, so every interface failed ("643 interfaces, 643 errors" at startup) and the current-interface prompt context was always empty. Now `source_connectivity->>'type'` (type name only, never the config/credentials). Guarded by `services/ai/interface_knowledge_db_test.go` (real Postgres via `DATABASE_URL`).
+
+**HL7/FHIR dictionaries are ingested as digests (2026-10-19)**: the raw files can't be embedded — they are `.gz` and fully expanded (one uncompressed v2.5.1 message file ≈ 20 MB, HL7 tree 1.5 GB compressed; ~1.5 s/chunk on CPU = months). `services/ai/schema_digest*.go` condense them: `schemaDigestSources` table (HL7 v2.5.1, FHIR R4 resources, US Core, Da Vinci PAS) × a `SchemaDigester` per family — HL7: one doc per distinct segment (fields: type, R/O, repeat, table, component names one level deep) + one per message structure (segments/groups in JSON key order — the files' `sequence` values are unreliable); FHIR: one doc per resource/profile (elements with type, cardinality, MS, binding; inherited boilerplate dropped). ≈1,390 chunks total. Another HL7 version / FHIR profile set = one table row. `TestSchemaDigest_RealSchemasStayCompact` fails if any digest exceeds ~3,000 chunks.
+- Schemas: HL7 v2 + FHIR (digests, see above), CDA (`cda/schemas`), and — table-driven since 2026-10-19 — EDI X12, NCPDP SCRIPT, NCPDP D.0 and ASTM (`services/ai/standard_schema_ingestion.go`'s `standardSchemaSources`; **a new standard/version is one table row**, guarded by a test that every row's directory holds schemas).
+- Docs: `architecture/*.md`, `docs/*.md` (incl. `docs/CAPABILITIES_GUIDE.md`, the question-oriented overview of formats, device connectivity, templates, partner endpoint auth, roles and security settings), `installer/INSTALLER_ARCHITECTURE.md`, `SYSTEM_DOCUMENTATION.md`. `connectivity/` is excluded from the image (`.dockerignore`), so connector knowledge must live in `docs/`.
+- Pipeline step docs: **only through the exported snapshot** `architecture/generated/pipeline_step_docs.json`, generated from `public/js/pipeline/documentation/*.js` by `npm run docs:export-step-docs`.
+
+### Checklist when shipping a feature
+1. New pipeline step → add its entry to a `public/js/pipeline/documentation/*StepsDocs.js` file (+ `<script>` tag in `pipeline-builder.html`) — this is also the step's in-app Documentation tab.
+2. Re-run `npm run docs:export-step-docs` and commit the regenerated JSON (the snapshot is NOT rebuilt automatically).
+3. New standard → one row in `standardSchemaSources`.
+4. New user-facing capability or behavior change → update `docs/CAPABILITIES_GUIDE.md`.
+5. Re-ingest (admin `POST /api/ai/ingest/docs`, or `/api/ai/ingest` for schemas — startup does NOT refresh existing knowledge, see the gap above), then ask ezCompanion about it.

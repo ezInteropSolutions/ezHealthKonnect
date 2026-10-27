@@ -53,10 +53,6 @@
             registry[this.instanceId] = this;
         }
 
-        _esc(s) {
-            return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        }
-
         /**
          * Fetches the current config and renders one collapsible section per
          * resourceType. Safe to call again to re-render with a different/updated
@@ -71,18 +67,19 @@
                 this._currentConfig = {};
             }
 
-            this.sectionsEl.innerHTML = resourceTypes.map(rt => `
+            this.sectionsEl.innerHTML = HtmlSafe.html`${resourceTypes.map(rt => HtmlSafe.html`
                 <div style="border:1px solid #e0e7ff;border-radius:6px;background:#fff;">
-                    <button type="button" onclick="window.NarrativeFieldsPicker.get('${this._esc(this.instanceId)}').toggleSection('${this._esc(rt)}')"
+                    <button type="button" data-picker="${this.instanceId}" data-rt="${rt}"
+                        onclick="window.NarrativeFieldsPicker.get(this.dataset.picker).toggleSection(this.dataset.rt)"
                         style="width:100%;text-align:left;padding:8px 12px;background:none;border:none;cursor:pointer;font-size:12px;font-weight:600;color:#1e293b;display:flex;justify-content:space-between;align-items:center;">
-                        <span>${this._esc(rt)}</span>
-                        <span id="narr-caret-${this._esc(this.instanceId)}-${this._esc(rt)}" style="font-size:10px;color:#6b7280;">▶</span>
+                        <span>${rt}</span>
+                        <span id="narr-caret-${this.instanceId}-${rt}" style="font-size:10px;color:#6b7280;">▶</span>
                     </button>
-                    <div id="narr-body-${this._esc(this.instanceId)}-${this._esc(rt)}" data-narr-resource="${this._esc(rt)}" style="display:none;padding:0 12px 10px;">
+                    <div id="narr-body-${this.instanceId}-${rt}" data-narr-resource="${rt}" style="display:none;padding:0 12px 10px;">
                         <div style="font-size:11px;color:#9ca3af;">Loading fields…</div>
                     </div>
                 </div>
-            `).join('');
+            `)}`;
 
             this._updateBadge();
         }
@@ -116,14 +113,14 @@
                 const res = await fetch(`/api/fhir/narrative-fields/${encodeURIComponent(resourceType)}`, { credentials: 'include' }).then(r => r.json());
                 const fields = res.fields || [];
                 const restricted = (this._currentConfig || {})[resourceType] || null; // null = show everything (default)
-                body.innerHTML = fields.map(f => {
+                body.innerHTML = HtmlSafe.html`${fields.length ? fields.map(f => {
                     const checked = !restricted || restricted.includes(f.name);
-                    return `<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:11px;color:#374151;">
-                        <input type="checkbox" data-narrfield-name="${this._esc(f.name)}" ${checked ? 'checked' : ''}
+                    return HtmlSafe.html`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:11px;color:#374151;">
+                        <input type="checkbox" data-narrfield-name="${f.name}" ${checked ? 'checked' : ''}
                             style="accent-color:#1e3a8a">
-                        <span>${this._esc(f.label)}</span>
+                        <span>${f.label}</span>
                     </label>`;
-                }).join('') || '<div style="font-size:11px;color:#9ca3af;">No fields found</div>';
+                }) : HtmlSafe.raw('<div style="font-size:11px;color:#9ca3af;">No fields found</div>')}`;
             } catch (_) {
                 body.innerHTML = '<div style="font-size:11px;color:#dc2626;">Failed to load fields</div>';
             }

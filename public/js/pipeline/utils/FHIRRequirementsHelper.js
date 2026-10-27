@@ -114,7 +114,6 @@ const FHIRRequirementsHelper = {
      * the underlying "missing" shape genuinely differs (see file doc comment).
      */
     renderCompletenessBanner(missing) {
-        const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         if (missing.total === 0) return '';
 
         const complete = missing.satisfied === missing.total;
@@ -124,16 +123,16 @@ const FHIRRequirementsHelper = {
         const icon = complete ? 'fa-circle-check' : 'fa-triangle-exclamation';
 
         const missingList = missing.missing.map(f =>
-            (f.label && f.label !== f.key) ? `${esc(f.label)} (${esc(f.key)})` : esc(f.key)
+            (f.label && f.label !== f.key) ? `${f.label} (${f.key})` : String(f.key)
         );
 
-        return `
+        return HtmlSafe.html`
         <div style="background:${bg};border:1px solid ${border};border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:${color};">
             <div style="display:flex;align-items:center;gap:0.4rem;font-weight:600;">
                 <i class="fas ${icon}"></i>
                 ${missing.satisfied} of ${missing.total} required elements mapped
             </div>
-            ${missingList.length > 0 ? `<div style="margin-top:0.4rem;font-weight:400;">Still missing: ${missingList.join(', ')}</div>` : ''}
+            ${missingList.length > 0 ? HtmlSafe.html`<div style="margin-top:0.4rem;font-weight:400;">Still missing: ${missingList.join(', ')}</div>` : ''}
         </div>`;
     },
 };

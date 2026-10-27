@@ -20,19 +20,20 @@
  * TC-MSG-016  Pagination controls render when more rows exist than page size
  */
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./helpers/seeded');
 
 // Discover a live interface ID for data-dependent tests
 let interfaceId = null;
 
-test.beforeAll(async ({ browser }) => {
+test.beforeAll(async ({ browser, seed }) => {
+    interfaceId = seed.interfaceId; // real, activated interface with real messages (helpers/seeded.js)
     const page = await browser.newPage();
     try {
         const resp = await page.request.get('/api/interfaces');
         const json = await resp.json().catch(() => null);
         const list = json?.interfaces ?? json?.data ?? json ?? [];
         if (Array.isArray(list) && list.length > 0) {
-            interfaceId = list[0]?.id ?? list[0]?.interface_id ?? null;
+            interfaceId = interfaceId ?? list[0]?.id ?? list[0]?.interface_id ?? null;
         }
     } catch {
         // skip silently
@@ -66,8 +67,7 @@ test.describe('Messages', () => {
             await page.waitForLoadState('domcontentloaded');
             await expect(page).toHaveTitle(/Message/i);
         } else {
-            // No way to get the messages title without an interfaceId — skip
-            test.skip();
+            expect(interfaceId, 'seeded interface id missing').toBeTruthy();
         }
     });
 
@@ -100,10 +100,7 @@ test.describe('Messages', () => {
 
     // ── TC-MSG-005 ───────────────────────────────────────────────────────────────
     test('TC-MSG-005 with interfaceId query param table renders', async ({ page }) => {
-        if (!interfaceId) {
-            test.skip();
-            return;
-        }
+        expect(!(!interfaceId), 'precondition failed (was a skip): !interfaceId').toBe(true);
         await page.goto(`/messages.html?interfaceId=${interfaceId}`);
         await page.waitForTimeout(2000);
         const table = page.locator('table, [class*="message-table"], [class*="messages-list"]').first();
@@ -112,17 +109,11 @@ test.describe('Messages', () => {
 
     // ── TC-MSG-006 ───────────────────────────────────────────────────────────────
     test('TC-MSG-006 messages table has expected column headers', async ({ page }) => {
-        if (!interfaceId) {
-            test.skip();
-            return;
-        }
+        expect(!(!interfaceId), 'precondition failed (was a skip): !interfaceId').toBe(true);
         await page.goto(`/messages.html?interfaceId=${interfaceId}`);
         await page.waitForTimeout(2000);
         const table = page.locator('table').first();
-        if (!await table.isVisible().catch(() => false)) {
-            test.skip();
-            return;
-        }
+        expect(!(!await table.isVisible().catch(() => false)), 'precondition failed (was a skip): !await table.isVisible().catch(() => false)').toBe(true);
         const headers = (await table.locator('th').allTextContents()).join(' ').toLowerCase();
         const hasExpected = /message|id|status|time|type|received/i.test(headers);
         expect(hasExpected).toBe(true);
@@ -130,10 +121,7 @@ test.describe('Messages', () => {
 
     // ── TC-MSG-007 ───────────────────────────────────────────────────────────────
     test('TC-MSG-007 status filter dropdown is present', async ({ page }) => {
-        if (!interfaceId) {
-            test.skip();
-            return;
-        }
+        expect(!(!interfaceId), 'precondition failed (was a skip): !interfaceId').toBe(true);
         await page.goto(`/messages.html?interfaceId=${interfaceId}`);
         await page.waitForTimeout(1500);
         // id="filterStatus" has capital S — [id*="status"] won't match; use ID directly
@@ -143,10 +131,7 @@ test.describe('Messages', () => {
 
     // ── TC-MSG-008 ───────────────────────────────────────────────────────────────
     test('TC-MSG-008 search input is present', async ({ page }) => {
-        if (!interfaceId) {
-            test.skip();
-            return;
-        }
+        expect(!(!interfaceId), 'precondition failed (was a skip): !interfaceId').toBe(true);
         await page.goto(`/messages.html?interfaceId=${interfaceId}`);
         await page.waitForTimeout(1500);
         // messages.html uses #filterMessageType (no input[type="search"] exists)
@@ -156,65 +141,45 @@ test.describe('Messages', () => {
 
     // ── TC-MSG-009 ───────────────────────────────────────────────────────────────
     test('TC-MSG-009 non-matching search yields empty state or zero rows', async ({ page }) => {
-        if (!interfaceId) {
-            test.skip();
-            return;
-        }
+        expect(!(!interfaceId), 'precondition failed (was a skip): !interfaceId').toBe(true);
         await page.goto(`/messages.html?interfaceId=${interfaceId}`);
         await page.waitForTimeout(1500);
         const search = page.locator('#filterMessageType, input[placeholder*="type" i], input[placeholder*="search" i]').first();
-        if (!await search.isVisible().catch(() => false)) {
-            test.skip();
-            return;
-        }
+        expect(!(!await search.isVisible().catch(() => false)), 'precondition failed (was a skip): !await search.isVisible().catch(() => false)').toBe(true);
         const rowsBefore = await page.locator('tbody tr:not(.empty-row)').count();
         await search.fill('zzzzNOTEXIST99999');
-        await page.waitForTimeout(1000);
+        await search.press('Enter'); // the filter applies on Enter (messages.js keypress handler)
+        await page.waitForTimeout(1500);
         const rowsAfter = await page.locator('tbody tr:not(.empty-row)').count();
         const empty = page.locator('[class*="empty"], .empty-state').first();
         const hasEmpty = await empty.isVisible({ timeout: 1000 }).catch(() => false);
         const isFiltered = rowsAfter === 0 || rowsAfter < rowsBefore || hasEmpty;
         // If the input has no filtering effect, skip rather than fail — it's a known gap
-        if (!isFiltered && rowsBefore === rowsAfter) {
-            test.skip();
-            return;
-        }
+        expect(!(!isFiltered && rowsBefore === rowsAfter), 'precondition failed (was a skip): !isFiltered && rowsBefore === rowsAfter').toBe(true);
         expect(isFiltered).toBe(true);
     });
 
     // ── TC-MSG-010 ───────────────────────────────────────────────────────────────
     test('TC-MSG-010 selecting a row shows bulk action bar', async ({ page }) => {
-        if (!interfaceId) {
-            test.skip();
-            return;
-        }
+        expect(!(!interfaceId), 'precondition failed (was a skip): !interfaceId').toBe(true);
         await page.goto(`/messages.html?interfaceId=${interfaceId}`);
         await page.waitForTimeout(2000);
         const firstCheckbox = page.locator('tbody tr input[type="checkbox"]').first();
-        if (!await firstCheckbox.isVisible().catch(() => false)) {
-            test.skip();
-            return;
-        }
+        expect(!(!await firstCheckbox.isVisible().catch(() => false)), 'precondition failed (was a skip): !await firstCheckbox.isVisible().catch(() => false)').toBe(true);
         await firstCheckbox.check();
-        const bulkBar = page.locator('.bulk-action-bar, [class*="bulk"], [id*="bulk"]').first();
+        const bulkBar = page.locator('#bulkSelectionToolbar');
         await expect(bulkBar).toBeVisible({ timeout: 3000 });
     });
 
     // ── TC-MSG-011 ───────────────────────────────────────────────────────────────
     test('TC-MSG-011 deselecting rows hides bulk action bar', async ({ page }) => {
-        if (!interfaceId) {
-            test.skip();
-            return;
-        }
+        expect(!(!interfaceId), 'precondition failed (was a skip): !interfaceId').toBe(true);
         await page.goto(`/messages.html?interfaceId=${interfaceId}`);
         await page.waitForTimeout(2000);
         const firstCheckbox = page.locator('tbody tr input[type="checkbox"]').first();
-        if (!await firstCheckbox.isVisible().catch(() => false)) {
-            test.skip();
-            return;
-        }
+        expect(!(!await firstCheckbox.isVisible().catch(() => false)), 'precondition failed (was a skip): !await firstCheckbox.isVisible().catch(() => false)').toBe(true);
         await firstCheckbox.check();
-        const bulkBar = page.locator('.bulk-action-bar, [class*="bulk"]').first();
+        const bulkBar = page.locator('#bulkSelectionToolbar');
         await expect(bulkBar).toBeVisible({ timeout: 3000 });
         await firstCheckbox.uncheck();
         await page.waitForTimeout(400);
@@ -223,20 +188,14 @@ test.describe('Messages', () => {
 
     // ── TC-MSG-012 ───────────────────────────────────────────────────────────────
     test('TC-MSG-012 clicking a message row or view button opens detail', async ({ page }) => {
-        if (!interfaceId) {
-            test.skip();
-            return;
-        }
+        expect(!(!interfaceId), 'precondition failed (was a skip): !interfaceId').toBe(true);
         await page.goto(`/messages.html?interfaceId=${interfaceId}`);
         await page.waitForTimeout(2000);
         // Use .message-row class — that's what messages.js sets on real rows
         // (empty state uses a plain <tr> with no class)
         const rows = page.locator('tbody tr.message-row');
         const rowCount = await rows.count();
-        if (rowCount === 0) {
-            test.skip();
-            return;
-        }
+        expect(!(rowCount === 0), 'precondition failed (was a skip): rowCount === 0').toBe(true);
         await rows.first().click();
         // Detail modal should appear — use specific modal ID to avoid .user-details sidebar
         const detail = page.locator('#messageDetailModal').first();
@@ -245,25 +204,16 @@ test.describe('Messages', () => {
 
     // ── TC-MSG-013 ───────────────────────────────────────────────────────────────
     test('TC-MSG-013 message detail has Overview and Details tabs', async ({ page }) => {
-        if (!interfaceId) {
-            test.skip();
-            return;
-        }
+        expect(!(!interfaceId), 'precondition failed (was a skip): !interfaceId').toBe(true);
         await page.goto(`/messages.html?interfaceId=${interfaceId}`);
         await page.waitForTimeout(2000);
         const rows = page.locator('tbody tr');
-        if (await rows.count() === 0) {
-            test.skip();
-            return;
-        }
+        expect(!(await rows.count() === 0), 'precondition failed (was a skip): await rows.count() === 0').toBe(true);
         await rows.first().click();
         await page.waitForTimeout(500);
         // Use specific modal ID to avoid matching .user-details sidebar element
         const detail = page.locator('#messageDetailModal, .modal-overlay').first();
-        if (!await detail.isVisible().catch(() => false)) {
-            test.skip();
-            return;
-        }
+        expect(!(!await detail.isVisible().catch(() => false)), 'precondition failed (was a skip): !await detail.isVisible().catch(() => false)').toBe(true);
         // Tabs are .tab-btn elements in messages.html detail modal
         const tabs = detail.locator('.tab-btn, [role="tab"], [class*="tab"]');
         const tabText = (await tabs.allTextContents()).join(' ').toLowerCase();
@@ -272,24 +222,15 @@ test.describe('Messages', () => {
 
     // ── TC-MSG-014 ───────────────────────────────────────────────────────────────
     test('TC-MSG-014 message detail closes via close button or Escape', async ({ page }) => {
-        if (!interfaceId) {
-            test.skip();
-            return;
-        }
+        expect(!(!interfaceId), 'precondition failed (was a skip): !interfaceId').toBe(true);
         await page.goto(`/messages.html?interfaceId=${interfaceId}`);
         await page.waitForTimeout(2000);
         const rows = page.locator('tbody tr');
-        if (await rows.count() === 0) {
-            test.skip();
-            return;
-        }
+        expect(!(await rows.count() === 0), 'precondition failed (was a skip): await rows.count() === 0').toBe(true);
         await rows.first().click();
         // Use specific modal ID to avoid matching .user-details sidebar element
         const detail = page.locator('#messageDetailModal, .modal-overlay').first();
-        if (!await detail.isVisible().catch(() => false)) {
-            test.skip();
-            return;
-        }
+        expect(!(!await detail.isVisible().catch(() => false)), 'precondition failed (was a skip): !await detail.isVisible().catch(() => false)').toBe(true);
         const closeBtn = detail.locator('.modal-close, button[aria-label*="close" i], button.close, .close-btn').first();
         if (await closeBtn.isVisible().catch(() => false)) {
             await closeBtn.click();
@@ -302,20 +243,14 @@ test.describe('Messages', () => {
 
     // ── TC-MSG-015 ───────────────────────────────────────────────────────────────
     test('TC-MSG-015 messages API returns 200 with interface ID', async ({ page }) => {
-        if (!interfaceId) {
-            test.skip();
-            return;
-        }
+        expect(!(!interfaceId), 'precondition failed (was a skip): !interfaceId').toBe(true);
         const resp = await page.request.get(`/api/messages/interface/${interfaceId}`);
         expect(resp.status()).toBe(200);
     });
 
     // ── TC-MSG-016 ───────────────────────────────────────────────────────────────
     test('TC-MSG-016 pagination controls render when present', async ({ page }) => {
-        if (!interfaceId) {
-            test.skip();
-            return;
-        }
+        expect(!(!interfaceId), 'precondition failed (was a skip): !interfaceId').toBe(true);
         await page.goto(`/messages.html?interfaceId=${interfaceId}`);
         await page.waitForTimeout(2000);
         const pagination = page.locator('.pagination, [class*="pagination"], [aria-label*="pagination" i]').first();

@@ -92,7 +92,7 @@ class CDASectionToCSVStepBuilder {
 
         this._loadSections();
 
-        return `
+        return HtmlSafe.html`
         <div id="cdaCsvBuilder" style="font-size:0.84rem;">
             ${this._renderGeneral(cfg)}
             <div style="margin:1.15rem 0 0.5rem;">
@@ -163,7 +163,7 @@ class CDASectionToCSVStepBuilder {
                 if (!data || !data.sections) return;
                 this._sections = data.sections;
                 const list = document.getElementById('cdaCsvSectionsList');
-                if (list) list.innerHTML = this._renderSectionsList();
+                if (list) list.innerHTML = HtmlSafe.html`${this._renderSectionsList()}`;
             })
             .catch(() => {}); // AbortError on destroy is expected
     }
@@ -172,18 +172,18 @@ class CDASectionToCSVStepBuilder {
 
     _renderGeneral(cfg) {
         const esc = cdaCsvEsc;
-        return `
+        return HtmlSafe.html`
         <div class="config-group" style="margin-bottom:1.1rem;">
             <label style="${CDA_CSV_LBL}">Source Field</label>
             <input id="cdaCsvSourceField" type="text" class="form-control form-control-sm"
-                value="${esc(cfg.sourceField || '')}" placeholder="(auto-detect parsed CDA document)"
+                value="${cfg.sourceField || ''}" placeholder="(auto-detect parsed CDA document)"
                 style="width:100%;font-family:monospace;font-size:0.82rem;padding:0.38rem 0.55rem;border:1px solid #cbd5e1;border-radius:6px;">
             <div style="${CDA_CSV_HINT}">Dot-path to the parsed CDA map. Leave blank to auto-detect (looks for a _format=ccda document from an upstream cda.parse/cda.dedupe step).</div>
         </div>
         <div class="config-group">
             <label style="${CDA_CSV_LBL}">Output Field Prefix</label>
             <input id="cdaCsvOutputPrefix" type="text" class="form-control form-control-sm"
-                value="${esc(cfg.outputPrefix || 'csv_')}" placeholder="csv_"
+                value="${cfg.outputPrefix || 'csv_'}" placeholder="csv_"
                 style="width:100%;font-family:monospace;font-size:0.82rem;padding:0.38rem 0.55rem;border:1px solid #cbd5e1;border-radius:6px;">
             <div style="${CDA_CSV_HINT}">Each enabled section's CSV is written to "&lt;prefix&gt;&lt;sectionKey&gt;", e.g. csv_medications, csv_allergiesAndIntolerances.</div>
         </div>`;
@@ -193,9 +193,9 @@ class CDASectionToCSVStepBuilder {
 
     _renderSectionsList() {
         if (!this._sections.length) {
-            return `<div style="text-align:center;padding:1.5rem;color:#6b7280;font-size:0.8rem;">Loading sections…</div>`;
+            return HtmlSafe.html`<div style="text-align:center;padding:1.5rem;color:#6b7280;font-size:0.8rem;">Loading sections…</div>`;
         }
-        return this._sections.map(sec => this._renderSectionRow(sec)).join('');
+        return this._sections.map(sec => this._renderSectionRow(sec));
     }
 
     _renderSectionRow(sec) {
@@ -204,12 +204,12 @@ class CDASectionToCSVStepBuilder {
         const overrideCount = (this._customColumns[sec.sectionKey] || []).length;
         const key = sec.sectionKey;
         const kindBadge = sec.narrativeOnly
-            ? `<span style="font-size:0.65rem;background:#f1f5f9;color:#64748b;border-radius:3px;padding:1px 5px;white-space:nowrap;">narrative</span>`
-            : `<span style="font-size:0.7rem;color:#94a3b8;white-space:nowrap;">${sec.columns.length} columns</span>`;
+            ? HtmlSafe.html`<span style="font-size:0.65rem;background:#f1f5f9;color:#64748b;border-radius:3px;padding:1px 5px;white-space:nowrap;">narrative</span>`
+            : HtmlSafe.html`<span style="font-size:0.7rem;color:#94a3b8;white-space:nowrap;">${sec.columns.length} columns</span>`;
         const customBadge = overrideCount
-            ? `<span style="font-size:0.65rem;background:#fef3c7;color:#92400e;border-radius:3px;padding:1px 5px;white-space:nowrap;">${overrideCount} custom</span>`
+            ? HtmlSafe.html`<span style="font-size:0.65rem;background:#fef3c7;color:#92400e;border-radius:3px;padding:1px 5px;white-space:nowrap;">${overrideCount} custom</span>`
             : '';
-        return `
+        return HtmlSafe.html`
         <div id="cdaCsvSectionRow-${key}" style="border:1px solid #e2e8f0;border-radius:6px;margin-bottom:0.4rem;overflow:hidden;">
             <div id="cdaCsvSectionHeader-${key}" style="display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0.6rem;background:${expanded ? '#eff6ff' : '#fff'};cursor:pointer;"
                 onclick="window._cdaCsvBuilder && window._cdaCsvBuilder.toggleSection('${key}')">
@@ -218,7 +218,7 @@ class CDASectionToCSVStepBuilder {
                     onclick="event.stopPropagation()"
                     onchange="window._cdaCsvBuilder && window._cdaCsvBuilder.setSectionEnabled('${key}', this.checked)"
                     style="accent-color:#1e3a8a;width:14px;height:14px;flex-shrink:0;">
-                <span style="font-weight:${enabled ? '500' : '400'};color:${enabled ? '#1e293b' : '#94a3b8'};flex:1;">${cdaCsvEsc(key)}</span>
+                <span style="font-weight:${enabled ? '500' : '400'};color:${enabled ? '#1e293b' : '#94a3b8'};flex:1;">${key}</span>
                 ${kindBadge}
                 ${customBadge}
                 <span id="cdaCsvSectionCaret-${key}" style="color:#94a3b8;">${expanded ? '▾' : '▸'}</span>
@@ -237,7 +237,7 @@ class CDASectionToCSVStepBuilder {
         const caret  = document.getElementById('cdaCsvSectionCaret-' + key);
         if (!detail) return;
         if (this._sectionExpanded[key]) {
-            detail.innerHTML = this._renderSectionDetail(sec);
+            detail.innerHTML = HtmlSafe.html`${this._renderSectionDetail(sec)}`;
             detail.style.display = 'block';
             if (caret) caret.textContent = '▾';
         } else {
@@ -257,14 +257,14 @@ class CDASectionToCSVStepBuilder {
         // detail area, and _renderSectionRow already renders the detail
         // expanded/collapsed correctly based on this._sectionExpanded[key].
         const row = document.getElementById('cdaCsvSectionRow-' + key);
-        if (row) row.outerHTML = this._renderSectionRow(sec);
+        if (row) row.outerHTML = HtmlSafe.html`${this._renderSectionRow(sec)}`;
     }
 
     // ── Section detail: OOB columns table + custom columns + add form ─────
 
     _renderSectionDetail(sec) {
         if (sec.narrativeOnly) {
-            return `<div style="font-size:0.78rem;color:#64748b;">
+            return HtmlSafe.html`<div style="font-size:0.78rem;color:#64748b;">
                 This section is narrative-only — no structured CDA entries exist for it in real documents, so it always exports a single row of free-text (SourceFile, NarrativeText). Custom columns aren't applicable here.
             </div>`;
         }
@@ -276,48 +276,48 @@ class CDASectionToCSVStepBuilder {
         const oobRows = sec.columns.map(col => {
             const override = customByName[col.name];
             const flags = [
-                col.exposeCodeMetadata ? `<span title="Also adds ${cdaCsvEsc(col.name)}CodeSystem / CodeSystemName / OriginalText" style="font-size:0.62rem;background:#eef2ff;color:#4338ca;border-radius:3px;padding:0 4px;">coded</span>` : '',
-                col.multiple ? `<span title="Collects every matching entry, semicolon-joined" style="font-size:0.62rem;background:#ecfdf5;color:#065f46;border-radius:3px;padding:0 4px;">multi</span>` : '',
+                col.exposeCodeMetadata ? HtmlSafe.html`<span title="Also adds ${col.name}CodeSystem / CodeSystemName / OriginalText" style="font-size:0.62rem;background:#eef2ff;color:#4338ca;border-radius:3px;padding:0 4px;">coded</span>` : '',
+                col.multiple ? HtmlSafe.html`<span title="Collects every matching entry, semicolon-joined" style="font-size:0.62rem;background:#ecfdf5;color:#065f46;border-radius:3px;padding:0 4px;">multi</span>` : '',
             ].filter(Boolean).join(' ');
             const pathDisplay = override
-                ? `<span style="text-decoration:line-through;color:#cbd5e1;">${cdaCsvEsc(col.path)}</span><br><span style="color:#b45309;">${cdaCsvEsc(override.path)}</span>`
-                : cdaCsvEsc(col.path);
+                ? HtmlSafe.html`<span style="text-decoration:line-through;color:#cbd5e1;">${col.path}</span><br><span style="color:#b45309;">${override.path}</span>`
+                : (col.path);
             const fallbacks = (override ? override.fallbackPaths : col.fallbackPaths) || [];
             const action = override
-                ? `<button type="button" onclick="window._cdaCsvBuilder && window._cdaCsvBuilder.removeCustomColumn('${sec.sectionKey}', '${cdaCsvEscAttr(col.name)}')"
+                ? HtmlSafe.html`<button type="button" onclick="window._cdaCsvBuilder && window._cdaCsvBuilder.removeCustomColumn('${sec.sectionKey}', '${col.name}')"
                      style="padding:0.12rem 0.5rem;font-size:0.68rem;background:#fff;border:1px solid #fca5a5;color:#b91c1c;border-radius:4px;cursor:pointer;">Reset to OOB</button>`
-                : `<button type="button" onclick="window._cdaCsvBuilder && window._cdaCsvBuilder.openEditForm('${sec.sectionKey}', '${cdaCsvEscAttr(col.name)}')"
+                : HtmlSafe.html`<button type="button" onclick="window._cdaCsvBuilder && window._cdaCsvBuilder.openEditForm('${sec.sectionKey}', '${col.name}')"
                      style="padding:0.12rem 0.5rem;font-size:0.68rem;background:#fff;border:1px solid #cbd5e1;color:#334155;border-radius:4px;cursor:pointer;">Override</button>`;
-            return `
+            return HtmlSafe.html`
             <tr style="border-bottom:1px solid #f1f5f9;">
-                <td style="padding:0.35rem 0.5rem;font-weight:500;color:#1e293b;white-space:nowrap;">${cdaCsvEsc(col.name)} ${flags}</td>
-                <td style="padding:0.35rem 0.5rem;font-family:monospace;font-size:0.72rem;color:#475569;word-break:break-all;">${pathDisplay}${fallbacks.length ? `<div style="font-size:0.68rem;color:#94a3b8;margin-top:2px;">fallback: ${fallbacks.map(cdaCsvEsc).join(' · ')}</div>` : ''}</td>
+                <td style="padding:0.35rem 0.5rem;font-weight:500;color:#1e293b;white-space:nowrap;">${col.name} ${flags}</td>
+                <td style="padding:0.35rem 0.5rem;font-family:monospace;font-size:0.72rem;color:#475569;word-break:break-all;">${pathDisplay}${fallbacks.length ? HtmlSafe.html`<div style="font-size:0.68rem;color:#94a3b8;margin-top:2px;">fallback: ${fallbacks.map(cdaCsvEsc).join(' · ')}</div>` : ''}</td>
                 <td style="padding:0.35rem 0.5rem;text-align:right;white-space:nowrap;">${action}</td>
             </tr>`;
-        }).join('');
+        });
 
         const pureAdds = custom.filter(c => !sec.columns.some(col => col.name === c.name));
         const addRows = pureAdds.map(c => {
             const flags = [
-                c.exposeCodeMetadata ? `<span style="font-size:0.62rem;background:#eef2ff;color:#4338ca;border-radius:3px;padding:0 4px;">coded</span>` : '',
-                c.multiple ? `<span style="font-size:0.62rem;background:#ecfdf5;color:#065f46;border-radius:3px;padding:0 4px;">multi</span>` : '',
-            ].filter(Boolean).join(' ');
-            return `
+                c.exposeCodeMetadata ? HtmlSafe.html`<span style="font-size:0.62rem;background:#eef2ff;color:#4338ca;border-radius:3px;padding:0 4px;">coded</span>` : '',
+                c.multiple ? HtmlSafe.html`<span style="font-size:0.62rem;background:#ecfdf5;color:#065f46;border-radius:3px;padding:0 4px;">multi</span>` : '',
+            ].filter(Boolean).map(x => HtmlSafe.html`${x} `);
+            return HtmlSafe.html`
             <tr style="border-bottom:1px solid #f1f5f9;background:#fffbeb;">
-                <td style="padding:0.35rem 0.5rem;font-weight:500;color:#92400e;white-space:nowrap;">${cdaCsvEsc(c.name)} ${flags} <span style="font-size:0.62rem;background:#fef3c7;color:#92400e;border-radius:3px;padding:0 4px;">custom</span></td>
-                <td style="padding:0.35rem 0.5rem;font-family:monospace;font-size:0.72rem;color:#92400e;word-break:break-all;">${cdaCsvEsc(c.path)}${(c.fallbackPaths||[]).length ? `<div style="font-size:0.68rem;color:#b45309;margin-top:2px;">fallback: ${(c.fallbackPaths||[]).map(cdaCsvEsc).join(' · ')}</div>` : ''}</td>
+                <td style="padding:0.35rem 0.5rem;font-weight:500;color:#92400e;white-space:nowrap;">${c.name} ${flags} <span style="font-size:0.62rem;background:#fef3c7;color:#92400e;border-radius:3px;padding:0 4px;">custom</span></td>
+                <td style="padding:0.35rem 0.5rem;font-family:monospace;font-size:0.72rem;color:#92400e;word-break:break-all;">${c.path}${(c.fallbackPaths||[]).length ? HtmlSafe.html`<div style="font-size:0.68rem;color:#b45309;margin-top:2px;">fallback: ${(c.fallbackPaths||[]).map(cdaCsvEsc).join(' · ')}</div>` : ''}</td>
                 <td style="padding:0.35rem 0.5rem;text-align:right;white-space:nowrap;">
-                    <button type="button" onclick="window._cdaCsvBuilder && window._cdaCsvBuilder.openEditForm('${sec.sectionKey}', '${cdaCsvEscAttr(c.name)}')"
+                    <button type="button" onclick="window._cdaCsvBuilder && window._cdaCsvBuilder.openEditForm('${sec.sectionKey}', '${c.name}')"
                         style="padding:0.12rem 0.5rem;font-size:0.68rem;background:#fff;border:1px solid #cbd5e1;color:#334155;border-radius:4px;cursor:pointer;margin-right:0.3rem;">Edit</button>
-                    <button type="button" onclick="window._cdaCsvBuilder && window._cdaCsvBuilder.removeCustomColumn('${sec.sectionKey}', '${cdaCsvEscAttr(c.name)}')"
+                    <button type="button" onclick="window._cdaCsvBuilder && window._cdaCsvBuilder.removeCustomColumn('${sec.sectionKey}', '${c.name}')"
                         style="padding:0.12rem 0.5rem;font-size:0.68rem;background:#fff;border:1px solid #fca5a5;color:#b91c1c;border-radius:4px;cursor:pointer;">Remove</button>
                 </td>
             </tr>`;
-        }).join('');
+        });
 
         const formOpen = this._formOpenFor === sec.sectionKey;
 
-        return `
+        return HtmlSafe.html`
         <div style="overflow:auto;max-height:280px;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:0.6rem;">
             <table style="width:100%;border-collapse:collapse;">
                 <thead>
@@ -330,7 +330,7 @@ class CDASectionToCSVStepBuilder {
                 <tbody>${oobRows}${addRows}</tbody>
             </table>
         </div>
-        ${formOpen ? this._renderColumnForm(sec.sectionKey) : `
+        ${formOpen ? this._renderColumnForm(sec.sectionKey) : HtmlSafe.html`
         <button type="button" onclick="window._cdaCsvBuilder && window._cdaCsvBuilder.openAddForm('${sec.sectionKey}')"
             style="padding:0.3rem 0.75rem;font-size:0.76rem;background:#1e3a8a;color:white;border:none;border-radius:5px;cursor:pointer;">
             + Add Custom Column
@@ -385,26 +385,26 @@ class CDASectionToCSVStepBuilder {
         const d = this._formDraft || { name: '', path: '', fallbackPaths: [], exposeCodeMetadata: false, multiple: false };
         const esc = cdaCsvEsc;
         const isEdit = !!this._formEditingName;
-        return `
+        return HtmlSafe.html`
         <div style="border:1px solid #cbd5e1;border-radius:6px;padding:0.75rem;margin-top:0.5rem;background:#fff;">
             <div style="font-size:0.8rem;font-weight:600;color:#1e293b;margin-bottom:0.6rem;">${isEdit ? 'Edit' : 'Add'} Custom Column</div>
             <div style="margin-bottom:0.6rem;">
                 <label style="${CDA_CSV_LBL}">Name</label>
-                <input id="cdaCsvFormName" type="text" value="${esc(d.name)}" placeholder="e.g. Reaction"
+                <input id="cdaCsvFormName" type="text" value="${d.name}" placeholder="e.g. Reaction"
                     oninput="window._cdaCsvBuilder && window._cdaCsvBuilder.onFormNameInput('${sectionKey}')"
                     style="width:100%;font-size:0.8rem;padding:0.32rem 0.5rem;border:1px solid #cbd5e1;border-radius:5px;box-sizing:border-box;">
                 <div id="cdaCsvFormOverrideWarning" style="${CDA_CSV_HINT}"></div>
             </div>
             <div style="margin-bottom:0.6rem;">
                 <label style="${CDA_CSV_LBL}">CDA Path</label>
-                <input id="cdaCsvFormPath" type="text" value="${esc(d.path)}" placeholder="e.g. entryRelationships[typeCode=SUBJ].entry.value.code"
+                <input id="cdaCsvFormPath" type="text" value="${d.path}" placeholder="e.g. entryRelationships[typeCode=SUBJ].entry.value.code"
                     style="width:100%;font-family:monospace;font-size:0.78rem;padding:0.32rem 0.5rem;border:1px solid #cbd5e1;border-radius:5px;box-sizing:border-box;">
                 <div style="${CDA_CSV_HINT}">Dot-separated path, relative to one section entry. Supports [key=value] bracket predicates (typeCode, templateId, classCode, moodCode, code, inversionInd, ...), [*] wildcards, [N] indices, and "A|B" OR values.</div>
             </div>
             <div style="margin-bottom:0.6rem;">
                 <label style="${CDA_CSV_LBL}">Fallback Paths <span style="font-weight:400;color:#94a3b8;text-transform:none;">(optional, one per line, tried in order if Path resolves to nothing)</span></label>
                 <textarea id="cdaCsvFormFallbacks" rows="2" placeholder="entryRelationships[typeCode=SUBJ,inversionInd=true].entry.value.code"
-                    style="width:100%;font-family:monospace;font-size:0.76rem;padding:0.32rem 0.5rem;border:1px solid #cbd5e1;border-radius:5px;box-sizing:border-box;resize:vertical;">${esc((d.fallbackPaths || []).join('\n'))}</textarea>
+                    style="width:100%;font-family:monospace;font-size:0.76rem;padding:0.32rem 0.5rem;border:1px solid #cbd5e1;border-radius:5px;box-sizing:border-box;resize:vertical;">${(d.fallbackPaths || []).join('\n')}</textarea>
             </div>
             <div style="display:flex;gap:1.25rem;margin-bottom:0.75rem;">
                 <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;color:#1f2937;cursor:pointer;">

@@ -142,41 +142,25 @@ WHERE status = 'running' AND started_at < NOW() - INTERVAL '10 minutes';
 ```bash
 curl http://localhost:8080/readyz
 ```
-If the engine is not `"ok"`, restart the Go service: `docker restart go-api`
+If the engine is not `"ok"`, restart the engine: `systemctl restart ezhealthkonnect-api` (Windows: `Restart-Service ezhealthkonnect`)
 
 ---
 
-## 5. MinIO Unreachable
+## 5. Message Storage Unavailable
 
-**Symptom:** Transformations succeed but raw HL7 and FHIR JSON cannot be retrieved from the UI. Logs show `connection refused` or `bucket not found` errors.
+**Symptom:** Transformations succeed, but raw HL7 and FHIR JSON cannot be retrieved from the UI. The engine logs show storage write or read errors.
 
-**Check connectivity:**
+**Local storage (the default for installed systems):**
 ```bash
-curl -s http://localhost:9000/minio/health/live
-# Should return 200 OK
+grep -E 'OBJECT_STORAGE_DRIVER|LOCAL_STORAGE_PATH' /opt/ezhealthkonnect/.env   # driver should be 'local'
+df -h /opt/ezhealthkonnect/storage                                             # disk full?
+ls -ld /opt/ezhealthkonnect/storage                                            # owned by the ezhealthkonnect user (Linux)
 ```
+Free disk space or fix the directory's ownership, then restart the engine. On Windows the folder is `C:\ezHealthKonnect\storage`.
 
-**Check environment:**
-```bash
-echo $OBJECT_STORAGE_DRIVER   # should be 'minio' or 's3'
-echo $MINIO_ENDPOINT
-echo $MINIO_BUCKET
-```
+**S3-compatible storage (`OBJECT_STORAGE_DRIVER=s3`):** check `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_REGION` and the access keys, and that the bucket policy allows the credentials.
 
-**If MinIO is down:**
-1. Restart the MinIO container: `docker restart minio`
-2. Wait for health check: `curl -s http://localhost:9000/minio/health/ready`
-3. Transformations continue to work (MinIO is storage-only, not in the critical path for HL7 delivery)
-4. Messages that failed storage writes will be missing from the content viewer — these are not re-stored automatically
-
-**Fallback to local storage:**
-If MinIO will be unavailable for an extended period, switch to local file storage:
-```bash
-# In .env
-OBJECT_STORAGE_DRIVER=local
-LOCAL_STORAGE_PATH=/data/ezhealthkonnect-storage
-```
-Restart the Go service after changing the env var.
+Transformations and delivery keep working either way; storage is not in the critical path for HL7 delivery. Messages whose content failed to store will be missing from the content viewer and are not re-stored automatically.
 
 ---
 
@@ -233,7 +217,7 @@ Results are written to `tests/hl7-scale-test-results/`. Open the HTML report for
 | Role | Responsible for |
 |------|----------------|
 | Integration Engineer | Mapping fixes, OOB template updates, scale test sign-off |
-| Platform Engineer | Database, MinIO, Docker infrastructure |
+| Platform Engineer | Database, storage, server and service infrastructure |
 | Security Officer | TLS cert rotation, PHI exposure incidents |
 
 For PHI exposure incidents: immediately isolate the affected interface (deactivate via UI), notify the Security Officer, and preserve logs before any remediation.

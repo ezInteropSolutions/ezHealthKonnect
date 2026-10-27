@@ -66,31 +66,31 @@ class PASEnvelopeBuilder {
         const mappings = step.config.mappings || PASEnvelopeBuilder._defaultMappings();
         const byGroup = PASEnvelopeBuilder._groupMappings(mappings);
 
-        let rows = '';
+        const rows = [];
         Object.entries(byGroup).forEach(([group, fields]) => {
-            rows += `
+            rows.push(HtmlSafe.html`
             <tr class="pas-group-header">
                 <td colspan="2" style="background:#1e293b;color:#94a3b8;font-size:11px;
                     font-weight:600;letter-spacing:.08em;text-transform:uppercase;
                     padding:8px 12px;border-top:2px solid #334155;">
-                    ${esc(group)}
+                    ${group}
                 </td>
-            </tr>`;
+            </tr>`);
 
             fields.forEach(m => {
                 const required  = m._required ? true : false;
                 const badge     = required
-                    ? '<span style="background:#dc2626;color:#fff;font-size:9px;border-radius:3px;padding:1px 5px;margin-left:5px;vertical-align:middle;">required</span>'
-                    : '<span style="background:#334155;color:#94a3b8;font-size:9px;border-radius:3px;padding:1px 5px;margin-left:5px;vertical-align:middle;">optional</span>';
-                const rhsVal    = esc(m.rhs || '');
-                const lhsVal    = esc(m.lhs || '');
-                const meta      = esc(JSON.stringify({ label: m._label, required }));
+                    ? HtmlSafe.raw('<span style="background:#dc2626;color:#fff;font-size:9px;border-radius:3px;padding:1px 5px;margin-left:5px;vertical-align:middle;">required</span>')
+                    : HtmlSafe.raw('<span style="background:#334155;color:#94a3b8;font-size:9px;border-radius:3px;padding:1px 5px;margin-left:5px;vertical-align:middle;">optional</span>');
+                const rhsVal    = (m.rhs || '');
+                const lhsVal    = (m.lhs || '');
+                const meta      = (JSON.stringify({ label: m._label, required }));
 
-                rows += `
+                rows.push(HtmlSafe.html`
                 <tr class="pas-env-row" data-meta='${meta}'>
                     <td style="padding:7px 12px;border-bottom:1px solid #1e293b;white-space:nowrap;width:44%;">
                         <div style="color:#e2e8f0;font-size:12px;font-weight:500;">
-                            ${esc(m._label || m.lhs)}${badge}
+                            ${m._label || m.lhs}${badge}
                         </div>
                         <div style="color:#64748b;font-size:10px;margin-top:2px;font-family:monospace;">
                             ${lhsVal}
@@ -107,11 +107,11 @@ class PASEnvelopeBuilder {
                                       font-family:monospace;"
                                data-lhs="${lhsVal}">
                     </td>
-                </tr>`;
+                </tr>`);
             });
         });
 
-        return `
+        return HtmlSafe.html`
         <div class="pas-envelope-builder" style="font-family:'Inter',sans-serif;">
             <div style="background:#0f2d4a;border:1px solid #1e4976;border-radius:6px;
                         padding:12px 16px;margin-bottom:14px;">

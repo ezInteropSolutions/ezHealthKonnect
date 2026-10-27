@@ -105,7 +105,7 @@ class FieldPathInputWithAutocomplete {
     }
 
     render() {
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="field-path-autocomplete-wrapper">
                 <input
                     type="text"
@@ -213,16 +213,16 @@ class FieldPathInputWithAutocomplete {
     showDropdown() {
         const items = this.filteredFields.map((field, index) => {
             const isSelected = index === this.selectedIndex;
-            return `
+            return HtmlSafe.html`
                 <div class="autocomplete-item ${isSelected ? 'selected' : ''}" data-index="${index}">
                     <div class="field-name">${field.name}</div>
                     <div class="field-description">${field.description || 'No description'}</div>
                     <div class="field-path">${field.path}</div>
                 </div>
             `;
-        }).join('');
+        });
 
-        this.elements.dropdown.innerHTML = items;
+        this.elements.dropdown.innerHTML = HtmlSafe.html`${items}`;
         this.elements.dropdown.style.display = 'block';
 
         // NO event listeners attached here - using event delegation on parent!

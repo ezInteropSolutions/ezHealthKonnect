@@ -116,7 +116,20 @@ function fhirPassthroughPayload(port) {
     };
 }
 
+// The File Writer connector reads directory_path (+ filename_pattern), not a single path; this older helper
+// used to send `outputPath`, which the connector ignores and the Edit modal rejects. A full file path such as
+// '/tmp/x/{timestamp}.hl7' is split into the directory and the filename pattern.
+function fileWriterConfig(filePath) {
+    const cut = filePath.lastIndexOf('/');
+    return {
+        directory_path: cut > 0 ? filePath.slice(0, cut) : '/tmp',
+        filename_pattern: filePath.slice(cut + 1),
+        create_subdirs: true,
+    };
+}
+
 function hl7ToFilePayload(port, filePath) {
+    const fileConfig = fileWriterConfig(filePath);
     return {
         name: `MVP_SMOKE_HL7_FILE_${port}`,
         description: 'MVP smoke test — HL7 to file (passthrough)',
@@ -129,10 +142,10 @@ function hl7ToFilePayload(port, filePath) {
         },
         targetType: 'file',
         targetConnectivity: 'file_writer',
-        targetConfig: { outputPath: filePath, createDirs: true },
+        targetConfig: fileConfig,
         targetConnectorConfig: {
             connectorType: 'file_writer',
-            config: { outputPath: filePath, createDirs: true },
+            config: fileConfig,
         },
         messageType: 'ADT^A01',
         mappings: [],
@@ -145,7 +158,23 @@ function hl7ToFilePayload(port, filePath) {
     };
 }
 
+// MLLP in, store only (the wizard's Passthrough flow with a sink target): needs no filesystem or network
+// destination, so it behaves the same on a Docker stack, a Linux install and a Windows service.
+function hl7SinkPayload(port) {
+    return {
+        ...hl7ToFilePayload(port, '/tmp/unused/{timestamp}.hl7'),
+        name: `PW_SINK_${port}`,
+        description: 'Playwright store-only interface',
+        transformationFlow: 'passthrough',
+        targetType: 'fhir',
+        targetConnectivity: 'sink',
+        targetConfig: {},
+        targetConnectorConfig: null,
+    };
+}
+
 module.exports = {
+    hl7SinkPayload,
     HL7_ADT_A01,
     HL7_ADT_A03,
     HL7_ORU_R01,

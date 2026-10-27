@@ -167,6 +167,7 @@
     </div>
 
     <!-- EXISTING JavaScript Dependencies (DO NOT CHANGE ORDER) -->
+    <script src="/js/core/html-safe.js"></script>
     <script src="js/core/env-config.js"></script>
     <script src="js/core/app-dialogs.js"></script>
 
@@ -174,7 +175,7 @@
     <script src="/js/services/AuthService.js"></script>
 
     <script src="js/components/interface-handlers.js"></script>
-    <script src="js/interfaces.js?v=15"></script>
+    <script src="js/interfaces.js?v=17"></script>
     <script src="js/interface-config-manager.js?v=6"></script>
     <script src="js/wizard/module-loader.js"></script>
     <!-- ADD THESE TWO LINES HERE - BEFORE other components -->
@@ -193,10 +194,12 @@
 
     <!-- NEW: Component loaders -->
     <script src="js/components/InterfaceConfigComponents.js?v=7"></script>
-    <script src="js/components/sidebar-nav.js?v=3"></script>
-    <script src="js/components/header-component.js?v=2"></script>
-    <script src="js/components/table-component.js?v=6"></script>
-    <script src="js/components/modal-components.js?v=5"></script>
+    <script src="/js/core/app-auth.js?v=2"></script>
+    <script src="js/components/sidebar-nav.js?v=7"></script>
+    <script src="js/components/header-component.js?v=3"></script>
+    <script src="js/components/table-component.js?v=7"></script>
+    <script src="js/components/EndpointAuthEditor.js?v=1"></script>
+    <script src="js/components/modal-components.js?v=6"></script>
     <script src="js/components/wizard-component.js?v=2"></script>
     
     <!-- PRESERVED: Core wizard functions (MUST STAY GLOBAL) -->
@@ -210,10 +213,10 @@
     <script src="js/pipeline/components/ZSegmentConfigBuilder.js"></script>
 
     <!-- OPTIMIZED WIZARD: New MVC system -->
-    <script src="js/wizard/FlowRegistry.js"></script>
-    <script src="js/wizard/optimized/WizardModel.js?v=2.3"></script>
+    <script src="js/wizard/FlowRegistry.js?v=2"></script>
+    <script src="js/wizard/optimized/WizardModel.js?v=2.4"></script>
     <script src="js/wizard/optimized/ZSegmentConfigPanel.js?v=1.0"></script>
-    <script src="js/wizard/optimized/WizardView.js?v=1.3"></script>
+    <script src="js/wizard/optimized/WizardView.js?v=1.4"></script>
     <script src="js/wizard/optimized/WizardController.js?v=1.3"></script>
     <script src="js/wizard/optimized/WizardFHIRTransform.js?v=1.1"></script>
     <script src="js/wizard/wizard-optimized-integration.js"></script>
@@ -224,6 +227,6 @@
     <script src="/js/step5-summary-fix.js"></script>
     <script src="/js/wizard-modal-close-fix.js"></script>
 
-    <script src="/js/ai-assistant.js"></script>
+    <script src="/js/ai-assistant.js?v=2"></script>
 </body>
 </html>

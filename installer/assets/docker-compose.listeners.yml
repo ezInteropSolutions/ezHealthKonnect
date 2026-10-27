@@ -1,6 +1,0 @@
-# docker-compose.listeners.yml
-# Port bindings are now handled entirely in docker-compose.prod.yml
-# (full range 0.0.0.0:1024-65535). This file is kept as a valid empty
-# override so the installer compose command (-f prod -f listeners) still works.
-services:
-  app: {}

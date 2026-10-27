@@ -12,7 +12,8 @@
         }
         
         // ✅ PRESERVED: Header HTML with all original IDs and structure
-        container.innerHTML = `
+        // Constant markup: every interpolation below is the app's own help text.
+        container.innerHTML = HtmlSafe.raw(`
             <!-- Ultra Compact Header with Inline Status Tiles -->
             <header class="main-header">
                 <div class="header-left">
@@ -68,7 +69,7 @@
                     " onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
                         <i class="fas fa-question"></i>
                     </button>
-                    <button class="create-btn" onclick="openWizard()" id="createInterfaceBtn">
+                    <button class="create-btn" data-requires="write" onclick="openWizard()" id="createInterfaceBtn">
                         <span class="btn-icon">+</span>
                         <span class="btn-text">Create Interface</span>
                     </button>
@@ -245,7 +246,7 @@
                     </div><!-- /body -->
                 </div>
             </div>
-        `;
+        `);
         
         console.log('✅ Interface header component loaded');
     }

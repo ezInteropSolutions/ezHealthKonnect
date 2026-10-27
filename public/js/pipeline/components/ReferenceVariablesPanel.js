@@ -164,13 +164,13 @@ class ReferenceVariablesPanel {
             return;
         }
 
-        const html = `
+        const html = HtmlSafe.html`
             <div class="reference-variables-panel">
                 <div class="panel-header">
                     <h4 style="margin: 0;">Reference Variables</h4>
                 </div>
 
-                ${this.variables.length > 0 ? `
+                ${this.variables.length > 0 ? HtmlSafe.html`
                     <div class="search-container">
                         <input type="text"
                                class="search-input"
@@ -196,7 +196,7 @@ class ReferenceVariablesPanel {
 
     // Render empty state
     renderEmpty() {
-        return `
+        return HtmlSafe.html`
             <div class="empty-state">
                 <div style="font-size: 48px; opacity: 0.3; margin-bottom: 16px;">📭</div>
                 <p style="color: #6b7280; margin: 0;">No variables available yet</p>
@@ -209,7 +209,7 @@ class ReferenceVariablesPanel {
 
     // Render error state
     renderError(message) {
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="reference-variables-panel">
                 <div class="panel-header">
                     <h4 style="margin: 0;">Reference Variables</h4>
@@ -244,32 +244,32 @@ class ReferenceVariablesPanel {
             });
         });
 
-        return `
+        return HtmlSafe.html`
             <div class="variables-list">
-                ${Object.entries(groupedByStep).map(([stepName, variables]) => `
+                ${Object.entries(groupedByStep).map(([stepName, variables]) => HtmlSafe.html`
                     <div class="variable-group" data-step="${stepName}">
                         <div class="group-header">${stepName}</div>
-                        ${variables.map(v => `
+                        ${variables.map(v => HtmlSafe.html`
                             <div class="variable-item" data-variable="${v.variableName}" data-xpath="${v.xpath}">
                                 <div class="variable-header">
                                     <span class="variable-name">${v.variableName}</span>
                                     <button class="copy-btn-small" data-text="${v.xpath}" title="Copy XPath">📋</button>
                                 </div>
                                 <code class="xpath-code">${v.xpath}</code>
-                                ${v.examples.length > 0 ? `
+                                ${v.examples.length > 0 ? HtmlSafe.html`
                                     <div class="examples-container">
-                                        ${v.examples.slice(0, 2).map(ex => `
+                                        ${v.examples.slice(0, 2).map(ex => HtmlSafe.html`
                                             <div class="example-item">
                                                 <code class="example-code">${ex}</code>
                                                 <button class="copy-btn-tiny" data-text="${ex}" title="Copy">📋</button>
                                             </div>
-                                        `).join('')}
+                                        `)}
                                     </div>
                                 ` : ''}
                             </div>
-                        `).join('')}
+                        `)}
                     </div>
-                `).join('')}
+                `)}
             </div>
         `;
     }

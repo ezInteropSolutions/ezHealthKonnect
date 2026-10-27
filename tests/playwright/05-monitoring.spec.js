@@ -22,7 +22,7 @@
  * TC-MON-018  No horizontal overflow at 1280px
  */
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./helpers/seeded');
 
 test.describe('Monitoring', () => {
 
@@ -85,10 +85,7 @@ test.describe('Monitoring', () => {
         await page.waitForTimeout(3000);
         const valueEls = page.locator('.kpi-value, [class*="kpi-value"], .kpi-number');
         const count    = await valueEls.count();
-        if (count === 0) {
-            test.skip();
-            return;
-        }
+        expect(!(count === 0), 'precondition failed (was a skip): count === 0').toBe(true);
         for (let i = 0; i < Math.min(count, 4); i++) {
             const text = (await valueEls.nth(i).textContent())?.trim() ?? '';
             expect(text.length).toBeGreaterThan(0);
@@ -100,10 +97,7 @@ test.describe('Monitoring', () => {
     test('TC-MON-008 KPI card labels contain expected metric names', async ({ page }) => {
         const labels = page.locator('.kpi-label, [class*="kpi-label"]');
         const count  = await labels.count();
-        if (count === 0) {
-            test.skip();
-            return;
-        }
+        expect(!(count === 0), 'precondition failed (was a skip): count === 0').toBe(true);
         const allText = (await labels.allTextContents()).join(' ').toLowerCase();
         // At least one of these metric names should appear
         const hasExpected = /messages|error|latency|interface|active|processing/i.test(allText);
@@ -153,11 +147,8 @@ test.describe('Monitoring', () => {
     // ── TC-MON-012 ───────────────────────────────────────────────────────────────
     test('TC-MON-012 live messages table has expected column headers', async ({ page }) => {
         await page.waitForTimeout(2000);
-        const table = page.locator('[class*="live-messages"] table, [class*="message-feed"] table').first();
-        if (!await table.isVisible().catch(() => false)) {
-            test.skip();
-            return;
-        }
+        const table = page.locator('table:has(#feedBody)');
+        expect(!(!await table.isVisible().catch(() => false)), 'precondition failed (was a skip): !await table.isVisible().catch(() => false)').toBe(true);
         const headers = (await table.locator('th').allTextContents()).join(' ').toLowerCase();
         const hasExpected = /message|interface|status|time|type/i.test(headers);
         expect(hasExpected).toBe(true);
@@ -201,7 +192,7 @@ test.describe('Monitoring', () => {
                 return { status: r.status, body };
             } catch (e) { return { status: 0, body: null }; }
         });
-        if (result.status === 0 || result.status >= 500) { test.skip(); return; }
+        expect(!(result.status === 0 || result.status >= 500), 'precondition failed (was a skip): result.status === 0 || result.status >= 500').toBe(true);
         expect(result.status).toBe(200);
         if (result.body) expect(result.body.success).toBe(true);
     });
@@ -218,7 +209,7 @@ test.describe('Monitoring', () => {
                 return { status: r.status, body };
             } catch (e) { return { status: 0, body: null }; }
         });
-        if (result.status === 0 || result.status >= 500) { test.skip(); return; }
+        expect(!(result.status === 0 || result.status >= 500), 'precondition failed (was a skip): result.status === 0 || result.status >= 500').toBe(true);
         expect(result.status).toBe(200);
         if (result.body) {
             expect(result.body.success).toBe(true);

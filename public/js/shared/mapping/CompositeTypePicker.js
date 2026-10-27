@@ -51,19 +51,13 @@ class CompositeTypePicker {
         var self         = this;
         var components   = HL7TypeCatalog.getComponents(this._hl7DataType);
         var wholeHint    = HL7TypeCatalog.getWholeObjectHint(this._hl7DataType);
-        var esc          = function(s) {
-            return String(s)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;');
-        };
+        var esc          = HtmlSafe.escapeHtml;
 
         var resourcePrefix  = this._resource ? (this._resource + '.') : '';
         var hasFixedFhir    = wholeHint && wholeHint.fhirHint !== '(target path)';
         var wholePathDisplay = hasFixedFhir ? resourcePrefix + wholeHint.fhirHint : '…';
 
-        this._container.innerHTML = [
+        this._container.innerHTML = HtmlSafe.raw([ // every value below goes through esc()
             '<div class="composite-picker" style="',
                 'border:1px solid #bae6fd;border-radius:8px;background:#f0f9ff;overflow:hidden;font-size:0.85rem;">',
 
@@ -193,7 +187,7 @@ class CompositeTypePicker {
             '</div>',
 
             '</div>',  // .composite-picker
-        ].join('');
+        ].join(''));
 
         this._attachEvents();
     }

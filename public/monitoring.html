@@ -489,9 +489,11 @@
 </div><!-- /main-content -->
 </div><!-- /dashboard-container -->
 
+<script src="/js/core/html-safe.js"></script>
 <script src="/js/core/app-dialogs.js"></script>
     <script src="/js/services/AuthService.js"></script>
-<script src="js/components/sidebar-nav.js?v=3"></script>
+<script src="/js/core/app-auth.js?v=2"></script>
+<script src="js/components/sidebar-nav.js?v=7"></script>
 <script>
 /* ── Config ────────────────────────────────────────────────────────────────── */
 const API = '/api';
@@ -561,9 +563,9 @@ async function loadSummary() {
         // Alert chips
         const chips = document.getElementById('alertChips');
         chips.innerHTML = '';
-        if (sev.critical) chips.innerHTML += `<span class="badge badge-critical">${sev.critical} critical</span> `;
-        if (sev.warning)  chips.innerHTML += `<span class="badge badge-warning">${sev.warning} warning</span> `;
-        if (sev.info)     chips.innerHTML += `<span class="badge badge-info">${sev.info} info</span>`;
+        if (sev.critical) chips.innerHTML += HtmlSafe.html`<span class="badge badge-critical">${sev.critical} critical</span> `;
+        if (sev.warning)  chips.innerHTML += HtmlSafe.html`<span class="badge badge-warning">${sev.warning} warning</span> `;
+        if (sev.info)     chips.innerHTML += HtmlSafe.html`<span class="badge badge-info">${sev.info} info</span>`;
         if (!sev.critical && !sev.warning && !sev.info) chips.textContent = 'No active alerts';
 
         drawSparkline('spkMessages', trends.messages_today_sparkline || [], getComputedStyle(document.documentElement).getPropertyValue('--pink').trim() || '#db2777');
@@ -580,26 +582,26 @@ async function loadAlerts(sev = {}) {
         // Badge row
         const badges = document.getElementById('alertBadges');
         badges.innerHTML = '';
-        if (sev.critical) badges.innerHTML += `<span class="badge badge-critical">${sev.critical} Critical</span>`;
-        if (sev.warning)  badges.innerHTML += `<span class="badge badge-warning">${sev.warning} Warning</span>`;
-        if (sev.info)     badges.innerHTML += `<span class="badge badge-info">${sev.info} Info</span>`;
+        if (sev.critical) badges.innerHTML += HtmlSafe.html`<span class="badge badge-critical">${sev.critical} Critical</span>`;
+        if (sev.warning)  badges.innerHTML += HtmlSafe.html`<span class="badge badge-warning">${sev.warning} Warning</span>`;
+        if (sev.info)     badges.innerHTML += HtmlSafe.html`<span class="badge badge-info">${sev.info} Info</span>`;
 
         document.getElementById('alertCountLabel').textContent = alerts?.length ? `(${alerts.length})` : '';
 
         const list = document.getElementById('alertsList');
         if (!alerts?.length) {
-            list.innerHTML = `<div class="alerts-empty"><i class="fas fa-check-circle" style="color:#16a34a;font-size:18px;margin-bottom:6px;display:block"></i>All clear — no active alerts</div>`;
+            list.innerHTML = HtmlSafe.html`<div class="alerts-empty"><i class="fas fa-check-circle" style="color:#16a34a;font-size:18px;margin-bottom:6px;display:block"></i>All clear — no active alerts</div>`;
             return;
         }
-        list.innerHTML = alerts.map(a => `
+        list.innerHTML = HtmlSafe.html`${alerts.map(a => HtmlSafe.html`
             <div class="alert-row" id="al-${a.id}">
                 <span class="sev-dot sev-${a.severity}"></span>
                 <div style="flex:1">
-                    <div class="alert-title">${esc(a.message)}</div>
-                    <div class="alert-meta">${esc(a.interface_name)} · ${a.alert_type} · ${elapsed(a.elapsed_seconds)}</div>
+                    <div class="alert-title">${a.message}</div>
+                    <div class="alert-meta">${a.interface_name} · ${a.alert_type} · ${elapsed(a.elapsed_seconds)}</div>
                 </div>
                 <button class="ack-btn" onclick="ackAlert('${a.id}')">Ack</button>
-            </div>`).join('');
+            </div>`)}`;
     } catch (e) { console.error('alerts', e); }
 }
 
@@ -609,17 +611,17 @@ async function loadFeed() {
         const { data: msgs } = await fetchJSON(`${API}/monitoring/live-messages?limit=50`);
         const tb = document.getElementById('feedBody');
         document.getElementById('feedCount').textContent = msgs?.length ? `${msgs.length} messages` : '';
-        if (!msgs?.length) { tb.innerHTML = `<tr><td colspan="5"><div class="empty"><i class="fas fa-inbox"></i><p>No messages yet</p></div></td></tr>`; return; }
-        tb.innerHTML = msgs.map(m => `<tr>
+        if (!msgs?.length) { tb.innerHTML = HtmlSafe.html`<tr><td colspan="5"><div class="empty"><i class="fas fa-inbox"></i><p>No messages yet</p></div></td></tr>`; return; }
+        tb.innerHTML = HtmlSafe.html`${msgs.map(m => HtmlSafe.html`<tr>
             <td style="white-space:nowrap;color:var(--muted)">${timeAgo(m.received_at)}</td>
-            <td>${esc(m.interface_name)}</td>
-            <td><code style="font-size:10px;background:#fdf7fb;padding:1px 5px;border-radius:4px">${esc(m.message_type||'—')}</code></td>
+            <td>${m.interface_name}</td>
+            <td><code style="font-size:10px;background:#fdf7fb;padding:1px 5px;border-radius:4px">${m.message_type||'—'}</code></td>
             <td>${pill(m.status)}</td>
             <td style="color:var(--muted)">${m.processing_time_ms ?? '—'}</td>
-        </tr>`).join('');
+        </tr>`)}`;
         document.getElementById('feedAge').textContent = msgs.length + ' messages';
     } catch (e) {
-        document.getElementById('feedBody').innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:#e11d48">${esc(e.message)}</td></tr>`;
+        document.getElementById('feedBody').innerHTML = HtmlSafe.html`<tr><td colspan="5" style="text-align:center;padding:20px;color:#e11d48">${e.message}</td></tr>`;
     }
 }
 
@@ -628,16 +630,16 @@ async function loadConnectors() {
     try {
         const { data: rows } = await fetchJSON(`${API}/monitoring/connector-health`);
         const tb = document.getElementById('connBody');
-        if (!rows?.length) { tb.innerHTML = `<tr><td colspan="5"><div class="empty"><i class="fas fa-check-circle" style="color:#16a34a;font-size:18px;margin-bottom:6px;display:block"></i><p>All connectors healthy</p></div></td></tr>`; return; }
-        tb.innerHTML = rows.map(r => `<tr>
-            <td>${esc(r.interface_name)}</td>
-            <td><code style="font-size:10px;background:#fdf7fb;padding:1px 5px;border-radius:4px">${esc(r.connector_type)}</code></td>
+        if (!rows?.length) { tb.innerHTML = HtmlSafe.html`<tr><td colspan="5"><div class="empty"><i class="fas fa-check-circle" style="color:#16a34a;font-size:18px;margin-bottom:6px;display:block"></i><p>All connectors healthy</p></div></td></tr>`; return; }
+        tb.innerHTML = HtmlSafe.html`${rows.map(r => HtmlSafe.html`<tr>
+            <td>${r.interface_name}</td>
+            <td><code style="font-size:10px;background:#fdf7fb;padding:1px 5px;border-radius:4px">${r.connector_type}</code></td>
             <td>${pill(r.last_run_status || r.status)}</td>
             <td style="color:var(--muted);white-space:nowrap">${r.last_run_at ? timeAgo(r.last_run_at) : '—'}</td>
             <td>${r.messages_last_run}</td>
-        </tr>`).join('');
+        </tr>`)}`;
     } catch (e) {
-        document.getElementById('connBody').innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:#e11d48">${esc(e.message)}</td></tr>`;
+        document.getElementById('connBody').innerHTML = HtmlSafe.html`<tr><td colspan="5" style="text-align:center;padding:20px;color:#e11d48">${e.message}</td></tr>`;
     }
 }
 
@@ -646,23 +648,23 @@ async function loadInterfaceHealth() {
     try {
         const { data: cards } = await fetchJSON(`${API}/monitoring/interface-health`);
         const grid = document.getElementById('healthGrid');
-        if (!cards?.length) { grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><i class="fas fa-plug"></i><p>No interfaces found</p></div>`; return; }
-        grid.innerHTML = cards.map(c => `
-            <a class="h-card" href="messages.html?interfaceId=${esc(c.interface_id)}" title="View messages for ${esc(c.interface_name)}">
+        if (!cards?.length) { grid.innerHTML = HtmlSafe.html`<div class="empty" style="grid-column:1/-1"><i class="fas fa-plug"></i><p>No interfaces found</p></div>`; return; }
+        grid.innerHTML = HtmlSafe.html`${cards.map(c => HtmlSafe.html`
+            <a class="h-card" href="messages.html?interfaceId=${c.interface_id}" title="View messages for ${c.interface_name}">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">
-                    <span class="h-card-name" title="${esc(c.interface_name)}">${esc(c.interface_name)}</span>
+                    <span class="h-card-name" title="${c.interface_name}">${c.interface_name}</span>
                     ${pill(c.status)}
                 </div>
-                <div class="h-card-conn">${esc(c.connector_type)}</div>
+                <div class="h-card-conn">${c.connector_type}</div>
                 <div class="h-card-row">
                     <div><div class="h-stat-val">${fmt(c.messages_today)}</div><div class="h-stat-lbl">Today</div></div>
                     <div><div class="h-stat-val" style="color:${c.error_rate_today>5?'#e11d48':'#16a34a'}">${(c.error_rate_today||0).toFixed(1)}%</div><div class="h-stat-lbl">Errors</div></div>
                 </div>
                 <svg id="hc-${c.interface_id.replace(/-/g,'')}" width="100%" height="22"></svg>
-            </a>`).join('');
+            </a>`)}`;
         cards.forEach(c => drawSparkline('hc-' + c.interface_id.replace(/-/g,''), c.sparkline_data || [], '#db2777', 22));
     } catch (e) {
-        document.getElementById('healthGrid').innerHTML = `<div class="empty" style="grid-column:1/-1"><i class="fas fa-exclamation-triangle"></i><p>${esc(e.message)}</p></div>`;
+        document.getElementById('healthGrid').innerHTML = HtmlSafe.html`<div class="empty" style="grid-column:1/-1"><i class="fas fa-exclamation-triangle"></i><p>${e.message}</p></div>`;
     }
 }
 
@@ -696,21 +698,21 @@ function drawSparkline(id, data, color, h = 30) {
         const y = h - (v / max) * (h - 4) - 2;
         return `${x},${y}`;
     });
-    svg.innerHTML = `<polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    svg.innerHTML = HtmlSafe.html`<polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
 }
 
 /* ── Utilities ─────────────────────────────────────────────────────────────── */
 const fmt = n => n == null ? '—' : Number(n).toLocaleString();
-const esc = s => { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; };
+const esc = s => HtmlSafe.escapeHtml(s || '');
 
 function pill(status) {
-    if (!status) return '<span class="pill pill-gray">—</span>';
+    if (!status) return HtmlSafe.raw('<span class="pill pill-gray">—</span>');
     const s = status.toLowerCase();
-    if (['active','completed','processed','success'].includes(s)) return `<span class="pill pill-green">${esc(status)}</span>`;
-    if (['failed','error'].includes(s)) return `<span class="pill pill-red">${esc(status)}</span>`;
-    if (['inactive','paused'].includes(s)) return `<span class="pill pill-yellow">${esc(status)}</span>`;
-    if (['queued','pending','no_runs'].includes(s)) return `<span class="pill pill-pink">${esc(status)}</span>`;
-    return `<span class="pill pill-gray">${esc(status)}</span>`;
+    if (['active','completed','processed','success'].includes(s)) return HtmlSafe.html`<span class="pill pill-green">${status}</span>`;
+    if (['failed','error'].includes(s)) return HtmlSafe.html`<span class="pill pill-red">${status}</span>`;
+    if (['inactive','paused'].includes(s)) return HtmlSafe.html`<span class="pill pill-yellow">${status}</span>`;
+    if (['queued','pending','no_runs'].includes(s)) return HtmlSafe.html`<span class="pill pill-pink">${status}</span>`;
+    return HtmlSafe.html`<span class="pill pill-gray">${status}</span>`;
 }
 
 function timeAgo(iso) {
@@ -728,6 +730,6 @@ function elapsed(s) {
 }
 
 </script>
-    <script src="/js/ai-assistant.js"></script>
+    <script src="/js/ai-assistant.js?v=2"></script>
 </body>
 </html>

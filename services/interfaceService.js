@@ -4,10 +4,15 @@
 
 const database = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
+// Secret fields in connector configs are encrypted at rest (see services/InterfaceConfigProtector.js).
+const configProtector = require('./InterfaceConfigProtector').default;
+const interfaceTableManager = require('./InterfaceTableManager');
 
 class InterfaceService {
     constructor() {
         this.database = database;
+        // The single owner of the standard messages_intf_* schema.
+        this.tableManager = interfaceTableManager;
         console.log('🔧 InterfaceService initialized');
         this.debugDatabaseConnection();
     }
@@ -133,11 +138,11 @@ class InterfaceService {
                 // V30+ migration: ONLY use connectivity fields (no legacy duplication)
                 source_connectivity: {
                     type: interfaceData.sourceConnectivity || 'tcp',
-                    config: interfaceData.sourceConfig || {}
+                    config: configProtector.protectForStorage(interfaceData.sourceConfig || {}, {})
                 },
                 target_connectivity: {
                     type: targetConnType,
-                    config: cleanedTargetConfig
+                    config: configProtector.protectForStorage(cleanedTargetConfig, {})
                 },
                 // REMOVED: Legacy columns source_config/target_config - use *_connectivity only
                 // FIXED: Handle both wizard formats - transformationMapping (object with atomicMappings) or mappings (array)
@@ -166,8 +171,8 @@ class InterfaceService {
                 name: createData.name,
                 source_type: createData.source_type,
                 target_type: createData.target_type,
-                source_connectivity: createData.source_connectivity,
-                target_connectivity: createData.target_connectivity,
+                source_connectivity: configProtector.maskForDisplay(createData.source_connectivity),
+                target_connectivity: configProtector.maskForDisplay(createData.target_connectivity),
                 status: createData.status
             });
 
@@ -274,8 +279,60 @@ class InterfaceService {
         }
     }
 
-    // Keep all other methods from the original file unchanged...
-    
+    /**
+     * Updates an existing interface from the wizard's re-run path
+     * (wizardController.completeWizard with an existing interfaceId). This
+     * method was called there but never existed, so re-running the wizard on an
+     * existing interface threw (found 2026-10-19). Only whitelisted columns are
+     * written; undefined values are left unchanged; connector configs are
+     * protected at rest against the currently stored values (masked
+     * placeholders resolve to the stored secrets).
+     * @returns {Promise<object|null>} the updated row (masked), or null when not found / not owned
+     */
+    async updateInterface(interfaceId, fields, userId, allInterfaces = false) {
+        await this.ensureDatabaseConnection();
+        // allInterfaces: the caller's access policy (AccessPolicyService) lets them change interfaces they did not create
+        const record = await this.database.models.Interface.findOne({
+            where: allInterfaces ? { id: interfaceId, is_active: true } : { id: interfaceId, user_id: userId, is_active: true }
+        });
+        if (!record) return null;
+
+        const UPDATABLE = ['name', 'description', 'source_type', 'target_type', 'message_type',
+            'status', 'auto_start', 'deployment_mode'];
+        const updates = {};
+        for (const key of UPDATABLE) {
+            if (fields[key] !== undefined) updates[key] = fields[key];
+        }
+        for (const column of ['source_connectivity', 'target_connectivity']) {
+            const incoming = fields[column];
+            if (!incoming) continue;
+            const stored = record.get(column) || {};
+            updates[column] = {
+                type: incoming.type || stored.type,
+                config: configProtector.protectForStorage(incoming.config || {}, stored.config || {}),
+            };
+        }
+        updates.updated_by = userId;
+        updates.updated_at = new Date();
+
+        await record.update(updates);
+        return this._toSafeJSON(record);
+    }
+
+    /**
+     * toJSON() of an Interface row with every stored connector secret masked —
+     * these objects are returned to the browser.
+     */
+    _toSafeJSON(record) {
+        const json = record.toJSON();
+        for (const column of ['source_config', 'target_config', 'source_connectivity', 'target_connectivity']) {
+            if (json[column] && typeof json[column] === 'object') {
+                json[column] = configProtector.maskForDisplay(json[column]);
+            }
+        }
+        return json;
+    }
+
     async getInterface(interfaceId, userId) {
         try {
             if (!this.database || !this.database.models || !this.database.models.Interface) {
@@ -294,7 +351,7 @@ class InterfaceService {
                 return null;
             }
             
-            const json = interfaceRecord.toJSON();
+            const json = this._toSafeJSON(interfaceRecord);
             
             try {
                 json.sourceConfig = JSON.parse(json.source_config || '{}');
@@ -344,7 +401,7 @@ class InterfaceService {
             });
             
             const processedInterfaces = interfaces.map(i => {
-                const json = i.toJSON();
+                const json = this._toSafeJSON(i);
                 
                 try {
                     json.sourceConfig = JSON.parse(json.source_config || '{}');
@@ -384,12 +441,11 @@ class InterfaceService {
         console.log(`🏗️ Initializing tables for interface: ${interfaceName} (${interfaceId})`);
 
         try {
-            // Generate table names
-            const inputTableName = `messages_intf_${interfaceId.replace(/-/g, '_')}`;
             const outputTableName = `output_intf_${interfaceId.replace(/-/g, '_')}`;
 
-            // Create PostgreSQL tables
-            await this.createInputTable(inputTableName, interfaceId);
+            // The message table always uses the standard schema owned by
+            // InterfaceTableManager — the same table every other creation path gets.
+            const inputTableName = await this.tableManager.ensureInterfaceTable(interfaceId, interfaceName);
             await this.createOutputTable(outputTableName, interfaceId);
             console.log(`✅ PostgreSQL tables created: ${inputTableName}, ${outputTableName}`);
 
@@ -407,61 +463,6 @@ class InterfaceService {
             console.error(`❌ Failed to initialize tables for interface ${interfaceId}:`, error);
             throw error;
         }
-    }
-
-    /**
-     * Create input message table
-     */
-    async createInputTable(tableName, interfaceId) {
-        const createTableSQL = `
-            CREATE TABLE IF NOT EXISTS ${tableName} (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                message_id VARCHAR(255) NOT NULL,
-                correlation_id VARCHAR(255),
-                interface_id UUID NOT NULL,
-                status VARCHAR(50) DEFAULT 'received',
-                priority INTEGER DEFAULT 5,
-                received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                source_type VARCHAR(50),
-                source_endpoint VARCHAR(255),
-                source_ip VARCHAR(45),
-                message_type VARCHAR(100),
-                message_size INTEGER,
-                message_encoding VARCHAR(50) DEFAULT 'UTF-8',
-                raw_message TEXT,
-                processing_completed_at TIMESTAMP WITH TIME ZONE,
-                processing_time_ms BIGINT,
-                error_count INTEGER DEFAULT 0,
-                last_error_message TEXT,
-                delivery_status VARCHAR(50) DEFAULT 'pending',
-                delivery_attempts INTEGER DEFAULT 0,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );
-        `;
-
-        const createIndexes = [
-            `CREATE INDEX IF NOT EXISTS idx_${tableName}_message_id ON ${tableName}(message_id);`,
-            `CREATE INDEX IF NOT EXISTS idx_${tableName}_received_at ON ${tableName}(received_at DESC);`,
-            `CREATE INDEX IF NOT EXISTS idx_${tableName}_status ON ${tableName}(status);`
-        ];
-
-        const registerMetadata = `
-            INSERT INTO interface_table_metadata (interface_id, table_name, created_at)
-            VALUES ($1, $2, CURRENT_TIMESTAMP)
-            ON CONFLICT (interface_id) DO UPDATE SET
-                table_name = $2, updated_at = CURRENT_TIMESTAMP;
-        `;
-
-        await this.database.sequelize.query(createTableSQL);
-        for (const indexSQL of createIndexes) {
-            await this.database.sequelize.query(indexSQL);
-        }
-        await this.database.sequelize.query(registerMetadata, {
-            bind: [interfaceId, tableName]
-        });
-
-        console.log(`✅ Input table created: ${tableName}`);
     }
 
     /**

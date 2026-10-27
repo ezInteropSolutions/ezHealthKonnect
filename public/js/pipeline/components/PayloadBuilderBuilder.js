@@ -147,14 +147,14 @@ class PayloadBuilderBuilder {
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
         const tabBtn = (id, label, active) =>
-            `<button class="pb-tab-btn${active ? ' pb-tab-active' : ''}" data-mode="${id}"
+            HtmlSafe.html`<button class="pb-tab-btn${active ? ' pb-tab-active' : ''}" data-mode="${id}"
                 style="flex:1;padding:8px 4px;border:none;border-bottom:${active ? '2px solid #1a73e8' : '2px solid transparent'};
                 background:transparent;color:${active ? '#1a73e8' : '#555'};font-size:12px;cursor:pointer;
                 font-weight:${active ? '600' : '400'};transition:all 0.15s;">${label}</button>`;
 
         const section = document.createElement('div');
         section.className = 'form-section';
-        section.innerHTML = `
+        section.innerHTML = HtmlSafe.html`
 <!-- Payload Builder -->
 <div class="payload-builder-wrap" style="padding:0">
 
@@ -165,7 +165,7 @@ class PayloadBuilderBuilder {
     ${tabBtn('fhir_bundle',  'FHIR Bundle',  mode === 'fhir_bundle')}
   </div>
 
-  <input type="hidden" id="pb-mode" value="${esc(mode)}">
+  <input type="hidden" id="pb-mode" value="${mode}">
 
   <!-- ── SIMPLE TAB ── -->
   <div id="pb-tab-pass_through" class="pb-tab-pane" style="display:${mode === 'pass_through' ? 'block' : 'none'}">
@@ -183,7 +183,7 @@ class PayloadBuilderBuilder {
       </select>
       <input type="text" id="pb-source-custom" class="form-control form-control-sm"
         placeholder="e.g. steps.hl7_fhir_transform.step_output.fhir_bundle"
-        value="${esc(cfg.source_path || '')}"
+        value="${cfg.source_path || ''}"
         style="display:${cfg.source_path && !['','fhirBundle','fhir_bundle','message'].includes(cfg.source_path) ? 'block' : 'none'};margin-top:4px;">
       <div class="field-help">Leave blank to auto-detect (fhirBundle &rarr; fhir_bundle &rarr; message).</div>
     </div>
@@ -217,7 +217,7 @@ class PayloadBuilderBuilder {
       <label class="form-label">Template</label>
       <textarea id="pb-template" class="form-control" rows="12"
         style="font-family:monospace;font-size:11px;resize:vertical;"
-        placeholder='{"resourceType":"Bundle","entry":[{"resource":{"resourceType":"Patient","id":"{{ steps.enrich.step_output.mrn }}"}}]}'>${esc(cfg.template || '')}</textarea>
+        placeholder='{"resourceType":"Bundle","entry":[{"resource":{"resourceType":"Patient","id":"{{ steps.enrich.step_output.mrn }}"}}]}'>${cfg.template || ''}</textarea>
       <div class="field-help">Write JSON, HL7, or any text. Placeholders are replaced at runtime.</div>
     </div>
     <div class="form-group">
@@ -299,7 +299,7 @@ class PayloadBuilderBuilder {
       <label class="form-label">Bundle ID <span style="font-weight:400;color:#888;">(optional)</span></label>
       <input type="text" id="pb-fb-bundle-id" class="form-control"
         placeholder="Auto-generated UUID if blank"
-        value="${esc(cfg.fhirBundle?.bundleId || '')}">
+        value="${cfg.fhirBundle?.bundleId || ''}">
       <div class="field-help">If set, used as the Bundle.id. Leave blank for a random UUID.</div>
     </div>
 
@@ -326,14 +326,14 @@ class PayloadBuilderBuilder {
 
 </div>`;
 
-        return section.outerHTML;
+        return HtmlSafe.raw(section.outerHTML);
     }
 
     _renderMappingRows(mappings) {
         if (!mappings || mappings.length === 0) {
             return this._renderMappingRow({ target: '', source_type: 'field_ref', source: '', value: '' }, 0);
         }
-        return mappings.map((m, i) => this._renderMappingRow(m, i)).join('');
+        return mappings.map((m, i) => this._renderMappingRow(m, i));
     }
 
     _renderMappingRow(m, i) {
@@ -342,18 +342,18 @@ class PayloadBuilderBuilder {
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         const type = m.source_type || 'field_ref';
         const displayVal = type === 'literal' ? (m.value || '') : (m.source || '');
-        return `
+        return HtmlSafe.html`
 <div class="pb-mapping-row" data-index="${i}"
   style="display:grid;grid-template-columns:1fr 80px 1fr 24px;gap:4px;margin-bottom:4px;align-items:center;">
   <input type="text" class="form-control form-control-sm pb-map-target"
-    placeholder="e.g. entry.resource.id" value="${esc(m.target || '')}">
+    placeholder="e.g. entry.resource.id" value="${m.target || ''}">
   <select class="form-control form-control-sm pb-map-type">
     <option value="field_ref" ${type === 'field_ref' ? 'selected' : ''}>Field</option>
     <option value="literal"   ${type === 'literal'   ? 'selected' : ''}>Literal</option>
   </select>
   <input type="text" class="form-control form-control-sm pb-map-value"
     placeholder="${type === 'literal' ? 'Enter value' : 'e.g. PID.5.1 or steps.enrich.mrn'}"
-    value="${esc(displayVal)}">
+    value="${displayVal}">
   <button class="pb-remove-row"
     style="background:none;border:none;color:#e53935;cursor:pointer;padding:0;font-size:16px;line-height:1;"
     title="Remove row">&times;</button>
@@ -367,16 +367,16 @@ class PayloadBuilderBuilder {
         if (!paths || paths.length === 0) {
             paths = [''];
         }
-        return paths.map((p, i) => `
+        return paths.map((p, i) => HtmlSafe.html`
 <div class="pb-rp-row" data-index="${i}"
   style="display:flex;gap:4px;margin-bottom:4px;align-items:center;">
   <input type="text" class="form-control form-control-sm pb-rp-input"
     placeholder="e.g. steps.transform.step_output.fhirBundle"
-    value="${esc(p)}" style="flex:1;">
+    value="${p}" style="flex:1;">
   <button class="pb-rp-remove"
     style="background:none;border:none;color:#e53935;cursor:pointer;padding:0 4px;font-size:16px;line-height:1;"
     title="Remove path">&times;</button>
-</div>`).join('');
+</div>`);
     }
 
     // ── Private: event wiring ────────────────────────────────────────────────
@@ -426,9 +426,9 @@ class PayloadBuilderBuilder {
             addBtn.addEventListener('click', () => {
                 const count = list.querySelectorAll('.pb-mapping-row').length;
                 const tmp = document.createElement('div');
-                tmp.innerHTML = this._renderMappingRow(
+                tmp.innerHTML = HtmlSafe.html`${this._renderMappingRow(
                     { target: '', source_type: 'field_ref', source: '', value: '' }, count
-                );
+                )}`;
                 const newRow = tmp.firstElementChild;
                 list.appendChild(newRow);
                 this._wireRowEvents(newRow);
@@ -466,7 +466,7 @@ class PayloadBuilderBuilder {
             addPathBtn.addEventListener('click', () => {
                 const count = pathsList.querySelectorAll('.pb-rp-row').length;
                 const tmp = document.createElement('div');
-                tmp.innerHTML = this._renderResourcePathRows(['']);
+                tmp.innerHTML = HtmlSafe.html`${this._renderResourcePathRows([''])}`;
                 const newRow = tmp.firstElementChild;
                 newRow.dataset.index = count;
                 pathsList.appendChild(newRow);
@@ -516,7 +516,7 @@ class PayloadBuilderBuilder {
                 // Always keep at least one blank row
                 if (list && list.querySelectorAll('.pb-rp-row').length === 0) {
                     const tmp = document.createElement('div');
-                    tmp.innerHTML = this._renderResourcePathRows(['']);
+                    tmp.innerHTML = HtmlSafe.html`${this._renderResourcePathRows([''])}`;
                     const newRow = tmp.firstElementChild;
                     list.appendChild(newRow);
                     this._wireResourcePathRowEvents(newRow);
@@ -539,7 +539,7 @@ class PayloadBuilderBuilder {
             }
         } catch (_) { /* ignore */ }
         // Fallback — common paths
-        varsDiv.innerHTML = [
+        varsDiv.innerHTML = HtmlSafe.raw([
             'fhirBundle',
             'fhir_bundle',
             'PID.3 &mdash; Patient MRN',
@@ -548,7 +548,7 @@ class PayloadBuilderBuilder {
             'PID.7 &mdash; Date of Birth',
             'MSH.9 &mdash; Message Type',
             'steps.&lt;step_name&gt;.step_output.&lt;field&gt;',
-        ].join('\n');
+        ].join('\n'));
     }
 }
 

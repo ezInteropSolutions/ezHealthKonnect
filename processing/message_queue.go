@@ -11,7 +11,6 @@ import (
 	"log"
 	"time"
 
-	"ezhealthkonnect/models"
 	"ezhealthkonnect/services"
 	"ezhealthkonnect/services/metrics"
 
@@ -20,7 +19,8 @@ import (
 
 // MessageQueue handles durable message queuing with database-backed persistence.
 // Uses FOR UPDATE SKIP LOCKED so multiple workers can dequeue concurrently without conflict.
-// Primary use case: retry of failed messages and startup recovery of stale 'received' messages.
+// Primary use case: retry of failed messages. (Startup recovery of stale messages does NOT use this queue — see
+// ProcessingEngine.recoverUnprocessedMessages, which re-runs them through the reprocess path.)
 type MessageQueue struct {
 	db                  *sql.DB
 	transformationSvc   *services.TransformationPipelineService
@@ -332,30 +332,6 @@ func (mq *MessageQueue) scheduleRetry(queueID, errMsg string, nextRetry time.Tim
 	log.Printf("🔁 [MessageQueue] Retry scheduled for queue entry %s at %v", queueID, nextRetry)
 	return nil
 }
-
-// EnqueueForRecovery adds a message from messages_intf_* back into the durable queue
-// for reprocessing. Called by the startup recovery loop.
-func (mq *MessageQueue) EnqueueForRecovery(interfaceID, messageID, messageType, rawContent string) error {
-	messageData := map[string]interface{}{
-		"raw":         rawContent,
-		"_recovered":  true,
-	}
-	return mq.EnqueueMessage(interfaceID, messageID, messageData, map[string]interface{}{
-		"messageType": messageType,
-		"priority":    8, // high priority for recovered messages
-		"maxAttempts": 3,
-		"metadata":    map[string]interface{}{"recovery": true},
-	})
-}
-
-// GetQueueStats returns statistics about pending/processing/failed messages in the queue.
-// (Kept from original implementation — now also used by /api/system/queue-depths.)
-func (mq *MessageQueue) GetStats() (map[string]interface{}, error) {
-	return mq.GetQueueStats()
-}
-
-// Needed to satisfy import (models is used in EnqueueForRecovery signature context)
-var _ = models.MessageStatusReceived
 
 // updateMessageStatus updates the status of a message in the queue
 func (mq *MessageQueue) updateMessageStatus(messageID, status, errorMessage string, errorDetails map[string]interface{}) error {

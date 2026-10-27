@@ -8,6 +8,7 @@ const userService = require('../services/userService');
 const auditService = require('../services/auditService');
 const { requireAuth } = require('../middleware/auth');
 const settingsService = require('../services/settingsService');
+const accessPolicy = require('../services/AccessPolicyService');
 const RateLimiter = require('../middleware/rateLimiter');
 
 // Per-IP throttle on login attempts — separate from the existing per-account
@@ -150,7 +151,7 @@ router.post('/login', loginRateLimiter.middleware(), async (req, res) => {
         const jwtExpiryHours = secPolicy.jwt_expiry_hours || 24;
         const token = jwt.sign(
             { userId: user.id, email: user.email, role: user.role },
-            process.env.JWT_SECRET || 'your-secret-key-change-this-in-production',
+            process.env.JWT_SECRET, // enforced at startup by config/SecretsGuard.js — no fallback
             { expiresIn: `${jwtExpiryHours}h` }
         );
 
@@ -240,7 +241,9 @@ router.post('/reset-password', async (req, res) => {
         }
 
         const hashed = await bcrypt.hash(password, 12);
-        await user.update({ password: hashed, force_password_reset: false, login_attempts: 0, locked_until: null });
+        // The model's attribute is password_hash. A `password` key is not an attribute and Sequelize silently
+        // ignores it, which left the old password valid after a "successful" reset.
+        await user.update({ password_hash: hashed, force_password_reset: false, login_attempts: 0, locked_until: null });
 
         await auditService.logEvent({
             userId: user.id,
@@ -261,6 +264,58 @@ router.post('/reset-password', async (req, res) => {
     }
 });
 
+// POST /api/auth/change-password — A signed-in user changes their OWN password (current password required).
+// Rate limited per IP so a stolen session cannot be used to guess the current password.
+const changePasswordRateLimiter = new RateLimiter({ windowMs: 60 * 1000, max: 5 });
+router.post('/change-password', requireAuth, changePasswordRateLimiter.middleware(), async (req, res) => {
+    const sessionUser = req.session.user;
+    const audit = (result, reason) => auditService.logEvent({
+        userId: sessionUser.id,
+        action: 'PASSWORD_CHANGED',
+        entityType: 'User',
+        entityId: sessionUser.id,
+        metadata: { email: sessionUser.email, method: 'self_service', ...(reason ? { reason } : {}) },
+        ipAddress: req.clientIP,
+        userAgent: req.get('User-Agent'),
+        sessionId: req.sessionID,
+        result,
+        riskLevel: result === 'success' ? 'medium' : 'high'
+    });
+
+    try {
+        const { currentPassword, newPassword } = req.body || {};
+        if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || !currentPassword || !newPassword) {
+            return res.status(400).json({ message: 'Current password and new password are required' });
+        }
+
+        const secPolicy = await settingsService.getSecuritySettings();
+        const minLength = secPolicy.password_min_length || 8;
+        if (newPassword.length < minLength) {
+            return res.status(400).json({ message: `New password must be at least ${minLength} characters` });
+        }
+
+        const User = userService.database.models.User;
+        const user = await User.findByPk(sessionUser.id);
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        if (!(await bcrypt.compare(currentPassword, user.password_hash))) {
+            await audit('failure', 'current password incorrect');
+            return res.status(400).json({ message: 'Current password is incorrect' });
+        }
+        if (await bcrypt.compare(newPassword, user.password_hash)) {
+            return res.status(400).json({ message: 'New password must be different from the current password' });
+        }
+
+        await user.update({ password_hash: await bcrypt.hash(newPassword, 12), force_password_reset: false });
+        await audit('success');
+
+        res.json({ message: 'Password changed successfully' });
+    } catch (error) {
+        console.error('❌ Change password error:', error);
+        res.status(500).json({ message: 'Failed to change password' });
+    }
+});
+
 // POST /api/auth/logout - User logout
 router.post('/logout', (req, res) => {
     req.session.destroy();
@@ -273,7 +328,7 @@ router.get('/profile', requireAuth, (req, res) => {
 });
 
 // GET /api/auth/session - Check if session is valid
-router.get('/session', (req, res) => {
+router.get('/session', async (req, res) => {
     if (req.session && req.session.user) {
         res.json({
             authenticated: true,
@@ -282,7 +337,9 @@ router.get('/session', (req, res) => {
                 email: req.session.user.email,
                 name: req.session.user.name,
                 role: req.session.user.role
-            }
+            },
+            // What this role may see (Settings -> Access policy), so pages can explain a restriction up front.
+            access: await accessPolicy.policyFor(req.session.user.role)
         });
     } else {
         res.status(401).json({

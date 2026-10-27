@@ -33,6 +33,8 @@
 
     async function checkAgentMode() {
         try {
+            // AI settings are admin-only. Everyone else keeps plain chat (agent mode stays off), without a 403.
+            if (window.appAuth) { await window.appAuth.whenReady(); if (!window.appAuth.can('aiSettings')) return; }
             const resp = await fetch('/api/system/settings/ai', { credentials: 'include' });
             if (!resp.ok) return;
             const body = await resp.json();
@@ -114,7 +116,7 @@
             for (const msg of msgs) {
                 const el = document.createElement('div');
                 el.className = `ai-msg ${msg.role === 'user' ? 'user' : 'assistant'}`;
-                el.innerHTML = renderMarkdownInline(msg.content);
+                el.innerHTML = HtmlSafe.html`${renderMarkdownInline(msg.content)}`;
                 container.insertBefore(el, welcome);
             }
             container.scrollTop = container.scrollHeight;
@@ -210,7 +212,7 @@
     }
 
     // Lists configured git repos for the commit-on-approve picker. Talks to
-    // /api/git directly (not /api/ai) — reuses the same list GitPanel.js shows.
+    // /api/git directly (not /api/ai) — the same list the Git page shows.
     async function listGitRepos() {
         try {
             const resp = await fetch('/api/git', { credentials: 'include' });
@@ -292,7 +294,7 @@
         if (!resp.ok) throw new Error(`AI service error (HTTP ${resp.status})`);
 
         return readSSEStream(resp, (_tok, full) => {
-            targetEl.innerHTML = renderMarkdownInline(full);
+            targetEl.innerHTML = HtmlSafe.html`${renderMarkdownInline(full)}`;
             const msgs = document.getElementById('ai-messages');
             if (msgs) msgs.scrollTop = msgs.scrollHeight;
         });
@@ -635,13 +637,7 @@
         const div = document.createElement('div');
         div.className = `ai-msg ${role}`;
 
-        // Basic markdown: **bold**, `code`, ```blocks```
-        let html = escapeHtml(text)
-            .replace(/```([\s\S]*?)```/g, '<pre>$1</pre>')
-            .replace(/`([^`]+)`/g, '<code>$1</code>')
-            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-            .replace(/\n/g, '<br>');
-        div.innerHTML = html;
+        div.innerHTML = HtmlSafe.html`${renderMarkdownInline(text)}`;
 
         if (sources && sources.length > 0) {
             const src = document.createElement('div');
@@ -682,15 +678,19 @@
     }
 
     function escapeHtml(s) {
-        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return HtmlSafe.escapeHtml(s);
     }
 
+    // Markdown subset for model output. The text is escaped FIRST; the
+    // replacements only add fixed tags around already-escaped text and never
+    // build an attribute from content, so the result is safe markup.
     function renderMarkdownInline(text) {
-        return escapeHtml(text)
+        // (backticks are restored: harmless in text, and they delimit code)
+        return HtmlSafe.raw(escapeHtml(text).replace(/&#96;/g, '`')
             .replace(/```([\s\S]*?)```/g, '<pre>$1</pre>')
             .replace(/`([^`]+)`/g, '<code>$1</code>')
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-            .replace(/\n/g, '<br>');
+            .replace(/\n/g, '<br>'));
     }
 
     // ── Feedback widget ────────────────────────────────────────────────────────
@@ -778,18 +778,17 @@
 
     // ── Agent Mode proposal card ───────────────────────────────────────────────
     const AGENT_TOOL_LABELS = {
-        retry_message: args => `Retry message <code>${escapeHtml(args.dlq_id || '')}</code>` +
-            (args.mode ? ` (${escapeHtml(args.mode)})` : ''),
-        activate_interface: args => `Activate interface <code>${escapeHtml(args.interface_id || '')}</code>`,
-        deactivate_interface: args => `Deactivate interface <code>${escapeHtml(args.interface_id || '')}</code>`,
-        propose_pipeline_script: args => `Insert a generated script into step <code>${escapeHtml(args.step_id || '')}</code> — review it in the editor before saving`,
+        retry_message: args => HtmlSafe.html`Retry message <code>${args.dlq_id || ''}</code>${args.mode ? ` (${args.mode})` : ''}`,
+        activate_interface: args => HtmlSafe.html`Activate interface <code>${args.interface_id || ''}</code>`,
+        deactivate_interface: args => HtmlSafe.html`Deactivate interface <code>${args.interface_id || ''}</code>`,
+        propose_pipeline_script: args => HtmlSafe.html`Insert a generated script into step <code>${args.step_id || ''}</code> — review it in the editor before saving`,
         verify_pipeline_script: args => {
             const status = args.verified
                 ? `✅ verified in ${args.attempts || 1} attempt(s)`
-                : `⚠️ could not self-verify after ${args.attempts || '?'} attempt(s)${args.last_error ? ' — last error: ' + escapeHtml(String(args.last_error).slice(0, 200)) : ''}`;
+                : `⚠️ could not self-verify after ${args.attempts || '?'} attempt(s)${args.last_error ? ' — last error: ' + String(args.last_error).slice(0, 200) : ''}`;
             const scriptPreview = args.script
-                ? `<pre style="max-height:160px;overflow:auto;margin-top:6px">${escapeHtml(args.script)}</pre>` : '';
-            return `Apply a script to step <code>${escapeHtml(args.step_id || '')}</code> (${status})${scriptPreview}`;
+                ? HtmlSafe.html`<pre style="max-height:160px;overflow:auto;margin-top:6px">${args.script}</pre>` : '';
+            return HtmlSafe.html`Apply a script to step <code>${args.step_id || ''}</code> (${status})${scriptPreview}`;
         },
     };
 
@@ -802,14 +801,14 @@
 
         const args = proposal.arguments || {};
         const labelFn = AGENT_TOOL_LABELS[proposal.tool_name];
-        const label = labelFn ? labelFn(args) : `Run <code>${escapeHtml(proposal.tool_name)}</code>`;
+        const label = labelFn ? labelFn(args) : HtmlSafe.html`Run <code>${proposal.tool_name}</code>`;
         // verify_pipeline_script persists to the DB on approve — offer a git
         // repo picker so the change can be auto-committed (see GitCommitter).
         const showGitPicker = proposal.tool_name === 'verify_pipeline_script';
 
-        div.innerHTML = `
+        div.innerHTML = HtmlSafe.html`
             <div class="ai-proposal-label">🤖 ezCompanion wants to: ${label}</div>
-            ${showGitPicker ? `
+            ${showGitPicker ? HtmlSafe.html`
             <div class="ai-proposal-git-row" style="margin:8px 0">
                 <label style="font-size:12px;color:#78350f">Commit to git repo:</label>
                 <select class="ai-proposal-git-select" style="font-size:12px;margin-left:6px;max-width:100%">

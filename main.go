@@ -4,35 +4,37 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	cdaSchemaLoader "ezhealthkonnect/cda"
 	"ezhealthkonnect/config"
 	"ezhealthkonnect/controllers"
+	"ezhealthkonnect/edi"
 	"ezhealthkonnect/fhir"
 	"ezhealthkonnect/fhir/r4"
 	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/models"
-	"ezhealthkonnect/processing"
-	"ezhealthkonnect/services"
-	"ezhealthkonnect/services/audit"
-	"ezhealthkonnect/services/backpressure"
-	cdaSchemaLoader "ezhealthkonnect/cda"
-	cdacoverage "ezhealthkonnect/services/cda_coverage"
-	"ezhealthkonnect/edi"
 	"ezhealthkonnect/ncpdp"
 	"ezhealthkonnect/ncpdptelecom"
+	"ezhealthkonnect/processing"
+	"ezhealthkonnect/services"
+	"ezhealthkonnect/services/ai"
+	"ezhealthkonnect/services/audit"
+	"ezhealthkonnect/services/authguard"
+	"ezhealthkonnect/services/backpressure"
+	cdacoverage "ezhealthkonnect/services/cda_coverage"
 	cdafhir "ezhealthkonnect/services/cda_fhir"
 	cdastorage "ezhealthkonnect/services/cda_storage"
 	cdaterminology "ezhealthkonnect/services/cda_terminology"
-	cdaparser "ezhealthkonnect/services/parsers/cda"
 	"ezhealthkonnect/services/connectors"
-	svcmapping "ezhealthkonnect/services/mapping"
-	"ezhealthkonnect/services/storage"
 	"ezhealthkonnect/services/dbpool"
-	"ezhealthkonnect/services/ai"
-	"ezhealthkonnect/services/schema"
 	"ezhealthkonnect/services/executors/enrichment"
 	fhirnarrative "ezhealthkonnect/services/fhir_narrative"
 	"ezhealthkonnect/services/logger"
+	svcmapping "ezhealthkonnect/services/mapping"
 	appmetrics "ezhealthkonnect/services/metrics"
+	cdaparser "ezhealthkonnect/services/parsers/cda"
+	"ezhealthkonnect/services/schema"
+	"ezhealthkonnect/services/secretguard"
+	"ezhealthkonnect/services/storage"
 	"ezhealthkonnect/uscdi"
 	"fmt"
 	"log"
@@ -85,7 +87,29 @@ var cdaDocumentStore cdastorage.CDADocumentStore
 // guarded at both use sites below.
 var appAuditLogger audit.AuditLogger
 
+// enforceNoPubliclyKnownSecrets checks the environment against
+// config/compromised_secrets.json. A missing list is reported, not fatal.
+func enforceNoPubliclyKnownSecrets() {
+	list, err := secretguard.Load(secretguard.DefaultPath)
+	if err != nil {
+		log.Printf("⚠️  SECURITY: could not load %s (%v) — publicly-known secrets are not being checked", secretguard.DefaultPath, err)
+		return
+	}
+	findings := list.Check(os.Getenv)
+	for _, f := range findings {
+		log.Printf("❌ SECURITY: %s is a publicly-known value (%s) — generate a new one", f.Variable, f.Note)
+	}
+	if len(findings) > 0 && strings.EqualFold(os.Getenv("NODE_ENV"), "production") {
+		log.Fatalf("Refusing to start in production with publicly-known secrets")
+	}
+}
+
 func main() {
+	// `go-api migrate ...` applies database migrations and exits; see migrate_command.go.
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		os.Exit(runMigrateCommand(os.Args[2:], os.Stdout, os.Stderr))
+	}
+
 	// Register the shutdown-signal channel FIRST, before any other
 	// initialization work — deliberately ahead of even .env loading below.
 	//
@@ -122,6 +146,12 @@ func main() {
 	// after godotenv.Load() — see InitInternalProxySecret's doc comment for why
 	// this can't be a package-level var initializer.
 	InitInternalProxySecret()
+
+	// Refuse publicly-known secrets (config/compromised_secrets.json). Fatal in
+	// production; a warning elsewhere so an existing dev environment keeps
+	// working until rotated. Node applies the same list, but standalone installs
+	// run this service on its own, so it must check for itself.
+	enforceNoPubliclyKnownSecrets()
 
 	// Record start time
 	startTime = time.Now()
@@ -370,20 +400,6 @@ func main() {
 		}
 	}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 	// OLD MLLP System - Replaced by ProcessingEngine architecture
 	// Interface listeners are now managed by ProcessingEngine via /api/processing/interfaces/:id/activate
 	// if db != nil {
@@ -460,6 +476,16 @@ func main() {
 	}
 
 	router := gin.Default()
+
+	// Real client IP: every request reaches Go through Node's forwardToGo on
+	// loopback, which sets X-Forwarded-For to the caller's address. Trust that
+	// header ONLY from loopback (gin's default trusts every proxy, letting anyone
+	// who reaches this port spoof their IP). Without this, c.ClientIP() was
+	// 127.0.0.1 for every request — wrong in audit rows and useless for
+	// per-client lockout (2026-10-19 release hardening).
+	if err := router.SetTrustedProxies([]string{"127.0.0.1", "::1"}); err != nil {
+		log.Fatalf("❌ FATAL: invalid trusted proxy list: %v", err)
+	}
 
 	// Configure CORS
 	corsConfig := cors.Config{
@@ -811,7 +837,7 @@ func main() {
 			fhirGroup.POST("/pipeline/test-api-endpoint", transformTestCtrl.TestAPIEndpoint) // Test API endpoint before configuring mapping
 			fhirGroup.POST("/pipeline/validate-script", transformTestCtrl.ValidateScript)    // Validate JavaScript script
 			fhirGroup.GET("/pipeline/:interfaceId/:messageType", transformTestCtrl.GetPipeline)
-			fhirGroup.GET("/field-search", transformTestCtrl.SearchFields)   // USCDI smart search for CDA field picker
+			fhirGroup.GET("/field-search", transformTestCtrl.SearchFields) // USCDI smart search for CDA field picker
 			// Rate-limited: CDA parsing is CPU-heavy XML processing — cap at 100 req/min
 			// per authenticated user (falls back to per-IP for unauthenticated callers).
 			fhirGroup.POST("/cda/parse", rateLimitMiddleware(100, 20, rateLimitByUserOrIP), transformTestCtrl.ParseCDA) // CDA document parse + section summary (wizard preview)
@@ -819,9 +845,17 @@ func main() {
 			// Synchronous 270/271 eligibility check — calls ExecutePipeline
 			// directly from the HTTP handler and returns the real result in
 			// the same response, unlike every other (async) inbound path.
+			// Per-interface partner authentication for the four synchronous
+			// endpoints below (controllers/sync_endpoint_auth.go). They are on
+			// admin_auth.go's publicClientRoutes allow-list because partner
+			// systems have no app session — this middleware is what gates them.
+			syncEndpointAuth := controllers.NewSyncEndpointAuth(
+				controllers.NewDBEndpointAuthConfigSource(db, credStore), appAuditLogger,
+				authguard.NewInMemoryFailureLimiter(authguard.DefaultPolicy, nil))
+
 			syncEligibilityPipelineSvc := services.NewTransformationPipelineService(db, credStore)
 			syncEligibilityCtrl := controllers.NewSyncEligibilityController(syncEligibilityPipelineSvc)
-			eligibilityGroup := api.Group("/eligibility")
+			eligibilityGroup := api.Group("/eligibility", syncEndpointAuth.Middleware())
 			syncEligibilityCtrl.RegisterRoutes(eligibilityGroup)
 
 			// Synchronous 276/277 claim status check — same pattern as
@@ -829,7 +863,7 @@ func main() {
 			// not shared.
 			syncClaimStatusPipelineSvc := services.NewTransformationPipelineService(db, credStore)
 			syncClaimStatusCtrl := controllers.NewSyncClaimStatusController(syncClaimStatusPipelineSvc)
-			claimStatusGroup := api.Group("/claim-status")
+			claimStatusGroup := api.Group("/claim-status", syncEndpointAuth.Middleware())
 			syncClaimStatusCtrl.RegisterRoutes(claimStatusGroup)
 
 			// Synchronous 278 prior authorization check — same pattern as
@@ -837,7 +871,7 @@ func main() {
 			// pipeline-service instance, not shared.
 			syncPriorAuthPipelineSvc := services.NewTransformationPipelineService(db, credStore)
 			syncPriorAuthCtrl := controllers.NewSyncPriorAuthController(syncPriorAuthPipelineSvc)
-			priorAuthGroup := api.Group("/prior-auth")
+			priorAuthGroup := api.Group("/prior-auth", syncEndpointAuth.Middleware())
 			syncPriorAuthCtrl.RegisterRoutes(priorAuthGroup)
 
 			// Synchronous NCPDP Telecom D.0 B1 pharmacy claim submit — same
@@ -847,7 +881,7 @@ func main() {
 			// so this ships as part of D.0's own Phase 1, not a later add-on.
 			syncPharmacyClaimPipelineSvc := services.NewTransformationPipelineService(db, credStore)
 			syncPharmacyClaimCtrl := controllers.NewSyncPharmacyClaimController(syncPharmacyClaimPipelineSvc)
-			pharmacyClaimGroup := api.Group("/pharmacy-claim")
+			pharmacyClaimGroup := api.Group("/pharmacy-claim", syncEndpointAuth.Middleware())
 			syncPharmacyClaimCtrl.RegisterRoutes(pharmacyClaimGroup)
 
 			// FHIR Narrative Generator
@@ -919,6 +953,12 @@ func main() {
 				}
 				cdaSchemaCtrl := controllers.NewCDASchemaController(db, cdaLoader, cdaMapper, cdaReqVocab)
 				cdaSchemaCtrl.RegisterRoutes(api.Group("/cda"))
+
+				// Code Translations management (/api/cda/code-translations) — the page that edits
+				// cda_code_translations; reads and writes the same table the terminology service looks up.
+				controllers.NewCDACodeTranslationsController(
+					cdaterminology.NewTranslationRepository(db), appAuditLogger,
+				).RegisterRoutes(api.Group("/cda"))
 				log.Printf("✅ CDA Schema Controller registered (/api/cda/schema, /api/cda/mappings, /api/cda/templates)")
 
 				// Sprint C — conformance validation (POST /api/cda/validate)
@@ -1188,8 +1228,8 @@ func main() {
 					optional, _ := rMap["optional"].(bool)
 
 					preview := ResourcePreview{
-						Name:     resourceName,
-						Optional: optional,
+						Name:          resourceName,
+						Optional:      optional,
 						MinConfidence: 1.0,
 					}
 
@@ -1621,11 +1661,11 @@ func main() {
 
 				atomicMappings := svc.ConvertToAtomicMappingsPublic(fieldMappings)
 				c.JSON(http.StatusOK, gin.H{
-					"success":         true,
-					"messageType":     messageType,
-					"hl7Version":      "2.5",
-					"fhirVersion":     fhirVersion,
-					"atomicMappings":  atomicMappings,
+					"success":          true,
+					"messageType":      messageType,
+					"hl7Version":       "2.5",
+					"fhirVersion":      fhirVersion,
+					"atomicMappings":   atomicMappings,
 					"validationErrors": []string{},
 				})
 			})
@@ -1681,13 +1721,13 @@ func main() {
 
 				atomicMappings := svc.ConvertToAtomicMappingsPublic(fieldMappings)
 				c.JSON(http.StatusOK, gin.H{
-					"success":         true,
-					"interfaceId":     interfaceID,
-					"messageType":     messageType,
-					"fhirVersion":     fhirVersion,
-					"mappingMode":     mappingMode,
-					"atomicMappings":  atomicMappings,
-					"count":           len(atomicMappings),
+					"success":        true,
+					"interfaceId":    interfaceID,
+					"messageType":    messageType,
+					"fhirVersion":    fhirVersion,
+					"mappingMode":    mappingMode,
+					"atomicMappings": atomicMappings,
+					"count":          len(atomicMappings),
 				})
 			})
 
@@ -1715,12 +1755,12 @@ func main() {
 
 				transformSvc := services.NewHL7FHIRTransformServiceV3(db)
 				type batchResult struct {
-					Index       int                       `json:"index"`
-					MessageType string                    `json:"messageType"`
-					Success     bool                      `json:"success"`
-					Bundle      map[string]interface{}    `json:"bundle,omitempty"`
-					Errors      []string                  `json:"errors,omitempty"`
-					Warnings    []string                  `json:"warnings,omitempty"`
+					Index       int                    `json:"index"`
+					MessageType string                 `json:"messageType"`
+					Success     bool                   `json:"success"`
+					Bundle      map[string]interface{} `json:"bundle,omitempty"`
+					Errors      []string               `json:"errors,omitempty"`
+					Warnings    []string               `json:"warnings,omitempty"`
 				}
 
 				results := make([]batchResult, 0, len(rawMessages))
@@ -1740,8 +1780,10 @@ func main() {
 						results = append(results, batchResult{
 							Index:   i,
 							Success: false,
-							Errors:  []string{"parse failed: " + func() string {
-								if parsed != nil { return parsed.Error }
+							Errors: []string{"parse failed: " + func() string {
+								if parsed != nil {
+									return parsed.Error
+								}
 								return "nil result"
 							}()},
 						})

@@ -28,10 +28,10 @@ class DicomParseStepBuilder {
         if (!step.config) step.config = {};
         const cfg = step.config;
 
-        const sourceField = dicomEsc(cfg.sourceField || 'raw');
-        const outputField = dicomEsc(cfg.outputField || 'parsedDICOM');
+        const sourceField = (cfg.sourceField || 'raw');
+        const outputField = (cfg.outputField || 'parsedDICOM');
 
-        return `
+        return HtmlSafe.html`
         <div class="dicom-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Parse step.</strong> Extracts metadata (patient ID, patient name, study/series/

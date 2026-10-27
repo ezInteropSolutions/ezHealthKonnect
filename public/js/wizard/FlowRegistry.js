@@ -87,7 +87,7 @@ const FLOW_REGISTRY = {
         targetFormat: null,
         showFamilyFilter: false,
         showMappingUI: false,
-        isSinkOnly: true,
+        isSinkOnly: false,         // has a real destination: the Target Config step shows the outbound connector builder
         hasDelivery: false,
         skipUploadSteps: true,
         redirectToPipelineBuilder: false
@@ -99,7 +99,7 @@ const FLOW_REGISTRY = {
         targetFormat: null,
         showFamilyFilter: false,
         showMappingUI: false,
-        isSinkOnly: true,
+        isSinkOnly: false,         // has a real destination: the Target Config step shows the outbound connector builder
         hasDelivery: false,
         skipUploadSteps: true,
         redirectToPipelineBuilder: true   // skip completion modal; go straight to pipeline builder

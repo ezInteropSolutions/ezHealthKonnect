@@ -113,10 +113,10 @@ class DataMaskingBuilder {
         const format = cfg.maskAllPHIFormat || 'hl7v2';
 
         const rulesHtml = rules.length > 0
-            ? rules.map((rule, i) => this._buildRuleRow(rule, i, format)).join('')
+            ? rules.map((rule, i) => this._buildRuleRow(rule, i, format))
             : this._buildEmptyState();
 
-        return `
+        return HtmlSafe.html`
 <div class="dm-builder">
   <style>
     .dm-builder { font-size: 13px; }
@@ -497,7 +497,7 @@ class DataMaskingBuilder {
       <span class="dm-phi-toggle-label">Mask All PHI</span>
       <span class="dm-phi-badge">HIPAA Safe Harbor · 13 identifiers</span>
     </label>
-    <div id="dmPhiChips" ${cfg.maskAllPHI ? '' : 'style="display:none"'}>
+    <div id="dmPhiChips" ${cfg.maskAllPHI ? '' : HtmlSafe.raw('style="display:none"')}>
       <div class="dm-format-selector">
         <span class="dm-format-label">Format:</span>
         <div class="dm-format-tabs" id="dmFormatTabs">
@@ -540,12 +540,12 @@ class DataMaskingBuilder {
         const stratOpts = this._buildStrategyOptions(rule.strategy || 'mask');
         const condFields = this._buildConditionalFields(rule, idx);
         const placeholder = this._getFieldPlaceholder(format || 'hl7v2');
-        return `
+        return HtmlSafe.html`
 <tr data-rule-idx="${idx}" id="dmRuleRow_${idx}">
   <td>
     <input type="text" class="dm-field-input" id="dmField_${idx}"
            placeholder="${placeholder}"
-           value="${this._esc(rule.field || '')}">
+           value="${rule.field || ''}">
   </td>
   <td>
     <select class="dm-strategy-select" id="dmStrategy_${idx}">
@@ -571,12 +571,12 @@ class DataMaskingBuilder {
      * @returns {string} HTML options string
      */
     _buildStrategyOptions(selected) {
-        let html = '';
+        const html = [];
         for (const [key, meta] of DataMaskingBuilder.MASKING_STRATEGIES) {
             const sel = (key === selected || (!selected && key === 'mask')) ? 'selected' : '';
-            html += `<option value="${key}" ${sel} title="${this._esc(meta.description)}">${meta.label}</option>`;
+            html.push(HtmlSafe.html`<option value="${key}" ${sel} title="${meta.description}">${meta.label}</option>`);
         }
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -602,16 +602,16 @@ class DataMaskingBuilder {
         const subValueHidden  = (hasField('substituteType') && curSubType === 'custom') ? '' : 'dm-hidden';
 
         const subTypeOptions = ['name', 'ssn', 'phone', 'email', 'date', 'address', 'custom']
-            .map(t => `<option value="${t}" ${curSubType === t ? 'selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}${t === 'custom' ? '…' : ''}</option>`)
-            .join('');
+            .map(t => HtmlSafe.html`<option value="${t}" ${curSubType === t ? 'selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}${t === 'custom' ? '…' : ''}</option>`)
+            ;
 
-        return `
+        return HtmlSafe.html`
 <div class="dm-options-group">
   <div class="dm-option-block ${maskCharHidden}" id="dmMaskCharBlock_${idx}">
     <span class="dm-option-label">Char</span>
     <input type="text" class="dm-small-input" id="dmMaskChar_${idx}"
            maxlength="1" placeholder="*"
-           value="${this._esc(rule.maskChar || '*')}"
+           value="${rule.maskChar || '*'}"
            style="width:44px;">
   </div>
   <div class="dm-option-block ${keepFirstHidden}" id="dmKeepFirstBlock_${idx}">
@@ -628,7 +628,7 @@ class DataMaskingBuilder {
     <span class="dm-option-label">Salt</span>
     <input type="text" class="dm-field-input" id="dmHashSalt_${idx}"
            placeholder="optional salt"
-           value="${this._esc(rule.hashSalt || '')}"
+           value="${rule.hashSalt || ''}"
            style="width:110px;">
   </div>
   <div class="dm-option-block ${subTypeHidden}" id="dmSubTypeBlock_${idx}">
@@ -641,12 +641,12 @@ class DataMaskingBuilder {
     <span class="dm-option-label">Value</span>
     <input type="text" class="dm-field-input" id="dmSubValue_${idx}"
            placeholder="custom text"
-           value="${this._esc(rule.substituteValue || '')}"
+           value="${rule.substituteValue || ''}"
            style="width:90px;">
   </div>
   <span class="dm-option-label" id="dmNoOptions_${idx}"
         ${(hashSaltHidden && maskCharHidden && keepFirstHidden && keepLastHidden && subTypeHidden)
-            ? '' : 'style="display:none"'}
+            ? '' : HtmlSafe.raw('style="display:none"')}
         style="color:#94a3b8;font-style:italic;">
     —
   </span>
@@ -659,7 +659,7 @@ class DataMaskingBuilder {
      * @returns {string} HTML for the empty state
      */
     _buildEmptyState() {
-        return `
+        return HtmlSafe.html`
 <tr id="dmEmptyState">
   <td colspan="4">
     <div class="dm-empty-state">
@@ -690,12 +690,12 @@ class DataMaskingBuilder {
             groups.get(cat).fields.push(f);
         }
 
-        let html = '';
+        const html = [];
         for (const [cat, group] of groups) {
-            const chips = group.fields.map(f => `<span class="dm-phi-chip" title="${this._esc(f.description)}"><span class="dm-phi-chip-field">${this._esc(f.field)}</span><span class="dm-phi-chip-strategy"> · ${f.strategy}</span></span>`).join('');
-            html += `<div class="dm-phi-category"><span class="dm-phi-cat-label">#${group.hipaaId} — ${this._esc(cat)}</span><div class="dm-phi-cat-chips">${chips}</div></div>`;
+            const chips = group.fields.map(f => HtmlSafe.html`<span class="dm-phi-chip" title="${f.description}"><span class="dm-phi-chip-field">${f.field}</span><span class="dm-phi-chip-strategy"> · ${f.strategy}</span></span>`);
+            html.push(HtmlSafe.html`<div class="dm-phi-category"><span class="dm-phi-cat-label">#${group.hipaaId} — ${cat}</span><div class="dm-phi-cat-chips">${chips}</div></div>`);
         }
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -807,7 +807,7 @@ class DataMaskingBuilder {
                 }
                 // Update placement guidance
                 const hint = document.getElementById('dmPlacementHint');
-                if (hint) hint.innerHTML = this._buildPlacementHint(fmt);
+                if (hint) hint.innerHTML = HtmlSafe.html`${this._buildPlacementHint(fmt)}`;
                 // Update field path placeholders
                 document.querySelectorAll('.dm-field-input').forEach(inp => {
                     inp.placeholder = this._getFieldPlaceholder(fmt);
@@ -856,7 +856,7 @@ class DataMaskingBuilder {
         const activeTop = document.querySelector('#dmTopFormatTabs .dm-top-format-tab.active');
         const currentFmt = activeTop ? activeTop.dataset.format : 'hl7v2';
         const tempDiv = document.createElement('tbody');
-        tempDiv.innerHTML = this._buildRuleRow(newRule, idx, currentFmt);
+        tempDiv.innerHTML = HtmlSafe.html`${this._buildRuleRow(newRule, idx, currentFmt)}`;
         const newRow = tempDiv.firstElementChild;
         tbody.appendChild(newRow);
 
@@ -899,7 +899,7 @@ class DataMaskingBuilder {
 
         if (rows.length === 0) {
             // Show empty state again
-            tbody.innerHTML = this._buildEmptyState();
+            tbody.innerHTML = HtmlSafe.html`${this._buildEmptyState()}`;
             return;
         }
 
@@ -1035,7 +1035,7 @@ class DataMaskingBuilder {
             btn.classList.toggle('active', btn.dataset.format === format);
         });
         const fieldList = document.getElementById('dmPhiFieldList');
-        if (fieldList) fieldList.innerHTML = this._renderPhiPreview(format);
+        if (fieldList) fieldList.innerHTML = HtmlSafe.html`${this._renderPhiPreview(format)}`;
     }
 
     /**
@@ -1061,13 +1061,13 @@ class DataMaskingBuilder {
      */
     _buildPlacementHint(format) {
         const hints = {
-            hl7v2: `<i class="fas fa-info-circle"></i>
+            hl7v2: HtmlSafe.html`<i class="fas fa-info-circle"></i>
                     <span>Place this step <b>before the outbound connector</b> for HL7 v2 output.
                     Use paths like <code>PID.5</code>, <code>PID.19</code>, <code>MSH.4</code>.</span>`,
-            fhir:  `<i class="fas fa-info-circle"></i>
+            fhir:  HtmlSafe.html`<i class="fas fa-info-circle"></i>
                     <span>For FHIR output, place this step <b>after the FHIR Transform step</b>.
                     Use paths like <code>Patient.name[0].family</code>, <code>Patient.identifier[0].value</code>.</span>`,
-            json:  `<i class="fas fa-info-circle"></i>
+            json:  HtmlSafe.html`<i class="fas fa-info-circle"></i>
                     <span>Place this step <b>after your JSON transform</b> and before the outbound connector.
                     Use dot-notation paths like <code>patient.name</code>, <code>patient.ssn</code>.</span>`,
         };

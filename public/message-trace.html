@@ -149,9 +149,11 @@
 
 </div><!-- /dashboard-container -->
 
+<script src="/js/core/html-safe.js"></script>
 <script src="/js/core/app-dialogs.js"></script>
 <script src="/js/services/AuthService.js"></script>
-<script src="js/components/sidebar-nav.js?v=3"></script>
+<script src="/js/core/app-auth.js?v=2"></script>
+<script src="js/components/sidebar-nav.js?v=7"></script>
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
     const ok = await window.AuthService.initialize();
@@ -178,12 +180,6 @@ const levelIcons = {
     info:    'fa-circle-info',
     debug:   'fa-bug',
 };
-
-function esc(s) {
-    return String(s ?? '').replace(/[&<>"']/g, (c) => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[c]));
-}
 
 async function runTrace() {
     const input = document.getElementById('correlationInput');
@@ -214,14 +210,14 @@ async function runTrace() {
         }
         if (!res.ok) {
             const errText = await res.text();
-            body.innerHTML = '<div class="empty error"><i class="fas fa-triangle-exclamation"></i>' +
-                '<p><strong>Request failed</strong> (' + esc(res.status) + ')<br>' + esc(errText) + '</p></div>';
+            body.innerHTML = HtmlSafe.html`<div class="empty error"><i class="fas fa-triangle-exclamation"></i>
+                <p><strong>Request failed</strong> (${res.status})<br>${errText}</p></div>`;
             return;
         }
 
         const data = await res.json();
         if (!data.success) {
-            body.innerHTML = '<div class="empty error"><i class="fas fa-triangle-exclamation"></i><p>' + esc(data.error || 'Unknown error') + '</p></div>';
+            body.innerHTML = HtmlSafe.html`<div class="empty error"><i class="fas fa-triangle-exclamation"></i><p>${data.error || 'Unknown error'}</p></div>`;
             return;
         }
 
@@ -234,9 +230,9 @@ async function runTrace() {
             return;
         }
 
-        body.innerHTML = '<div class="timeline">' + timeline.map(renderEntry).join('') + '</div>';
+        body.innerHTML = HtmlSafe.html`<div class="timeline">${timeline.map(renderEntry)}</div>`;
     } catch (err) {
-        body.innerHTML = '<div class="empty error"><i class="fas fa-plug-circle-xmark"></i><p><strong>Could not reach the server.</strong><br>' + esc(err.message) + '</p></div>';
+        body.innerHTML = HtmlSafe.html`<div class="empty error"><i class="fas fa-plug-circle-xmark"></i><p><strong>Could not reach the server.</strong><br>${err.message}</p></div>`;
     } finally {
         btn.disabled = false;
     }
@@ -247,18 +243,18 @@ function renderEntry(entry) {
     const icon = levelIcons[level] || levelIcons.info;
     const ts = entry.ts ? new Date(entry.ts).toLocaleString() : '';
     const fields = entry.fields && Object.keys(entry.fields).length
-        ? '<div class="timeline-fields">' + esc(JSON.stringify(entry.fields)) + '</div>'
+        ? HtmlSafe.html`<div class="timeline-fields">${JSON.stringify(entry.fields)}</div>`
         : '';
 
-    return '<div class="timeline-row">' +
-        '<div class="timeline-icon level-' + esc(level) + '"><i class="fas ' + icon + '"></i></div>' +
-        '<div class="timeline-main">' +
-            '<div class="timeline-top"><span class="timeline-stage">' + esc(entry.stage || 'event') + '</span></div>' +
-            '<div class="timeline-message">' + esc(entry.message) + '</div>' +
-            fields +
-        '</div>' +
-        '<div class="timeline-ts">' + esc(ts) + '</div>' +
-    '</div>';
+    return HtmlSafe.html`<div class="timeline-row">
+        <div class="timeline-icon level-${level}"><i class="fas ${icon}"></i></div>
+        <div class="timeline-main">
+            <div class="timeline-top"><span class="timeline-stage">${entry.stage || 'event'}</span></div>
+            <div class="timeline-message">${entry.message}</div>
+            ${fields}
+        </div>
+        <div class="timeline-ts">${ts}</div>
+    </div>`;
 }
 </script>
 </body>

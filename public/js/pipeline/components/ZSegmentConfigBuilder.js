@@ -115,7 +115,7 @@ class ZSegmentConfigBuilder extends EventTarget {
             console.error(`ZSegmentConfigBuilder: container #${this.containerId} not found`);
             return;
         }
-        container.innerHTML = this._buildHTML();
+        container.innerHTML = HtmlSafe.html`${this._buildHTML()}`;
         this._attachEvents(container);
         return this;
     }
@@ -135,21 +135,21 @@ class ZSegmentConfigBuilder extends EventTarget {
         const segCards = detectionResult.data.map(seg => {
             const hasOOB = seg.hasOobTemplate;
             const oobTmpl = seg.suggestedTemplates.find(t => t.isSystem);
-            return `
-            <div class="zseg-detect-card ${hasOOB ? 'has-oob' : ''}" data-segment-id="${esc(seg.segmentId)}">
+            return HtmlSafe.html`
+            <div class="zseg-detect-card ${hasOOB ? 'has-oob' : ''}" data-segment-id="${seg.segmentId}">
                 <div class="zseg-detect-card-header">
-                    <span class="zseg-segment-badge">${esc(seg.segmentId)}</span>
-                    ${hasOOB ? `<span class="zseg-oob-badge">OOB Template</span>` : '<span class="zseg-custom-badge">Custom</span>'}
+                    <span class="zseg-segment-badge">${seg.segmentId}</span>
+                    ${hasOOB ? HtmlSafe.html`<span class="zseg-oob-badge">OOB Template</span>` : HtmlSafe.raw('<span class="zseg-custom-badge">Custom</span>')}
                 </div>
-                ${oobTmpl ? `<p class="zseg-detect-desc">${esc(oobTmpl.description)}</p>` : `<p class="zseg-detect-desc">No OOB template — configure manually</p>`}
+                ${oobTmpl ? HtmlSafe.html`<p class="zseg-detect-desc">${oobTmpl.description}</p>` : HtmlSafe.html`<p class="zseg-detect-desc">No OOB template — configure manually</p>`}
                 <div class="zseg-detect-actions">
-                    ${oobTmpl ? `<button class="btn btn-sm btn-primary zseg-apply-oob" data-template-id="${esc(oobTmpl.id)}" data-segment-id="${esc(seg.segmentId)}">Apply OOB Template</button>` : ''}
-                    <button class="btn btn-sm btn-outline-secondary zseg-configure-manual" data-segment-id="${esc(seg.segmentId)}">Configure Manually</button>
+                    ${oobTmpl ? HtmlSafe.html`<button class="btn btn-sm btn-primary zseg-apply-oob" data-template-id="${oobTmpl.id}" data-segment-id="${seg.segmentId}">Apply OOB Template</button>` : ''}
+                    <button class="btn btn-sm btn-outline-secondary zseg-configure-manual" data-segment-id="${seg.segmentId}">Configure Manually</button>
                 </div>
             </div>`;
-        }).join('');
+        });
 
-        container.innerHTML = `
+        container.innerHTML = HtmlSafe.html`
         <div class="zseg-detection-banner">
             <div class="zseg-detection-header">
                 <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -171,7 +171,7 @@ class ZSegmentConfigBuilder extends EventTarget {
 
     _buildHTML() {
         const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        return `
+        return HtmlSafe.html`
         <div class="zseg-builder">
             ${this._buildStyles()}
             <div class="zseg-builder-header">
@@ -190,20 +190,20 @@ class ZSegmentConfigBuilder extends EventTarget {
     _buildMFNOverridesSection() {
         const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-        const rows = this.mfnOverrides.map(o => `
+        const rows = this.mfnOverrides.map(o => HtmlSafe.html`
             <tr>
-                <td><code>${esc(o.mfiIdentifier)}</code></td>
-                <td>${esc(o.fhirResource)}</td>
-                <td>${esc(o.description || '—')}</td>
+                <td><code>${o.mfiIdentifier}</code></td>
+                <td>${o.fhirResource}</td>
+                <td>${o.description || '—'}</td>
                 <td>
                     <span class="badge ${o.isActive ? 'badge-success' : 'badge-secondary'}">${o.isActive ? 'Active' : 'Inactive'}</span>
                 </td>
                 <td>
-                    <button class="btn btn-xs btn-outline-danger zseg-delete-mfn" data-id="${esc(o.id)}" title="Remove">×</button>
+                    <button class="btn btn-xs btn-outline-danger zseg-delete-mfn" data-id="${o.id}" title="Remove">×</button>
                 </td>
-            </tr>`).join('');
+            </tr>`);
 
-        return `
+        return HtmlSafe.html`
         <div class="zseg-section" id="zseg-mfn-section">
             <div class="zseg-section-header">
                 <h4>MFI.1 → FHIR Resource Override <span class="zseg-tier-badge">Tier 2</span></h4>
@@ -227,7 +227,7 @@ class ZSegmentConfigBuilder extends EventTarget {
                     <div class="form-group col-md-3">
                         <label>FHIR Resource</label>
                         <select class="form-control" id="zseg-mfn-resource">
-                            ${FHIR_RESOURCES.map(r => `<option value="${r}">${r}</option>`).join('')}
+                            ${FHIR_RESOURCES.map(r => HtmlSafe.html`<option value="${r}">${r}</option>`)}
                         </select>
                     </div>
                     <div class="form-group col-md-4">
@@ -246,9 +246,9 @@ class ZSegmentConfigBuilder extends EventTarget {
     }
 
     _buildZSegmentsSection() {
-        const configCards = this.configs.map(c => this._buildConfigCard(c)).join('');
+        const configCards = this.configs.map(c => this._buildConfigCard(c));
 
-        return `
+        return HtmlSafe.html`
         <div class="zseg-section" id="zseg-configs-section">
             <div class="zseg-section-header">
                 <h4>Z-Segment Configurations <span class="zseg-tier-badge">Tier 3</span></h4>
@@ -267,7 +267,7 @@ class ZSegmentConfigBuilder extends EventTarget {
             </div>
 
             <div id="zseg-config-cards">
-                ${configCards || '<p class="text-muted">No Z-segments configured. Click "Add Z-Segment" or apply a template.</p>'}
+                ${configCards.length ? configCards : HtmlSafe.raw('<p class="text-muted">No Z-segments configured. Click "Add Z-Segment" or apply a template.</p>')}
             </div>
 
             <!-- Add/Edit config panel (hidden by default) -->
@@ -288,43 +288,43 @@ class ZSegmentConfigBuilder extends EventTarget {
         const roleColors = { primary: '#0d6efd', related: '#6f42c1', extension: '#20c997' };
         const roleColor  = roleColors[cfg.resourceRole] || '#6c757d';
 
-        const fieldRows = (cfg.fieldMappings || []).map((f, i) => `
+        const fieldRows = (cfg.fieldMappings || []).map((f, i) => HtmlSafe.html`
             <tr class="zseg-field-row">
-                <td><code>${esc(f.position)}</code></td>
-                <td>${esc(f.fieldLabel || '—')}</td>
-                <td><span class="badge badge-light">${esc(f.hl7DataType)}</span></td>
-                <td><code class="small">${esc(f.fhirPath)}</code></td>
-                <td><span class="badge badge-info">${esc(f.transform)}</span></td>
-                <td>${f.isRequired ? '<span class="text-danger">✓</span>' : ''}</td>
+                <td><code>${f.position}</code></td>
+                <td>${f.fieldLabel || '—'}</td>
+                <td><span class="badge badge-light">${f.hl7DataType}</span></td>
+                <td><code class="small">${f.fhirPath}</code></td>
+                <td><span class="badge badge-info">${f.transform}</span></td>
+                <td>${f.isRequired ? HtmlSafe.raw('<span class="text-danger">✓</span>') : ''}</td>
                 <td>
-                    <button class="btn btn-xs btn-outline-primary zseg-edit-field" data-config-id="${esc(cfg.id)}" data-field-id="${esc(f.id)}" title="Edit">✎</button>
-                    <button class="btn btn-xs btn-outline-danger zseg-delete-field" data-config-id="${esc(cfg.id)}" data-field-id="${esc(f.id)}" title="Delete">×</button>
+                    <button class="btn btn-xs btn-outline-primary zseg-edit-field" data-config-id="${cfg.id}" data-field-id="${f.id}" title="Edit">✎</button>
+                    <button class="btn btn-xs btn-outline-danger zseg-delete-field" data-config-id="${cfg.id}" data-field-id="${f.id}" title="Delete">×</button>
                 </td>
-            </tr>`).join('');
+            </tr>`);
 
-        return `
-        <div class="zseg-config-card ${cfg.isActive ? '' : 'inactive'}" data-config-id="${esc(cfg.id)}">
-            <div class="zseg-config-card-header" data-toggle-config="${esc(cfg.id)}">
+        return HtmlSafe.html`
+        <div class="zseg-config-card ${cfg.isActive ? '' : 'inactive'}" data-config-id="${cfg.id}">
+            <div class="zseg-config-card-header" data-toggle-config="${cfg.id}">
                 <div class="zseg-config-card-title">
-                    <span class="zseg-segment-badge">${esc(cfg.segmentId)}</span>
+                    <span class="zseg-segment-badge">${cfg.segmentId}</span>
                     <span class="zseg-arrow">→</span>
-                    <span class="zseg-resource-name">${esc(cfg.targetFhirResource)}</span>
-                    <span class="zseg-role-badge" style="background:${roleColor}20;color:${roleColor};">${esc(cfg.resourceRole)}</span>
+                    <span class="zseg-resource-name">${cfg.targetFhirResource}</span>
+                    <span class="zseg-role-badge" style="background:${roleColor}20;color:${roleColor};">${cfg.resourceRole}</span>
                     <span class="zseg-field-count">${(cfg.fieldMappings || []).length} fields</span>
-                    ${!cfg.isActive ? '<span class="badge badge-warning ml-2">Inactive</span>' : ''}
-                    ${cfg.sourceTemplateId ? '<span class="badge badge-secondary ml-1" title="Applied from template">template</span>' : ''}
+                    ${!cfg.isActive ? HtmlSafe.raw('<span class="badge badge-warning ml-2">Inactive</span>') : ''}
+                    ${cfg.sourceTemplateId ? HtmlSafe.raw('<span class="badge badge-secondary ml-1" title="Applied from template">template</span>') : ''}
                 </div>
                 <div class="zseg-config-card-actions" onclick="event.stopPropagation()">
-                    <button class="btn btn-xs btn-outline-primary zseg-edit-config" data-config-id="${esc(cfg.id)}" title="Edit">✎</button>
-                    <button class="btn btn-xs btn-outline-secondary zseg-save-as-template" data-config-id="${esc(cfg.id)}" title="Save as Template">📋</button>
-                    <button class="btn btn-xs btn-outline-danger zseg-delete-config" data-config-id="${esc(cfg.id)}" title="Delete">🗑</button>
+                    <button class="btn btn-xs btn-outline-primary zseg-edit-config" data-config-id="${cfg.id}" title="Edit">✎</button>
+                    <button class="btn btn-xs btn-outline-secondary zseg-save-as-template" data-config-id="${cfg.id}" title="Save as Template">📋</button>
+                    <button class="btn btn-xs btn-outline-danger zseg-delete-config" data-config-id="${cfg.id}" title="Delete">🗑</button>
                     <span class="zseg-expand-icon">${isExpanded ? '▲' : '▼'}</span>
                 </div>
             </div>
 
-            ${isExpanded ? `
+            ${isExpanded ? HtmlSafe.html`
             <div class="zseg-config-card-body">
-                ${cfg.description ? `<p class="text-muted small mb-2">${esc(cfg.description)}</p>` : ''}
+                ${cfg.description ? HtmlSafe.html`<p class="text-muted small mb-2">${cfg.description}</p>` : ''}
                 <table class="table table-sm zseg-fields-table">
                     <thead>
                         <tr>
@@ -332,15 +332,15 @@ class ZSegmentConfigBuilder extends EventTarget {
                             <th>FHIR Path</th><th>Transform</th><th>Req.</th><th></th>
                         </tr>
                     </thead>
-                    <tbody id="zseg-fields-${esc(cfg.id)}">${fieldRows}</tbody>
+                    <tbody id="zseg-fields-${cfg.id}">${fieldRows}</tbody>
                 </table>
-                <button class="btn btn-xs btn-outline-primary mt-1 zseg-add-field" data-config-id="${esc(cfg.id)}">
+                <button class="btn btn-xs btn-outline-primary mt-1 zseg-add-field" data-config-id="${cfg.id}">
                     + Add Field Mapping
                 </button>
             </div>
 
             <!-- Inline field editor for this config -->
-            <div class="zseg-field-editor" id="zseg-field-editor-${esc(cfg.id)}" style="display:none;">
+            <div class="zseg-field-editor" id="zseg-field-editor-${cfg.id}" style="display:none;">
                 ${this._buildFieldEditor(cfg.id)}
             </div>
             ` : ''}
@@ -350,7 +350,7 @@ class ZSegmentConfigBuilder extends EventTarget {
     _buildConfigEditor(cfg = null) {
         const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         const isEdit = !!cfg;
-        return `
+        return HtmlSafe.html`
         <div class="zseg-editor-panel">
             <h5>${isEdit ? 'Edit Z-Segment' : 'Add Z-Segment'}</h5>
             <div class="form-row">
@@ -358,26 +358,26 @@ class ZSegmentConfigBuilder extends EventTarget {
                     <label>Segment ID <span class="text-danger">*</span></label>
                     <input type="text" class="form-control text-uppercase" id="zseg-editor-segment-id"
                            placeholder="ZEM" maxlength="10"
-                           value="${esc(cfg ? cfg.segmentId : '')}"
+                           value="${cfg ? cfg.segmentId : ''}"
                            ${isEdit ? 'readonly' : ''}>
                     <small class="form-text text-muted">e.g. ZEM, ZPI, ZIN, ZPD</small>
                 </div>
                 <div class="form-group col-md-3">
                     <label>Target FHIR Resource <span class="text-danger">*</span></label>
                     <select class="form-control" id="zseg-editor-resource">
-                        ${FHIR_RESOURCES.map(r => `<option value="${r}" ${cfg && cfg.targetFhirResource === r ? 'selected' : ''}>${r}</option>`).join('')}
+                        ${FHIR_RESOURCES.map(r => HtmlSafe.html`<option value="${r}" ${cfg && cfg.targetFhirResource === r ? 'selected' : ''}>${r}</option>`)}
                     </select>
                 </div>
                 <div class="form-group col-md-3">
                     <label>Role</label>
                     <select class="form-control" id="zseg-editor-role">
-                        ${RESOURCE_ROLES.map(r => `<option value="${r.value}" ${cfg && cfg.resourceRole === r.value ? 'selected' : ''} title="${esc(r.desc)}">${r.label}</option>`).join('')}
+                        ${RESOURCE_ROLES.map(r => HtmlSafe.html`<option value="${r.value}" ${cfg && cfg.resourceRole === r.value ? 'selected' : ''} title="${r.desc}">${r.label}</option>`)}
                     </select>
                 </div>
                 <div class="form-group col-md-3">
                     <label>Occurrence (if duplicate seg IDs)</label>
                     <input type="number" class="form-control" id="zseg-editor-occurrence"
-                           min="0" max="9" value="${esc(cfg ? cfg.occurrenceIndex : 0)}">
+                           min="0" max="9" value="${cfg ? cfg.occurrenceIndex : 0}">
                     <small class="form-text text-muted">0 = first, 1 = second, etc.</small>
                 </div>
             </div>
@@ -385,10 +385,10 @@ class ZSegmentConfigBuilder extends EventTarget {
                 <label>Description</label>
                 <input type="text" class="form-control" id="zseg-editor-desc"
                        placeholder="Optional description for this Z-segment"
-                       value="${esc(cfg ? cfg.description : '')}">
+                       value="${cfg ? cfg.description : ''}">
             </div>
             <div class="d-flex">
-                <button class="btn btn-primary mr-2" id="zseg-editor-save" data-config-id="${esc(cfg ? cfg.id : '')}">
+                <button class="btn btn-primary mr-2" id="zseg-editor-save" data-config-id="${cfg ? cfg.id : ''}">
                     ${isEdit ? 'Update' : 'Add Z-Segment'}
                 </button>
                 <button class="btn btn-secondary" id="zseg-editor-cancel">Cancel</button>
@@ -400,92 +400,92 @@ class ZSegmentConfigBuilder extends EventTarget {
         const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         const isEdit = !!field;
         const transformOptions = this.transforms.map(t =>
-            `<option value="${esc(t.code)}" ${field && field.transform === t.code ? 'selected' : ''}>${esc(t.label)}</option>`
-        ).join('');
+            HtmlSafe.html`<option value="${t.code}" ${field && field.transform === t.code ? 'selected' : ''}>${t.label}</option>`
+        );
 
-        return `
+        return HtmlSafe.html`
         <div class="zseg-field-editor-inner">
             <h6>${isEdit ? 'Edit Field' : 'Add Field Mapping'}</h6>
             <div class="form-row">
                 <div class="form-group col-md-2">
                     <label>Position <span class="text-danger">*</span></label>
-                    <input type="text" class="form-control form-control-sm" id="zseg-field-position-${esc(configId)}"
-                           placeholder="ZEM.1" value="${esc(field ? field.position : '')}">
+                    <input type="text" class="form-control form-control-sm" id="zseg-field-position-${configId}"
+                           placeholder="ZEM.1" value="${field ? field.position : ''}">
                     <small class="form-text text-muted">e.g. ZEM.1, ZEM.3.2</small>
                 </div>
                 <div class="form-group col-md-3">
                     <label>Label</label>
-                    <input type="text" class="form-control form-control-sm" id="zseg-field-label-${esc(configId)}"
-                           placeholder="Employer ID" value="${esc(field ? field.fieldLabel : '')}">
+                    <input type="text" class="form-control form-control-sm" id="zseg-field-label-${configId}"
+                           placeholder="Employer ID" value="${field ? field.fieldLabel : ''}">
                 </div>
                 <div class="form-group col-md-2">
                     <label>HL7 Type</label>
-                    <select class="form-control form-control-sm" id="zseg-field-datatype-${esc(configId)}">
-                        ${HL7_DATA_TYPES.map(t => `<option value="${t}" ${field && field.hl7DataType === t ? 'selected' : ''}>${t}</option>`).join('')}
+                    <select class="form-control form-control-sm" id="zseg-field-datatype-${configId}">
+                        ${HL7_DATA_TYPES.map(t => HtmlSafe.html`<option value="${t}" ${field && field.hl7DataType === t ? 'selected' : ''}>${t}</option>`)}
                     </select>
                 </div>
                 <div class="form-group col-md-2">
                     <label>FHIR Path <span class="text-danger">*</span></label>
-                    <input type="text" class="form-control form-control-sm" id="zseg-field-fhirpath-${esc(configId)}"
-                           placeholder="identifier[0].value" value="${esc(field ? field.fhirPath : '')}">
+                    <input type="text" class="form-control form-control-sm" id="zseg-field-fhirpath-${configId}"
+                           placeholder="identifier[0].value" value="${field ? field.fhirPath : ''}">
                 </div>
                 <div class="form-group col-md-2">
                     <label>Transform</label>
-                    <select class="form-control form-control-sm" id="zseg-field-transform-${esc(configId)}">
+                    <select class="form-control form-control-sm" id="zseg-field-transform-${configId}">
                         ${transformOptions}
                     </select>
                 </div>
                 <div class="form-group col-md-1 d-flex flex-column justify-content-end">
                     <div class="form-check mb-1">
-                        <input class="form-check-input" type="checkbox" id="zseg-field-required-${esc(configId)}"
+                        <input class="form-check-input" type="checkbox" id="zseg-field-required-${configId}"
                                ${field && field.isRequired ? 'checked' : ''}>
-                        <label class="form-check-label" for="zseg-field-required-${esc(configId)}">Req.</label>
+                        <label class="form-check-label" for="zseg-field-required-${configId}">Req.</label>
                     </div>
                 </div>
             </div>
             <div class="form-group">
                 <label>Default Value (when field empty)</label>
-                <input type="text" class="form-control form-control-sm" id="zseg-field-default-${esc(configId)}"
-                       placeholder="Optional default" value="${esc(field ? field.defaultValue : '')}">
+                <input type="text" class="form-control form-control-sm" id="zseg-field-default-${configId}"
+                       placeholder="Optional default" value="${field ? field.defaultValue : ''}">
             </div>
             <div class="d-flex">
                 <button class="btn btn-sm btn-primary mr-2 zseg-field-save"
-                        data-config-id="${esc(configId)}"
-                        data-field-id="${esc(field ? field.id : '')}">
+                        data-config-id="${configId}"
+                        data-field-id="${field ? field.id : ''}">
                     ${isEdit ? 'Update Field' : 'Add Field'}
                 </button>
-                <button class="btn btn-sm btn-secondary zseg-field-cancel" data-config-id="${esc(configId)}">Cancel</button>
+                <button class="btn btn-sm btn-secondary zseg-field-cancel" data-config-id="${configId}">Cancel</button>
             </div>
         </div>`;
     }
 
     _buildTemplatePicker() {
         const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        const cards = this.templates.map(t => `
-            <div class="zseg-template-card" data-template-id="${esc(t.id)}">
+        const cards = this.templates.map(t => HtmlSafe.html`
+            <div class="zseg-template-card" data-template-id="${t.id}">
                 <div class="zseg-template-card-header">
-                    <span class="zseg-segment-badge">${esc(t.segmentId)}</span>
-                    <strong>${esc(t.templateName)}</strong>
-                    ${t.isSystem ? '<span class="badge badge-primary ml-1">OOB</span>' : ''}
-                    <span class="zseg-resource-name ml-2">→ ${esc(t.targetFhirResource)}</span>
+                    <span class="zseg-segment-badge">${t.segmentId}</span>
+                    <strong>${t.templateName}</strong>
+                    ${t.isSystem ? HtmlSafe.raw('<span class="badge badge-primary ml-1">OOB</span>') : ''}
+                    <span class="zseg-resource-name ml-2">→ ${t.targetFhirResource}</span>
                     <span class="zseg-field-count">${(t.fields || []).length} fields</span>
                 </div>
-                <p class="text-muted small mb-2">${esc(t.description || '')}</p>
+                <p class="text-muted small mb-2">${t.description || ''}</p>
                 <div class="zseg-template-fields-preview">
                     ${(t.fields || []).slice(0, 4).map(f =>
-                        `<span class="zseg-field-chip"><code>${esc(f.position)}</code> → ${esc(f.fhirPath)}</span>`
-                    ).join('')}
-                    ${(t.fields || []).length > 4 ? `<span class="text-muted small">+${(t.fields || []).length - 4} more</span>` : ''}
+                        HtmlSafe.html`<span class="zseg-field-chip"><code>${f.position}</code> → ${f.fhirPath}</span>`
+                    )}
+                    ${(t.fields || []).length > 4 ? HtmlSafe.html`<span class="text-muted small">+${(t.fields || []).length - 4} more</span>` : ''}
                 </div>
                 <div class="mt-2">
                     <span class="text-muted small">Used ${t.usageCount} time${t.usageCount !== 1 ? 's' : ''}</span>
                 </div>
-                <button class="btn btn-sm btn-primary mt-2 zseg-apply-template" data-template-id="${esc(t.id)}">
+                <button class="btn btn-sm btn-primary mt-2 zseg-apply-template" data-template-id="${t.id}">
                     Apply This Template
                 </button>
-            </div>`).join('') || '<p class="text-muted">No templates available.</p>';
+            </div>`);
 
-        return `
+        return HtmlSafe.html`
         <div class="zseg-editor-panel">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h5>Apply Template</h5>
@@ -495,7 +495,7 @@ class ZSegmentConfigBuilder extends EventTarget {
                 <input type="text" class="form-control" id="zseg-template-search"
                        placeholder="Search templates by name or segment…">
             </div>
-            <div class="zseg-template-grid" id="zseg-template-grid">${cards}</div>
+            <div class="zseg-template-grid" id="zseg-template-grid">${cards.length ? cards : HtmlSafe.raw('<p class="text-muted">No templates available.</p>')}</div>
         </div>`;
     }
 
@@ -527,7 +527,7 @@ class ZSegmentConfigBuilder extends EventTarget {
         // Add Z-segment button
         container.querySelector('#zseg-add-config-btn')?.addEventListener('click', () => {
             const editor = container.querySelector('#zseg-config-editor');
-            editor.innerHTML = this._buildConfigEditor(null);
+            editor.innerHTML = HtmlSafe.html`${this._buildConfigEditor(null)}`;
             editor.style.display = 'block';
             this._attachConfigEditorEvents(container);
         });
@@ -561,7 +561,7 @@ class ZSegmentConfigBuilder extends EventTarget {
                 const cfg = this.configs.find(c => c.id === configId);
                 if (!cfg) return;
                 const editor = container.querySelector('#zseg-config-editor');
-                editor.innerHTML = this._buildConfigEditor(cfg);
+                editor.innerHTML = HtmlSafe.html`${this._buildConfigEditor(cfg)}`;
                 editor.style.display = 'block';
                 this._attachConfigEditorEvents(container);
             }
@@ -593,7 +593,7 @@ class ZSegmentConfigBuilder extends EventTarget {
                 const editorId = `zseg-field-editor-${configId}`;
                 const editorEl = container.querySelector(`#${editorId}`);
                 if (editorEl) {
-                    editorEl.innerHTML = this._buildFieldEditor(configId, null);
+                    editorEl.innerHTML = HtmlSafe.html`${this._buildFieldEditor(configId, null)}`;
                     editorEl.style.display = 'block';
                     this._attachFieldEditorEvents(container, configId);
                 }
@@ -611,7 +611,7 @@ class ZSegmentConfigBuilder extends EventTarget {
                 const editorId = `zseg-field-editor-${configId}`;
                 const editorEl = container.querySelector(`#${editorId}`);
                 if (editorEl) {
-                    editorEl.innerHTML = this._buildFieldEditor(configId, field);
+                    editorEl.innerHTML = HtmlSafe.html`${this._buildFieldEditor(configId, field)}`;
                     editorEl.style.display = 'block';
                     this._attachFieldEditorEvents(container, configId);
                 }
@@ -663,7 +663,7 @@ class ZSegmentConfigBuilder extends EventTarget {
                 const segmentId = e.target.dataset.segmentId;
                 const inlineArea = container.querySelector('#zseg-inline-config');
                 if (inlineArea) {
-                    inlineArea.innerHTML = `
+                    inlineArea.innerHTML = HtmlSafe.html`
                         <div style="margin-top:12px;padding:12px;background:#f8f9fa;border-radius:6px;">
                             ${this._buildConfigEditor(null)}
                         </div>`;
@@ -889,20 +889,20 @@ class ZSegmentConfigBuilder extends EventTarget {
     _refresh(container) {
         const cardsEl = container.querySelector('#zseg-config-cards');
         if (cardsEl) {
-            const configCards = this.configs.map(c => this._buildConfigCard(c)).join('');
-            cardsEl.innerHTML = configCards || '<p class="text-muted">No Z-segments configured. Click "Add Z-Segment" or apply a template.</p>';
+            const configCards = this.configs.map(c => this._buildConfigCard(c));
+            cardsEl.innerHTML = HtmlSafe.html`${configCards.length ? configCards : HtmlSafe.raw('<p class="text-muted">No Z-segments configured. Click "Add Z-Segment" or apply a template.</p>')}`;
         }
         const mfnRowsEl = container.querySelector('#zseg-mfn-rows');
         if (mfnRowsEl) {
             const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-            mfnRowsEl.innerHTML = this.mfnOverrides.map(o => `
+            mfnRowsEl.innerHTML = HtmlSafe.html`${this.mfnOverrides.map(o => HtmlSafe.html`
                 <tr>
-                    <td><code>${esc(o.mfiIdentifier)}</code></td>
-                    <td>${esc(o.fhirResource)}</td>
-                    <td>${esc(o.description || '—')}</td>
+                    <td><code>${o.mfiIdentifier}</code></td>
+                    <td>${o.fhirResource}</td>
+                    <td>${o.description || '—'}</td>
                     <td><span class="badge ${o.isActive ? 'badge-success' : 'badge-secondary'}">${o.isActive ? 'Active' : 'Inactive'}</span></td>
-                    <td><button class="btn btn-xs btn-outline-danger zseg-delete-mfn" data-id="${esc(o.id)}">×</button></td>
-                </tr>`).join('');
+                    <td><button class="btn btn-xs btn-outline-danger zseg-delete-mfn" data-id="${o.id}">×</button></td>
+                </tr>`)}`;
         }
     }
 
@@ -911,7 +911,7 @@ class ZSegmentConfigBuilder extends EventTarget {
     // ───────────────────────────────────────────────────────────────────────
 
     _buildStyles() {
-        return `<style>
+        return HtmlSafe.html`<style>
 .zseg-builder { font-size: 14px; }
 .zseg-builder-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 4px; }
 .zseg-builder-subtitle { color: #6c757d; font-size: 13px; margin-bottom: 20px; }
@@ -996,13 +996,13 @@ async function attachZSegmentWizardHook(opts = {}) {
         if (detection.detectedSegments && detection.detectedSegments.length > 0) {
             builder.renderDetectionBanner(detection, bannerContainer);
         } else {
-            bannerContainer.innerHTML = `
+            bannerContainer.innerHTML = HtmlSafe.html`
                 <div class="alert alert-light border small py-2">
                     No Z-segments detected in sample message.
                     <button class="btn btn-xs btn-outline-secondary ml-2" id="zseg-manual-add-btn">+ Add Z-Segment Manually</button>
                 </div>`;
             document.getElementById('zseg-manual-add-btn')?.addEventListener('click', () => {
-                bannerContainer.innerHTML = `<div id="${bannerContainerId}-full"></div>`;
+                bannerContainer.innerHTML = HtmlSafe.html`<div id="${bannerContainerId}-full"></div>`;
                 const fullBuilder = new ZSegmentConfigBuilder({
                     interfaceId,
                     containerId: `${bannerContainerId}-full`

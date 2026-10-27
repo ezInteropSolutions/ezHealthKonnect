@@ -33,8 +33,8 @@ const NCPDP_TRANSFORM_OPTIONS = [
 
 function ncpdpTransformOptionsHTML(selected) {
     return NCPDP_TRANSFORM_OPTIONS.map(o =>
-        `<option value="${ncpdpEsc(o.value)}" ${o.value === (selected || '') ? 'selected' : ''}>${ncpdpEsc(o.label)}</option>`
-    ).join('');
+        HtmlSafe.html`<option value="${o.value}" ${o.value === (selected || '') ? 'selected' : ''}>${o.label}</option>`
+    );
 }
 
 // Phase 1 scope — see CLAUDE.md's own "NCPDP SCRIPT Engine — Phase 1"
@@ -44,8 +44,8 @@ const NCPDP_TRANSACTION_TYPES = ['NewRx', 'CancelRx', 'CancelRxResponse', 'RxCha
 
 function ncpdpTransactionTypeOptionsHTML(selected) {
     return NCPDP_TRANSACTION_TYPES.map(t =>
-        `<option value="${ncpdpEsc(t)}" ${t === (selected || 'NewRx') ? 'selected' : ''}>${ncpdpEsc(t)}</option>`
-    ).join('');
+        HtmlSafe.html`<option value="${t}" ${t === (selected || 'NewRx') ? 'selected' : ''}>${t}</option>`
+    );
 }
 
 // ── NcpdpParseStepBuilder ────────────────────────────────────────────────────
@@ -61,10 +61,10 @@ class NcpdpParseStepBuilder {
         if (!step.config) step.config = {};
         const cfg = step.config;
 
-        const sourceField = ncpdpEsc(cfg.sourceField || 'raw');
-        const outputField = ncpdpEsc(cfg.outputField || 'parsedNCPDP');
+        const sourceField = (cfg.sourceField || 'raw');
+        const outputField = (cfg.outputField || 'parsedNCPDP');
 
-        return `
+        return HtmlSafe.html`
         <div class="ncpdp-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Parse step.</strong> Converts raw NCPDP SCRIPT (pharmacy e-prescribing) XML
@@ -124,10 +124,10 @@ class NcpdpValidateStepBuilder {
         if (!step.config) step.config = {};
         const cfg = step.config;
 
-        const sourceField = ncpdpEsc(cfg.sourceField || 'parsedNCPDP');
-        const outputField = ncpdpEsc(cfg.outputField || 'ncpdpValidation');
+        const sourceField = (cfg.sourceField || 'parsedNCPDP');
+        const outputField = (cfg.outputField || 'ncpdpValidation');
 
-        return `
+        return HtmlSafe.html`
         <div class="ncpdp-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Validate step.</strong> Checks a parsed NCPDP SCRIPT message against the
@@ -182,10 +182,10 @@ class NcpdpBuildStepBuilder {
         if (!step.config) step.config = {};
         const cfg = step.config;
 
-        const sourceField = ncpdpEsc(cfg.sourceField || 'parsedNCPDP');
-        const outputField = ncpdpEsc(cfg.outputField || 'ncpdpScript');
+        const sourceField = (cfg.sourceField || 'parsedNCPDP');
+        const outputField = (cfg.outputField || 'ncpdpScript');
 
-        return `
+        return HtmlSafe.html`
         <div class="ncpdp-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Build step.</strong> Builds a complete NCPDP SCRIPT XML message from canonical
@@ -297,7 +297,7 @@ class NcpdpMapToCanonicalStepBuilder {
     // re-fetches the right tree instead of silently keeping the previous one.
     _loadTransactionSchema() {
         if (this._transactionSchema) return;
-        const txType = ncpdpEsc(this._step.config.transactionType || 'NewRx');
+        const txType = encodeURIComponent(this._step.config.transactionType || 'NewRx');
         fetch(`/api/ncpdp/schema/transactions/${txType}/groups`, { signal: this._ac.signal })
             .then(r => r.ok ? r.json() : null)
             .then(data => {
@@ -410,13 +410,13 @@ class NcpdpMapToCanonicalStepBuilder {
     _fieldKeyOptionsHTML(fieldsCatalog, selectedKey) {
         return ['<option value="">-- Field --</option>']
             .concat((fieldsCatalog || []).map(f =>
-                `<option value="${ncpdpEsc(f.key)}" ${f.key === selectedKey ? 'selected' : ''}>${ncpdpEsc(f.key)}${f.required ? ' *' : ''}${f.name ? ' — ' + ncpdpEsc(f.name) : ''}</option>`))
-            .join('');
+                HtmlSafe.html`<option value="${f.key}" ${f.key === selectedKey ? 'selected' : ''}>${f.key}${f.required ? ' *' : ''}${f.name ? ' — ' + (f.name) : ''}</option>`))
+            ;
     }
 
     _renderAll() {
         const cfg = this._step.config;
-        return `
+        return HtmlSafe.html`
         <div id="ncpdpMapToCanonicalBuilder" class="ncpdp-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Map to Canonical step.</strong> No-code field mapping from any source shape
@@ -427,7 +427,7 @@ class NcpdpMapToCanonicalStepBuilder {
             <div class="config-group" style="margin-bottom:1.1rem;">
                 <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Output Field</label>
                 <input id="ncpdpMapOutputField" type="text" class="form-control form-control-sm"
-                    value="${ncpdpEsc(cfg.outputField)}" placeholder="parsedNCPDP"
+                    value="${cfg.outputField}" placeholder="parsedNCPDP"
                     style="font-family:monospace;font-size:0.82rem;">
             </div>
             <div class="config-group" style="margin-bottom:1.1rem;">
@@ -449,18 +449,18 @@ class NcpdpMapToCanonicalStepBuilder {
 
     _renderFlatFieldsSection(scope, label, fields) {
         if (!this._groupsByKey || (scope === 'body' && !this._transactionSchema)) {
-            return `<div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;font-size:0.78rem;color:#94a3b8;">Loading ${ncpdpEsc(label)}…</div>`;
+            return HtmlSafe.html`<div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;font-size:0.78rem;color:#94a3b8;">Loading ${label}…</div>`;
         }
         const catalog = this._rootFields(scope);
-        return `
+        return HtmlSafe.html`
         <div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-                <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;">${ncpdpEsc(label)}</div>
+                <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;">${label}</div>
                 <button type="button" class="btn btn-sm btn-outline-primary" style="font-size:0.75rem;"
                     onclick="window._ncpdpMapBuilder && window._ncpdpMapBuilder.addFlatField('${scope}')">+ Add Field</button>
             </div>
-            ${fields.map((f, i) => this._renderFieldRow(scope, null, f, i, catalog)).join('')}
-            ${fields.length === 0 ? '<div style="font-size:0.78rem;color:#94a3b8;">No fields mapped.</div>' : ''}
+            ${fields.map((f, i) => this._renderFieldRow(scope, null, f, i, catalog))}
+            ${fields.length === 0 ? HtmlSafe.raw('<div style="font-size:0.78rem;color:#94a3b8;">No fields mapped.</div>') : ''}
         </div>`;
     }
 
@@ -468,34 +468,34 @@ class NcpdpMapToCanonicalStepBuilder {
 
     _renderGroupsSection(scope, label) {
         if (!this._groupsByKey || (scope === 'body' && !this._transactionSchema)) {
-            return `<div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;font-size:0.78rem;color:#94a3b8;">Loading ${ncpdpEsc(label)}…</div>`;
+            return HtmlSafe.html`<div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;font-size:0.78rem;color:#94a3b8;">Loading ${label}…</div>`;
         }
         const rootGroups = this._rootGroups(scope);
-        return `
+        return HtmlSafe.html`
         <div style="border-top:1px solid #e2e8f0;margin:1rem 0 0.75rem;padding-top:0.85rem;">
-            <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;margin-bottom:0.3rem;">${ncpdpEsc(label)}</div>
+            <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;margin-bottom:0.3rem;">${label}</div>
             <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.5rem;">Check a group to map fields into it. Set Rows Path on a repeatable group to map one entry per source row.</div>
-            ${rootGroups.map(ref => this._renderGroupNode(scope, ref, ref.key)).join('')}
-            ${rootGroups.length === 0 ? '<div style="font-size:0.78rem;color:#94a3b8;">No nested groups.</div>' : ''}
+            ${rootGroups.map(ref => this._renderGroupNode(scope, ref, ref.key))}
+            ${rootGroups.length === 0 ? HtmlSafe.raw('<div style="font-size:0.78rem;color:#94a3b8;">No nested groups.</div>') : ''}
         </div>`;
     }
 
     _renderGroupNode(scope, ref, idPath) {
         const depth = idPath.split('.').length;
         const included = !!this._configGroupAt(scope, idPath);
-        const repeatHint = ref.repeatable ? ' <span style="color:#94a3b8;">(repeatable)</span>' : '';
+        const repeatHint = ref.repeatable ? HtmlSafe.raw(' <span style="color:#94a3b8;">(repeatable)</span>') : '';
         const requiredHint = ref.required ? ' *' : '';
         const childRefs = this._schemaGroupsAt(this._rootGroups(scope), idPath);
 
-        return `
+        return HtmlSafe.html`
         <div style="margin-left:${depth > 1 ? '1.25rem' : '0'};${depth > 1 ? 'border-left:2px solid #e2e8f0;padding-left:0.75rem;' : ''}margin-bottom:0.4rem;">
             <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;cursor:pointer;">
                 <input type="checkbox" ${included ? 'checked' : ''}
                     onchange="window._ncpdpMapBuilder && window._ncpdpMapBuilder.toggleGroup('${scope}', '${idPath}', this.checked)">
-                <strong>${ncpdpEsc(ref.key)}</strong>${requiredHint}${repeatHint}
+                <strong>${ref.key}</strong>${requiredHint}${repeatHint}
             </label>
             ${included ? this._renderGroupCard(scope, ref, idPath, childRefs) : ''}
-            ${childRefs.map(childRef => this._renderGroupNode(scope, childRef, idPath + '.' + childRef.key)).join('')}
+            ${childRefs.map(childRef => this._renderGroupNode(scope, childRef, idPath + '.' + childRef.key))}
         </div>`;
     }
 
@@ -504,16 +504,16 @@ class NcpdpMapToCanonicalStepBuilder {
         if (!node) return '';
         const fields = Array.isArray(node.fields) ? node.fields : (node.fields = []);
         const fieldsCatalog = this._schemaFieldsAt(this._rootGroups(scope), this._rootFields(scope), idPath);
-        return `
+        return HtmlSafe.html`
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:0.6rem 0.7rem;margin:0.4rem 0 0.6rem;">
-            ${ref.repeatable ? `
+            ${ref.repeatable ? HtmlSafe.html`
             <div class="config-group" style="margin-bottom:0.5rem;">
                 <label style="font-size:0.7rem;color:#64748b;display:block;margin-bottom:0.2rem;">Rows Path (one entry per source row)</label>
-                <input type="text" value="${ncpdpEsc(node.rowsPath || '')}" placeholder="e.g. diagnoses"
+                <input type="text" value="${node.rowsPath || ''}" placeholder="e.g. diagnoses"
                     style="width:100%;font-family:monospace;font-size:0.78rem;"
                     onblur="window._ncpdpMapBuilder && window._ncpdpMapBuilder.updateGroupRowsPath('${scope}', '${idPath}', this.value)">
             </div>` : ''}
-            ${fields.map((f, fi) => this._renderFieldRow(scope, idPath, f, fi, fieldsCatalog)).join('')}
+            ${fields.map((f, fi) => this._renderFieldRow(scope, idPath, f, fi, fieldsCatalog))}
             <button type="button" class="btn btn-sm btn-outline-primary" style="font-size:0.72rem;"
                 onclick="window._ncpdpMapBuilder && window._ncpdpMapBuilder.addGroupField('${scope}', '${idPath}')">+ Add Field</button>
         </div>`;
@@ -530,20 +530,20 @@ class NcpdpMapToCanonicalStepBuilder {
             ? `window._ncpdpMapBuilder.removeFlatField('${scope}', ${index})`
             : `window._ncpdpMapBuilder.removeGroupField('${scope}', '${idPath}', ${index})`;
 
-        return `
+        return HtmlSafe.html`
         <div style="display:flex;gap:0.4rem;align-items:center;margin-bottom:0.4rem;flex-wrap:wrap;">
             <select style="flex:1;min-width:130px;font-size:0.76rem;" class="form-select form-select-sm"
                 onchange="${prefix}, 'fieldKey', this.value)">
                 ${this._fieldKeyOptionsHTML(fieldsCatalog, f.fieldKey)}
             </select>
-            <input type="text" placeholder="source path" value="${ncpdpEsc(f.sourcePath || '')}"
+            <input type="text" placeholder="source path" value="${f.sourcePath || ''}"
                 style="flex:1;min-width:100px;font-family:monospace;font-size:0.76rem;" class="form-control form-control-sm"
                 onblur="${prefix}, 'sourcePath', this.value)">
             <select style="width:130px;font-size:0.76rem;" class="form-select form-select-sm"
                 onchange="${prefix}, 'transform', this.value)">
                 ${ncpdpTransformOptionsHTML(f.transform)}
             </select>
-            <input type="text" placeholder="literal (if no source)" value="${ncpdpEsc(f.literalValue || '')}"
+            <input type="text" placeholder="literal (if no source)" value="${f.literalValue || ''}"
                 style="flex:1;min-width:90px;font-family:monospace;font-size:0.76rem;" class="form-control form-control-sm"
                 onblur="${prefix}, 'literalValue', this.value)">
             <button type="button" class="btn btn-sm btn-outline-danger" style="font-size:0.7rem;padding:0.1rem 0.4rem;"
@@ -613,7 +613,7 @@ class NcpdpMapToCanonicalStepBuilder {
     _rerender() {
         const root = document.getElementById('ncpdpMapToCanonicalBuilder');
         if (!root || !root.parentElement) return;
-        root.outerHTML = this._renderAll();
+        root.outerHTML = HtmlSafe.html`${this._renderAll()}`;
     }
 
     collectConfig(step) {

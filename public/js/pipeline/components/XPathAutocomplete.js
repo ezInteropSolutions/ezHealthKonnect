@@ -57,7 +57,7 @@ class XPathAutocomplete {
     render() {
         console.log('[XPathAutocomplete] Rendering into container:', this.container);
 
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="xpath-autocomplete">
                 <div class="xpath-input-wrapper">
                     <input
@@ -343,22 +343,22 @@ class XPathAutocomplete {
             // Extract field key from name (e.g., "PID.5" from "PID.5 - Patient Name")
             const fieldKey = item.name && item.name.includes('.') ? item.name.split(' ')[0] : '';
 
-            return `
-                <div class="xpath-dropdown-item" data-index="${index}" data-path="${this.escapeHtml(item.path)}">
+            return HtmlSafe.html`
+                <div class="xpath-dropdown-item" data-index="${index}" data-path="${item.path}">
                     <div class="xpath-item-header">
-                        ${fieldKey ? `<span class="xpath-item-key">${this.highlightMatch(fieldKey)}</span>` : ''}
-                        ${item.description ? `<span class="xpath-item-name">${this.highlightMatch(item.description)}</span>` : `<span class="xpath-item-name">${this.highlightMatch(item.name)}</span>`}
+                        ${fieldKey ? HtmlSafe.html`<span class="xpath-item-key">${this.highlightMatch(fieldKey)}</span>` : ''}
+                        ${item.description ? HtmlSafe.html`<span class="xpath-item-name">${this.highlightMatch(item.description)}</span>` : HtmlSafe.html`<span class="xpath-item-name">${this.highlightMatch(item.name)}</span>`}
                     </div>
                     <div class="xpath-item-details">
-                        <span class="xpath-item-path-small">${this.escapeHtml(item.path)}</span>
-                        ${item.dataType ? `<span class="xpath-item-type">${this.escapeHtml(item.dataType)}</span>` : ''}
-                        ${item.cardinality ? `<span class="xpath-item-cardinality">${this.escapeHtml(item.cardinality)}</span>` : ''}
+                        <span class="xpath-item-path-small">${item.path}</span>
+                        ${item.dataType ? HtmlSafe.html`<span class="xpath-item-type">${item.dataType}</span>` : ''}
+                        ${item.cardinality ? HtmlSafe.html`<span class="xpath-item-cardinality">${item.cardinality}</span>` : ''}
                     </div>
                 </div>
             `;
-        }).join('');
+        });
 
-        this.elements.dropdownList.innerHTML = html;
+        this.elements.dropdownList.innerHTML = HtmlSafe.html`${html}`;
 
         // Attach click handlers
         this.elements.dropdownList.querySelectorAll('.xpath-dropdown-item').forEach(item => {
@@ -377,10 +377,12 @@ class XPathAutocomplete {
 
     highlightMatch(text) {
         const query = this.elements.input.value.trim();
-        if (!query) return this.escapeHtml(text);
+        if (!query) return HtmlSafe.html`${text}`;
 
+        // Split on the query and bold only the matches; every piece is escaped.
         const regex = new RegExp(`(${this.escapeRegex(query)})`, 'gi');
-        return this.escapeHtml(text).replace(regex, '<strong>$1</strong>');
+        return HtmlSafe.html`${String(text ?? '').split(regex).map((part, i) =>
+            i % 2 ? HtmlSafe.html`<strong>${part}</strong>` : part)}`;
     }
 
     highlightItem(index) {

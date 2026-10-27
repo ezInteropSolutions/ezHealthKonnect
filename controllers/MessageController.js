@@ -1,6 +1,7 @@
 // controllers/MessageController.js
 // Enhanced message management controller for interface-specific functionality
 const { goClient: _goClient } = require('../services/goBackendClient');
+const accessPolicy = require('../services/AccessPolicyService');
 const { hasCoverageGapSql } = require('../services/coverageGapSql');
 const auditService = require('../services/auditService');
 
@@ -36,10 +37,11 @@ class MessageController {
             } = req.query;
 
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const offset = (page - 1) * limit;
 
             // Build WHERE clause
-            let whereConditions = ['i.user_id = :userId'];
+            let whereConditions = [`(i.user_id = :userId OR ${allInterfaces})`];
             let replacements = { userId, limit: parseInt(limit), offset: parseInt(offset) };
 
             if (interfaceId) {
@@ -190,6 +192,7 @@ class MessageController {
             const { messageId } = req.params;
             const { interfaceId } = req.query;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             console.log(`🔍 getMessageDetail: Looking for message ${messageId} for user ${userId}`);
 
@@ -199,7 +202,7 @@ class MessageController {
             if (interfaceId) {
                 // Fast path: caller told us exactly which interface table to look in
                 const ifaceRows = await this.database.sequelize.query(
-                    `SELECT id, name FROM interfaces WHERE id = :interfaceId AND user_id = :userId AND is_active = true`,
+                    `SELECT id, name FROM interfaces WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces}) AND is_active = true`,
                     { replacements: { interfaceId, userId }, type: this.database.sequelize.QueryTypes.SELECT }
                 );
                 if (ifaceRows.length > 0) {
@@ -220,7 +223,7 @@ class MessageController {
             } else {
                 // Fallback: scan all user interfaces (no status filter — message could be in any table)
                 const interfaces = await this.database.sequelize.query(
-                    `SELECT id, name FROM interfaces WHERE user_id = :userId AND is_active = true`,
+                    `SELECT id, name FROM interfaces WHERE (user_id = :userId OR ${allInterfaces}) AND is_active = true`,
                     { replacements: { userId }, type: this.database.sequelize.QueryTypes.SELECT }
                 );
 
@@ -307,12 +310,13 @@ class MessageController {
             const { interfaceId } = req.params;
             const { messageContent, messageType, contentType = 'application/json' } = req.body;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             // Verify interface exists and user has access
             const interfaceQuery = `
                 SELECT id, name, source_type, source_config
                 FROM interfaces
-                WHERE id = :interfaceId AND user_id = :userId
+                WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces})
             `;
 
             const interfaceResult = await this.database.sequelize.query(interfaceQuery, {
@@ -550,6 +554,7 @@ class MessageController {
 
             const { messageId } = req.params;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             console.log(`🔍 Reprocess request: messageId=${messageId}, userId=${userId}`);
 
@@ -558,7 +563,7 @@ class MessageController {
                 SELECT itm.table_name, itm.interface_id, i.name as interface_name
                 FROM interface_table_metadata itm
                 JOIN interfaces i ON itm.interface_id = i.id
-                WHERE i.user_id = $1
+                WHERE (i.user_id = $1 OR ${allInterfaces})
             `;
 
             const metadataResult = await this.database.sequelize.query(metadataQuery, {
@@ -689,12 +694,13 @@ class MessageController {
     async _resolveOwnedInterfaceTable(req, res) {
         const { interfaceId } = req.body?.interfaceId ? req.body : req.query;
         const userId = req.session.user.id;
+        const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
         if (!interfaceId) {
             res.status(400).json({ success: false, error: 'interfaceId is required' });
             return null;
         }
         const rows = await this.database.sequelize.query(
-            `SELECT id FROM interfaces WHERE id = :interfaceId AND user_id = :userId`,
+            `SELECT id FROM interfaces WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces})`,
             { replacements: { interfaceId, userId }, type: this.database.sequelize.QueryTypes.SELECT }
         );
         if (rows.length === 0) {
@@ -741,6 +747,7 @@ class MessageController {
 
             const { ids, filter } = req.body;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             let selectionMode, totalMatched, filterJson = null, idsArray = null;
 
@@ -821,6 +828,7 @@ class MessageController {
             await this.ensureDatabase();
             const { jobId } = req.params;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             const rows = await this.database.sequelize.query(`
                 SELECT j.id, j.interface_id, j.status, j.total_matched, j.processed_count,
@@ -828,7 +836,7 @@ class MessageController {
                        j.created_at, j.started_at, j.completed_at
                 FROM bulk_reprocess_jobs j
                 JOIN interfaces i ON i.id = j.interface_id
-                WHERE j.id = :jobId AND i.user_id = :userId
+                WHERE j.id = :jobId AND (i.user_id = :userId OR ${allInterfaces})
             `, { replacements: { jobId, userId }, type: this.database.sequelize.QueryTypes.SELECT });
 
             if (rows.length === 0) {
@@ -864,12 +872,13 @@ class MessageController {
             await this.ensureDatabase();
             const { jobId } = req.params;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             const result = await this.database.sequelize.query(`
                 UPDATE bulk_reprocess_jobs j
                 SET cancel_requested = true
                 FROM interfaces i
-                WHERE j.id = :jobId AND j.interface_id = i.id AND i.user_id = :userId
+                WHERE j.id = :jobId AND j.interface_id = i.id AND (i.user_id = :userId OR ${allInterfaces})
                   AND j.status IN ('queued','running')
                 RETURNING j.id
             `, { replacements: { jobId, userId }, type: this.database.sequelize.QueryTypes.UPDATE });
@@ -891,6 +900,7 @@ class MessageController {
             await this.ensureDatabase();
             const { interfaceId } = req.query;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             if (!interfaceId) {
                 return res.status(400).json({ success: false, error: 'interfaceId is required' });
             }
@@ -900,7 +910,7 @@ class MessageController {
                        j.succeeded_count, j.failed_count, j.created_at, j.completed_at
                 FROM bulk_reprocess_jobs j
                 JOIN interfaces i ON i.id = j.interface_id
-                WHERE j.interface_id = :interfaceId AND i.user_id = :userId
+                WHERE j.interface_id = :interfaceId AND (i.user_id = :userId OR ${allInterfaces})
                 ORDER BY j.created_at DESC
                 LIMIT 20
             `, { replacements: { interfaceId, userId }, type: this.database.sequelize.QueryTypes.SELECT });
@@ -933,13 +943,14 @@ class MessageController {
 
             const { messageId } = req.params;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             // Verify message exists and user has access
             const messageQuery = `
                 SELECT mpe.id
                 FROM message_processing_enhanced mpe
                 JOIN interfaces i ON mpe.interface_id = i.id
-                WHERE mpe.id = :messageId AND i.user_id = :userId
+                WHERE mpe.id = :messageId AND (i.user_id = :userId OR ${allInterfaces})
             `;
 
             const messageResult = await this.database.sequelize.query(messageQuery, {
@@ -987,6 +998,7 @@ class MessageController {
 
             const { interfaceId, timeRange = '24h' } = req.query;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             let timeCondition = '';
             if (timeRange === '1h') {
@@ -1015,7 +1027,7 @@ class MessageController {
                     SUM(mpe.message_size) as total_bytes_processed
                 FROM message_processing_enhanced mpe
                 JOIN interfaces i ON mpe.interface_id = i.id
-                WHERE i.user_id = :userId ${timeCondition} ${interfaceCondition}
+                WHERE (i.user_id = :userId OR ${allInterfaces}) ${timeCondition} ${interfaceCondition}
             `;
 
             const stats = await this.database.sequelize.query(statsQuery, {
@@ -1062,6 +1074,7 @@ class MessageController {
             } = req.query;
 
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             // Verify user owns this interface. coverage_audit_enabled gates whether
             // the has_coverage_gap column below gets computed at all — keeps the
@@ -1076,7 +1089,7 @@ class MessageController {
                 SELECT id, name, status,
                     (cda_coverage_audit_config IS NOT NULL AND cda_coverage_audit_config <> 'null'::jsonb) AS coverage_audit_enabled
                 FROM interfaces
-                WHERE id = :interfaceId AND user_id = :userId
+                WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces})
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -1323,10 +1336,11 @@ class MessageController {
             const { interfaceId } = req.params;
             const { timeRange = '24h' } = req.query;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             // Verify user owns this interface
             const interfaceCheck = await this.database.sequelize.query(`
-                SELECT id, name FROM interfaces WHERE id = :interfaceId AND user_id = :userId
+                SELECT id, name FROM interfaces WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces})
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -1401,11 +1415,12 @@ class MessageController {
             const { sourceInterfaceId, targetInterfaceId } = req.params;
             const { timeRange = '24h' } = req.query;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             // Verify interfaces belong to user
             const interfacesCheck = await this.database.sequelize.query(`
                 SELECT id, name FROM interfaces
-                WHERE id IN (:sourceInterfaceId, :targetInterfaceId) AND user_id = :userId
+                WHERE id IN (:sourceInterfaceId, :targetInterfaceId) AND (user_id = :userId OR ${allInterfaces})
             `, {
                 replacements: { sourceInterfaceId, targetInterfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -1503,178 +1518,6 @@ class MessageController {
     }
 
     /**
-     * Receive and store FHIR messages in the FHIR Receiver interface
-     * POST /api/messages/fhir/:resourceType
-     */
-    async receiveFHIRMessage(req, res) {
-        try {
-            const resourceType = req.params.resourceType || 'Patient';
-            const fhirMessage = req.body;
-
-            console.log(`🏥 Receiving FHIR ${resourceType} message...`);
-
-            // Find FHIR Receiver interface
-            await this.ensureDatabase();
-            const fhirInterface = await this.database.sequelize.query(`
-                SELECT id, name, target_config, processing_rules
-                FROM interfaces
-                WHERE message_type = 'FHIR'
-                AND source_type = 'http'
-                AND target_type = 'database'
-                AND status = 'active'
-                LIMIT 1
-            `, { type: this.database.sequelize.QueryTypes.SELECT });
-
-            if (!fhirInterface || fhirInterface.length === 0) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'No active FHIR receiver interface found'
-                });
-            }
-
-            const interfaceConfig = fhirInterface[0];
-            const targetConfig = JSON.parse(interfaceConfig.target_config || '{}');
-            const processingRules = JSON.parse(interfaceConfig.processing_rules || '{}');
-
-            // Generate message ID and correlation ID
-            const messageId = `fhir_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            const correlationId = req.headers['x-correlation-id'] || messageId;
-
-            // Extract FHIR resource information
-            let fhirResourceType = resourceType;
-            let fhirResourceId = null;
-
-            if (fhirMessage && typeof fhirMessage === 'object') {
-                fhirResourceType = fhirMessage.resourceType || resourceType;
-                fhirResourceId = fhirMessage.id || null;
-            }
-
-            // Validate FHIR message if enabled
-            let validationStatus = 'valid';
-            let validationError = null;
-
-            if (processingRules.messageValidation) {
-                try {
-                    // Basic FHIR validation
-                    if (!fhirMessage || !fhirMessage.resourceType) {
-                        validationStatus = 'invalid';
-                        validationError = 'Missing resourceType in FHIR message';
-                    } else if (fhirMessage.resourceType !== resourceType) {
-                        validationStatus = 'warning';
-                        validationError = `Resource type mismatch: expected ${resourceType}, got ${fhirMessage.resourceType}`;
-                    }
-                } catch (error) {
-                    validationStatus = 'invalid';
-                    validationError = error.message;
-                }
-            }
-
-            // Store message in interface-specific table
-            const tableName = targetConfig.tableName || `messages_intf_${interfaceConfig.id.replace(/-/g, '_').substring(0, 16)}`;
-
-            const startTime = Date.now();
-
-            const insertResult = await this.database.sequelize.query(`
-                INSERT INTO ${tableName} (
-                    interface_id, message_id, correlation_id, status, source,
-                    message_type, content_type, raw_message, processed_message,
-                    fhir_resource_type, fhir_resource_id, error_details,
-                    processing_duration_ms, created_at, processed_at
-                ) VALUES (
-                    :interfaceId, :messageId, :correlationId, :status, :source,
-                    :messageType, :contentType, :rawMessage, :processedMessage,
-                    :fhirResourceType, :fhirResourceId, :errorDetails,
-                    :processingDuration, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                )
-            `, {
-                replacements: {
-                    interfaceId: interfaceConfig.id,
-                    messageId,
-                    correlationId,
-                    status: validationStatus === 'invalid' ? 'failed' : 'processed',
-                    source: req.headers['x-source-interface'] || 'external',
-                    messageType: 'FHIR',
-                    contentType: req.headers['content-type'] || 'application/fhir+json',
-                    rawMessage: JSON.stringify(fhirMessage),
-                    processedMessage: JSON.stringify(fhirMessage),
-                    fhirResourceType,
-                    fhirResourceId,
-                    errorDetails: validationError,
-                    processingDuration: Date.now() - startTime
-                }
-            });
-
-            console.log(`✅ FHIR ${resourceType} message stored successfully`);
-            console.log(`   Message ID: ${messageId}`);
-            console.log(`   Resource: ${fhirResourceType}${fhirResourceId ? `/${fhirResourceId}` : ''}`);
-            console.log(`   Status: ${validationStatus}`);
-            console.log(`   Table: ${tableName}`);
-
-            // Audit logging — previously a raw INSERT into columns
-            // (resource_type, resource_id, details) that don't exist in the
-            // real audit_logs schema (entity_type, entity_id, metadata), and
-            // userId: 'system' would have failed the user_id UUID cast even
-            // if the columns had been right — every call has always silently
-            // failed. Routed through the shared auditService instead; no
-            // userId (null, not the literal string 'system') since this is a
-            // system-triggered event with no authenticated actor.
-            if (processingRules.auditLogging) {
-                try {
-                    await auditService.logEvent({
-                        action: 'fhir_message_received',
-                        entityType: 'message',
-                        entityId: messageId,
-                        metadata: {
-                            interfaceId: interfaceConfig.id,
-                            interfaceName: interfaceConfig.name,
-                            fhirResourceType,
-                            fhirResourceId,
-                            validationStatus,
-                            correlationId
-                        },
-                        ipAddress: req.ip || req.connection.remoteAddress,
-                        userAgent: req.headers['user-agent'] || 'Unknown',
-                        result: 'success',
-                        riskLevel: 'low'
-                    });
-                } catch (auditError) {
-                    console.warn('⚠️ Failed to create audit log:', auditError.message);
-                }
-            }
-
-            // Return success response
-            res.status(201).json({
-                success: true,
-                data: {
-                    messageId,
-                    correlationId,
-                    resourceType: fhirResourceType,
-                    resourceId: fhirResourceId,
-                    status: validationStatus === 'invalid' ? 'failed' : 'stored',
-                    validation: {
-                        status: validationStatus,
-                        error: validationError
-                    },
-                    interface: {
-                        id: interfaceConfig.id,
-                        name: interfaceConfig.name
-                    },
-                    storedAt: new Date().toISOString(),
-                    processingDuration: Date.now() - startTime
-                }
-            });
-
-        } catch (error) {
-            console.error('Failed to receive FHIR message:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to process FHIR message',
-                details: error.message
-            });
-        }
-    }
-
-    /**
      * Get data lineage for a message (input → transformation → output)
      */
     async getDataLineage(req, res) {
@@ -1683,6 +1526,7 @@ class MessageController {
 
             const { messageId } = req.params;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             console.log(`🔍 Getting data lineage for message: ${messageId}`);
 
@@ -1691,7 +1535,7 @@ class MessageController {
             try {
                 // Find which interface table contains this message
                 const allInterfaces = await this.database.sequelize.query(`
-                    SELECT id, name, source_type, target_type FROM interfaces WHERE user_id = :userId
+                    SELECT id, name, source_type, target_type FROM interfaces WHERE (user_id = :userId OR ${allInterfaces})
                 `, {
                     replacements: { userId },
                     type: this.database.sequelize.QueryTypes.SELECT
@@ -2165,9 +2009,10 @@ class MessageController {
 
             const { interfaceId, messageId } = req.params;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             const check = await this.database.sequelize.query(
-                `SELECT id FROM interfaces WHERE id = :interfaceId AND user_id = :userId`,
+                `SELECT id FROM interfaces WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces})`,
                 { replacements: { interfaceId, userId }, type: this.database.sequelize.QueryTypes.SELECT }
             );
             if (check.length === 0) {
@@ -2179,22 +2024,21 @@ class MessageController {
             let rawMessage = null;
             let messageType = null;
             try {
+                // The raw_message column was dropped in V60: message content lives only in object storage.
                 const rows = await this.database.sequelize.query(
-                    `SELECT raw_message, message_type FROM ${tableName}
+                    `SELECT message_type FROM ${tableName}
                      WHERE message_id = :messageId OR id::text = :messageId
                      LIMIT 1`,
                     { replacements: { messageId }, type: this.database.sequelize.QueryTypes.SELECT }
                 );
                 if (rows.length > 0) {
-                    rawMessage   = rows[0].raw_message;
-                    messageType  = rows[0].message_type;
+                    messageType = rows[0].message_type;
                 }
             } catch (dbErr) {
                 console.warn(`⚠️ getParsedContent DB read: ${dbErr.message}`);
             }
 
-            // raw_message is NULL for file-based messages (content in object storage).
-            // Fall back to Go's raw content endpoint which reads from MinIO using the
+            // Content comes from Go's raw content endpoint, which reads object storage using the
             // stored raw_content_uri (correct across day boundaries).
             if (!rawMessage) {
                 try {
@@ -2266,9 +2110,10 @@ class MessageController {
             await this.ensureDatabase();
             const { interfaceId, messageId } = req.params;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             const check = await this.database.sequelize.query(
-                `SELECT id FROM interfaces WHERE id = :interfaceId AND user_id = :userId`,
+                `SELECT id FROM interfaces WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces})`,
                 { replacements: { interfaceId, userId }, type: this.database.sequelize.QueryTypes.SELECT }
             );
             if (check.length === 0) {
@@ -2318,6 +2163,7 @@ class MessageController {
             await this.ensureDatabase();
             const { messageId } = req.params;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             const rows = await this.database.sequelize.query(`
                 SELECT se.step_output
@@ -2326,7 +2172,7 @@ class MessageController {
                 JOIN interfaces i ON i.id = te.interface_id
                 WHERE te.message_id = :messageId
                   AND se.step_type = 'cda.dedupe'
-                  AND i.user_id = :userId
+                  AND (i.user_id = :userId OR ${allInterfaces})
                 ORDER BY se.started_at DESC
             `, {
                 replacements: { messageId, userId },
@@ -2373,6 +2219,7 @@ class MessageController {
             await this.ensureDatabase();
             const { messageId } = req.params;
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
 
             // DISTINCT ON step_id: a redelivered/re-run message can produce more
             // than one historical row for the SAME destination (one per attempt).
@@ -2386,7 +2233,7 @@ class MessageController {
                 FROM cda_coverage_audits ca
                 JOIN interfaces i ON i.id = ca.interface_id
                 WHERE ca.message_id = :messageId
-                  AND i.user_id = :userId
+                  AND (i.user_id = :userId OR ${allInterfaces})
                 ORDER BY ca.step_id, ca.created_at DESC
             `, {
                 replacements: { messageId, userId },
@@ -2423,12 +2270,13 @@ class MessageController {
         }
     }
 
-    async getTableNameForMessage(messageId, userId) {
-        // Helper to find which table a message belongs to
+    async getTableNameForMessage(messageId, userId, allInterfaces = false) {
+        // Helper to find which table a message belongs to (allInterfaces: the caller's access policy, see
+        // AccessPolicyService.canSeeAllInterfaces)
         if (!userId) return null;
 
         const interfaces = await this.database.sequelize.query(`
-            SELECT id FROM interfaces WHERE user_id = :userId
+            SELECT id FROM interfaces WHERE (user_id = :userId OR ${allInterfaces})
         `, {
             replacements: { userId },
             type: this.database.sequelize.QueryTypes.SELECT

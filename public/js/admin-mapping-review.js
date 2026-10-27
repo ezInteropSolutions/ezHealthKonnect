@@ -103,27 +103,25 @@
             container.innerHTML = '<div class="empty-list"><i class="fas fa-check-circle"></i>No unreviewed flagged records</div>';
             return;
         }
-        var html = '';
-        state.records.forEach(function (r) {
+        container.innerHTML = HtmlSafe.html`${state.records.map(function (r) {
             var scoreClass = r.score >= 80 ? 'good' : (r.score >= 60 ? 'warn' : 'bad');
             var ts = r.created_at ? new Date(r.created_at).toLocaleString() : '';
-            html += '<div class="record-item' + (r.id === state.activeId ? ' active' : '') + '" ' +
-                    'data-id="' + esc(r.id) + '" onclick="window._mrSelectRecord(\'' + esc(r.id) + '\')">' +
-                    '<div class="msg-type">' + esc(r.message_type || 'Unknown') + '</div>' +
-                    '<div class="msg-id">' + esc(r.message_id || r.id) + '</div>' +
-                    '<div class="record-meta">' +
-                    '<span class="score-badge ' + scoreClass + '">' + (r.score || 0).toFixed(1) + '</span>' +
-                    '<span class="flag-reason">' + esc(r.flag_reason || '') + '</span>' +
-                    '<span class="record-ts">' + esc(ts) + '</span>' +
-                    '</div>' +
-                    '</div>';
-        });
-        container.innerHTML = html;
+            return HtmlSafe.html`<div class="record-item${r.id === state.activeId ? ' active' : ''}"
+                    data-id="${r.id}" onclick="window._mrSelectRecord(this.dataset.id)">
+                    <div class="msg-type">${r.message_type || 'Unknown'}</div>
+                    <div class="msg-id">${r.message_id || r.id}</div>
+                    <div class="record-meta">
+                    <span class="score-badge ${scoreClass}">${(r.score || 0).toFixed(1)}</span>
+                    <span class="flag-reason">${r.flag_reason || ''}</span>
+                    <span class="record-ts">${ts}</span>
+                    </div>
+                    </div>`;
+        })}`;
     }
 
     function renderEmptyList(msg) {
         document.getElementById('recordList').innerHTML =
-            '<div class="empty-list"><i class="fas fa-exclamation-triangle"></i>' + esc(msg) + '</div>';
+            HtmlSafe.html`<div class="empty-list"><i class="fas fa-exclamation-triangle"></i>${msg}</div>`;
     }
 
     // ── Record detail ────────────────────────────────────────────────────────
@@ -161,23 +159,20 @@
             }
 
             // Chips
-            var chips = '';
+            var chips = [];
             var scoreClass = r.score >= 80 ? 'green' : (r.score >= 60 ? 'amber' : 'red');
-            chips += '<span class="chip ' + scoreClass + '"><i class="fas fa-star"></i> Score: ' + (r.score || 0).toFixed(1) + '</span>';
-            if (r.flag_reason) chips += '<span class="chip red"><i class="fas fa-flag"></i> ' + esc(r.flag_reason) + '</span>';
+            chips.push(HtmlSafe.html`<span class="chip ${scoreClass}"><i class="fas fa-star"></i> Score: ${(r.score || 0).toFixed(1)}</span>`);
+            if (r.flag_reason) chips.push(HtmlSafe.html`<span class="chip red"><i class="fas fa-flag"></i> ${r.flag_reason}</span>`);
             if (r.missing_resources && r.missing_resources.length) {
-                chips += '<span class="chip amber"><i class="fas fa-exclamation"></i> Missing: ' +
-                         esc(r.missing_resources.join(', ')) + '</span>';
+                chips.push(HtmlSafe.html`<span class="chip amber"><i class="fas fa-exclamation"></i> Missing: ${r.missing_resources.join(', ')}</span>`);
             }
             if (r.warnings && r.warnings.length) {
-                chips += '<span class="chip amber"><i class="fas fa-exclamation-triangle"></i> ' +
-                         r.warnings.length + ' warning' + (r.warnings.length !== 1 ? 's' : '') + '</span>';
+                chips.push(HtmlSafe.html`<span class="chip amber"><i class="fas fa-exclamation-triangle"></i> ${r.warnings.length} warning${r.warnings.length !== 1 ? 's' : ''}</span>`);
             }
             if (r.errors && r.errors.length) {
-                chips += '<span class="chip red"><i class="fas fa-times-circle"></i> ' +
-                         r.errors.length + ' error' + (r.errors.length !== 1 ? 's' : '') + '</span>';
+                chips.push(HtmlSafe.html`<span class="chip red"><i class="fas fa-times-circle"></i> ${r.errors.length} error${r.errors.length !== 1 ? 's' : ''}</span>`);
             }
-            document.getElementById('detailChips').innerHTML = chips;
+            document.getElementById('detailChips').innerHTML = HtmlSafe.html`${chips}`;
 
             loadMessageContent(r);
         }).catch(function () {
@@ -295,12 +290,5 @@
             if (e.target === this) closeReviewModal();
         });
     });
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    function esc(s) {
-        return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                              .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    }
 
 }());

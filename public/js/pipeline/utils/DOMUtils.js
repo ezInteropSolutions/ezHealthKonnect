@@ -17,7 +17,8 @@ class DOMUtils {
      *
      * @param {string} tag - HTML tag name
      * @param {Object} attributes - Attributes to set
-     * @param {string|HTMLElement|HTMLElement[]} content - Inner content
+     * @param {string|HtmlSafe.SafeHtml|HTMLElement|HTMLElement[]} content - Inner content.
+     *        A plain string is inserted as TEXT; pass HtmlSafe.html`...` for markup.
      * @returns {HTMLElement} Created element
      *
      * @example
@@ -50,8 +51,10 @@ class DOMUtils {
 
         // Set content
         if (content !== null) {
-            if (typeof content === 'string') {
-                element.innerHTML = content;
+            if (content instanceof HtmlSafe.SafeHtml) {
+                element.innerHTML = HtmlSafe.html`${content}`;
+            } else if (typeof content === 'string') {
+                element.textContent = content;
             } else if (content instanceof HTMLElement) {
                 element.appendChild(content);
             } else if (Array.isArray(content)) {

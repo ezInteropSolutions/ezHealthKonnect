@@ -117,12 +117,12 @@ class HL7BuildBuilder {
         const esc = HL7BuildBuilder._esc;
 
         const messageTypeOptions = this._messageTypes
-            .map(mt => `${esc(mt.messageType)}^${esc(mt.triggerEvent)}`)
+            .map(mt => `${mt.messageType}^${mt.triggerEvent}`)
             .filter((v, i, arr) => arr.indexOf(v) === i)
-            .map(v => `<option value="${v}" ${v === `${esc(cfg.messageType)}^${esc(cfg.triggerEvent)}` ? 'selected' : ''}>${v}</option>`)
-            .join('');
+            .map(v => HtmlSafe.html`<option value="${v}" ${v === `${cfg.messageType}^${cfg.triggerEvent}` ? 'selected' : ''}>${v}</option>`)
+            ;
 
-        return `
+        return HtmlSafe.html`
         <div id="hl7BuildBuilder" class="cda-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>HL7 v2 Message Builder step.</strong> Maps CSV/DB/JSON fields directly onto HL7 segment/field paths.
@@ -133,21 +133,21 @@ class HL7BuildBuilder {
                 <div style="flex:1 1 200px;">
                     <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Message Type</label>
                     <select id="hbbMessageType" class="form-select form-select-sm">
-                        ${messageTypeOptions || `<option value="${esc(cfg.messageType)}^${esc(cfg.triggerEvent)}">${esc(cfg.messageType)}^${esc(cfg.triggerEvent)}</option>`}
+                        ${messageTypeOptions.length ? messageTypeOptions : HtmlSafe.html`<option value="${cfg.messageType}^${cfg.triggerEvent}">${cfg.messageType}^${cfg.triggerEvent}</option>`}
                     </select>
                 </div>
                 <div style="flex:0 0 110px;">
                     <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Version</label>
                     <select id="hbbVersion" class="form-select form-select-sm">
                         ${(this._versions.length ? this._versions : [cfg.version]).map(v =>
-                            `<option value="${esc(v)}" ${v === cfg.version ? 'selected' : ''}>${esc(v)}</option>`
-                        ).join('')}
+                            HtmlSafe.html`<option value="${v}" ${v === cfg.version ? 'selected' : ''}>${v}</option>`
+                        )}
                     </select>
                 </div>
                 <div style="flex:1 1 200px;">
                     <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Output Field</label>
                     <input id="hbbOutputField" type="text" class="form-control form-control-sm"
-                        value="${esc(cfg.outputField)}" placeholder="hl7Message"
+                        value="${cfg.outputField}" placeholder="hl7Message"
                         style="font-family:monospace;font-size:0.82rem;">
                 </div>
             </div>
@@ -156,13 +156,13 @@ class HL7BuildBuilder {
                 <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.5rem;">MSH Overrides (optional)</label>
                 <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
                     <input id="hbbSendingApp" type="text" class="form-control form-control-sm" placeholder="Sending App (default: ezHealthKonnect)"
-                        value="${esc(cfg.sendingApplication)}" style="flex:1 1 180px;">
+                        value="${cfg.sendingApplication}" style="flex:1 1 180px;">
                     <input id="hbbSendingFacility" type="text" class="form-control form-control-sm" placeholder="Sending Facility (default: EHK)"
-                        value="${esc(cfg.sendingFacility)}" style="flex:1 1 180px;">
+                        value="${cfg.sendingFacility}" style="flex:1 1 180px;">
                     <input id="hbbReceivingApp" type="text" class="form-control form-control-sm" placeholder="Receiving App"
-                        value="${esc(cfg.receivingApplication)}" style="flex:1 1 180px;">
+                        value="${cfg.receivingApplication}" style="flex:1 1 180px;">
                     <input id="hbbReceivingFacility" type="text" class="form-control form-control-sm" placeholder="Receiving Facility"
-                        value="${esc(cfg.receivingFacility)}" style="flex:1 1 180px;">
+                        value="${cfg.receivingFacility}" style="flex:1 1 180px;">
                 </div>
             </div>
 
@@ -227,10 +227,10 @@ class HL7BuildBuilder {
     _renderSegmentList(list, parentPath) {
         if (!list || list.length === 0) {
             return parentPath.length === 0
-                ? `<div style="text-align:center;padding:1.5rem;color:#94a3b8;font-size:0.8rem;border:1px dashed #cbd5e1;border-radius:6px;">No segments configured yet. Click "Add Segment" to map fields into a segment.</div>`
-                : `<div style="font-size:0.72rem;color:#94a3b8;padding:0.2rem 0;">No child segments yet.</div>`;
+                ? HtmlSafe.html`<div style="text-align:center;padding:1.5rem;color:#94a3b8;font-size:0.8rem;border:1px dashed #cbd5e1;border-radius:6px;">No segments configured yet. Click "Add Segment" to map fields into a segment.</div>`
+                : HtmlSafe.html`<div style="font-size:0.72rem;color:#94a3b8;padding:0.2rem 0;">No child segments yet.</div>`;
         }
-        return list.map((seg, i) => this._renderSegmentCard(seg, [...parentPath, i], list)).join('');
+        return list.map((seg, i) => this._renderSegmentCard(seg, [...parentPath, i], list));
     }
 
     _renderSegmentCard(seg, path, siblingList) {
@@ -250,28 +250,28 @@ class HL7BuildBuilder {
         const fieldsHtml = (seg.fields || []).map((f, fi) => {
             const condKey = `${pathStr}|${fi}`;
             const condOpen = this._conditionPanelOpen.has(condKey) || !!f.condition;
-            return `
+            return HtmlSafe.html`
             <tr data-field-index="${fi}">
                 <td>
                     <div class="hbb-field-picker" data-path="${pathStr}" data-field-index="${fi}"></div>
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm hbb-field-source"
-                        value="${esc(f.sourcePath)}" placeholder="e.g. lastName" autocomplete="off">
+                        value="${f.sourcePath}" placeholder="e.g. lastName" autocomplete="off">
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm hbb-field-fallback"
-                        value="${esc((f.fallbackPaths || []).join(', '))}" placeholder="alt1, alt2" autocomplete="off"
+                        value="${(f.fallbackPaths || []).join(', ')}" placeholder="alt1, alt2" autocomplete="off"
                         title="Comma-separated fallback source paths, tried in order if Source Path is empty">
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm hbb-field-literal"
-                        value="${esc(f.literalValue)}" placeholder="(fixed value)" autocomplete="off"
+                        value="${f.literalValue}" placeholder="(fixed value)" autocomplete="off"
                         title="Used only when no source/fallback path resolves">
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm hbb-field-valuemap"
-                        value="${esc(HL7BuildBuilder._valueMapToText(f.valueMap))}" placeholder="A=active, R=resolved" autocomplete="off"
+                        value="${HL7BuildBuilder._valueMapToText(f.valueMap)}" placeholder="A=active, R=resolved" autocomplete="off"
                         title="Comma-separated raw=translated value mappings">
                 </td>
                 <td style="width:70px;text-align:center;white-space:nowrap;">
@@ -283,54 +283,54 @@ class HL7BuildBuilder {
                         title="Remove field"><i class="fas fa-trash"></i></button>
                 </td>
             </tr>
-            ${condOpen ? `
+            ${condOpen ? HtmlSafe.html`
             <tr class="hbb-field-condition-row">
                 <td colspan="6" style="padding-top:0;">
                     ${this._renderConditionEditor(f.condition, { kind: 'field', path: pathStr, 'field-index': fi })}
                 </td>
             </tr>` : ''}`;
-        }).join('');
+        });
 
-        return `
+        return HtmlSafe.html`
         <div class="hbb-segment-card" data-path="${pathStr}"
             style="border:1px solid #e2e8f0;border-radius:8px;padding:0.7rem 0.8rem;margin-bottom:0.8rem;background:#fafbfc;${isRoot ? '' : 'margin-left:1.1rem;border-left:3px solid #93c5fd;'}">
             <div class="hbb-card-header" style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.55rem;flex-wrap:wrap;">
                 <div class="hbb-segment-picker" data-path="${pathStr}" style="flex:0 0 200px;"></div>
-                ${canRepeat ? `
+                ${canRepeat ? HtmlSafe.html`
                 <select class="form-select form-select-sm hbb-segment-cardinality" style="flex:0 0 140px;"
                     onchange="window._hl7BuildBuilder && window._hl7BuildBuilder.onCardinalityChange('${pathStr}', this.value)">
                     <option value="single" ${!isRepeating ? 'selected' : ''}>Single</option>
                     <option value="repeating" ${isRepeating ? 'selected' : ''}>Repeating</option>
-                </select>` : `
+                </select>` : HtmlSafe.html`
                 <span class="form-control form-control-sm hbb-segment-cardinality-fixed" style="flex:0 0 140px;background:#f1f5f9;color:#94a3b8;cursor:not-allowed;"
-                    title="${esc(seg.segment || 'This segment')} cannot repeat per the HL7 schema">Single (fixed)</span>`}
-                ${isRepeating ? `
+                    title="${seg.segment || 'This segment'} cannot repeat per the HL7 schema">Single (fixed)</span>`}
+                ${isRepeating ? HtmlSafe.html`
                 <input type="text" class="form-control form-control-sm hbb-segment-rowspath" data-search-kind="rowspath"
-                    value="${esc(seg.rowsPath)}" placeholder="e.g. labResults"
+                    value="${seg.rowsPath}" placeholder="e.g. labResults"
                     style="flex:1 1 150px;font-family:monospace;font-size:0.8rem;">
                 <input type="text" class="form-control form-control-sm hbb-segment-groupby"
-                    value="${esc((seg.groupBy || []).join(', '))}" placeholder="Group By (e.g. orderId)"
+                    value="${(seg.groupBy || []).join(', ')}" placeholder="Group By (e.g. orderId)"
                     title="Optional: bucket Rows Path's rows by these column(s) before building one instance per bucket instead of per row — lets a single flat CSV (e.g. one row per analyte result) produce a grouped parent+children (one OBR per order, each with its own OBX children)"
                     style="flex:1 1 150px;font-family:monospace;font-size:0.8rem;">` : ''}
                 <button type="button" class="btn btn-sm btn-outline-danger"
                     onclick="window._hl7BuildBuilder && window._hl7BuildBuilder.removeSegment('${pathStr}')"
                     title="Remove segment"><i class="fas fa-trash"></i></button>
             </div>
-            ${isRepeating ? `<div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">
-                Rows Path: pipeline field holding the array of source rows — one ${esc(seg.segment || 'segment')} instance is built per ${hasGroupBy ? 'group' : 'row'}.
-                ${hasGroupBy ? `Grouped by <code>${esc(seg.groupBy.join(', '))}</code> — a child segment below can iterate this group's own rows via Rows Path <code>${esc(seg.groupedItemsKey || '_rows')}</code>.` : ''}
+            ${isRepeating ? HtmlSafe.html`<div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.5rem;">
+                Rows Path: pipeline field holding the array of source rows — one ${seg.segment || 'segment'} instance is built per ${hasGroupBy ? 'group' : 'row'}.
+                ${hasGroupBy ? HtmlSafe.html`Grouped by <code>${seg.groupBy.join(', ')}</code> — a child segment below can iterate this group's own rows via Rows Path <code>${seg.groupedItemsKey || '_rows'}</code>.` : ''}
             </div>` : ''}
             <div class="hbb-card-condition">
                 ${seg.condition
                     ? this._renderConditionEditor(seg.condition, { kind: 'segment', path: pathStr })
-                    : `<button type="button" class="btn btn-sm btn-link hbb-add-condition" style="font-size:0.7rem;padding:0.1rem 0;margin-bottom:0.3rem;"
+                    : HtmlSafe.html`<button type="button" class="btn btn-sm btn-link hbb-add-condition" style="font-size:0.7rem;padding:0.1rem 0;margin-bottom:0.3rem;"
                         onclick="window._hl7BuildBuilder && window._hl7BuildBuilder.addCondition('segment', '${pathStr}')">+ Add condition (only build ${isRepeating ? 'a row/group of ' : ''}this segment if…)</button>`}
             </div>
             ${this._renderSuggestPanel(pathStr)}
             <div class="hbb-card-fields">
                 ${(seg.fields || []).length === 0
-                    ? `<div style="font-size:0.74rem;color:#94a3b8;margin-bottom:0.4rem;">No fields mapped yet.</div>`
-                    : `<div style="overflow-x:auto;">
+                    ? HtmlSafe.html`<div style="font-size:0.74rem;color:#94a3b8;margin-bottom:0.4rem;">No fields mapped yet.</div>`
+                    : HtmlSafe.html`<div style="overflow-x:auto;">
                         <table class="mapping-table" style="width:100%;min-width:700px;">
                             <thead><tr>
                                 <th style="font-size:0.68rem;color:#64748b;">Field Key</th>
@@ -355,7 +355,7 @@ class HL7BuildBuilder {
             <div class="hbb-child-segments" style="margin-top:0.6rem;padding-top:0.5rem;border-top:1px dashed #cbd5e1;">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;">
                     <label style="font-size:0.68rem;font-weight:600;text-transform:uppercase;color:#64748b;">
-                        Child Segments <span style="font-weight:400;text-transform:none;color:#94a3b8;">(built immediately after each ${esc(seg.segment || 'this')} instance)</span>
+                        Child Segments <span style="font-weight:400;text-transform:none;color:#94a3b8;">(built immediately after each ${seg.segment || 'this'} instance)</span>
                     </label>
                     <button type="button" class="btn btn-sm btn-outline-primary" style="font-size:0.68rem;padding:0.1rem 0.4rem;"
                         onclick="window._hl7BuildBuilder && window._hl7BuildBuilder.addSegment('${pathStr}')">+ Add Child Segment</button>
@@ -384,21 +384,21 @@ class HL7BuildBuilder {
         const valueText = isListOp
             ? (Array.isArray(cond.value) ? cond.value.join(', ') : '')
             : (cond.value !== undefined && cond.value !== null ? cond.value : '');
-        const attrs = Object.entries(ctxAttrs).map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ');
+        const attrs = Object.entries(ctxAttrs).map(([k, v]) => HtmlSafe.html`data-${k}="${v}" `);
         const fieldIndex = ctxAttrs['field-index'];
 
-        return `
+        return HtmlSafe.html`
         <div class="hbb-condition-editor" ${attrs}
             style="display:flex;gap:0.3rem;align-items:center;flex-wrap:wrap;background:#fffbeb;border:1px dashed #f0c36d;border-radius:5px;padding:0.35rem 0.5rem;margin-bottom:0.4rem;">
             <span style="font-size:0.68rem;color:#92400e;font-weight:600;">IF</span>
             <input type="text" class="form-control form-control-sm hbb-condition-field" style="flex:1 1 140px;font-family:monospace;font-size:0.75rem;"
-                value="${esc(cond.field)}" placeholder="field path (e.g. message.country)" autocomplete="off">
+                value="${cond.field}" placeholder="field path (e.g. message.country)" autocomplete="off">
             <select class="form-select form-select-sm hbb-condition-operator" style="flex:0 0 160px;font-size:0.75rem;"
                 onchange="window._hl7BuildBuilder && window._hl7BuildBuilder.onConditionOperatorChange('${ctxAttrs.kind}', '${ctxAttrs.path}', ${fieldIndex ?? 'null'}, this.value)">
-                ${HL7_CONDITION_OPERATORS.map(op => `<option value="${op.value}" ${op.value === operator ? 'selected' : ''}>${op.label}</option>`).join('')}
+                ${HL7_CONDITION_OPERATORS.map(op => HtmlSafe.html`<option value="${op.value}" ${op.value === operator ? 'selected' : ''}>${op.label}</option>`)}
             </select>
-            ${needsValue ? `<input type="text" class="form-control form-control-sm hbb-condition-value" style="flex:1 1 120px;font-size:0.75rem;"
-                value="${esc(valueText)}" placeholder="${isListOp ? 'val1, val2' : 'value'}" autocomplete="off">` : ''}
+            ${needsValue ? HtmlSafe.html`<input type="text" class="form-control form-control-sm hbb-condition-value" style="flex:1 1 120px;font-size:0.75rem;"
+                value="${valueText}" placeholder="${isListOp ? 'val1, val2' : 'value'}" autocomplete="off">` : ''}
             <button type="button" class="btn btn-sm btn-outline-danger"
                 onclick="window._hl7BuildBuilder && window._hl7BuildBuilder.removeCondition('${ctxAttrs.kind}', '${ctxAttrs.path}', ${fieldIndex ?? 'null'})"
                 title="Remove condition">×</button>
@@ -469,17 +469,17 @@ class HL7BuildBuilder {
         if (this._suggestPanelOpenPath !== pathStr) return '';
         const esc = HL7BuildBuilder._esc;
         const idSafe = pathStr.replace(/,/g, '-');
-        return `
+        return HtmlSafe.html`
         <div style="border:1px dashed #94a3b8;border-radius:6px;padding:0.6rem 0.7rem;margin-bottom:0.6rem;background:#fafafa;">
             <div style="font-size:0.72rem;color:#64748b;margin-bottom:0.4rem;">Paste sample source rows (a JSON array of objects) — suggestions are added to this segment's field table for you to review, never saved automatically.</div>
             <textarea id="hbbSuggestSampleRows-${idSafe}" class="form-control form-control-sm" rows="4"
                 placeholder='[{"lastName":"Doe","mrn":"12345"}]'
-                style="font-family:monospace;font-size:0.78rem;margin-bottom:0.4rem;">${esc(this._suggestSampleRowsText || '')}</textarea>
+                style="font-family:monospace;font-size:0.78rem;margin-bottom:0.4rem;">${this._suggestSampleRowsText || ''}</textarea>
             <div style="display:flex;align-items:center;gap:0.6rem;">
                 <button type="button" class="btn btn-sm btn-primary" style="font-size:0.72rem;"
                     onclick="window._hl7BuildBuilder && window._hl7BuildBuilder.runSuggestMappings('${pathStr}')">Suggest</button>
-                ${this._suggestError ? `<span style="font-size:0.72rem;color:#dc2626;">${esc(this._suggestError)}</span>` : ''}
-                ${this._suggestBusy ? `<span style="font-size:0.72rem;color:#64748b;">Asking the local model…</span>` : ''}
+                ${this._suggestError ? HtmlSafe.html`<span style="font-size:0.72rem;color:#dc2626;">${this._suggestError}</span>` : ''}
+                ${this._suggestBusy ? HtmlSafe.html`<span style="font-size:0.72rem;color:#64748b;">Asking the local model…</span>` : ''}
             </div>
         </div>`;
     }
@@ -758,7 +758,7 @@ class HL7BuildBuilder {
         const root = document.getElementById('hl7BuildBuilder');
         if (!root || !root.parentElement) return;
         this._destroyChildComponents();
-        root.outerHTML = this._renderAll();
+        root.outerHTML = HtmlSafe.html`${this._renderAll()}`;
         setTimeout(() => this._attachChildComponents(), 0);
         this._wireTopLevelChangeHandlers();
     }

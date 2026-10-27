@@ -3,6 +3,7 @@
 // Integrates with existing ezHealthKonnect database schema and authentication
 
 const WizardMappingService = require('../services/WizardMappingService');
+const accessPolicy = require('../services/AccessPolicyService');
 const Joi = require('joi');
 
 class WizardMappingController {
@@ -58,7 +59,7 @@ class WizardMappingController {
             const { interfaceId, wizardData } = validationResult.value;
 
             // 2. Verify interface exists and belongs to user
-            const interfaceOwnership = await this.verifyInterfaceOwnership(interfaceId, req.user.id);
+            const interfaceOwnership = await this.verifyInterfaceOwnership(interfaceId, req.user.id, await accessPolicy.canSeeAllInterfaces(req.user));
             if (!interfaceOwnership.valid) {
                 this.logger.warn('⚠️ Interface access denied or not found', {
                     interfaceId,
@@ -186,7 +187,7 @@ class WizardMappingController {
 
             // Verify access permissions (optional - depends on if Go services need auth)
             if (req.user) {
-                const ownership = await this.verifyInterfaceOwnership(interfaceId, req.user.id);
+                const ownership = await this.verifyInterfaceOwnership(interfaceId, req.user.id, await accessPolicy.canSeeAllInterfaces(req.user));
                 if (!ownership.valid && ownership.status === 404) {
                     return res.status(404).json({
                         success: false,
@@ -408,7 +409,7 @@ class WizardMappingController {
     /**
      * Verify interface exists and user has access
      */
-    async verifyInterfaceOwnership(interfaceId, userId) {
+    async verifyInterfaceOwnership(interfaceId, userId, canSeeAll = false) {
         try {
             const result = await this.wizardMappingService.pool.query(`
                 SELECT 
@@ -433,7 +434,7 @@ class WizardMappingController {
             const interface_record = result.rows[0];
 
             // Check if user owns the interface
-            if (interface_record.user_id !== userId) {
+            if (!canSeeAll && interface_record.user_id !== userId) {
                 return {
                     valid: false,
                     status: 403,

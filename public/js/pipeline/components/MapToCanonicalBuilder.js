@@ -159,9 +159,9 @@ class MapToCanonicalBuilder {
             : { shallTotal: 0 };
 
         const docTypeOptions = ['CCD', 'Discharge Summary', 'Referral Note', 'History and Physical', 'Consultation Note', 'Progress Note']
-            .map(dt => `<option value="${esc(dt)}" ${cfg.documentType === dt ? 'selected' : ''}>${esc(dt)}</option>`).join('');
+            .map(dt => HtmlSafe.html`<option value="${dt}" ${cfg.documentType === dt ? 'selected' : ''}>${dt}</option>`);
 
-        return `
+        return HtmlSafe.html`
         <div id="mapToCanonicalBuilder" class="cda-step-config">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:0.65rem 0.85rem;margin-bottom:1rem;font-size:0.8rem;color:#1e40af;">
                 <strong>Map to Canonical step.</strong> Maps CSV/DB/JSON fields onto the same canonical JSON shape
@@ -183,7 +183,7 @@ class MapToCanonicalBuilder {
             <div class="config-group" style="margin-bottom:1.1rem;">
                 <label style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:#64748b;display:block;margin-bottom:0.4rem;">Output Field</label>
                 <input id="m2cOutputField" type="text" class="form-control form-control-sm"
-                    value="${esc(cfg.outputField)}" placeholder="parsedCDA"
+                    value="${cfg.outputField}" placeholder="parsedCDA"
                     style="font-family:monospace;font-size:0.82rem;">
                 <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.25rem;">Pipeline field where the canonical JSON is written — point cda.build's Source Field at this.</div>
             </div>
@@ -204,8 +204,8 @@ class MapToCanonicalBuilder {
                 </div>
                 <div id="m2cSectionsContainer">
                     ${cfg.sections.length === 0
-                        ? `<div style="text-align:center;padding:1.5rem;color:#94a3b8;font-size:0.8rem;border:1px dashed #cbd5e1;border-radius:6px;">No sections configured yet. Click "Add Section" to map rows into a canonical section.</div>`
-                        : cfg.sections.map((sec, i) => this._renderSectionCard(sec, i)).join('')}
+                        ? HtmlSafe.html`<div style="text-align:center;padding:1.5rem;color:#94a3b8;font-size:0.8rem;border:1px dashed #cbd5e1;border-radius:6px;">No sections configured yet. Click "Add Section" to map rows into a canonical section.</div>`
+                        : cfg.sections.map((sec, i) => this._renderSectionCard(sec, i))}
                 </div>
             </div>
         </div>`;
@@ -218,9 +218,9 @@ class MapToCanonicalBuilder {
     _renderTransformOptions(selectedName) {
         const esc = MapToCanonicalBuilder._esc;
         const opts = this._transformCatalog.map(t =>
-            `<option value="${esc(t.name)}" title="${esc(t.description)}" ${t.name === selectedName ? 'selected' : ''}>${esc(t.name)}</option>`
-        ).join('');
-        return `<option value="">— none —</option>${opts}`;
+            HtmlSafe.html`<option value="${t.name}" title="${t.description}" ${t.name === selectedName ? 'selected' : ''}>${t.name}</option>`
+        );
+        return HtmlSafe.html`<option value="">— none —</option>${opts}`;
     }
 
     // ── Header groups ────────────────────────────────────────────────────────
@@ -238,19 +238,19 @@ class MapToCanonicalBuilder {
         const rowsHtml = rows.map(h => {
             const globalIndex = cfg.header.indexOf(h);
             const req = requirementByKey[h.target];
-            return `
+            return HtmlSafe.html`
             <tr data-header-index="${globalIndex}">
                 <td>
                     <input type="text" class="form-control form-control-sm m2c-header-target"
-                        value="${esc(h.target)}" list="${datalistId}" placeholder="e.g. firstName" autocomplete="off">
+                        value="${h.target}" list="${datalistId}" placeholder="e.g. firstName" autocomplete="off">
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm m2c-header-source"
-                        value="${esc(h.sourcePath)}" placeholder="e.g. patientFirstName" autocomplete="off">
+                        value="${h.sourcePath}" placeholder="e.g. patientFirstName" autocomplete="off">
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm m2c-header-literal"
-                        value="${esc(h.literalValue)}" placeholder="(fixed value)" autocomplete="off"
+                        value="${h.literalValue}" placeholder="(fixed value)" autocomplete="off"
                         title="Used only when Source Path is empty — a constant written regardless of per-message data (e.g. a coded field's own codeSystem OID)">
                 </td>
                 <td>
@@ -265,12 +265,12 @@ class MapToCanonicalBuilder {
                         title="Remove"><i class="fas fa-trash"></i></button>
                 </td>
             </tr>`;
-        }).join('');
+        });
 
-        return `
+        return HtmlSafe.html`
         <div style="margin-bottom:0.9rem;border:1px solid #e2e8f0;border-radius:6px;padding:0.6rem 0.7rem;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;">
-                <span style="font-size:0.78rem;font-weight:600;color:#334155;">${esc(label)}</span>
+                <span style="font-size:0.78rem;font-weight:600;color:#334155;">${label}</span>
                 <button type="button" class="btn btn-sm btn-outline-primary"
                     onclick="window._mapToCanonicalBuilder && window._mapToCanonicalBuilder.addHeaderRow('${group}')"
                     style="font-size:0.72rem;padding:0.15rem 0.5rem;">+ Add Field</button>
@@ -279,12 +279,12 @@ class MapToCanonicalBuilder {
                 ${catalog.map(f => {
                     const req = requirementByKey[f.key];
                     const suffix = req ? ` (${req.conformance === 'SHALL' ? 'required' : 'recommended'})` : '';
-                    return `<option value="${esc(f.key)}">${esc(f.label || f.key)}${esc(suffix)}</option>`;
-                }).join('')}
+                    return HtmlSafe.html`<option value="${f.key}">${f.label || f.key}${suffix}</option>`;
+                })}
             </datalist>
             ${rows.length === 0
-                ? `<div style="font-size:0.74rem;color:#94a3b8;">No ${esc(label.toLowerCase())} fields mapped.</div>`
-                : `<table class="mapping-table" style="width:100%;">
+                ? HtmlSafe.html`<div style="font-size:0.74rem;color:#94a3b8;">No ${label.toLowerCase()} fields mapped.</div>`
+                : HtmlSafe.html`<table class="mapping-table" style="width:100%;">
                     <thead><tr>
                         <th style="font-size:0.7rem;color:#64748b;">Target Field</th>
                         <th style="font-size:0.7rem;color:#64748b;">Source Path</th>
@@ -315,8 +315,8 @@ class MapToCanonicalBuilder {
     _renderSectionCard(sec, sectionIndex) {
         const esc = MapToCanonicalBuilder._esc;
         const sectionOptions = (this._sectionsCatalog || [])
-            .map(s => `<option value="${esc(s.key)}" ${s.key === sec.sectionKey ? 'selected' : ''}>${esc(s.displayName || s.key)}</option>`)
-            .join('');
+            .map(s => HtmlSafe.html`<option value="${s.key}" ${s.key === sec.sectionKey ? 'selected' : ''}>${s.displayName || s.key}</option>`)
+            ;
         const entryCatalog = this._sectionFieldCatalog[sec.sectionKey] || [];
         const docTypeSectionReq = (this._requirements && this._requirements.sections || []).find(s => s.key === sec.sectionKey);
         const sectionBadge = docTypeSectionReq && typeof CDARequirementsHelper !== 'undefined'
@@ -335,18 +335,18 @@ class MapToCanonicalBuilder {
         // describes what one row/item maps to once rows are being bucketed.
         const itemCatalog = isGrouped ? repeatingGroup.fields : entryCatalog;
 
-        const groupByHtml = repeatingGroup ? `
+        const groupByHtml = repeatingGroup ? HtmlSafe.html`
             <div style="margin-bottom:0.5rem;padding:0.5rem 0.6rem;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;">
                 <label style="font-size:0.72rem;font-weight:600;color:#5b21b6;display:block;margin-bottom:0.25rem;">
-                    Group rows by <span style="font-weight:400;color:#7c6aae;">(comma-separated source columns — repeats matching rows into one entry's "${esc(repeatingGroup.key)}")</span>
+                    Group rows by <span style="font-weight:400;color:#7c6aae;">(comma-separated source columns — repeats matching rows into one entry's "${repeatingGroup.key}")</span>
                 </label>
                 <input type="text" class="form-control form-control-sm m2c-section-groupby"
-                    value="${esc((sec.groupBy || []).join(', '))}" placeholder="e.g. panelId or encounterId, panelId"
+                    value="${(sec.groupBy || []).join(', ')}" placeholder="e.g. panelId or encounterId, panelId"
                     style="font-family:monospace;font-size:0.8rem;">
             </div>` : '';
 
         const itemFieldsSection = this._renderFieldMappingTable(sectionIndex, sec.fields, itemCatalog, 'item', {
-            title: isGrouped ? `Per-Item Fields (one row per "${esc(repeatingGroup.key)}" entry)` : null,
+            title: isGrouped ? `Per-Item Fields (one row per "${repeatingGroup.key}" entry)` : null,
             emptyText: 'No fields mapped yet.',
             addLabel: '+ Add Field',
         });
@@ -357,7 +357,7 @@ class MapToCanonicalBuilder {
             addLabel: '+ Add Entry Field',
         }) : '';
 
-        return `
+        return HtmlSafe.html`
         <div class="m2c-section-card" data-section-index="${sectionIndex}"
             style="border:1px solid #e2e8f0;border-radius:8px;padding:0.7rem 0.8rem;margin-bottom:0.8rem;background:#fafbfc;">
             <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.55rem;">
@@ -367,7 +367,7 @@ class MapToCanonicalBuilder {
                     ${sectionOptions}
                 </select>
                 <input type="text" class="form-control form-control-sm m2c-rows-path" data-search-kind="rowspath" data-section-index="${sectionIndex}"
-                    value="${esc(sec.rowsPath)}" placeholder="e.g. records or rows"
+                    value="${sec.rowsPath}" placeholder="e.g. records or rows"
                     style="flex:1;font-family:monospace;font-size:0.8rem;">
                 ${sectionBadge}
                 <button type="button" class="btn btn-sm btn-outline-danger"
@@ -378,7 +378,7 @@ class MapToCanonicalBuilder {
             <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.5rem;">
                 <label style="font-size:0.7rem;color:#94a3b8;white-space:nowrap;" title="Advanced — only needed when this section has more than one entry shape (e.g. Medical Equipment's alternate Procedure entries). Add a SECOND section card for the same section, give it its own Rows Path, and set its Entries Key to match the alternate shape's key. Leave blank for the ordinary case.">Entries Key (advanced)</label>
                 <input type="text" class="form-control form-control-sm m2c-entries-key" data-section-index="${sectionIndex}"
-                    value="${esc(sec.entriesKey || '')}" placeholder="entries (default)"
+                    value="${sec.entriesKey || ''}" placeholder="entries (default)"
                     style="flex:0 0 200px;font-family:monospace;font-size:0.78rem;">
             </div>
             ${groupByHtml}
@@ -410,24 +410,24 @@ class MapToCanonicalBuilder {
             if (allowJoinMode && f.relatedRows) {
                 return this._renderRelatedRowsFieldRow(sectionIndex, fi, f, joinCatalog, datalistId);
             }
-            return `
+            return HtmlSafe.html`
             <tr data-field-index="${fi}" data-field-kind="${kind}">
                 <td>
                     <input type="text" class="form-control form-control-sm m2c-field-canonical"
-                        value="${esc(f.canonicalField)}" list="${datalistId}" placeholder="e.g. conditionCode" autocomplete="off">
+                        value="${f.canonicalField}" list="${datalistId}" placeholder="e.g. conditionCode" autocomplete="off">
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm m2c-field-source"
-                        value="${esc(f.sourcePath)}" placeholder="e.g. icd10Code" autocomplete="off">
+                        value="${f.sourcePath}" placeholder="e.g. icd10Code" autocomplete="off">
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm m2c-field-fallback"
-                        value="${esc((f.fallbackPaths || []).join(', '))}" placeholder="alt1, alt2" autocomplete="off"
+                        value="${(f.fallbackPaths || []).join(', ')}" placeholder="alt1, alt2" autocomplete="off"
                         title="Comma-separated fallback source paths, tried in order if Source Path is empty">
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm m2c-field-literal"
-                        value="${esc(f.literalValue)}" placeholder="(fixed value)" autocomplete="off"
+                        value="${f.literalValue}" placeholder="(fixed value)" autocomplete="off"
                         title="Used only when no source/fallback path resolves">
                 </td>
                 <td>
@@ -438,11 +438,11 @@ class MapToCanonicalBuilder {
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm m2c-field-valuemap"
-                        value="${esc(MapToCanonicalBuilder._valueMapToText(f.valueMap))}" placeholder="A=active, R=resolved" autocomplete="off"
+                        value="${MapToCanonicalBuilder._valueMapToText(f.valueMap)}" placeholder="A=active, R=resolved" autocomplete="off"
                         title="Comma-separated raw=canonical value translations, applied AFTER Transform">
                 </td>
                 <td style="width:70px;text-align:center;white-space:nowrap;">
-                    ${allowJoinMode ? `<button type="button" class="btn btn-sm btn-outline-secondary" title="Attach rows from a different pipeline field (cross-table join)"
+                    ${allowJoinMode ? HtmlSafe.html`<button type="button" class="btn btn-sm btn-outline-secondary" title="Attach rows from a different pipeline field (cross-table join)"
                         onclick="window._mapToCanonicalBuilder && window._mapToCanonicalBuilder.toggleFieldJoinMode(${sectionIndex}, ${fi}, true)"
                         style="font-size:0.7rem;padding:0.1rem 0.35rem;margin-right:0.25rem;"><i class="fas fa-link"></i></button>` : ''}
                     <button type="button" class="btn btn-sm btn-danger"
@@ -450,19 +450,19 @@ class MapToCanonicalBuilder {
                         title="Remove field"><i class="fas fa-trash"></i></button>
                 </td>
             </tr>`;
-        }).join('');
+        });
 
-        return `
-            ${opts.title ? `<div style="font-size:0.72rem;font-weight:600;color:#475569;margin:0.5rem 0 0.3rem;">${esc(opts.title)}</div>` : ''}
+        return HtmlSafe.html`
+            ${opts.title ? HtmlSafe.html`<div style="font-size:0.72rem;font-weight:600;color:#475569;margin:0.5rem 0 0.3rem;">${opts.title}</div>` : ''}
             <datalist id="${datalistId}">
-                ${catalog.map(f => `<option value="${esc(f.key)}">${esc(f.label || f.key)}</option>`).join('')}
+                ${catalog.map(f => HtmlSafe.html`<option value="${f.key}">${f.label || f.key}</option>`)}
                 ${allowJoinMode && repeatingGroup && !catalog.some(f => f.key === repeatingGroup.key)
-                    ? `<option value="${esc(repeatingGroup.key)}">${esc(repeatingGroup.key)} (repeating — use "Attach related rows" for this one)</option>`
+                    ? HtmlSafe.html`<option value="${repeatingGroup.key}">${repeatingGroup.key} (repeating — use "Attach related rows" for this one)</option>`
                     : ''}
             </datalist>
             ${fields.length === 0
-                ? `<div style="font-size:0.74rem;color:#94a3b8;margin-bottom:0.4rem;">${esc(opts.emptyText)}</div>`
-                : `<div style="overflow-x:auto;">
+                ? HtmlSafe.html`<div style="font-size:0.74rem;color:#94a3b8;margin-bottom:0.4rem;">${opts.emptyText}</div>`
+                : HtmlSafe.html`<div style="overflow-x:auto;">
                     <table class="mapping-table" style="width:100%;min-width:760px;">
                         <thead><tr>
                             <th style="font-size:0.68rem;color:#64748b;">Canonical Field</th>
@@ -478,7 +478,7 @@ class MapToCanonicalBuilder {
                    </div>`}
             <button type="button" class="btn btn-sm btn-outline-primary"
                 onclick="window._mapToCanonicalBuilder && window._mapToCanonicalBuilder.addSectionField(${sectionIndex}, '${kind}')"
-                style="font-size:0.72rem;padding:0.15rem 0.5rem;margin-top:0.4rem;">${esc(opts.addLabel)}</button>`;
+                style="font-size:0.72rem;padding:0.15rem 0.5rem;margin-top:0.4rem;">${opts.addLabel}</button>`;
     }
 
     // Renders one field row in "related rows join" mode (Block 3, Option C)
@@ -495,7 +495,7 @@ class MapToCanonicalBuilder {
             addLabel: '+ Add Joined Field',
         });
 
-        return `
+        return HtmlSafe.html`
         <tr data-field-index="${fieldIndex}" data-field-kind="item" data-field-relatedrows="1">
             <td colspan="7">
                 <div style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:6px;padding:0.55rem 0.65rem;">
@@ -514,23 +514,23 @@ class MapToCanonicalBuilder {
                         <div>
                             <label style="font-size:0.68rem;color:#64748b;display:block;">Canonical Field</label>
                             <input type="text" class="form-control form-control-sm m2c-relatedrows-canonical"
-                                value="${esc(f.canonicalField)}" list="${datalistId}" placeholder="e.g. indications" autocomplete="off">
+                                value="${f.canonicalField}" list="${datalistId}" placeholder="e.g. indications" autocomplete="off">
                         </div>
                         <div>
                             <label style="font-size:0.68rem;color:#64748b;display:block;">Related Rows Path</label>
                             <input type="text" class="form-control form-control-sm m2c-relatedrows-path"
-                                value="${esc(rr.relatedRowsPath)}" placeholder="e.g. indicationRecords" autocomplete="off"
+                                value="${rr.relatedRowsPath}" placeholder="e.g. indicationRecords" autocomplete="off"
                                 style="font-family:monospace;font-size:0.78rem;">
                         </div>
                         <div>
                             <label style="font-size:0.68rem;color:#64748b;display:block;">Join Local Key <span title="Column on THIS row">ⓘ</span></label>
                             <input type="text" class="form-control form-control-sm m2c-relatedrows-localkey"
-                                value="${esc(rr.joinLocalKey)}" placeholder="e.g. medicationId" autocomplete="off">
+                                value="${rr.joinLocalKey}" placeholder="e.g. medicationId" autocomplete="off">
                         </div>
                         <div>
                             <label style="font-size:0.68rem;color:#64748b;display:block;">Join Related Key <span title="Column on the OTHER array's rows">ⓘ</span></label>
                             <input type="text" class="form-control form-control-sm m2c-relatedrows-relatedkey"
-                                value="${esc(rr.joinRelatedKey)}" placeholder="e.g. medicationId" autocomplete="off">
+                                value="${rr.joinRelatedKey}" placeholder="e.g. medicationId" autocomplete="off">
                         </div>
                     </div>
                     <div style="font-size:0.68rem;color:#64748b;margin-bottom:0.3rem;">Every row in Related Rows Path whose Join Related Key matches this row's own Join Local Key becomes one item.</div>
@@ -764,7 +764,7 @@ class MapToCanonicalBuilder {
         const root = document.getElementById('mapToCanonicalBuilder');
         if (!root || !root.parentElement) return;
         this._destroyFieldSearches();
-        root.outerHTML = this._renderAll();
+        root.outerHTML = HtmlSafe.html`${this._renderAll()}`;
         setTimeout(() => this._attachFieldSearches(), 0);
     }
 

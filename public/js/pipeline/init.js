@@ -59,7 +59,7 @@
             z-index: 10000;
         `;
 
-        errorDiv.innerHTML = `
+        errorDiv.innerHTML = HtmlSafe.html`
             <i class="fas fa-exclamation-triangle" style="font-size: 3rem; color: #ef4444; margin-bottom: 1rem;"></i>
             <h2 style="margin-bottom: 1rem; color: #0f172a;">Failed to Load Pipeline Builder</h2>
             <p style="color: #64748b; margin-bottom: 1rem;">${error.message}</p>

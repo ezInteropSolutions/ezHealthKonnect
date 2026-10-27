@@ -245,16 +245,18 @@ class UserService {
                 return;
             }
 
-            const adminPassword = 'admin123';
-            const hashedPassword = await bcrypt.hash(adminPassword, 12);
-
+            // Locked exactly like migration V146 leaves it: no password can
+            // ever match, status pending. The first-run setup wizard turns it
+            // into the real administrator. (It used to be created ACTIVE with
+            // the publicly documented password "admin123".)
             const adminUser = await this.database.models.User.create({
-                email:              adminEmail,
-                password_hash:      hashedPassword,
-                first_name:         'System',
-                last_name:          'Administrator',
-                role:               'admin',
-                status:             'active',
+                email:                adminEmail,
+                password_hash:        'LOCKED_PENDING_SETUP',
+                force_password_reset: true,
+                first_name:           'System',
+                last_name:            'Administrator',
+                role:                 'admin',
+                status:               'pending',
                 email_verified:     true,
                 created_by:         null,
                 data_consent_given: true,

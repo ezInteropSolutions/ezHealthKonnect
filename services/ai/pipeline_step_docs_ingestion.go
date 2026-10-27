@@ -28,7 +28,7 @@ type pipelineStepDocsFile struct {
 // one chunk-source per step type (plus one per legacy alias, so an old-name
 // question still retrieves the right content — RAG similarity search doesn't
 // go through StepDocumentationRegistry.get()'s alias resolution). Degrades
-// gracefully (like IngestHL7Schemas does for a missing schema dir) when the
+// gracefully (like the schema digests do for a missing schema dir) when the
 // export hasn't been run yet, rather than failing the whole ingestion pass.
 func (k *KnowledgeIngestionService) IngestPipelineStepDocs(ctx context.Context, jsonPath string) *IngestionResult {
 	result := &IngestionResult{SourceType: "pipeline_step_docs"}

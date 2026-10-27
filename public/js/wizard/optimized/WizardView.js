@@ -67,7 +67,7 @@ class WizardView extends EventTarget {
      * Main render method - creates the complete wizard structure
      */
     render() {
-        this.container.innerHTML = this.getModalTemplate();
+        this.container.innerHTML = HtmlSafe.html`${this.getModalTemplate()}`;
         this.modal = this.container.querySelector('.wizard-modal-overlay');
         this.setupAccessibility();
     }
@@ -76,7 +76,7 @@ class WizardView extends EventTarget {
      * Modal template following our design system
      */
     getModalTemplate() {
-        return `
+        return HtmlSafe.html`
             <div class="wizard-modal-overlay" id="wizardModalOverlay" role="dialog" aria-labelledby="wizard-title" aria-modal="true">
                 <div class="wizard-modal-container" id="wizardModalContainer">
                     <!-- Top Right Navigation Buttons (Floating) -->
@@ -174,7 +174,7 @@ class WizardView extends EventTarget {
             { number: 4, title: 'Target Config', icon: '🎯' }
         ];
 
-        return steps.map(step => `
+        return steps.map(step => HtmlSafe.html`
             <div class="wizard-step ${step.number === 1 ? 'active' : ''}"
                  id="wizardStep${step.number}"
                  role="tab"
@@ -186,7 +186,7 @@ class WizardView extends EventTarget {
                 </div>
                 <div class="wizard-step-title">${step.title}</div>
             </div>
-        `).join('');
+        `);
     }
 
     /**
@@ -200,7 +200,7 @@ class WizardView extends EventTarget {
             { number: 4, title: 'Target Config', icon: '🎯', description: 'Endpoint setup' }
         ];
 
-        return steps.map((step, index) => `
+        return steps.map((step, index) => HtmlSafe.html`
             <div class="wizard-step-creative ${step.number === 1 ? 'active' : ''}"
                  data-step="${step.number}" tabindex="-1"
                  role="tab" aria-selected="${step.number === 1}"
@@ -216,7 +216,7 @@ class WizardView extends EventTarget {
                     <div class="step-description">${step.description}</div>
                 </div>
             </div>
-        `).join('');
+        `);
     }
 
     /**
@@ -275,7 +275,7 @@ class WizardView extends EventTarget {
 
         // Update content
         console.log('📝 Setting container innerHTML');
-        container.innerHTML = newContent;
+        container.innerHTML = HtmlSafe.html`${newContent}`;
 
         // Fade in new content
         container.style.opacity = '1';
@@ -328,7 +328,7 @@ class WizardView extends EventTarget {
                 }
                 return this.getStep5Template(data); // HL7: Mapping configuration
             default:
-                return '<div class="wizard-error">Invalid step</div>';
+                return HtmlSafe.raw('<div class="wizard-error">Invalid step</div>');
         }
     }
 
@@ -336,7 +336,7 @@ class WizardView extends EventTarget {
      * Step 1: Basic Information
      */
     getStep1Template(data) {
-        return `
+        return HtmlSafe.html`
             <div class="wizard-step-content" data-step="1">
                 <div class="wizard-step-header">
                     <h3>Interface Configuration</h3>
@@ -453,16 +453,16 @@ class WizardView extends EventTarget {
                                 <div style="font-size:0.79rem;color:#64748b;margin-bottom:10px;">Click to select. MFN events must be chosen individually.</div>
                                 <div style="display:flex;flex-wrap:wrap;gap:6px;" id="wizardFamilyChips">
                                     ${['ADT','ORU','ORM','SIU','MDM','VXU','RDE','BAR','DFT'].map(f =>
-                                        `<span class="family-chip${Array.isArray(data.acceptedMessageFamilies) && data.acceptedMessageFamilies.includes(f) ? ' selected' : ''}"
+                                        HtmlSafe.html`<span class="family-chip${Array.isArray(data.acceptedMessageFamilies) && data.acceptedMessageFamilies.includes(f) ? ' selected' : ''}"
                                                data-family="${f}" onclick="window._wizardToggleFamilyChip('${f}')"
                                                title="${{ADT:'Admit/Discharge/Transfer',ORU:'Observation Results',ORM:'Order Entry',SIU:'Scheduling',MDM:'Medical Document',VXU:'Vaccination',RDE:'Pharmacy',BAR:'Billing',DFT:'Financial'}[f]}">${f}</span>`
-                                    ).join('')}
+                                    )}
                                     <span style="width:100%;font-size:0.75rem;color:#94a3b8;padding-top:4px;font-weight:500;">MFN — select individually:</span>
                                     ${['MFN^M02','MFN^M04','MFN^M05','MFN^M12','MFN^M13'].map(f => {
                                         const label = {MFN_M02:'Staff',MFN_M04:'Charge',MFN_M05:'Location',MFN_M12:'Observation',MFN_M13:'Generic'}[f.replace('^','_')];
-                                        return `<span class="family-chip${Array.isArray(data.acceptedMessageFamilies) && data.acceptedMessageFamilies.includes(f) ? ' selected' : ''}"
+                                        return HtmlSafe.html`<span class="family-chip${Array.isArray(data.acceptedMessageFamilies) && data.acceptedMessageFamilies.includes(f) ? ' selected' : ''}"
                                                       data-family="${f}" onclick="window._wizardToggleFamilyChip('${f}')">${f} ${label}</span>`;
-                                    }).join('')}
+                                    })}
                                 </div>
                             </div>
                             <input type="hidden" id="wizardAcceptedMessageFamilies"
@@ -603,7 +603,7 @@ class WizardView extends EventTarget {
      * Step 2: HL7 Parsing & Sample
      */
     getStep2Template(data) {
-        return `
+        return HtmlSafe.html`
             <div class="wizard-step-content" data-step="2">
                 <div class="wizard-step-header">
                     <h3>HL7 Message Parsing & Sample <span style="font-size:14px;font-weight:400;color:#6b7280;vertical-align:middle;">(Optional)</span></h3>
@@ -715,7 +715,7 @@ class WizardView extends EventTarget {
             { icon: '🩻', cda: 'Medical Equipment',             fhir: 'DeviceUseStatement',      fields: 3  },
         ];
         const totalFields = sections.reduce((sum, s) => sum + s.fields, 0);
-        const cards = sections.map(s => `
+        const cards = sections.map(s => HtmlSafe.html`
             <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:white;border:1px solid #e5e7eb;border-radius:8px;">
                 <span style="font-size:18px;flex-shrink:0;">${s.icon}</span>
                 <div style="min-width:0;flex:1;">
@@ -723,9 +723,9 @@ class WizardView extends EventTarget {
                     <div style="font-size:11px;color:#1e3a8a;font-weight:500;">${s.fhir}</div>
                 </div>
                 <span style="flex-shrink:0;font-size:10px;color:#6b7280;background:#f3f4f6;border-radius:4px;padding:2px 6px;">${s.fields}f</span>
-            </div>`).join('');
+            </div>`);
 
-        return `
+        return HtmlSafe.html`
             <div class="wizard-step-content" data-step="2">
                 <div class="wizard-step-header">
                     <h3>CDA/CCD Document Processing</h3>
@@ -859,27 +859,27 @@ class WizardView extends EventTarget {
                 badgeEl.style.color = badgeColor;
                 badgeEl.style.fontSize = '11px';
                 badgeEl.style.fontWeight = '600';
-                badgeEl.innerHTML = `${badgeIcon} ${badgeText}`;
+                badgeEl.textContent = `${badgeIcon} ${badgeText}`;
             }
 
             // Detail list of missing SHALL sections
             let detailHTML = '';
             if (missingShall.length > 0) {
-                detailHTML = `<div style="margin-top:8px;padding:8px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;">
+                detailHTML = HtmlSafe.html`<div style="margin-top:8px;padding:8px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;">
                     <div style="font-weight:600;color:#991b1b;margin-bottom:4px;">Missing SHALL sections:</div>
                     <ul style="margin:0;padding-left:16px;color:#b91c1c;">
-                        ${missingShall.map(s => `<li>${s}</li>`).join('')}
+                        ${missingShall.map(s => HtmlSafe.html`<li>${s}</li>`)}
                     </ul>
                 </div>`;
             }
 
             // SHOULD summary
             const shouldPct = Math.round(shouldScore * 100);
-            const shouldSummary = `<div style="margin-top:6px;color:#6b7280;">SHOULD score: <strong>${shouldPct}%</strong> — overall: <strong>${Math.round(report.overallScore * 100)}%</strong></div>`;
+            const shouldSummary = HtmlSafe.html`<div style="margin-top:6px;color:#6b7280;">SHOULD score: <strong>${shouldPct}%</strong> — overall: <strong>${Math.round(report.overallScore * 100)}%</strong></div>`;
 
             if (resultEl) {
                 resultEl.style.display = 'block';
-                resultEl.innerHTML = detailHTML + shouldSummary;
+                resultEl.innerHTML = HtmlSafe.html`${detailHTML}${shouldSummary}`;
             }
 
         } catch (err) {
@@ -891,7 +891,7 @@ class WizardView extends EventTarget {
                 badgeEl.style.border = '1px solid #fecaca';
                 badgeEl.style.color = '#991b1b';
                 badgeEl.style.fontSize = '11px';
-                badgeEl.innerHTML = `❌ ${err.message}`;
+                badgeEl.textContent = `❌ ${err.message}`;
             }
         } finally {
             if (loadingEl) loadingEl.style.display = 'none';
@@ -960,11 +960,11 @@ class WizardView extends EventTarget {
             SHOULD: { color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
             MAY:    { color: '#4b5563', bg: '#f9fafb', border: '#e5e7eb' },
         };
-        const badge = (c) => `<span style="font-size:10px;font-weight:700;color:${conf[c].color};background:${conf[c].bg};border:1px solid ${conf[c].border};border-radius:4px;padding:1px 5px;">${c}</span>`;
-        const bar = (v) => `<div style="display:flex;align-items:center;gap:6px;"><div style="width:50px;height:5px;background:#e5e7eb;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.round(v*100)}%;background:#1e3a8a;border-radius:3px;"></div></div><span style="font-size:10px;color:#6b7280;">${Math.round(v*100)}%</span></div>`;
-        const fn = (t) => `<code style="font-size:10px;background:#f1f5f9;padding:1px 5px;border-radius:3px;color:#1e40af;">${t}</code>`;
+        const badge = (c) => HtmlSafe.html`<span style="font-size:10px;font-weight:700;color:${conf[c].color};background:${conf[c].bg};border:1px solid ${conf[c].border};border-radius:4px;padding:1px 5px;">${c}</span>`;
+        const bar = (v) => HtmlSafe.html`<div style="display:flex;align-items:center;gap:6px;"><div style="width:50px;height:5px;background:#e5e7eb;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.round(v*100)}%;background:#1e3a8a;border-radius:3px;"></div></div><span style="font-size:10px;color:#6b7280;">${Math.round(v*100)}%</span></div>`;
+        const fn = (t) => HtmlSafe.html`<code style="font-size:10px;background:#f1f5f9;padding:1px 5px;border-radius:3px;color:#1e40af;">${t}</code>`;
 
-        const row = (m) => `
+        const row = (m) => HtmlSafe.html`
             <tr style="border-bottom:1px solid #f3f4f6;">
                 <td style="padding:6px 10px;font-size:11px;font-family:monospace;color:#374151;">${m.cda}</td>
                 <td style="padding:6px 10px;font-size:11px;font-family:monospace;color:#1e40af;word-break:break-all;">${m.fhir}</td>
@@ -973,7 +973,7 @@ class WizardView extends EventTarget {
                 <td style="padding:6px 10px;">${bar(m.score)}</td>
             </tr>`;
 
-        const section = (label, icon, fhirRes, profile, mappings) => `
+        const section = (label, icon, fhirRes, profile, mappings) => HtmlSafe.html`
             <details style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:8px;">
                 <summary style="padding:10px 14px;background:#f8fafc;cursor:pointer;display:flex;align-items:center;gap:10px;user-select:none;list-style:none;">
                     <span style="font-size:16px;">${icon}</span>
@@ -991,7 +991,7 @@ class WizardView extends EventTarget {
                             <th style="padding:5px 10px;text-align:left;color:#6b7280;font-weight:500;width:10%;">Conf.</th>
                             <th style="padding:5px 10px;text-align:left;color:#6b7280;font-weight:500;width:11%;">Score</th>
                         </tr></thead>
-                        <tbody>${mappings.map(row).join('')}</tbody>
+                        <tbody>${mappings.map(row)}</tbody>
                     </table>
                 </div>
             </details>`;
@@ -1001,7 +1001,7 @@ class WizardView extends EventTarget {
 
         // Advisory banner: show conformance check result if it came from step 2
         const conf2 = data.cdaConformanceResult;
-        const conformanceBanner = conf2 && conf2.missingShall && conf2.missingShall.length > 0 ? `
+        const conformanceBanner = conf2 && conf2.missingShall && conf2.missingShall.length > 0 ? HtmlSafe.html`
             <div style="display:flex;align-items:flex-start;gap:10px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;">
                 <span style="font-size:16px;flex-shrink:0;">⚠️</span>
                 <div>
@@ -1011,7 +1011,7 @@ class WizardView extends EventTarget {
                 </div>
             </div>` : '';
 
-        return `
+        return HtmlSafe.html`
             <div class="wizard-step-content" data-step="3">
                 <div class="wizard-step-header">
                     <h3>OOB Template Mapping Review <span style="font-size:12px;font-weight:400;color:#6b7280;vertical-align:middle;margin-left:6px;">Read-only · Auto-applied</span></h3>
@@ -1021,11 +1021,11 @@ class WizardView extends EventTarget {
                 ${conformanceBanner}
 
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
-                    ${[['21','Sections'],['90+','Field Mappings'],['US Core 6.1','Profile'],['85%+','Avg. Confidence']].map(([v,l])=>`
+                    ${[['21','Sections'],['90+','Field Mappings'],['US Core 6.1','Profile'],['85%+','Avg. Confidence']].map(([v,l])=>HtmlSafe.html`
                     <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;text-align:center;">
                         <div style="font-size:18px;font-weight:700;color:#1e3a8a;">${v}</div>
                         <div style="font-size:11px;color:#6b7280;">${l}</div>
-                    </div>`).join('')}
+                    </div>`)}
                 </div>
 
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
@@ -1213,206 +1213,6 @@ class WizardView extends EventTarget {
     }
 
     /**
-     * LEGACY METHOD - Kept for backward compatibility but now delegates to shared component
-     */
-    _legacyGetFhirReceiverConfig(config = {}) {
-        return `
-            <div class="config-group fhir-receiver-config">
-                <h4>🏥 FHIR Receiver Configuration</h4>
-
-                <!-- Base URL Path -->
-                <div class="form-group">
-                    <label for="fhirBasePath" class="form-label required">Base URL Path</label>
-                    <input type="text" id="fhirBasePath" class="form-control"
-                           value="${config.basePath || '/fhir'}"
-                           placeholder="/fhir">
-                    <div class="form-hint">💡 Example endpoint: <code>/fhir/receiver/{interfaceId}</code> or <code>/fhir/{resourceType}</code></div>
-                </div>
-
-                <!-- FHIR Version -->
-                <div class="form-group">
-                    <label for="fhirVersion" class="form-label required">FHIR Version</label>
-                    <select id="fhirVersion" class="form-control">
-                        <option value="R4" ${!config.fhirVersion || config.fhirVersion === 'R4' ? 'selected' : ''}>FHIR R4 (Recommended)</option>
-                        <option value="R5" ${config.fhirVersion === 'R5' ? 'selected' : ''}>FHIR R5 (Emerging Standard)</option>
-                    </select>
-                    <div class="form-hint">Select the FHIR version your destination system expects</div>
-                </div>
-
-                <!-- Supported Operations -->
-                <div class="form-group">
-                    <label class="form-label">
-                        Supported REST Operations
-                        <a href="#" class="help-link" onclick="event.preventDefault(); AppDialogs.alert('Choose which FHIR REST API operations to enable:<br><br>• <b>CREATE (POST)</b> — Most common, create new resources<br>• <b>READ (GET)</b> — Retrieve resources by ID<br>• <b>UPDATE (PUT)</b> — Replace entire resource<br>• <b>PATCH</b> — Partial updates<br>• <b>DELETE</b> — Remove resources (use with caution)<br>• <b>SEARCH</b> — Query with parameters<br>• <b>BATCH/TRANSACTION</b> — Multiple operations in one request<br><br><i>Recommendation: Start with CREATE only, add others as needed.</i>', { title: 'FHIR Operations Help', type: 'info' });" title="Click for help">ⓘ</a>
-                    </label>
-                    <div class="checkbox-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="opCreate" ${!config.operations || config.operations.includes('CREATE') ? 'checked' : ''}>
-                            <span>CREATE (POST)</span>
-                        </label>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="opRead" ${config.operations?.includes('READ') ? 'checked' : ''}>
-                            <span>READ (GET)</span>
-                        </label>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="opUpdate" ${config.operations?.includes('UPDATE') ? 'checked' : ''}>
-                            <span>UPDATE (PUT)</span>
-                        </label>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="opPatch" ${config.operations?.includes('PATCH') ? 'checked' : ''}>
-                            <span>PATCH</span>
-                        </label>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="opDelete" ${config.operations?.includes('DELETE') ? 'checked' : ''}>
-                            <span>DELETE</span>
-                        </label>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="opSearch" ${config.operations?.includes('SEARCH') ? 'checked' : ''}>
-                            <span>SEARCH</span>
-                        </label>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="opBatch" ${config.operations?.includes('BATCH') ? 'checked' : ''}>
-                            <span>BATCH/TRANSACTION</span>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- Resource Filtering -->
-                <div class="form-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="enableResourceFilter" ${config.enableResourceFilter ? 'checked' : ''}>
-                        <span>Restrict Accepted Resource Types</span>
-                    </label>
-                    <div id="resourceFilterPanel" style="display: ${config.enableResourceFilter ? 'block' : 'none'}; margin-top: 12px;">
-                        <div class="checkbox-group" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 12px; border-radius: 4px;">
-                            ${this.getFhirResourceCheckboxes(config.acceptedResources || [])}
-                        </div>
-                        <label class="checkbox-label" style="margin-top: 8px;">
-                            <input type="checkbox" id="rejectUnknownResources" ${config.rejectUnknownResources ? 'checked' : ''}>
-                            <span>Reject resources not in the list above</span>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- Validation Settings -->
-                <div class="form-group">
-                    <label class="form-label">Validation Settings</label>
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="validateStructure" ${config.validateStructure !== false ? 'checked' : ''}>
-                        <span>Validate Resource Structure (required fields, data types)</span>
-                    </label>
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="validateProfiles" ${config.validateProfiles ? 'checked' : ''}>
-                        <span>Validate Against Profiles (US Core, IPS, etc.)</span>
-                    </label>
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="validateTerminology" ${config.validateTerminology ? 'checked' : ''}>
-                        <span>Validate Terminology (CodeSystems, ValueSets)</span>
-                    </label>
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="rejectInvalid" ${config.rejectInvalid ? 'checked' : ''}>
-                        <span>Reject Invalid Resources (vs Accept with Warnings)</span>
-                    </label>
-                </div>
-
-                <!-- Rate Limiting -->
-                <div class="form-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="enableRateLimit" ${config.enableRateLimit ? 'checked' : ''}>
-                        <span>Enable Rate Limiting</span>
-                    </label>
-                    <div id="rateLimitPanel" style="display: ${config.enableRateLimit ? 'block' : 'none'}; margin-top: 12px;">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="rateLimit" class="form-label">Requests per Minute</label>
-                                <input type="number" id="rateLimit" class="form-control"
-                                       value="${config.rateLimit || 60}"
-                                       min="1" max="10000">
-                            </div>
-                            <div class="form-group">
-                                <label for="burstLimit" class="form-label">Burst Allowance</label>
-                                <input type="number" id="burstLimit" class="form-control"
-                                       value="${config.burstLimit || 10}"
-                                       min="1" max="1000">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Content Format -->
-                <div class="form-group">
-                    <label class="form-label">Accepted Content Types</label>
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="acceptFhirJson" ${config.acceptFhirJson !== false ? 'checked' : ''}>
-                        <span>application/fhir+json (FHIR Standard)</span>
-                    </label>
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="acceptJson" ${config.acceptJson !== false ? 'checked' : ''}>
-                        <span>application/json (Fallback)</span>
-                    </label>
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="acceptFhirXml" ${config.acceptFhirXml ? 'checked' : ''}>
-                        <span>application/fhir+xml (XML Support)</span>
-                    </label>
-                </div>
-
-                <!-- Post-Reception Actions (Integration Engine Features) -->
-                <div class="form-group" style="border-top: 2px solid #e0e0e0; padding-top: 20px; margin-top: 20px;">
-                    <h4 style="margin-bottom: 16px;">🔄 Post-Reception Actions</h4>
-                    <div class="form-hint" style="margin-bottom: 12px;">Configure what happens after receiving FHIR resources</div>
-
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="actionStoreOnly" ${!config.postActions || config.postActions.includes('store') ? 'checked' : ''}>
-                        <span>Store in Database (Always enabled)</span>
-                    </label>
-
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="actionTransform" ${config.postActions?.includes('transform') ? 'checked' : ''}>
-                        <span>Apply Transformation Pipeline (custom mappings, enrichment)</span>
-                    </label>
-
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="actionForward" ${config.postActions?.includes('forward') ? 'checked' : ''}>
-                        <span>Forward to Destination (route to another FHIR server)</span>
-                    </label>
-
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="actionWorkflow" ${config.postActions?.includes('workflow') ? 'checked' : ''}>
-                        <span>Trigger Workflow (conditional routing, notifications)</span>
-                    </label>
-
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="actionAudit" ${config.postActions?.includes('audit') ? 'checked' : ''}>
-                        <span>Generate FHIR AuditEvent (compliance tracking)</span>
-                    </label>
-
-                    <!-- Forwarding Configuration (shown when forward is checked) -->
-                    <div id="forwardingConfig" style="display: ${config.postActions?.includes('forward') ? 'block' : 'none'}; margin-top: 12px; padding: 12px; background: #f5f5f5; border-radius: 4px;">
-                        <div class="form-group">
-                            <label for="forwardDestination" class="form-label">Forward Destination URL</label>
-                            <input type="url" id="forwardDestination" class="form-control"
-                                   value="${config.forwardDestination || ''}"
-                                   placeholder="https://fhir-server.example.com/fhir">
-                        </div>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="forwardAsync" ${config.forwardAsync !== false ? 'checked' : ''}>
-                            <span>Async Forwarding (don't wait for response)</span>
-                        </label>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="forwardOnlyValid" ${config.forwardOnlyValid ? 'checked' : ''}>
-                            <span>Forward Only Valid Resources</span>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- HTTP Authentication (Universal for all HTTP connections) -->
-                ${this.getHttpAuthConfig(config)}
-
-            </div>
-        `;
-    }
-
-    /**
      * Get FHIR resource type checkboxes
      * REFACTORED: Delegates to shared InterfaceConfigComponents
      */
@@ -1449,15 +1249,15 @@ class WizardView extends EventTarget {
             data.targetType = data.targetType || 'fhir';
         }
 
-        return `
+        return HtmlSafe.html`
             <div class="wizard-step-content" data-step="4">
                 <div class="wizard-step-header">
                     <h3>Target Configuration</h3>
-                    <p>${isSinkOnly ? 'Messages will be stored in database only (no external routing)' : 'Configure where FHIR resources will be sent'}</p>
+                    <p>${isSinkOnly ? 'Messages will be stored in database only (no external routing)' : (typeof getFlow !== 'undefined' && getFlow(data.transformationFlow).targetFormat === null ? 'Configure where processed messages will be delivered' : 'Configure where FHIR resources will be sent')}</p>
                 </div>
 
                 <div class="wizard-form">
-                    ${isSinkOnly ? `
+                    ${isSinkOnly ? HtmlSafe.html`
                         <!-- Sink-Only Flow: Show informational message only -->
                         <div class="alert alert-info" style="background: linear-gradient(135deg, #e3f2fd 0%, #ffffff 100%); padding: 24px; border: 2px solid #90caf9; border-radius: 12px; margin-bottom: 20px;">
                             <div style="display: flex; align-items: start; gap: 16px;">
@@ -1483,7 +1283,7 @@ class WizardView extends EventTarget {
                         <!-- Hidden inputs to set connectivity as sink -->
                         <input type="hidden" id="targetConnectivity" value="sink">
                         <input type="hidden" id="targetType" value="${data.targetType || 'fhir'}">
-                    ` : `
+                    ` : HtmlSafe.html`
                         <!-- Outbound connector — same ConnectorConfigBuilder used by pipeline builder -->
                         <div id="wizardOutboundConnectorContainer" class="wizard-embedded-connector"></div>
                     `}
@@ -1541,7 +1341,7 @@ class WizardView extends EventTarget {
                     showDeliveryMode: showDeliveryMode
                 });
 
-                return `
+                return HtmlSafe.html`
                     <div class="config-group">
                         <h4>FHIR Server Configuration</h4>
                         <div class="form-group">
@@ -1569,7 +1369,7 @@ class WizardView extends EventTarget {
                         </div>
 
                         <!-- Delivery Mode (Only for transformation flows) -->
-                        ${showDeliveryMode ? `
+                        ${showDeliveryMode ? HtmlSafe.html`
                         <div class="form-group" id="deliveryModeGroup">
                             <label class="form-label">
                                 Delivery Mode
@@ -1746,10 +1546,10 @@ class WizardView extends EventTarget {
         console.log('🔄 Updating target config panel - connectivity:', connectivity, 'transformationFlow:', wizardData.transformationFlow);
 
         // Re-render panel with transformation flow passed through
-        targetConfigPanelDiv.innerHTML = this.getTargetConfigPanel(connectivity, {
+        targetConfigPanelDiv.innerHTML = HtmlSafe.html`${this.getTargetConfigPanel(connectivity, {
             ...(wizardData.targetConfig || {}),
             transformationFlow: wizardData.transformationFlow
-        });
+        })}`;
 
         // Re-attach event listeners for new content
         this.setupTargetConfigListeners(container);
@@ -1778,7 +1578,7 @@ class WizardView extends EventTarget {
         console.log('🔄 Updating source config panel - connectivity:', connectivity, 'sourceType:', sourceType);
 
         // Re-render panel with current config
-        sourceConfigPanelDiv.innerHTML = this.getSourceConfigPanel(connectivity, wizardData.sourceConfig || {}, sourceType);
+        sourceConfigPanelDiv.innerHTML = HtmlSafe.html`${this.getSourceConfigPanel(connectivity, wizardData.sourceConfig || {}, sourceType)}`;
 
         // Re-attach event listeners for dynamic elements (like auth type dropdown)
         if (typeof InterfaceConfigComponents !== 'undefined') {
@@ -2003,7 +1803,7 @@ class WizardView extends EventTarget {
             dataKeys: Object.keys(data || {})
         });
 
-        return `
+        return HtmlSafe.html`
             <div class="wizard-step-content" data-step="3">
                 <div class="wizard-step-header">
                     <h3>🔄 ${data.transformationFlow === 'fhir_receiver' ? 'Processing Configuration' : 'HL7 to FHIR Mapping Configuration'}</h3>
@@ -2018,7 +1818,7 @@ class WizardView extends EventTarget {
                             ${(() => {
                                 const hl7Ver = data?.parsedHL7Data?.version || data?.parsedHL7Data?.messageHeader?.version || null;
                                 const isOldVer = hl7Ver && !['2.5', '2.5.1', '2.6', '2.7', '2.8'].includes(hl7Ver);
-                                return isOldVer ? `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#92400e;display:flex;align-items:center;gap:8px;">
+                                return isOldVer ? HtmlSafe.html`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#92400e;display:flex;align-items:center;gap:8px;">
                                     <span>⚠️</span>
                                     <span>Your sample uses <strong>HL7 v${hl7Ver}</strong>. Standard FHIR R4 mappings are optimized for HL7 v2.5+. Some field positions may differ — review highlighted mappings carefully.</span>
                                 </div>` : '';
@@ -2090,7 +1890,7 @@ class WizardView extends EventTarget {
                                         if (resourceNames.length === 0) {
                                             resourceNames = this.getExpectedResourcesForMessageType(data?.detectedMessageType || '').map(r => r.name);
                                         }
-                                        return resourceNames.map(r => `<option value="${r}">${r}</option>`).join('');
+                                        return resourceNames.map(r => HtmlSafe.html`<option value="${r}">${r}</option>`);
                                     })()}
                                 </select>
                             </div>
@@ -2100,17 +1900,17 @@ class WizardView extends EventTarget {
                         <div id="mapping-coverage-bar" style="display:flex; align-items:center; gap:16px; padding:10px 14px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; margin-bottom:10px; font-size:12px; color:#0369a1;">
                             ${(() => {
                                 const mappings = data?.fhirTransformResult?.atomicMappings || [];
-                                if (mappings.length === 0) return `<span style="color:#6b7280;">Mapping preview will appear below — select a message type</span>`;
+                                if (mappings.length === 0) return HtmlSafe.html`<span style="color:#6b7280;">Mapping preview will appear below — select a message type</span>`;
                                 const high = mappings.filter(m => m.confidence == null || m.confidence >= 0.90).length;
                                 const med  = mappings.filter(m => m.confidence != null && m.confidence >= 0.75 && m.confidence < 0.90).length;
                                 const low  = mappings.filter(m => m.confidence != null && m.confidence < 0.75).length;
                                 const errors = data?.fhirTransformResult?.validationErrors?.length || 0;
-                                return `
+                                return HtmlSafe.html`
                                     <span style="font-weight:600;">📊 ${mappings.length} fields mapped</span>
                                     <span style="color:#d1d5db;">|</span>
-                                    ${high  > 0 ? `<span style="color:#16a34a;">●&nbsp;${high} high</span>`  : ''}
-                                    ${med   > 0 ? `<span style="color:#d97706;">●&nbsp;${med} medium</span>` : ''}
-                                    ${low   > 0 ? `<span style="color:#dc2626;">●&nbsp;${low} low</span>`   : ''}
+                                    ${high  > 0 ? HtmlSafe.html`<span style="color:#16a34a;">●&nbsp;${high} high</span>`  : ''}
+                                    ${med   > 0 ? HtmlSafe.html`<span style="color:#d97706;">●&nbsp;${med} medium</span>` : ''}
+                                    ${low   > 0 ? HtmlSafe.html`<span style="color:#dc2626;">●&nbsp;${low} low</span>`   : ''}
                                     <span style="color:#d1d5db;">|</span>
                                     <span style="${errors > 0 ? 'color:#dc2626;font-weight:600;' : 'color:#16a34a;'}">
                                         ${errors > 0 ? `⚠ ${errors} validation issue${errors > 1 ? 's' : ''}` : '✓ No validation issues'}
@@ -2132,14 +1932,14 @@ class WizardView extends EventTarget {
                             if (previewTypes.length === 0) return '';
                             const pills = previewTypes.map(t => {
                                 const isActive = t === active || t.split('^')[0] === active?.split('^')[0];
-                                return `<button class="msg-type-preview-btn${isActive ? ' active' : ''}"
+                                return HtmlSafe.html`<button class="msg-type-preview-btn${isActive ? ' active' : ''}"
                                     data-msg-type="${t}"
                                     onclick="window._previewMappingForType('${t}', this)"
                                     style="padding:6px 14px; border: 2px solid ${isActive ? '#1e3a8a' : '#e5e7eb'}; border-radius:20px; font-size:12px; font-weight:500; cursor:pointer; background:${isActive ? '#1e3a8a' : 'white'}; color:${isActive ? 'white' : '#6b7280'}; transition: all 0.2s;">
                                     ${t}
                                 </button>`;
-                            }).join('');
-                            return `<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; padding:10px 14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
+                            });
+                            return HtmlSafe.html`<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; padding:10px 14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
                                 <span style="font-size:12px; color:#6b7280; white-space:nowrap; font-weight:500;">Preview mapping for:</span>
                                 ${pills}
                                 <span id="msg-type-preview-loading" style="display:none; font-size:12px; color:#6b7280; margin-left:4px;">⟳ Loading...</span>
@@ -2215,13 +2015,13 @@ class WizardView extends EventTarget {
                     <!-- Validation Messages -->
                     <div class="validation-messages" id="validationMessages">
                         ${data.validation && data.validation.errors && Object.keys(data.validation.errors).length > 0 ?
-                            `<div class="validation-message error">
+                            HtmlSafe.html`<div class="validation-message error">
                                 <span class="validation-icon">⚠️</span>
                                 <span class="validation-text">${Object.values(data.validation.errors)[0]}</span>
                             </div>` : ''
                         }
                         ${data.validation && data.validation.warnings && Object.keys(data.validation.warnings).length > 0 ?
-                            `<div class="validation-message warning">
+                            HtmlSafe.html`<div class="validation-message warning">
                                 <span class="validation-icon">💡</span>
                                 <span class="validation-text">${Object.values(data.validation.warnings)[0]}</span>
                             </div>` : ''
@@ -2353,7 +2153,7 @@ class WizardView extends EventTarget {
         const statusIcon = hasErrors ? (hasMappings ? '⚠️' : '❌') : '✅';
         const statusText = hasErrors ? (hasMappings ? 'Mappings Available - Review Validation Issues' : 'Transformation Failed') : 'Transformation Successful';
 
-        return `
+        return HtmlSafe.html`
             <div style="padding: 20px;">
                 <!-- Status Header -->
                 <div style="background: ${statusBg}; border: 2px solid ${statusBorder}; border-radius: 12px; padding: 16px; margin-bottom: 20px;">
@@ -2364,9 +2164,9 @@ class WizardView extends EventTarget {
                                 ${statusText}
                             </h4>
                             <div style="font-size: 14px; color: #6b7280; margin-top: 2px;">
-                                <strong>${mappings.length}</strong> field mappings generated ${hasErrors ? `| <span style="color: ${statusColor}; font-weight: 600;">${errors.length} validation issues</span>` : '| All validations passed'}
+                                <strong>${mappings.length}</strong> field mappings generated ${hasErrors ? HtmlSafe.html`| <span style="color: ${statusColor}; font-weight: 600;">${errors.length} validation issues</span>` : '| All validations passed'}
                             </div>
-                            ${hasMappings && hasErrors ? `
+                            ${hasMappings && hasErrors ? HtmlSafe.html`
                                 <div style="font-size: 12px; color: #8b5cf6; margin-top: 4px; font-style: italic;">
                                     💡 You can edit mappings below to resolve validation issues
                                 </div>
@@ -2383,22 +2183,22 @@ class WizardView extends EventTarget {
 
                 <!-- Resource Mapping Groups -->
                 <div style="display: flex; flex-direction: column; gap: 16px;" id="resource-mapping-groups">
-                    ${resources.map(resourceType => this.renderResourceMappingGroup(resourceType, mappings, transformResult)).join('')}
+                    ${resources.map(resourceType => this.renderResourceMappingGroup(resourceType, mappings, transformResult))}
                 </div>
 
                 <!-- Validation Issues Section -->
-                ${errors.length > 0 ? `
+                ${errors.length > 0 ? HtmlSafe.html`
                     <div style="margin-top: 24px; background: #fef2f2; border: 2px solid #fecaca; border-radius: 12px; overflow: hidden;">
                         <div style="background: #dc2626; color: white; padding: 12px 16px;">
                             <h5 style="margin: 0; font-size: 14px; font-weight: 600;">⚠️ Validation Issues (${errors.length})</h5>
                         </div>
                         <div style="max-height: 200px; overflow-y: auto;">
-                            ${errors.slice(0, 10).map((error, index) => `
+                            ${errors.slice(0, 10).map((error, index) => HtmlSafe.html`
                                 <div style="padding: 8px 16px; border-bottom: 1px solid #fee2e2; font-size: 13px; color: #dc2626;">
                                     ${index + 1}. ${error}
                                 </div>
-                            `).join('')}
-                            ${errors.length > 10 ? `
+                            `)}
+                            ${errors.length > 10 ? HtmlSafe.html`
                                 <div style="padding: 8px 16px; text-align: center; color: #6b7280; font-size: 12px; font-style: italic;">
                                     ... and ${errors.length - 10} more issues
                                 </div>
@@ -2417,7 +2217,7 @@ class WizardView extends EventTarget {
         const resources = transformResult.fhirResources || [];
         const mappings = transformResult.atomicMappings || [];
 
-        return `
+        return HtmlSafe.html`
             <div style="padding: 20px;">
                 <!-- Success Header -->
                 <div style="background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%); border: 2px solid #bbf7d0; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
@@ -2434,7 +2234,7 @@ class WizardView extends EventTarget {
                                 <span>•</span>
                                 <span>Ready for deployment</span>
                             </div>
-                            ${transformResult._assemblyDriven ? `
+                            ${transformResult._assemblyDriven ? HtmlSafe.html`
                             <div style="margin-top:8px;font-size:12px;background:#e0e7ff;color:#3730a3;border-radius:6px;padding:6px 10px;display:inline-block;">
                                 🔧 <strong>Structural Assembly</strong> — mappings are applied automatically by the HL7 assembly engine.
                                 Fields marked <em>structural</em> are hardcoded; add Z-segment mappings below for custom fields.
@@ -2451,7 +2251,7 @@ class WizardView extends EventTarget {
 
                 <!-- Generated Resources -->
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 24px;">
-                    ${resources.map((resource, index) => this.renderOptimizedFHIRResourceCard(resource, index)).join('')}
+                    ${resources.map((resource, index) => this.renderOptimizedFHIRResourceCard(resource, index))}
                 </div>
 
                 <!-- Applied Mappings Summary -->
@@ -2469,29 +2269,29 @@ class WizardView extends EventTarget {
                                              : isStructural ? 'border-left: 3px solid #6366f1;'
                                              : '';
                             const badge = isComposite
-                                ? `<span style="font-family:sans-serif;font-size:10px;background:#dcfce7;color:#166534;border-radius:4px;padding:1px 6px;margin-left:4px;border:1px solid #86efac;">composite</span>`
+                                ? HtmlSafe.html`<span style="font-family:sans-serif;font-size:10px;background:#dcfce7;color:#166534;border-radius:4px;padding:1px 6px;margin-left:4px;border:1px solid #86efac;">composite</span>`
                                 : isStructural
-                                ? `<span style="font-family:sans-serif;font-size:10px;background:#e0e7ff;color:#3730a3;border-radius:4px;padding:1px 6px;margin-left:4px;border:1px solid #a5b4fc;">structural</span>`
+                                ? HtmlSafe.html`<span style="font-family:sans-serif;font-size:10px;background:#e0e7ff;color:#3730a3;border-radius:4px;padding:1px 6px;margin-left:4px;border:1px solid #a5b4fc;">structural</span>`
                                 : '';
                             const srcVal = (mapping.hl7Value || '');
                             const tgtVal = (mapping.fhirValue || mapping.transformedValue || '');
-                            return `
+                            return HtmlSafe.html`
                             <div style="padding: 12px 16px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;
                                         background:${rowBg}; ${leftBorder}">
                                 <div style="flex: 1; font-family: monospace;">
                                     <div style="font-size: 13px; font-weight: 600; color: #1e293b;">${mapping.hl7Path || mapping.hl7Field}
                                         ${badge}
                                     </div>
-                                    ${srcVal ? `<div style="font-size: 11px; color: #64748b; margin-top: 2px;">"${srcVal.substring(0, 30)}${srcVal.length > 30 ? '...' : ''}"</div>` : ''}
+                                    ${srcVal ? HtmlSafe.html`<div style="font-size: 11px; color: #64748b; margin-top: 2px;">"${srcVal.substring(0, 30)}${srcVal.length > 30 ? '...' : ''}"</div>` : ''}
                                 </div>
                                 <div style="margin: 0 16px; color: ${isComposite ? '#16a34a' : '#6b7280'}; font-weight: bold;">→</div>
                                 <div style="flex: 1; text-align: right; font-family: monospace;">
                                     <div style="font-size: 13px; font-weight: 600; color: ${isComposite ? '#166534' : '#1e40af'};">${mapping.fhirPath || mapping.fhirField}</div>
-                                    ${tgtVal ? `<div style="font-size: 11px; color: #64748b; margin-top: 2px;">"${tgtVal.substring(0, 40)}${tgtVal.length > 40 ? '...' : ''}"</div>` : ''}
+                                    ${tgtVal ? HtmlSafe.html`<div style="font-size: 11px; color: #64748b; margin-top: 2px;">"${tgtVal.substring(0, 40)}${tgtVal.length > 40 ? '...' : ''}"</div>` : ''}
                                 </div>
                             </div>`;
-                        }).join('')}
-                        ${mappings.length > 15 ? `
+                        })}
+                        ${mappings.length > 15 ? HtmlSafe.html`
                             <div style="padding: 12px 16px; text-align: center; color: #6b7280; font-size: 12px; font-style: italic;">
                                 ... and ${mappings.length - 15} more mappings
                             </div>
@@ -2506,7 +2306,7 @@ class WizardView extends EventTarget {
      * Render FHIR mapping placeholder when no transformation has occurred yet
      */
     renderFHIRMappingPlaceholder(data) {
-        return `
+        return HtmlSafe.html`
             <div style="text-align: center; padding: 60px 20px;">
                 <div style="font-size: 64px; margin-bottom: 24px; color: #1e3a8a;">🗺️</div>
                 <div style="font-size: 20px; font-weight: 600; margin-bottom: 12px; color: #1e3a8a;">Ready to Configure Mappings</div>
@@ -2514,7 +2314,7 @@ class WizardView extends EventTarget {
                     ${data.detectedMessageType ? `Configure how HL7 ${data.detectedMessageType} fields map to FHIR ${data.targetConfig?.version || 'R4'} resources` : 'Parse an HL7 message first to configure field mappings'}
                 </div>
 
-                ${data.detectedMessageType ? `
+                ${data.detectedMessageType ? HtmlSafe.html`
                     <button onclick="window.generateFHIRMappings()"
                             style="padding: 12px 24px; background: #1e3a8a; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; margin-right: 12px;">
                         🚀 Auto-Generate Mappings
@@ -2523,23 +2323,23 @@ class WizardView extends EventTarget {
                             style="padding: 12px 24px; background: white; color: #1e3a8a; border: 2px solid #1e3a8a; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer;">
                         🔧 Create Custom Mapping
                     </button>
-                ` : `
+                ` : HtmlSafe.html`
                     <div style="font-size: 14px; color: #dc2626; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; display: inline-block;">
                         ⚠️ Complete Step 2 (HL7 Parsing) first to proceed with mapping configuration
                     </div>
                 `}
 
                 <!-- Expected FHIR Resources Preview -->
-                ${data.detectedMessageType ? `
+                ${data.detectedMessageType ? HtmlSafe.html`
                     <div style="margin-top: 48px;">
                         <div style="font-size: 16px; font-weight: 600; color: #374151; margin-bottom: 16px;">Expected FHIR Resources for ${data.detectedMessageType}:</div>
                         <div style="display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;">
-                            ${this.getExpectedResourcesForMessageType(data.detectedMessageType).map(resource => `
+                            ${this.getExpectedResourcesForMessageType(data.detectedMessageType).map(resource => HtmlSafe.html`
                                 <div style="background: ${resource.color}; border: 1px solid ${resource.borderColor}; border-radius: 8px; padding: 12px; text-align: center; min-width: 120px;">
                                     <div style="font-size: 18px; font-weight: 600; color: ${resource.textColor};">${resource.icon}</div>
                                     <div style="font-size: 12px; color: ${resource.textColor}; margin-top: 4px; font-weight: 500;">${resource.name}</div>
                                 </div>
-                            `).join('')}
+                            `)}
                         </div>
                     </div>
                 ` : ''}
@@ -2560,7 +2360,7 @@ class WizardView extends EventTarget {
             transformResult.validationErrors.some(error => error.includes(resourceType));
 
         if (resourceMappings.length === 0) {
-            return `
+            return HtmlSafe.html`
                 <div style="border: 2px dashed #d1d5db; border-radius: 12px; padding: 16px; text-align: center; color: #6b7280;" id="resource-group-empty-${resourceType}">
                     <div style="font-size: 32px; margin-bottom: 8px;">${this.getResourceIcon(resourceType)}</div>
                     <div style="font-size: 14px; font-weight: 500;">No ${resourceType} mappings generated</div>
@@ -2588,7 +2388,7 @@ class WizardView extends EventTarget {
         const headerBg  = hasIssues ? '#fef2f2' : 'linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%)';
         const headerColor = hasIssues ? '#dc2626' : 'white';
 
-        return `
+        return HtmlSafe.html`
             <div class="resource-group-card" data-resource="${resourceType}" style="border: 2px solid ${hasIssues ? '#fecaca' : '#e0e7ff'}; border-radius: 12px; background: white; overflow: hidden;">
                 <!-- Resource Header -->
                 <div class="resource-group-header" style="background: ${headerBg}; color: ${headerColor}; padding: 12px 16px;">
@@ -2598,7 +2398,7 @@ class WizardView extends EventTarget {
                             <div style="font-size: 12px; opacity: 0.85; margin-top: 2px;">${resourceMappings.length} field mappings</div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            ${hasConfidence ? `
+                            ${hasConfidence ? HtmlSafe.html`
                             <!-- Confidence meter -->
                             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;" title="Avg mapping confidence for ${resourceType}">
                                 <div style="display:flex;align-items:center;gap:6px;">
@@ -2609,9 +2409,9 @@ class WizardView extends EventTarget {
                                     <div style="width:${barWidth}%;height:100%;background:${avgColor};border-radius:4px;transition:width 0.3s;"></div>
                                 </div>
                                 <div style="display:flex;gap:4px;font-size:9px;opacity:0.85;">
-                                    ${highConf > 0  ? `<span style="color:#4ade80;">●${highConf} high</span>` : ''}
-                                    ${medConf  > 0  ? `<span style="color:#fbbf24;">●${medConf} med</span>`  : ''}
-                                    ${lowConf  > 0  ? `<span style="color:#f87171;">●${lowConf} low</span>`  : ''}
+                                    ${highConf > 0  ? HtmlSafe.html`<span style="color:#4ade80;">●${highConf} high</span>` : ''}
+                                    ${medConf  > 0  ? HtmlSafe.html`<span style="color:#fbbf24;">●${medConf} med</span>`  : ''}
+                                    ${lowConf  > 0  ? HtmlSafe.html`<span style="color:#f87171;">●${lowConf} low</span>`  : ''}
                                 </div>
                             </div>
                             ` : ''}
@@ -2629,7 +2429,7 @@ class WizardView extends EventTarget {
 
                 <!-- Mappings List -->
                 <div id="resource-mappings-${resourceType}" style="max-height: 400px; overflow-y: auto;">
-                    ${resourceMappings.map((mapping, index) => this.renderMappingRow(mapping, index, resourceType)).join('')}
+                    ${resourceMappings.map((mapping, index) => this.renderMappingRow(mapping, index, resourceType))}
                 </div>
             </div>
         `;
@@ -2754,7 +2554,7 @@ class WizardView extends EventTarget {
         const confPct = conf != null ? Math.round(conf * 100) : null;
         const confColor = confPct == null ? '#94a3b8' : confPct >= 90 ? '#16a34a' : confPct >= 75 ? '#d97706' : '#dc2626';
         const confLabel = confPct != null
-            ? `<span class="confidence-badge"
+            ? HtmlSafe.html`<span class="confidence-badge"
                      style="font-size:11px;font-weight:700;color:${confColor};background:${confColor}18;padding:2px 7px;border-radius:10px;border:1px solid ${confColor}50;white-space:nowrap;"
                      title="Mapping confidence (spec-driven)">${confPct}% conf.</span>`
             : '';
@@ -2765,7 +2565,7 @@ class WizardView extends EventTarget {
         const hl7Value  = (_hl7Raw  == null) ? '' : (typeof _hl7Raw  === 'string' ? _hl7Raw  : JSON.stringify(_hl7Raw));
         const fhirValue = (_fhirRaw == null) ? '' : (typeof _fhirRaw === 'string' ? _fhirRaw : JSON.stringify(_fhirRaw));
 
-        return `
+        return HtmlSafe.html`
             <div class="fhir-mapping-row" style="padding: 10px 16px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 12px; ${hasIssue ? 'background: #fef2f2;' : ''}"
                  data-mapping-index="${index}" data-resource="${resourceType}">
 
@@ -2776,7 +2576,7 @@ class WizardView extends EventTarget {
                                onchange="window.updateMapping(${index}, 'hl7Field', this.value)"
                                style="flex: 1; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; font-family: monospace; background: #f9fafb;"
                                readonly>
-                        ${hasIssue ? '<span style="color: #dc2626; font-size: 12px;" title="Validation issue">⚠️</span>' : ''}
+                        ${hasIssue ? HtmlSafe.raw('<span style="color: #dc2626; font-size: 12px;" title="Validation issue">⚠️</span>') : ''}
                     </div>
                     <div style="font-size: 11px; color: #6b7280; padding: 2px 4px; background: #f3f4f6; border-radius: 4px; font-family: monospace; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
                         "${hl7Value.substring(0, 25)}${hl7Value.length > 25 ? '...' : ''}"
@@ -2796,8 +2596,8 @@ class WizardView extends EventTarget {
                                 style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; font-family: monospace;">
                             <option value="${fhirField}" selected>${fhirField}</option>
                             ${this.getFHIRFieldOptions(resourceType).map(option =>
-                                option.value !== fhirField ? `<option value="${option.value}">${option.label}</option>` : ''
-                            ).join('')}
+                                option.value !== fhirField ? HtmlSafe.html`<option value="${option.value}">${option.label}</option>` : ''
+                            )}
                         </select>
                     </div>
                     <div style="font-size: 11px; color: #6b7280; padding: 2px 4px; background: #f0f9ff; border-radius: 4px; font-family: monospace; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
@@ -2963,7 +2763,7 @@ class WizardView extends EventTarget {
             return this.getFHIRTransformationResults(data.fhirTransformResult);
         } else {
             // Show placeholder
-            return `
+            return HtmlSafe.html`
                 <div style="text-align: center; padding: 60px 20px;">
                     <div style="font-size: 64px; margin-bottom: 24px; color: #1e3a8a;">🔄</div>
                     <div style="font-size: 20px; font-weight: 600; margin-bottom: 12px; color: #1e3a8a;">Ready for FHIR Transformation</div>
@@ -2996,7 +2796,7 @@ class WizardView extends EventTarget {
         const resources = fhirResult.fhirResources || [];
         const atomicMappings = fhirResult.atomicMappings || [];
 
-        return `
+        return HtmlSafe.html`
             <div style="padding: 20px;">
                 <!-- Summary Header -->
                 <div style="background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%); border: 2px solid #bbf7d0; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
@@ -3025,7 +2825,7 @@ class WizardView extends EventTarget {
 
                 <!-- FHIR Resources Grid -->
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 24px;">
-                    ${resources.map((resource, index) => this.renderOptimizedFHIRResourceCard(resource, index)).join('')}
+                    ${resources.map((resource, index) => this.renderOptimizedFHIRResourceCard(resource, index))}
                 </div>
 
                 <!-- Field Mappings by Resource -->
@@ -3037,14 +2837,14 @@ class WizardView extends EventTarget {
                             return match ? match[1] : null;
                         })].filter(Boolean)
                     )];
-                    return `
+                    return HtmlSafe.html`
                     <div style="margin-top: 8px;">
                         <div style="font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
                             🔗 Field Mappings by Resource
                             <span style="font-size: 11px; font-weight: 400; color: #6b7280;">(${atomicMappings.length} total)</span>
                         </div>
                         <div style="display: flex; flex-direction: column; gap: 12px;">
-                            ${resourceTypes.map(rt => this.renderResourceMappingGroup(rt, atomicMappings, fhirResult)).join('')}
+                            ${resourceTypes.map(rt => this.renderResourceMappingGroup(rt, atomicMappings, fhirResult))}
                         </div>
                     </div>`;
                 })() : ''}
@@ -3060,7 +2860,7 @@ class WizardView extends EventTarget {
         const icon = this.getFHIRResourceIcon(resourceType);
         const summary = this.getFHIRResourceSummary(resource);
 
-        return `
+        return HtmlSafe.html`
             <div style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; overflow: hidden; transition: all 0.3s ease;">
                 <div style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: white; padding: 16px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -3110,7 +2910,7 @@ class WizardView extends EventTarget {
             case 'Patient':
                 const name = resource.name?.[0];
                 const nameStr = name ? `${name.given?.[0] || ''} ${name.family || ''}`.trim() : 'N/A';
-                return `
+                return HtmlSafe.html`
                     <div style="space-y: 8px;">
                         <div style="margin-bottom: 8px;"><strong>Name:</strong> ${nameStr}</div>
                         <div style="margin-bottom: 8px;"><strong>Gender:</strong> ${resource.gender || 'N/A'}</div>
@@ -3119,7 +2919,7 @@ class WizardView extends EventTarget {
                     </div>
                 `;
             case 'Encounter':
-                return `
+                return HtmlSafe.html`
                     <div style="space-y: 8px;">
                         <div style="margin-bottom: 8px;"><strong>Status:</strong> ${resource.status || 'N/A'}</div>
                         <div style="margin-bottom: 8px;"><strong>Class:</strong> ${resource.class?.code || 'N/A'}</div>
@@ -3128,7 +2928,7 @@ class WizardView extends EventTarget {
                     </div>
                 `;
             case 'Observation':
-                return `
+                return HtmlSafe.html`
                     <div style="space-y: 8px;">
                         <div style="margin-bottom: 8px;"><strong>Status:</strong> ${resource.status || 'N/A'}</div>
                         <div style="margin-bottom: 8px;"><strong>Code:</strong> ${resource.code?.coding?.[0]?.display || resource.code?.coding?.[0]?.code || 'N/A'}</div>
@@ -3137,7 +2937,7 @@ class WizardView extends EventTarget {
                     </div>
                 `;
             default:
-                return `
+                return HtmlSafe.html`
                     <div style="color: #6b7280; font-style: italic;">
                         ${resource.resourceType} resource with ${Object.keys(resource).length} properties
                     </div>
@@ -3149,7 +2949,7 @@ class WizardView extends EventTarget {
      * Step 5: Mapping Configuration (Most Complex)
      */
     getStep5Template(data) {
-        return `
+        return HtmlSafe.html`
             <div class="wizard-step-content" data-step="5">
                 <div class="wizard-step-header">
                     <h3>${data.transformationFlow === 'fhir_receiver' ? 'Message Mapping' : 'HL7 to FHIR Mapping'}</h3>
@@ -3216,7 +3016,7 @@ class WizardView extends EventTarget {
      */
     getTransformationResultsTemplate(data) {
         if (!data.parsedHL7Data?.enhancedSegments && !data.parsedHL7Data?.segmentGroups) {
-            return '<div style="text-align: center; padding: 40px; color: #6b7280;">No parsed data available</div>';
+            return HtmlSafe.raw('<div style="text-align: center; padding: 40px; color: #6b7280;">No parsed data available</div>');
         }
 
         // Initialize segment viewer properties if not exists
@@ -3236,7 +3036,7 @@ class WizardView extends EventTarget {
         // Build field metadata cache from actual API data
         this.buildFieldMetadataCache(segments);
 
-        return `
+        return HtmlSafe.html`
             <div class="transformation-results-container">
                 <!-- HL7 Segment Viewer -->
                 <div class="compact-segment-viewer">
@@ -3264,7 +3064,7 @@ class WizardView extends EventTarget {
         // Dynamic schema information
         const schemaInfo = this.getSchemaInfo(data);
 
-        return `
+        return HtmlSafe.html`
             <div class="segment-header-compact">
                 <div class="message-summary">
                     <div class="message-info">
@@ -3275,8 +3075,8 @@ class WizardView extends EventTarget {
                     <div class="metrics-row">
                         <span class="metric">${segments.length} segments</span>
                         <span class="metric">${totalFields} fields</span>
-                        ${errorCount > 0 ? `<span class="metric error">${errorCount} errors</span>` : ''}
-                        ${warningCount > 0 ? `<span class="metric warning">${warningCount} warnings</span>` : ''}
+                        ${errorCount > 0 ? HtmlSafe.html`<span class="metric error">${errorCount} errors</span>` : ''}
+                        ${warningCount > 0 ? HtmlSafe.html`<span class="metric warning">${warningCount} warnings</span>` : ''}
                         <span class="metric info">v${data.version || '2.5'}</span>
                     </div>
                 </div>
@@ -3305,11 +3105,11 @@ class WizardView extends EventTarget {
      * Compact view with minimal vertical space usage (from backup design)
      */
     renderCompactView(segments, validationErrors) {
-        return `
+        return HtmlSafe.html`
             <div class="segments-compact">
                 ${segments.map(([segName, segment]) =>
                     this.renderCompactSegment(segName, segment, validationErrors)
-                ).join('')}
+                )}
             </div>
         `;
     }
@@ -3318,7 +3118,7 @@ class WizardView extends EventTarget {
      * Table view showing all segments in a grid
      */
     renderTableView(segments, validationErrors) {
-        return `
+        return HtmlSafe.html`
             <div class="segments-table-container">
                 <table class="segments-table">
                     <thead>
@@ -3334,7 +3134,7 @@ class WizardView extends EventTarget {
                     <tbody>
                         ${segments.map(([segName, segment]) =>
                             this.renderSegmentTableRow(segName, segment, validationErrors)
-                        ).join('')}
+                        )}
                     </tbody>
                 </table>
             </div>
@@ -3458,7 +3258,7 @@ class WizardView extends EventTarget {
 
         const keyFields = this.getKeyFields(baseSeg, segment);
 
-        return `
+        return HtmlSafe.html`
             <div class="segment-compact ${hasIssues ? 'has-issues' : ''} ${isExpanded ? 'expanded' : ''} ${missingRequiredFields.length > 0 ? 'has-missing-required' : ''}">
                 <div class="segment-row" onclick="toggleSegment('${segName}')">
                     <div class="segment-info">
@@ -3469,7 +3269,7 @@ class WizardView extends EventTarget {
                         </div>
                         <div class="segment-summary">
                             <span class="seg-desc">${this.truncateText(segment.description || `${baseSeg} Segment`, 40)}</span>
-                            ${keyFields.length > 0 ? `<span class="key-values">${keyFields.join(' • ')}</span>` : ''}
+                            ${keyFields.length > 0 ? HtmlSafe.html`<span class="key-values">${keyFields.join(' • ')}</span>` : ''}
                         </div>
                     </div>
                     <div class="segment-meta">
@@ -3489,7 +3289,7 @@ class WizardView extends EventTarget {
      */
     renderSegmentFields(segName, segment, validationErrors) {
         if (!segment.fields || segment.fields.length === 0) {
-            return `<div class="no-fields">No field data available</div>`;
+            return HtmlSafe.html`<div class="no-fields">No field data available</div>`;
         }
 
         // Ensure fields are sorted by position, not array order
@@ -3504,7 +3304,7 @@ class WizardView extends EventTarget {
         const schemaSource = segment.dictionarySource || 'Unknown';
         const isSchemaEnhanced = schemaSource.includes('Schema') || schemaSource.includes('RealSchemaLoader');
 
-        return `
+        return HtmlSafe.html`
             <div class="fields-compact">
                 <div class="fields-header">
                     <div class="fields-title-section">
@@ -3538,11 +3338,11 @@ class WizardView extends EventTarget {
      */
     renderStructuredFieldsTable(segName, fields, validationErrors = []) {
         if (!fields || fields.length === 0) {
-            return '<div style="text-align: center; color: #6b7280; padding: 20px;">No fields found</div>';
+            return HtmlSafe.raw('<div style="text-align: center; color: #6b7280; padding: 20px;">No fields found</div>');
         }
 
         // Create a clean, professional table with exact column widths
-        return `
+        return HtmlSafe.html`
             <div class="modern-hl7-table" style="margin: 16px 0; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); overflow: hidden; border: 1px solid #e2e8f0;">
                 <table style="width: 100%; border-collapse: collapse; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;">
                     <colgroup>
@@ -3611,7 +3411,7 @@ class WizardView extends EventTarget {
                 badgeColor = '#f59e0b'; // Orange for schema violations
             }
 
-            return `
+            return HtmlSafe.html`
                 <tr style="border-bottom: 1px solid #f1f5f9; ${rowStyle}" data-field-id="${fieldId}">
                     <td style="padding: 16px 12px; text-align: center; border: none;">
                         <div style="display: inline-flex; flex-direction: column; align-items: center; gap: 6px;">
@@ -3620,37 +3420,37 @@ class WizardView extends EventTarget {
                             </div>
                             <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
                                 ${hasValue ?
-                                    '<div style="width: 8px; height: 8px; background: #10b981; border-radius: 50%; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);"></div>' :
-                                    '<div style="width: 8px; height: 8px; background: #d1d5db; border-radius: 50%;"></div>'
+                                    HtmlSafe.raw('<div style="width: 8px; height: 8px; background: #10b981; border-radius: 50%; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);"></div>') :
+                                    HtmlSafe.raw('<div style="width: 8px; height: 8px; background: #d1d5db; border-radius: 50%;"></div>')
                                 }
-                                ${isRequired ? '<span style="color: #f59e0b; font-size: 9px; font-weight: 600;">REQ</span>' : ''}
+                                ${isRequired ? HtmlSafe.raw('<span style="color: #f59e0b; font-size: 9px; font-weight: 600;">REQ</span>') : ''}
                             </div>
                         </div>
                     </td>
                     <td style="padding: 16px 12px; border: none;">
                         <div style="display: flex; align-items: flex-start; gap: 10px;">
                             ${hasSubcomponents ?
-                                `<button onclick="toggleFieldExpansion('${fieldId}')"
+                                HtmlSafe.html`<button onclick="toggleFieldExpansion('${fieldId}')"
                                          style="background: none; border: none; color: #1e3a8a; font-size: 16px; cursor: pointer; padding: 4px; margin-top: 2px; border-radius: 4px; transition: all 0.2s; outline: none;"
                                          onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='none'">
                                     <span id="expand-icon-${fieldId}">▶</span>
                                  </button>` :
-                                '<span style="width: 20px;"></span>'
+                                HtmlSafe.raw('<span style="width: 20px;"></span>')
                             }
                             <div style="flex: 1;">
                                 <div style="font-size: 14px; color: #1e293b; font-weight: 600; line-height: 1.4; margin-bottom: 2px;">
                                     ${fieldName}
                                     ${schemaDataType && messageDataType && schemaDataType !== messageDataType ?
-                                        `<span style="background: #fef3c7; color: #d97706; padding: 2px 6px; border-radius: 4px; font-size: 9px; margin-left: 8px;">TYPE MISMATCH</span>` : ''
+                                        HtmlSafe.html`<span style="background: #fef3c7; color: #d97706; padding: 2px 6px; border-radius: 4px; font-size: 9px; margin-left: 8px;">TYPE MISMATCH</span>` : ''
                                     }
                                 </div>
                                 ${hasValidationError ?
-                                    `<div style="color: #ef4444; font-size: 11px; font-weight: 500; margin-top: 4px; padding: 4px 8px; background: #fee2e2; border-radius: 4px; border-left: 3px solid #ef4444;">
+                                    HtmlSafe.html`<div style="color: #ef4444; font-size: 11px; font-weight: 500; margin-top: 4px; padding: 4px 8px; background: #fee2e2; border-radius: 4px; border-left: 3px solid #ef4444;">
                                         ⚠ ${fieldErrors.map(err => err.message || err.code).join(', ')}
                                      </div>` : ''
                                 }
                                 ${!isSchemaCompliant && schemaViolations.length > 0 ?
-                                    `<div style="color: #d97706; font-size: 11px; font-weight: 500; margin-top: 4px; padding: 4px 8px; background: #fef3c7; border-radius: 4px; border-left: 3px solid #f59e0b;">
+                                    HtmlSafe.html`<div style="color: #d97706; font-size: 11px; font-weight: 500; margin-top: 4px; padding: 4px 8px; background: #fef3c7; border-radius: 4px; border-left: 3px solid #f59e0b;">
                                         🚨 Schema: ${schemaViolations.join(', ')}
                                      </div>` : ''
                                 }
@@ -3677,7 +3477,7 @@ class WizardView extends EventTarget {
                     </td>
                 </tr>
             `;
-        }).join('');
+        });
     }
 
     renderCleanFieldValue(field) {
@@ -3685,7 +3485,7 @@ class WizardView extends EventTarget {
         const hasValue = value !== null && value !== undefined && String(value).trim() !== '';
 
         if (!hasValue) {
-            return '<div style="color: #94a3b8; font-style: italic; font-size: 12px; padding: 8px; background: #f8fafc; border-radius: 6px; border: 1px dashed #cbd5e1;">No value</div>';
+            return HtmlSafe.raw('<div style="color: #94a3b8; font-style: italic; font-size: 12px; padding: 8px; background: #f8fafc; border-radius: 6px; border: 1px dashed #cbd5e1;">No value</div>');
         }
 
         const valueStr = String(value);
@@ -3701,14 +3501,14 @@ class WizardView extends EventTarget {
         }
 
         // Simple value
-        return `
+        return HtmlSafe.html`
             <div style="background: #f8fafc; border-radius: 6px; padding: 10px; border-left: 4px solid #1e3a8a;">
                 <div style="font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace; font-size: 13px; color: #1e293b; word-break: break-all; line-height: 1.4;">
-                    ${this.escapeHtml(valueStr)}
+                    ${valueStr}
                 </div>
                 <div style="margin-top: 6px; font-size: 10px; color: #64748b; font-family: monospace; display: flex; align-items: center; gap: 8px;">
                     <span>${valueStr.length} chars</span>
-                    ${(field.tableId && window.hasHL7TableData && window.hasHL7TableData(field.tableId)) ? `<span class="table-id-badge clickable-table-badge" style="font-family: 'Courier New', monospace; font-size: 9px; font-weight: 600; color: white; background: #ec4899; padding: 2px 5px; border-radius: 3px; cursor: pointer; transition: all 0.2s;" onclick="window.showHL7Table('${field.tableId}', '${field.name || 'Field'}', this)" onmouseover="this.style.background='#be185d'; this.style.transform='scale(1.05)'" onmouseout="this.style.background='#ec4899'; this.style.transform='scale(1)'">T${field.tableId}</span>` : ''}
+                    ${(field.tableId && window.hasHL7TableData && window.hasHL7TableData(field.tableId)) ? HtmlSafe.html`<span class="table-id-badge clickable-table-badge" style="font-family: 'Courier New', monospace; font-size: 9px; font-weight: 600; color: white; background: #ec4899; padding: 2px 5px; border-radius: 3px; cursor: pointer; transition: all 0.2s;" onclick="window.showHL7Table('${field.tableId}', '${field.name || 'Field'}', this)" onmouseover="this.style.background='#be185d'; this.style.transform='scale(1.05)'" onmouseout="this.style.background='#ec4899'; this.style.transform='scale(1)'">T${field.tableId}</span>` : ''}
                 </div>
             </div>
         `;
@@ -3722,28 +3522,28 @@ class WizardView extends EventTarget {
             '&': 'Subcomponent Separator'
         };
 
-        return `
+        return HtmlSafe.html`
             <div style="background: #fef2f2; border-radius: 6px; padding: 12px; border-left: 4px solid #ef4444;">
                 <div style="font-weight: 600; color: #dc2626; margin-bottom: 8px; font-size: 12px;">⚙️ HL7 Encoding Characters</div>
-                ${Array.from(valueStr).map(char => `
+                ${Array.from(valueStr).map(char => HtmlSafe.html`
                     <div style="display: flex; align-items: center; gap: 8px; margin: 4px 0; padding: 6px; background: white; border-radius: 4px;">
                         <span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-weight: bold; font-size: 12px;">${char}</span>
                         <span style="color: #374151; font-size: 11px;">${meanings[char] || 'Special Character'}</span>
                     </div>
-                `).join('')}
+                `)}
             </div>
         `;
     }
 
     renderComplexValue(valueStr, field = {}) {
-        return `
+        return HtmlSafe.html`
             <div style="background: #eff6ff; border-radius: 6px; padding: 10px; border-left: 4px solid #3b82f6;">
                 <div style="font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace; font-size: 13px; color: #1e293b; word-break: break-all; line-height: 1.4; margin-bottom: 6px;">
-                    ${this.escapeHtml(valueStr)}
+                    ${valueStr}
                 </div>
                 <div style="font-size: 10px; color: #3b82f6; font-weight: 500; display: flex; align-items: center; gap: 8px;">
                     <span>🔗 Complex field - click ▶ to expand components</span>
-                    ${(field.tableId && window.hasHL7TableData && window.hasHL7TableData(field.tableId)) ? `<span class="table-id-badge clickable-table-badge" style="font-family: 'Courier New', monospace; font-size: 9px; font-weight: 600; color: white; background: #ec4899; padding: 2px 5px; border-radius: 3px; cursor: pointer; transition: all 0.2s;" onclick="window.showHL7Table('${field.tableId}', '${field.name || 'Field'}', this)" onmouseover="this.style.background='#be185d'; this.style.transform='scale(1.05)'" onmouseout="this.style.background='#ec4899'; this.style.transform='scale(1)'">T${field.tableId}</span>` : ''}
+                    ${(field.tableId && window.hasHL7TableData && window.hasHL7TableData(field.tableId)) ? HtmlSafe.html`<span class="table-id-badge clickable-table-badge" style="font-family: 'Courier New', monospace; font-size: 9px; font-weight: 600; color: white; background: #ec4899; padding: 2px 5px; border-radius: 3px; cursor: pointer; transition: all 0.2s;" onclick="window.showHL7Table('${field.tableId}', '${field.name || 'Field'}', this)" onmouseover="this.style.background='#be185d'; this.style.transform='scale(1.05)'" onmouseout="this.style.background='#ec4899'; this.style.transform='scale(1)'">T${field.tableId}</span>` : ''}
                 </div>
             </div>
         `;
@@ -3851,17 +3651,17 @@ class WizardView extends EventTarget {
         const hasValue = value !== null && value !== undefined && String(value).trim() !== '';
 
         if (!hasValue) {
-            return '<div style="font-size: 11px; color: #9ca3af; font-style: italic; padding: 6px; background: #f9fafb; border-radius: 4px; border: 1px dashed #d1d5db;">No value</div>';
+            return HtmlSafe.raw('<div style="font-size: 11px; color: #9ca3af; font-style: italic; padding: 6px; background: #f9fafb; border-radius: 4px; border: 1px dashed #d1d5db;">No value</div>');
         }
 
         const valueStr = String(value);
-        let html = '';
+        const html = [];
 
         // Special handling for HL7 encoding characters field (typically "^~\&")
         if (field.name && field.name.toLowerCase().includes('encoding') && valueStr.length <= 4) {
             console.log('🎯 ENCODING FIELD DETECTED:', field.name, valueStr);
-            html += '<div style="font-size: 11px; color: #dc2626; background: #fef2f2; padding: 8px; border-radius: 4px; border-left: 3px solid #dc2626;">';
-            html += '<div style="font-weight: 600; margin-bottom: 6px; color: #dc2626;">⚙️ HL7 Encoding Characters:</div>';
+            html.push(HtmlSafe.raw('<div style="font-size: 11px; color: #dc2626; background: #fef2f2; padding: 8px; border-radius: 4px; border-left: 3px solid #dc2626;">'));
+            html.push(HtmlSafe.raw('<div style="font-weight: 600; margin-bottom: 6px; color: #dc2626;">⚙️ HL7 Encoding Characters:</div>'));
 
             for (let i = 0; i < valueStr.length; i++) {
                 const char = valueStr[i];
@@ -3874,34 +3674,34 @@ class WizardView extends EventTarget {
                     default: meaning = 'Special Character';
                 }
 
-                html += `<div style="margin-left: 8px; margin-bottom: 3px; font-family: 'Courier New', monospace;">
+                html.push(HtmlSafe.html`<div style="margin-left: 8px; margin-bottom: 3px; font-family: 'Courier New', monospace;">
                     <span style="background: #dc2626; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-right: 8px; font-weight: bold;">${char}</span>
                     <span style="color: #374151; font-size: 10px;">${meaning}</span>
-                </div>`;
+                </div>`);
             }
-            html += '</div>';
+            html.push(HtmlSafe.raw('</div>'));
         }
         // Handle complex parsing with nested separators
         else if (valueStr.includes('^') || valueStr.includes('~') || valueStr.includes('&')) {
-            html += this.renderComplexHL7Value(valueStr);
+            html.push(this.renderComplexHL7Value(valueStr));
         }
         // Simple value display
         else {
             console.log('🔵 SIMPLE VALUE FIELD:', field.name, valueStr);
-            html += `<div style="font-size: 11px; color: #374151; font-family: 'Courier New', monospace; background: #f0f9ff; padding: 8px; border-radius: 4px; border-left: 4px solid #1e3a8a; word-break: break-all; line-height: 1.4; max-width: 100%; overflow: hidden;">
+            html.push(HtmlSafe.html`<div style="font-size: 11px; color: #374151; font-family: 'Courier New', monospace; background: #f0f9ff; padding: 8px; border-radius: 4px; border-left: 4px solid #1e3a8a; word-break: break-all; line-height: 1.4; max-width: 100%; overflow: hidden;">
                 <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 4px; font-size: 10px;">🚀 ENHANCED VALUE:</div>
                 <div style="word-wrap: break-word; overflow-wrap: break-word;">
-                    ${this.escapeHtml(valueStr)}
+                    ${valueStr}
                 </div>
-            </div>`;
+            </div>`);
         }
 
         // Add value metadata
-        html += `<div style="margin-top: 6px; padding: 4px 6px; background: #f3f4f6; border-radius: 3px; font-size: 9px; color: #6b7280; font-family: monospace;">
+        html.push(HtmlSafe.html`<div style="margin-top: 6px; padding: 4px 6px; background: #f3f4f6; border-radius: 3px; font-size: 9px; color: #6b7280; font-family: monospace;">
             📏 Length: ${valueStr.length} chars | 🔤 Type: ${typeof value}
-        </div>`;
+        </div>`);
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -3911,27 +3711,27 @@ class WizardView extends EventTarget {
         const valueStr = String(field.value || '');
         if (!valueStr) return '';
 
-        let html = '<div style="font-size: 12px; font-weight: 600; color: #1e3a8a; margin-bottom: 8px;">📋 Component Breakdown:</div>';
+        const html = [HtmlSafe.raw('<div style="font-size: 12px; font-weight: 600; color: #1e3a8a; margin-bottom: 8px;">📋 Component Breakdown:</div>')];
 
         // Handle repetitions first
         if (valueStr.includes('~')) {
             const repetitions = valueStr.split('~');
-            html += '<div style="margin-bottom: 12px;">';
-            html += '<div style="font-size: 11px; font-weight: 600; color: #059669; margin-bottom: 4px;">🔄 Repetitions:</div>';
+            html.push(HtmlSafe.raw('<div style="margin-bottom: 12px;">'));
+            html.push(HtmlSafe.raw('<div style="font-size: 11px; font-weight: 600; color: #059669; margin-bottom: 4px;">🔄 Repetitions:</div>'));
             repetitions.forEach((rep, idx) => {
                 if (rep.trim()) {
-                    html += `<div style="margin: 4px 0; padding: 6px; background: white; border-radius: 4px; border-left: 3px solid #059669;">
+                    html.push(HtmlSafe.html`<div style="margin: 4px 0; padding: 6px; background: white; border-radius: 4px; border-left: 3px solid #059669;">
                         <div style="font-size: 10px; color: #059669; font-weight: 600;">Repetition ${idx + 1}:</div>
                         ${this.renderComponentBreakdown(rep)}
-                    </div>`;
+                    </div>`);
                 }
             });
-            html += '</div>';
+            html.push(HtmlSafe.raw('</div>'));
         } else {
-            html += this.renderComponentBreakdown(valueStr);
+            html.push(this.renderComponentBreakdown(valueStr));
         }
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -3939,29 +3739,29 @@ class WizardView extends EventTarget {
      */
     renderComponentBreakdown(value) {
         if (!value.includes('^') && !value.includes('&')) {
-            return `<div style="font-family: monospace; padding: 4px; background: #f9fafb; border-radius: 4px;">${this.escapeHtml(value)}</div>`;
+            return HtmlSafe.html`<div style="font-family: monospace; padding: 4px; background: #f9fafb; border-radius: 4px;">${value}</div>`;
         }
 
-        let html = '';
+        const html = [];
 
         // Handle components
         if (value.includes('^')) {
             const components = value.split('^');
-            html += '<div style="margin: 4px 0;">';
-            html += '<div style="font-size: 10px; font-weight: 600; color: #1e3a8a; margin-bottom: 4px;">📋 Components:</div>';
+            html.push(HtmlSafe.raw('<div style="margin: 4px 0;">'));
+            html.push(HtmlSafe.raw('<div style="font-size: 10px; font-weight: 600; color: #1e3a8a; margin-bottom: 4px;">📋 Components:</div>'));
             components.forEach((component, idx) => {
                 // Add data type information for components
                 const componentType = this.getComponentDataType(idx + 1); // Component positions start at 1
-                html += `<div style="margin: 2px 0; padding: 4px 8px; background: #eff6ff; border-radius: 3px; font-size: 11px;">
+                html.push(HtmlSafe.html`<div style="margin: 2px 0; padding: 4px 8px; background: #eff6ff; border-radius: 3px; font-size: 11px;">
                     <span style="color: #1e3a8a; font-weight: 600;">${idx + 1}:</span>
                     <span class="component-datatype-badge" style="font-family: 'Courier New', monospace; font-size: 9px; font-weight: 600; color: white; background: #1e40af; padding: 1px 4px; border-radius: 3px; margin-left: 4px; margin-right: 4px;">${componentType}</span>
-                    ${component.includes('&') ? this.renderSubcomponentBreakdown(component) : `<span style="font-family: monospace;">${this.escapeHtml(component)}</span>`}
-                </div>`;
+                    ${component.includes('&') ? this.renderSubcomponentBreakdown(component) : HtmlSafe.html`<span style="font-family: monospace;">${component}</span>`}
+                </div>`);
             });
-            html += '</div>';
+            html.push(HtmlSafe.raw('</div>'));
         }
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -3999,18 +3799,18 @@ class WizardView extends EventTarget {
      */
     renderSubcomponentBreakdown(value) {
         if (!value.includes('&')) {
-            return `<span style="font-family: monospace;">${this.escapeHtml(value)}</span>`;
+            return HtmlSafe.html`<span style="font-family: monospace;">${value}</span>`;
         }
 
         const subcomponents = value.split('&');
         return subcomponents.map((sub, idx) => {
             const subcomponentType = this.getSubcomponentDataType(idx + 1);
-            return `<div style="margin-left: 12px; font-size: 10px;">
+            return HtmlSafe.html`<div style="margin-left: 12px; font-size: 10px;">
                 <span style="color: #7c3aed; font-weight: 600;">${idx + 1}:</span>
                 <span class="subcomponent-datatype-badge" style="font-family: 'Courier New', monospace; font-size: 8px; font-weight: 600; color: white; background: #ec4899; padding: 1px 3px; border-radius: 2px; margin-left: 3px; margin-right: 3px;">${subcomponentType}</span>
-                <span style="font-family: monospace;">${this.escapeHtml(sub)}</span>
+                <span style="font-family: monospace;">${sub}</span>
             </div>`;
-        }).join('');
+        });
     }
 
     /**
@@ -4042,34 +3842,34 @@ class WizardView extends EventTarget {
      * Render complex HL7 value with nested separators
      */
     renderComplexHL7Value(value) {
-        let html = '';
+        const html = [];
 
         // First, handle repetitions (~) at the top level
         if (value.includes('~')) {
             const repetitions = value.split('~');
-            html += '<div style="font-size: 11px; color: #059669; background: #ecfdf5; padding: 8px; border-radius: 4px; border-left: 3px solid #059669; margin-bottom: 4px;">';
-            html += '<div style="font-weight: 600; margin-bottom: 6px; color: #059669;">🔄 REPETITIONS (~):</div>';
+            html.push(HtmlSafe.raw('<div style="font-size: 11px; color: #059669; background: #ecfdf5; padding: 8px; border-radius: 4px; border-left: 3px solid #059669; margin-bottom: 4px;">'));
+            html.push(HtmlSafe.raw('<div style="font-weight: 600; margin-bottom: 6px; color: #059669;">🔄 REPETITIONS (~):</div>'));
 
             repetitions.forEach((rep, idx) => {
                 if (rep.trim() || idx === 0) {
-                    html += `<div style="margin-left: 8px; margin-bottom: 6px; background: white; padding: 6px; border-radius: 3px; border: 1px solid #a7f3d0;">
+                    html.push(HtmlSafe.html`<div style="margin-left: 8px; margin-bottom: 6px; background: white; padding: 6px; border-radius: 3px; border: 1px solid #a7f3d0;">
                         <div style="font-weight: 600; color: #059669; margin-bottom: 3px; font-size: 10px;">REPETITION ${idx + 1}:</div>
                         ${this.renderComponentLevel(rep)}
-                    </div>`;
+                    </div>`);
                 }
             });
-            html += '</div>';
+            html.push(HtmlSafe.raw('</div>'));
         }
         // Handle components (^) at the top level
         else if (value.includes('^')) {
-            html += this.renderComponentLevel(value);
+            html.push(this.renderComponentLevel(value));
         }
         // Handle subcomponents (&) at the top level
         else if (value.includes('&')) {
-            html += this.renderSubcomponentLevel(value);
+            html.push(this.renderSubcomponentLevel(value));
         }
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -4081,23 +3881,23 @@ class WizardView extends EventTarget {
         }
 
         const components = value.split('^');
-        let html = '<div style="font-size: 11px; color: #1e3a8a; background: #eff6ff; padding: 8px; border-radius: 4px; border-left: 3px solid #1e3a8a;">';
-        html += '<div style="font-weight: 600; margin-bottom: 6px; color: #1e3a8a;">📋 COMPONENTS (^):</div>';
+        const html = [HtmlSafe.raw('<div style="font-size: 11px; color: #1e3a8a; background: #eff6ff; padding: 8px; border-radius: 4px; border-left: 3px solid #1e3a8a;">')];
+        html.push(HtmlSafe.raw('<div style="font-weight: 600; margin-bottom: 6px; color: #1e3a8a;">📋 COMPONENTS (^):</div>'));
 
         components.forEach((component, idx) => {
-            html += `<div style="margin-left: 8px; margin-bottom: 4px; background: white; padding: 6px; border-radius: 3px; border: 1px solid #bfdbfe;">
-                <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 3px; font-size: 10px;">COMPONENT ${idx + 1}:</div>`;
+            html.push(HtmlSafe.html`<div style="margin-left: 8px; margin-bottom: 4px; background: white; padding: 6px; border-radius: 3px; border: 1px solid #bfdbfe;">
+                <div style="font-weight: 600; color: #1e3a8a; margin-bottom: 3px; font-size: 10px;">COMPONENT ${idx + 1}:</div>`);
 
             if (component.trim()) {
-                html += this.renderSubcomponentLevel(component);
+                html.push(this.renderSubcomponentLevel(component));
             } else {
-                html += '<em style="color: #9ca3af; font-size: 10px;">empty component</em>';
+                html.push(HtmlSafe.raw('<em style="color: #9ca3af; font-size: 10px;">empty component</em>'));
             }
-            html += '</div>';
+            html.push(HtmlSafe.raw('</div>'));
         });
-        html += '</div>';
+        html.push(HtmlSafe.raw('</div>'));
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -4105,26 +3905,26 @@ class WizardView extends EventTarget {
      */
     renderSubcomponentLevel(value) {
         if (!value.includes('&')) {
-            return `<div style="font-family: 'Courier New', monospace; color: #374151; font-size: 11px; padding: 4px; background: #f9fafb; border-radius: 2px;">
-                ${this.escapeHtml(value) || '<em style="color: #9ca3af;">empty</em>'}
+            return HtmlSafe.html`<div style="font-family: 'Courier New', monospace; color: #374151; font-size: 11px; padding: 4px; background: #f9fafb; border-radius: 2px;">
+                ${value || HtmlSafe.raw('<em style="color: #9ca3af;">empty</em>')}
             </div>`;
         }
 
         const subcomponents = value.split('&');
-        let html = '<div style="font-size: 11px; color: #7c3aed; background: #f3e8ff; padding: 6px; border-radius: 4px; border-left: 3px solid #7c3aed;">';
-        html += '<div style="font-weight: 600; margin-bottom: 4px; color: #7c3aed; font-size: 10px;">🧩 SUBCOMPONENTS (&):</div>';
+        const html = [HtmlSafe.raw('<div style="font-size: 11px; color: #7c3aed; background: #f3e8ff; padding: 6px; border-radius: 4px; border-left: 3px solid #7c3aed;">')];
+        html.push(HtmlSafe.raw('<div style="font-weight: 600; margin-bottom: 4px; color: #7c3aed; font-size: 10px;">🧩 SUBCOMPONENTS (&):</div>'));
 
         subcomponents.forEach((sub, idx) => {
             if (sub.trim() || idx === 0) {
-                html += `<div style="margin-left: 8px; margin-bottom: 2px; font-family: 'Courier New', monospace; background: white; padding: 3px 6px; border-radius: 2px; border: 1px solid #d8b4fe;">
+                html.push(HtmlSafe.html`<div style="margin-left: 8px; margin-bottom: 2px; font-family: 'Courier New', monospace; background: white; padding: 3px 6px; border-radius: 2px; border: 1px solid #d8b4fe;">
                     <span style="background: #7c3aed; color: white; padding: 1px 4px; border-radius: 2px; font-size: 9px; margin-right: 6px; font-weight: bold;">${idx + 1}</span>
-                    <span style="color: #374151;">${this.escapeHtml(sub) || '<em style="color: #9ca3af;">empty</em>'}</span>
-                </div>`;
+                    <span style="color: #374151;">${sub || HtmlSafe.raw('<em style="color: #9ca3af;">empty</em>')}</span>
+                </div>`);
             }
         });
-        html += '</div>';
+        html.push(HtmlSafe.raw('</div>'));
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -4235,68 +4035,68 @@ class WizardView extends EventTarget {
         const hasValue = field.value && field.value.trim() !== '';
 
         if (!hasValue) {
-            return '<div style="font-size: 12px; color: #9ca3af; font-style: italic;">No value</div>';
+            return HtmlSafe.raw('<div style="font-size: 12px; color: #9ca3af; font-style: italic;">No value</div>');
         }
 
         const value = field.value;
-        let html = '';
+        const html = [];
 
         // Check if value has components (^ separator)
         if (value.includes('^')) {
             const components = value.split('^');
-            html += '<div style="font-size: 12px; color: #4b5563;">';
-            html += '<div style="margin-bottom: 4px;"><strong>Components:</strong></div>';
+            html.push(HtmlSafe.raw('<div style="font-size: 12px; color: #4b5563;">'));
+            html.push(HtmlSafe.raw('<div style="margin-bottom: 4px;"><strong>Components:</strong></div>'));
 
             components.forEach((component, idx) => {
                 if (component.trim()) {
-                    html += `<div style="margin-left: 12px; margin-bottom: 2px;">
+                    html.push(HtmlSafe.html`<div style="margin-left: 12px; margin-bottom: 2px;">
                         <span style="font-family: monospace; color: #6b7280; font-size: 10px;">${idx + 1}:</span>
-                        <span style="margin-left: 4px;">${this.escapeHtml(component)}</span>
-                    </div>`;
+                        <span style="margin-left: 4px;">${component}</span>
+                    </div>`);
                 }
             });
-            html += '</div>';
+            html.push(HtmlSafe.raw('</div>'));
         }
         // Check if value has repetitions (~ separator)
         else if (value.includes('~')) {
             const repetitions = value.split('~');
-            html += '<div style="font-size: 12px; color: #4b5563;">';
-            html += '<div style="margin-bottom: 4px;"><strong>Repetitions:</strong></div>';
+            html.push(HtmlSafe.raw('<div style="font-size: 12px; color: #4b5563;">'));
+            html.push(HtmlSafe.raw('<div style="margin-bottom: 4px;"><strong>Repetitions:</strong></div>'));
 
             repetitions.forEach((rep, idx) => {
                 if (rep.trim()) {
-                    html += `<div style="margin-left: 12px; margin-bottom: 2px;">
+                    html.push(HtmlSafe.html`<div style="margin-left: 12px; margin-bottom: 2px;">
                         <span style="font-family: monospace; color: #6b7280; font-size: 10px;">${idx + 1}:</span>
-                        <span style="margin-left: 4px;">${this.escapeHtml(rep)}</span>
-                    </div>`;
+                        <span style="margin-left: 4px;">${rep}</span>
+                    </div>`);
                 }
             });
-            html += '</div>';
+            html.push(HtmlSafe.raw('</div>'));
         }
         // Check if value has subcomponents (& separator)
         else if (value.includes('&')) {
             const subcomponents = value.split('&');
-            html += '<div style="font-size: 12px; color: #4b5563;">';
-            html += '<div style="margin-bottom: 4px;"><strong>Subcomponents:</strong></div>';
+            html.push(HtmlSafe.raw('<div style="font-size: 12px; color: #4b5563;">'));
+            html.push(HtmlSafe.raw('<div style="margin-bottom: 4px;"><strong>Subcomponents:</strong></div>'));
 
             subcomponents.forEach((sub, idx) => {
                 if (sub.trim()) {
-                    html += `<div style="margin-left: 12px; margin-bottom: 2px;">
+                    html.push(HtmlSafe.html`<div style="margin-left: 12px; margin-bottom: 2px;">
                         <span style="font-family: monospace; color: #6b7280; font-size: 10px;">${idx + 1}:</span>
-                        <span style="margin-left: 4px;">${this.escapeHtml(sub)}</span>
-                    </div>`;
+                        <span style="margin-left: 4px;">${sub}</span>
+                    </div>`);
                 }
             });
-            html += '</div>';
+            html.push(HtmlSafe.raw('</div>'));
         }
         // Simple value
         else {
-            html += `<div style="font-size: 12px; color: #4b5563; font-family: monospace; background: #f9fafb; padding: 6px 8px; border-radius: 4px; border-left: 3px solid #3b82f6;">
-                ${this.escapeHtml(value)}
-            </div>`;
+            html.push(HtmlSafe.html`<div style="font-size: 12px; color: #4b5563; font-family: monospace; background: #f9fafb; padding: 6px 8px; border-radius: 4px; border-left: 3px solid #3b82f6;">
+                ${value}
+            </div>`);
         }
 
-        return html;
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -4411,7 +4211,7 @@ class WizardView extends EventTarget {
             badges.push('<span class="badge-mini custom" title="Custom segment">Z</span>');
         }
 
-        return badges.join('');
+        return badges;
     }
 
     /**
@@ -4421,11 +4221,11 @@ class WizardView extends EventTarget {
         if (segmentErrors.length === 0) return '';
 
         const firstError = segmentErrors[0];
-        return `
+        return HtmlSafe.html`
             <div class="inline-validation">
                 <span class="validation-icon">${firstError.severity === 'error' || firstError.severity === 'ERROR' ? '❌' : '⚠️'}</span>
                 <span class="validation-text">${this.truncateText(firstError.message, 60)}</span>
-                ${segmentErrors.length > 1 ? `<span class="more-count">+${segmentErrors.length - 1} more</span>` : ''}
+                ${segmentErrors.length > 1 ? HtmlSafe.html`<span class="more-count">+${segmentErrors.length - 1} more</span>` : ''}
             </div>
         `;
     }
@@ -4535,7 +4335,7 @@ class WizardView extends EventTarget {
         const resourceCount = this.getResourceTypesFromMappings([]).length || 3; // Default estimate
         const validationScore = mappingsCount > 0 ? Math.round((mappingsCount / (mappingsCount + 0)) * 100) + '%' : '100%';
 
-        return `
+        return HtmlSafe.html`
             <div style="background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%); border: 2px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                     <h4 style="margin: 0; font-size: 16px; font-weight: 600; color: #1e3a8a;">HL7 → FHIR Transformation</h4>
@@ -4586,18 +4386,18 @@ class WizardView extends EventTarget {
      */
     getHL7ElementTableSection(atomicMappings, resourceTypes) {
         if (atomicMappings.length === 0) {
-            return '<div style="text-align: center; padding: 40px; color: #6b7280;">No field mappings to display</div>';
+            return HtmlSafe.raw('<div style="text-align: center; padding: 40px; color: #6b7280;">No field mappings to display</div>');
         }
 
-        let html = '<div id="resourcesContainer" style="margin-top: 16px;">';
+        const html = [HtmlSafe.raw('<div id="resourcesContainer" style="margin-top: 16px;">')];
 
         resourceTypes.forEach((resourceType, index) => {
             const mappings = atomicMappings.filter(m => m.resourceType === resourceType);
-            html += this.generateResourceCard(resourceType, mappings, index);
+            html.push(this.generateResourceCard(resourceType, mappings, index));
         });
 
-        html += '</div>';
-        return html;
+        html.push(HtmlSafe.raw('</div>'));
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -4607,7 +4407,7 @@ class WizardView extends EventTarget {
         const icon = this.getResourceIcon(resourceType);
         const mappingCount = mappings.length;
 
-        return `
+        return HtmlSafe.html`
             <div style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; margin-bottom: 16px;">
                 <div onclick="window.wizardView.toggleResource(${index})" style="padding: 16px; background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%); cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
                     <div style="display: flex; align-items: center; gap: 12px;">
@@ -4632,19 +4432,19 @@ class WizardView extends EventTarget {
      */
     generateMappingsTable(mappings) {
         if (mappings.length === 0) {
-            return '<div style="text-align: center; color: #6b7280; padding: 20px;">No mappings found</div>';
+            return HtmlSafe.raw('<div style="text-align: center; color: #6b7280; padding: 20px;">No mappings found</div>');
         }
 
-        let html = '<div style="overflow-x: auto;">';
-        html += '<table style="width: 100%; border-collapse: collapse;">';
-        html += '<thead><tr style="border-bottom: 2px solid #e2e8f0;">';
-        html += '<th style="text-align: left; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">HL7 Field</th>';
-        html += '<th style="text-align: center; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">→</th>';
-        html += '<th style="text-align: left; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">FHIR Path</th>';
-        html += '<th style="text-align: left; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">Value</th>';
-        html += '<th style="text-align: center; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">Type</th>';
-        html += '</tr></thead>';
-        html += '<tbody>';
+        const html = [HtmlSafe.raw('<div style="overflow-x: auto;">')];
+        html.push(HtmlSafe.raw('<table style="width: 100%; border-collapse: collapse;">'));
+        html.push(HtmlSafe.raw('<thead><tr style="border-bottom: 2px solid #e2e8f0;">'));
+        html.push(HtmlSafe.raw('<th style="text-align: left; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">HL7 Field</th>'));
+        html.push(HtmlSafe.raw('<th style="text-align: center; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">→</th>'));
+        html.push(HtmlSafe.raw('<th style="text-align: left; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">FHIR Path</th>'));
+        html.push(HtmlSafe.raw('<th style="text-align: left; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">Value</th>'));
+        html.push(HtmlSafe.raw('<th style="text-align: center; padding: 12px; font-size: 12px; font-weight: 600; color: #6b7280;">Type</th>'));
+        html.push(HtmlSafe.raw('</tr></thead>'));
+        html.push(HtmlSafe.raw('<tbody>'));
 
         mappings.forEach((mapping, idx) => {
             const hl7Parts = mapping.hl7Field.split('.');
@@ -4652,11 +4452,11 @@ class WizardView extends EventTarget {
             const statusColor = '#10b981';
             const statusLabel = 'Direct';
 
-            html += `
+            html.push(HtmlSafe.html`
                 <tr style="border-bottom: 1px solid #f3f4f6;">
                     <td style="padding: 12px;">
                         <div style="font-family: monospace; font-size: 12px; color: #4b5563; font-weight: 600;">${hl7Display}</div>
-                        ${mapping.fieldName ? `<div style="font-size: 10px; color: #9ca3af; margin-top: 2px;">${mapping.fieldName}</div>` : ''}
+                        ${mapping.fieldName ? HtmlSafe.html`<div style="font-size: 10px; color: #9ca3af; margin-top: 2px;">${mapping.fieldName}</div>` : ''}
                     </td>
                     <td style="text-align: center; padding: 12px;">
                         <span style="color: #3b82f6; font-weight: bold;">→</span>
@@ -4673,11 +4473,11 @@ class WizardView extends EventTarget {
                         </span>
                     </td>
                 </tr>
-            `;
+            `);
         });
 
-        html += '</tbody></table></div>';
-        return html;
+        html.push(HtmlSafe.raw('</tbody></table></div>'));
+        return HtmlSafe.html`${html}`;
     }
 
     /**
@@ -4685,10 +4485,10 @@ class WizardView extends EventTarget {
      */
     getSegmentsDisplay(parsedData) {
         if (!parsedData?.segments) {
-            return '<div class="no-segments">No segments found</div>';
+            return HtmlSafe.raw('<div class="no-segments">No segments found</div>');
         }
 
-        return Object.entries(parsedData.segments).map(([segmentName, segmentData]) => `
+        return Object.entries(parsedData.segments).map(([segmentName, segmentData]) => HtmlSafe.html`
             <div class="segment-card">
                 <div class="segment-header" onclick="this.toggleSegment('${segmentName}')">
                     <div class="segment-title">
@@ -4706,7 +4506,7 @@ class WizardView extends EventTarget {
                     ${this.getSegmentFields(segmentName, segmentData, parsedData.enhancedSegments?.[segmentName])}
                 </div>
             </div>
-        `).join('');
+        `);
     }
 
     /**
@@ -4750,7 +4550,7 @@ class WizardView extends EventTarget {
      */
     getSegmentFields(segmentName, segmentData, enhancedData) {
         if (!segmentData || typeof segmentData !== 'object') {
-            return '<div class="no-fields">No field data available</div>';
+            return HtmlSafe.raw('<div class="no-fields">No field data available</div>');
         }
 
         // Use enhanced data if available, otherwise use basic segment data
@@ -4758,21 +4558,21 @@ class WizardView extends EventTarget {
 
         if (fields.length === 0) {
             // Fallback to displaying raw segment data
-            return `<div class="raw-segment-data"><pre>${JSON.stringify(segmentData, null, 2)}</pre></div>`;
+            return HtmlSafe.html`<div class="raw-segment-data"><pre>${JSON.stringify(segmentData, null, 2)}</pre></div>`;
         }
 
-        return `
+        return HtmlSafe.html`
             <div class="fields-grid">
-                ${fields.map((field, index) => `
+                ${fields.map((field, index) => HtmlSafe.html`
                     <div class="field-item">
                         <div class="field-header">
                             <span class="field-position">${segmentName}.${field.position || index + 1}</span>
                             <span class="field-name">${field.name || 'Field ' + (index + 1)}</span>
                         </div>
                         <div class="field-value">${field.value || 'N/A'}</div>
-                        ${field.description ? `<div class="field-description">${field.description}</div>` : ''}
+                        ${field.description ? HtmlSafe.html`<div class="field-description">${field.description}</div>` : ''}
                     </div>
-                `).join('')}
+                `)}
             </div>
         `;
     }
@@ -4781,7 +4581,7 @@ class WizardView extends EventTarget {
      * Generate OOB mapping templates
      */
     getOOBMappingTemplates(templates = {}, selectedTemplate = '') {
-        return Object.entries(templates).map(([id, template]) => `
+        return Object.entries(templates).map(([id, template]) => HtmlSafe.html`
             <div class="oob-template-item ${selectedTemplate === id ? 'selected' : ''}"
                  data-template-id="${id}">
                 <div class="oob-template-header">
@@ -4796,14 +4596,14 @@ class WizardView extends EventTarget {
                     <span class="stat">⚡ Ready to use</span>
                 </div>
             </div>
-        `).join('');
+        `);
     }
 
     /**
      * Visual mapping panel
      */
     getVisualMappingPanel(mappings = []) {
-        return `
+        return HtmlSafe.html`
             <div class="visual-mapping-container">
                 <div class="mapping-columns">
                     <div class="mapping-column hl7-column">
@@ -4848,7 +4648,7 @@ class WizardView extends EventTarget {
      * Table mapping panel
      */
     getTableMappingPanel(mappings = []) {
-        return `
+        return HtmlSafe.html`
             <div class="table-mapping-container">
                 <div class="mapping-table-controls">
                     <button class="btn btn-primary" id="addMappingRow">
@@ -4887,7 +4687,7 @@ class WizardView extends EventTarget {
      */
     getMappingTableRows(mappings = []) {
         if (mappings.length === 0) {
-            return `
+            return HtmlSafe.html`
                 <tr class="empty-row">
                     <td colspan="5" class="text-center">
                         <div class="empty-state">
@@ -4900,7 +4700,7 @@ class WizardView extends EventTarget {
             `;
         }
 
-        return mappings.map((mapping, index) => `
+        return mappings.map((mapping, index) => HtmlSafe.html`
             <tr data-mapping-index="${index}">
                 <td>
                     <input type="text" class="form-control" value="${mapping.hl7Path || ''}"
@@ -4932,14 +4732,14 @@ class WizardView extends EventTarget {
                     </button>
                 </td>
             </tr>
-        `).join('');
+        `);
     }
 
     /**
      * Preview mapping panel
      */
     getPreviewMappingPanel() {
-        return `
+        return HtmlSafe.html`
             <div class="preview-container">
                 <div class="preview-controls">
                     <button class="btn btn-primary" id="generatePreview">
@@ -4981,7 +4781,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
      * Step 6: Summary and Completion
      */
     getStep6Template(data) {
-        return `
+        return HtmlSafe.html`
             <div class="wizard-step-content" data-step="6">
                 <div class="wizard-step-header">
                     <h3>Summary & Completion</h3>
@@ -5078,14 +4878,14 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
     getSummaryConfig(type, config = {}) {
         const configItems = Object.entries(config)
             .filter(([key, value]) => value && key !== 'password' && key !== 'token')
-            .map(([key, value]) => `
+            .map(([key, value]) => HtmlSafe.html`
                 <div class="summary-item">
                     <label>${this.formatConfigKey(key)}:</label>
                     <span>${value}</span>
                 </div>
-            `).join('');
+            `);
 
-        return configItems || '<div class="summary-item text-muted">Using default configuration</div>';
+        return configItems.length ? configItems : HtmlSafe.raw('<div class="summary-item text-muted">Using default configuration</div>');
     }
 
     /**
@@ -5187,7 +4987,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         const helpTexts = {
             1: {
                 title: 'Getting Started',
-                content: `
+                content: HtmlSafe.html`
                     <p>Choose a descriptive name for your interface and optionally provide a description.</p>
                     <p><strong>💡 Quick Start:</strong> Use our OOB templates for common scenarios:</p>
                     <ul>
@@ -5199,7 +4999,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             },
             2: {
                 title: 'Source Configuration',
-                content: `
+                content: HtmlSafe.html`
                     <p>Configure where your HL7 messages come from.</p>
                     <p><strong>💡 OOB Defaults:</strong></p>
                     <ul>
@@ -5212,7 +5012,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             },
             3: {
                 title: 'Target Configuration',
-                content: `
+                content: HtmlSafe.html`
                     <p>Configure your FHIR server where transformed data will be sent.</p>
                     <p><strong>💡 OOB Defaults:</strong></p>
                     <ul>
@@ -5225,7 +5025,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             },
             4: {
                 title: 'Mapping Configuration',
-                content: `
+                content: HtmlSafe.html`
                     <p>Define how HL7 segments map to FHIR resources.</p>
                     <p><strong>💡 OOB Templates:</strong> Start with pre-built mappings for common message types.</p>
                     <p><strong>Visual Mode:</strong> Drag and drop interface for easy mapping creation.</p>
@@ -5235,7 +5035,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             },
             5: {
                 title: 'Ready to Deploy',
-                content: `
+                content: HtmlSafe.html`
                     <p>Review your configuration and test the complete transformation.</p>
                     <p><strong>💡 Recommendations:</strong></p>
                     <ul>
@@ -5251,7 +5051,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
 
         const help = helpTexts[stepNumber];
         if (help) {
-            helpContent.innerHTML = `
+            helpContent.innerHTML = HtmlSafe.html`
                 <div class="help-content">
                     <h4>${help.title}</h4>
                     ${help.content}
@@ -6124,7 +5924,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         }
 
         const newRow = document.createElement('tr');
-        newRow.innerHTML = `
+        newRow.innerHTML = HtmlSafe.html`
             <td>
                 <input type="text" class="form-control" placeholder="e.g., PID.5.1" data-field="hl7Path">
             </td>
@@ -6887,21 +6687,21 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             return;
         }
 
-        const errorHtml = errors.map(([field, message]) => `
+        const errorHtml = errors.map(([field, message]) => HtmlSafe.html`
             <div class="validation-message error">
                 <span class="validation-icon">❌</span>
                 <span class="validation-text">${message}</span>
             </div>
-        `).join('');
+        `);
 
-        const warningHtml = warnings.map(([field, message]) => `
+        const warningHtml = warnings.map(([field, message]) => HtmlSafe.html`
             <div class="validation-message warning">
                 <span class="validation-icon">⚠️</span>
                 <span class="validation-text">${message}</span>
             </div>
-        `).join('');
+        `);
 
-        validationContainer.innerHTML = errorHtml + warningHtml;
+        validationContainer.innerHTML = HtmlSafe.html`${errorHtml}${warningHtml}`;
     }
 
     /**
@@ -6912,7 +6712,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         const loadingOverlay = document.createElement('div');
         loadingOverlay.className = 'wizard-loading-overlay';
         loadingOverlay.id = 'wizardLoading';
-        loadingOverlay.innerHTML = `
+        loadingOverlay.innerHTML = HtmlSafe.html`
             <div class="loading-spinner"></div>
             <div class="loading-message">${message}</div>
         `;
@@ -6943,7 +6743,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
     showNotification(message, type = 'info', duration = 3000) {
         const notification = document.createElement('div');
         notification.className = `wizard-notification ${type}`;
-        notification.innerHTML = `
+        notification.innerHTML = HtmlSafe.html`
             <span class="notification-icon">${this.getNotificationIcon(type)}</span>
             <span class="notification-message">${message}</span>
             <button class="notification-close" onclick="this.parentElement.remove()">×</button>
@@ -6986,7 +6786,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         // (Appointment vs Encounter) that lives on the CCD to FHIR step's
         // Assembly tab, not in the wizard itself -- guide the user there
         // instead of building a separate settings surface for it.
-        const cdaGuidanceHtml = (sourceType === 'ccda' || sourceType === 'cda') ? `
+        const cdaGuidanceHtml = (sourceType === 'ccda' || sourceType === 'cda') ? HtmlSafe.html`
                     <div style="
                         background: #eff6ff;
                         border: 1px solid #bfdbfe;
@@ -7004,7 +6804,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         // Create completion modal overlay
         const completionModal = document.createElement('div');
         completionModal.className = 'wizard-completion-modal';
-        completionModal.innerHTML = `
+        completionModal.innerHTML = HtmlSafe.html`
             <div class="completion-modal-overlay" style="
                 position: fixed;
                 top: 0;
@@ -7412,7 +7212,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             const fields = currentData.parsedHL7Data?.enhancedSegments ?
                 Object.values(currentData.parsedHL7Data.enhancedSegments).reduce((count, seg) => count + (seg.fields?.length || 0), 0) : 0;
 
-            parsingResults.innerHTML = `
+            parsingResults.innerHTML = HtmlSafe.html`
                 <div class="transformation-summary">
                     ${this.getTransformationSummarySection(messageType, segments, fields, atomicMappings.length)}
                     ${this.getHL7ElementTableSection(atomicMappings, resourceTypes)}
@@ -7686,8 +7486,8 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             used: schemaUsed,
             source: schemaSource,
             html: schemaUsed ?
-                `<span class="schema-indicator schema-loaded">📋 ${schemaSource}</span>` :
-                `<span class="schema-indicator basic-parser">💡 ${schemaSource}</span>`
+                HtmlSafe.html`<span class="schema-indicator schema-loaded">📋 ${schemaSource}</span>` :
+                HtmlSafe.html`<span class="schema-indicator basic-parser">💡 ${schemaSource}</span>`
         };
     }
 
@@ -7719,7 +7519,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             badges.push('<span class="badge-mini custom" title="Custom segment">Z</span>');
         }
 
-        return badges.join('');
+        return badges;
     }
 
     /**
@@ -7728,7 +7528,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
     renderRequiredFieldsBadge(missingRequiredFields) {
         if (missingRequiredFields.length === 0) return '';
 
-        return `<span class="badge-mini missing-required" title="${missingRequiredFields.length} missing required field${missingRequiredFields.length > 1 ? 's' : ''}">${missingRequiredFields.length}!</span>`;
+        return HtmlSafe.html`<span class="badge-mini missing-required" title="${missingRequiredFields.length} missing required field${missingRequiredFields.length > 1 ? 's' : ''}">${missingRequiredFields.length}!</span>`;
     }
 
     /**
@@ -7793,24 +7593,24 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         // Check if this is a required field
         const isRequired = field.optionality === 'R';
 
-        return `
+        return HtmlSafe.html`
             <div class="field-compact ${hasIssues ? 'has-issues' : ''} ${isMissingRequired ? 'missing-required' : ''} ${isEmptyRequired ? 'empty-required' : ''} ${isRequired ? 'required-field' : ''}"
                  onclick="window.wizardView.toggleField('${segName}', '${field.key}')">
                 <div class="field-header-compact">
                     <div class="field-label">
                         <span class="field-key">${field.key}</span>
-                        ${isRequired ? '<span class="required-indicator">*</span>' : ''}
+                        ${isRequired ? HtmlSafe.raw('<span class="required-indicator">*</span>') : ''}
                         <span class="field-name">${this.truncateText(field.name || `Field ${field.position}`, 25)}</span>
-                        ${isMissingRequired ? '<span class="missing-required-icon" title="Required field is missing">❌</span>' : ''}
-                        ${isEmptyRequired ? '<span class="empty-required-icon" title="Required field is empty">⚠️</span>' : ''}
-                        ${hasIssues && !isMissingRequired && !isEmptyRequired ? '<span class="field-error-icon">!</span>' : ''}
+                        ${isMissingRequired ? HtmlSafe.raw('<span class="missing-required-icon" title="Required field is missing">❌</span>') : ''}
+                        ${isEmptyRequired ? HtmlSafe.raw('<span class="empty-required-icon" title="Required field is empty">⚠️</span>') : ''}
+                        ${hasIssues && !isMissingRequired && !isEmptyRequired ? HtmlSafe.raw('<span class="field-error-icon">!</span>') : ''}
                     </div>
                     <div class="field-value-preview">
                         ${field.hasValue ?
-                            `<span class="value-text">${this.truncateValue(field.value, 35)}</span>` :
-                            `<span class="no-value ${isMissingRequired || isEmptyRequired ? 'missing-required-value' : ''}">—</span>`
+                            HtmlSafe.html`<span class="value-text">${this.truncateValue(field.value, 35)}</span>` :
+                            HtmlSafe.html`<span class="no-value ${isMissingRequired || isEmptyRequired ? 'missing-required-value' : ''}">—</span>`
                         }
-                        ${field.dataType && field.dataType !== 'ST' ? `<span class="data-type">(${field.dataType})</span>` : ''}
+                        ${field.dataType && field.dataType !== 'ST' ? HtmlSafe.html`<span class="data-type">(${field.dataType})</span>` : ''}
                     </div>
                 </div>
 
@@ -7823,45 +7623,45 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
      * Render field details when expanded
      */
     renderFieldDetails(segName, field, fieldValidationErrors) {
-        return `
+        return HtmlSafe.html`
             <div class="field-details-compact">
                 <div class="field-metadata-row">
                     <span>Type: ${field.dataType || 'ST'}</span>
                     <span>Usage: ${this.getUsageDescription(field.optionality || 'O')}</span>
-                    ${field.cardinality ? `<span>Repeat: ${field.cardinality}</span>` : ''}
-                    ${field.length ? `<span>Max Length: ${field.length}</span>` : ''}
+                    ${field.cardinality ? HtmlSafe.html`<span>Repeat: ${field.cardinality}</span>` : ''}
+                    ${field.length ? HtmlSafe.html`<span>Max Length: ${field.length}</span>` : ''}
                     <span>Position: ${field.position}</span>
                 </div>
 
-                ${field.description ? `
+                ${field.description ? HtmlSafe.html`
                     <div class="field-description-row">
                         <strong>Description:</strong> ${field.description}
                     </div>
                 ` : ''}
 
-                ${field.hasValue && field.value ? `
+                ${field.hasValue && field.value ? HtmlSafe.html`
                     <div class="field-value-row">
                         <strong>Full Value:</strong>
-                        <code class="value-display">${this.escapeHtml(field.value)}</code>
+                        <code class="value-display">${field.value}</code>
                         ${this.analyzeValue(field)}
                     </div>
                 ` : ''}
 
-                ${field.subfields && field.subfields.length > 0 ? `
+                ${field.subfields && field.subfields.length > 0 ? HtmlSafe.html`
                     <div class="subfields-section">
                         <strong>Components (${field.subfields.length}):</strong>
                         ${this.renderEnhancedSubfields(field.subfields)}
                     </div>
                 ` : ''}
 
-                ${fieldValidationErrors.length > 0 ? `
+                ${fieldValidationErrors.length > 0 ? HtmlSafe.html`
                     <div class="field-validation-row">
-                        ${fieldValidationErrors.map(error => `
+                        ${fieldValidationErrors.map(error => HtmlSafe.html`
                             <div class="validation-item ${error.severity}">
                                 ${error.message}
-                                ${error.suggestion ? `<br><em>💡 ${error.suggestion}</em>` : ''}
+                                ${error.suggestion ? HtmlSafe.html`<br><em>💡 ${error.suggestion}</em>` : ''}
                             </div>
-                        `).join('')}
+                        `)}
                     </div>
                 ` : ''}
             </div>
@@ -7873,7 +7673,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
      */
     renderEnhancedSubfields(subfields) {
         if (!subfields || subfields.length === 0) {
-            return '<div class="no-subfields">No components defined</div>';
+            return HtmlSafe.raw('<div class="no-subfields">No components defined</div>');
         }
 
         // Sort subfields by position
@@ -7884,7 +7684,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
             return (a.sequence || 0) - (b.sequence || 0);
         });
 
-        return `
+        return HtmlSafe.html`
             <div class="rich-subfields-container">
                 <div class="subfields-header">
                     <span class="subfields-title">Components (${sortedSubfields.length})</span>
@@ -7893,7 +7693,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                     </button>
                 </div>
                 <div class="rich-subfields-list">
-                    ${sortedSubfields.map((subfield, index) => this.renderEnhancedSubfield(subfield, index)).join('')}
+                    ${sortedSubfields.map((subfield, index) => this.renderEnhancedSubfield(subfield, index))}
                 </div>
             </div>
         `;
@@ -7907,7 +7707,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         const isEmpty = !subfield.hasValue || !subfield.value;
         const isMissingRequired = isRequired && isEmpty;
 
-        return `
+        return HtmlSafe.html`
             <div class="enhanced-subfield ${subfield.hasValue ? 'has-value' : 'no-value'} ${isMissingRequired ? 'missing-required' : ''}"
                  onclick="event.stopPropagation(); this.classList.toggle('subfield-expanded')">
 
@@ -7916,16 +7716,16 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                     <div class="subfield-label-section">
                         <span class="subfield-position">${subfield.position}</span>
                         <span class="subfield-name">${subfield.name || `Component ${subfield.position}`}</span>
-                        ${isRequired ? '<span class="required-indicator">*</span>' : ''}
-                        ${isMissingRequired ? '<span class="missing-required-icon">⚠️</span>' : ''}
+                        ${isRequired ? HtmlSafe.raw('<span class="required-indicator">*</span>') : ''}
+                        ${isMissingRequired ? HtmlSafe.raw('<span class="missing-required-icon">⚠️</span>') : ''}
                     </div>
 
                     <div class="subfield-value-section">
                         <span class="subfield-value ${isEmpty ? 'empty-value' : ''}">
-                            ${subfield.hasValue ? this.escapeHtml(this.truncateValue(subfield.value, 20)) : '—'}
+                            ${subfield.hasValue ? this.truncateValue(subfield.value, 20) : '—'}
                         </span>
                         ${subfield.dataType && subfield.dataType !== 'ST' ?
-                            `<span class="subfield-datatype">(${subfield.dataType})</span>` : ''
+                            HtmlSafe.html`<span class="subfield-datatype">(${subfield.dataType})</span>` : ''
                         }
                     </div>
 
@@ -7949,7 +7749,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                                 ${this.getUsageDescription(subfield.usage)}
                             </span>
                         </div>
-                        ${subfield.length ? `
+                        ${subfield.length ? HtmlSafe.html`
                             <div class="metadata-row">
                                 <span class="metadata-label">Max Length:</span>
                                 <span class="metadata-value">${subfield.length}</span>
@@ -7961,18 +7761,18 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                         </div>
                     </div>
 
-                    ${subfield.description ? `
+                    ${subfield.description ? HtmlSafe.html`
                         <div class="subfield-description-section">
                             <div class="description-label">Description:</div>
                             <div class="description-text">${subfield.description}</div>
                         </div>
                     ` : ''}
 
-                    ${subfield.hasValue && subfield.value ? `
+                    ${subfield.hasValue && subfield.value ? HtmlSafe.html`
                         <div class="subfield-value-section-detailed">
                             <div class="value-label">Full Value:</div>
                             <div class="value-display">
-                                <code>${this.escapeHtml(subfield.value)}</code>
+                                <code>${subfield.value}</code>
                                 <span class="value-stats">(${subfield.value.length} chars)</span>
                             </div>
                         </div>
@@ -7990,7 +7790,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         const hasIssues = segmentErrors.length > 0;
         const keyFields = this.getKeyFields(segName, segment);
 
-        return `
+        return HtmlSafe.html`
             <tr class="segment-table-row ${hasIssues ? 'has-issues' : ''}" onclick="window.wizardView.viewSegmentDetails('${segName}')">
                 <td class="seg-name-cell">
                     <span class="seg-name">${segName}</span>
@@ -8000,8 +7800,8 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
                 <td class="field-count-cell">${segment.fieldCount || segment.fields?.length || 0}</td>
                 <td class="status-cell">
                     ${hasIssues ?
-                        `<span class="status-badge error">${segmentErrors.length} issue${segmentErrors.length > 1 ? 's' : ''}</span>` :
-                        `<span class="status-badge ok">✓</span>`
+                        HtmlSafe.html`<span class="status-badge error">${segmentErrors.length} issue${segmentErrors.length > 1 ? 's' : ''}</span>` :
+                        HtmlSafe.html`<span class="status-badge ok">✓</span>`
                     }
                 </td>
                 <td class="key-values-cell">${keyFields.join(', ')}</td>
@@ -8027,11 +7827,11 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
 
         // Otherwise show first error
         const firstError = segmentErrors[0];
-        return `
+        return HtmlSafe.html`
             <div class="inline-validation">
                 <span class="validation-icon">${firstError.severity === 'error' || firstError.severity === 'ERROR' ? '❌' : '⚠️'}</span>
                 <span class="validation-text">${this.truncateText(firstError.message, 60)}</span>
-                ${segmentErrors.length > 1 ? `<span class="more-count">+${segmentErrors.length - 1} more</span>` : ''}
+                ${segmentErrors.length > 1 ? HtmlSafe.html`<span class="more-count">+${segmentErrors.length - 1} more</span>` : ''}
             </div>
         `;
     }
@@ -8047,11 +7847,11 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         const displayText = fieldNames.join(', ');
         const remainingCount = missingRequiredFields.length - 3;
 
-        return `
+        return HtmlSafe.html`
             <div class="inline-validation missing-required">
                 <span class="validation-icon">❌</span>
                 <span class="validation-text">Missing required: ${displayText}</span>
-                ${remainingCount > 0 ? `<span class="more-count">+${remainingCount} more</span>` : ''}
+                ${remainingCount > 0 ? HtmlSafe.html`<span class="more-count">+${remainingCount} more</span>` : ''}
             </div>
         `;
     }
@@ -8119,7 +7919,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
         }
 
         if (analysis.length > 0) {
-            return `<span class="value-analysis">(${analysis.join(', ')})</span>`;
+            return HtmlSafe.html`<span class="value-analysis">(${analysis.join(', ')})</span>`;
         }
 
         return '';
@@ -8298,7 +8098,7 @@ PV1|1|I|ICU^101^1|||DOC123^Smith^Jane|||EMERGENCY|||
 
             if (container) {
                 const newContent = this.getTransformationResultsTemplate(currentData);
-                container.innerHTML = newContent;
+                container.innerHTML = HtmlSafe.html`${newContent}`;
                 console.log('✅ Segment view refreshed successfully');
             } else {
                 console.warn('⚠️ Container not found for refresh - available elements:', document.querySelectorAll('*[id]').length);
@@ -8436,7 +8236,7 @@ function getHL7TableData(tableId) {
 // Show table not found message
 function showTableNotFound(tableId, fieldName) {
     const modal = createTableModal();
-    modal.innerHTML = `
+    modal.innerHTML = HtmlSafe.html`
         <div class="table-modal-content">
             <div class="table-modal-header">
                 <h3>HL7 Table T${tableId}</h3>
@@ -8460,7 +8260,7 @@ function showTableNotFound(tableId, fieldName) {
 // Show table modal with data
 function showTableModal(tableId, fieldName, tableData, triggerElement) {
     const modal = createTableModal();
-    modal.innerHTML = `
+    modal.innerHTML = HtmlSafe.html`
         <div class="table-modal-content">
             <div class="table-modal-header">
                 <h3>HL7 Table T${tableId}</h3>
@@ -8479,12 +8279,12 @@ function showTableModal(tableId, fieldName, tableData, triggerElement) {
                             </tr>
                         </thead>
                         <tbody>
-                            ${tableData.map(item => `
+                            ${tableData.map(item => HtmlSafe.html`
                                 <tr style="border-bottom: 1px solid #e5e7eb;">
                                     <td style="padding: 8px; font-family: monospace; font-weight: 600; color: #1e3a8a;">${item.code}</td>
                                     <td style="padding: 8px; color: #374151;">${item.description}</td>
                                 </tr>
-                            `).join('')}
+                            `)}
                         </tbody>
                     </table>
                 </div>
@@ -8669,7 +8469,7 @@ window.aiSuggestMappings = async function() {
         panel = document.createElement('div');
         panel.id = 'ai-mapping-suggestion-panel';
         panel.style.cssText = 'position:fixed;top:0;right:0;width:480px;height:100vh;background:#fff;border-left:1px solid #e2e8f0;box-shadow:-4px 0 24px rgba(30,58,138,0.12);z-index:10010;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
-        panel.innerHTML = `
+        panel.innerHTML = HtmlSafe.html`
 <div style="background:linear-gradient(135deg,#f472b6,#1e3a8a);padding:14px 18px;display:flex;align-items:center;justify-content:space-between;color:#fff;flex-shrink:0;">
   <div>
     <div style="font-weight:700;font-size:15px;">💡 AI Mapping Suggestions</div>
@@ -8789,15 +8589,15 @@ window.aiSuggestMappings = async function() {
         const totalFields = allSuggestions.length;
         const coverage = totalFields > 0 ? Math.round((okCount / totalFields) * 100) : 0;
         const analysisLabel = userHL7 ? `fields found in your HL7 message` : `OOB template fields`;
-        const summaryHtml = `
+        const summaryHtml = HtmlSafe.html`
 <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;">
   <div style="font-weight:700;color:#0369a1;margin-bottom:6px;">📊 ${totalFields} ${analysisLabel} — ${coverage}% covered (${okCount} mapped, ${gapCount} gap${gapCount !== 1 ? 's' : ''})</div>
-  ${okCount > 0 ? `<div style="color:#16a34a;margin-bottom:3px;">✅ Already mapped (${okCount}): ${alreadyMapped.map(s=>`<span style="font-family:monospace;background:#dcfce7;padding:1px 4px;border-radius:3px;margin:1px;">${s.source_field}</span>`).join(' ')}</div>` : ''}
-  ${gapCount > 0 ? `<div style="color:#d97706;">⚠️ Gaps found (${gapCount}): ${suggestions.map(s=>`<span style="font-family:monospace;background:#fef9c3;padding:1px 4px;border-radius:3px;margin:1px;">${s.source_field}</span>`).join(' ')}</div>` : `<div style="color:#16a34a;">✅ All ${analysisLabel} are mapped.</div>`}
+  ${okCount > 0 ? HtmlSafe.html`<div style="color:#16a34a;margin-bottom:3px;">✅ Already mapped (${okCount}): ${alreadyMapped.map(s=>HtmlSafe.html`<span style="font-family:monospace;background:#dcfce7;padding:1px 4px;border-radius:3px;margin:1px;">${s.source_field}</span> `)}</div>` : ''}
+  ${gapCount > 0 ? HtmlSafe.html`<div style="color:#d97706;">⚠️ Gaps found (${gapCount}): ${suggestions.map(s=>HtmlSafe.html`<span style="font-family:monospace;background:#fef9c3;padding:1px 4px;border-radius:3px;margin:1px;">${s.source_field}</span> `)}</div>` : HtmlSafe.html`<div style="color:#16a34a;">✅ All ${analysisLabel} are mapped.</div>`}
 </div>`;
 
         if (suggestions.length === 0) {
-            tableEl.innerHTML = summaryHtml + `<div style="text-align:center;padding:24px;color:#16a34a;font-weight:600;">✅ No gaps — all ${analysisLabel} are already mapped!</div>`;
+            tableEl.innerHTML = HtmlSafe.html`${summaryHtml}<div style="text-align:center;padding:24px;color:#16a34a;font-weight:600;">✅ No gaps — all ${analysisLabel} are already mapped!</div>`;
             statusEl.textContent = `Coverage: ${coverage}% — nothing missing.`;
             footerEl.style.display = 'none';
             return;
@@ -8806,15 +8606,15 @@ window.aiSuggestMappings = async function() {
         statusEl.textContent = `${gapCount} gap(s) found — accept mappings to add them:`;
 
         // Render gap rows
-        tableEl.innerHTML = summaryHtml + suggestions.map((s, i) => {
+        tableEl.innerHTML = HtmlSafe.html`${summaryHtml}${suggestions.map((s, i) => {
             const conf    = Math.round((s.confidence > 0 ? s.confidence : 0.7) * 100);
             const confCol = conf >= 80 ? '#16a34a' : conf >= 50 ? '#d97706' : '#dc2626';
             const txKey   = resolveTransformKey(s);
             const txType  = wizardTransformLabel(txKey);
             const txLabel = txKey
-                ? `<span title="${txKey}">${txType === 'format' ? '📅' : txType === 'lookup' ? '🔄' : txType === 'custom' ? '⚙️' : '⇒'} ${txKey}</span>`
+                ? HtmlSafe.html`<span title="${txKey}">${txType === 'format' ? '📅' : txType === 'lookup' ? '🔄' : txType === 'custom' ? '⚙️' : '⇒'} ${txKey}</span>`
                 : '⇒ Direct';
-            return `
+            return HtmlSafe.html`
 <div class="ai-ms-row" data-idx="${i}" style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:8px;background:#fafafa;">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
     <div style="flex:1;min-width:0;">
@@ -8835,7 +8635,7 @@ window.aiSuggestMappings = async function() {
     </div>
   </div>
 </div>`;
-        }).join('');
+        })}`;
 
         footerEl.style.display = '';
 
@@ -8935,13 +8735,13 @@ window.aiSuggestMappings = async function() {
 
     } catch (err) {
         const isServiceDown = err.message.includes('not found') || err.message.includes('unexpected response') || err.message.includes('Failed to fetch');
-        tableEl.innerHTML = `
+        tableEl.innerHTML = HtmlSafe.html`
             <div style="text-align:center;padding:40px;">
                 <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
                 <div style="color:#dc2626;font-weight:600;margin-bottom:8px;">AI suggestion failed</div>
                 <div style="color:#6b7280;font-size:12px;line-height:1.5;">
                     ${isServiceDown
-                        ? 'The ezCompanion AI service is not running.<br>Start the Go backend with Ollama configured to use AI suggestions.'
+                        ? HtmlSafe.raw('The ezCompanion AI service is not running.<br>Start the Go backend with Ollama configured to use AI suggestions.')
                         : err.message.replace(/</g, '&lt;')}
                 </div>
             </div>`;
@@ -8970,7 +8770,7 @@ window.aiSuggestCDAMappings = async function() {
     panel = document.createElement('div');
     panel.id = 'ai-cda-suggestion-panel';
     panel.style.cssText = 'position:fixed;top:0;right:0;width:500px;height:100vh;background:#fff;border-left:1px solid #e2e8f0;box-shadow:-4px 0 24px rgba(30,58,138,0.12);z-index:10010;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
-    panel.innerHTML = `
+    panel.innerHTML = HtmlSafe.html`
 <div style="background:linear-gradient(135deg,#f472b6,#1e3a8a);padding:14px 18px;display:flex;align-items:center;justify-content:space-between;color:#fff;flex-shrink:0;">
   <div>
     <div style="font-weight:700;font-size:15px;">💡 AI CDA Mapping Suggestions</div>
@@ -9054,19 +8854,19 @@ window.aiSuggestCDAMappings = async function() {
                 (isOOB ? covered : uncovered).push(sec);
             });
 
-            const sectionRow = (s, isOOB) => `
+            const sectionRow = (s, isOOB) => HtmlSafe.html`
                 <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;">
                     <span>${isOOB ? '✅' : '⚠️'}</span>
                     <div style="flex:1;">
                         <div style="font-weight:500;color:#374151;">${s.title || s.code || 'Unknown section'}</div>
-                        ${s.template ? `<div style="font-size:10px;color:#94a3b8;font-family:monospace;">${s.template}</div>` : ''}
+                        ${s.template ? HtmlSafe.html`<div style="font-size:10px;color:#94a3b8;font-family:monospace;">${s.template}</div>` : ''}
                     </div>
                     <span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;${isOOB ? 'background:#dcfce7;color:#16a34a;' : 'background:#fef9c3;color:#b45309;'}">${isOOB ? 'OOB covered' : 'Custom'}</span>
                 </div>`;
 
             // AI suggestions for custom sections (from API response or generated message)
             const suggestions = aiResult?.data?.suggestions || [];
-            const aiSugHtml = suggestions.length > 0 ? `
+            const aiSugHtml = suggestions.length > 0 ? HtmlSafe.html`
                 <div style="margin-top:12px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
                     <div style="background:#f8fafc;padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;color:#374151;">
                         💡 AI Field Mapping Suggestions (${suggestions.length})
@@ -9078,42 +8878,42 @@ window.aiSuggestCDAMappings = async function() {
                             <th style="padding:5px 8px;text-align:left;color:#6b7280;">Transform</th>
                             <th style="padding:5px 8px;text-align:left;color:#6b7280;">Conf.</th>
                         </tr></thead>
-                        <tbody>${suggestions.map(s => `
+                        <tbody>${suggestions.map(s => HtmlSafe.html`
                         <tr style="border-bottom:1px solid #f3f4f6;">
                             <td style="padding:5px 8px;font-family:monospace;color:#374151;">${s.source_field || ''}</td>
                             <td style="padding:5px 8px;font-family:monospace;color:#1e40af;word-break:break-all;">${s.target_field || ''}</td>
                             <td style="padding:5px 8px;"><code style="font-size:10px;background:#f1f5f9;padding:1px 4px;border-radius:3px;">${s.transform_key || 'string_direct'}</code></td>
                             <td style="padding:5px 8px;font-size:10px;color:#6b7280;">${s.confidence ? Math.round(s.confidence * 100) + '%' : '—'}</td>
-                        </tr>`).join('')}</tbody>
+                        </tr>`)}</tbody>
                     </table>
-                </div>` : (uncovered.length > 0 ? `
+                </div>` : (uncovered.length > 0 ? HtmlSafe.html`
                 <div style="margin-top:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px;font-size:12px;color:#92400e;">
                     <strong>⚠️ Custom sections detected.</strong> The ezCompanion AI service (Ollama) needs to be running to generate mapping suggestions for these sections. These sections will be skipped during transformation unless manually mapped in the Pipeline Builder.
                 </div>` : '') ;
 
-            resultsEl.innerHTML = `
+            resultsEl.innerHTML = HtmlSafe.html`
                 <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;">
                     <div style="font-weight:700;color:#0369a1;margin-bottom:4px;">
                         📊 ${xmlSectionIds.length} section${xmlSectionIds.length !== 1 ? 's' : ''} detected — ${covered.length} OOB covered, ${uncovered.length} custom
                     </div>
                     <div style="color:#16a34a;">Coverage: <strong>${xmlSectionIds.length > 0 ? Math.round(covered.length / xmlSectionIds.length * 100) : 100}%</strong> of document sections handled by OOB template</div>
                 </div>
-                ${xmlSectionIds.length === 0 ? '<div style="padding:16px;color:#d97706;font-size:12px;text-align:center;">No &lt;section&gt; elements found. Make sure the pasted content is a valid C-CDA XML document.</div>' : ''}
-                ${covered.length > 0 ? `
+                ${xmlSectionIds.length === 0 ? HtmlSafe.raw('<div style="padding:16px;color:#d97706;font-size:12px;text-align:center;">No &lt;section&gt; elements found. Make sure the pasted content is a valid C-CDA XML document.</div>') : ''}
+                ${covered.length > 0 ? HtmlSafe.html`
                     <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:8px;">
                         <div style="background:#f0fdf4;padding:7px 10px;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:600;color:#166534;">✅ OOB-covered sections (${covered.length})</div>
-                        ${covered.map(s => sectionRow(s, true)).join('')}
+                        ${covered.map(s => sectionRow(s, true))}
                     </div>` : ''}
-                ${uncovered.length > 0 ? `
+                ${uncovered.length > 0 ? HtmlSafe.html`
                     <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:8px;">
                         <div style="background:#fffbeb;padding:7px 10px;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:600;color:#92400e;">⚠️ Custom sections — not in OOB template (${uncovered.length})</div>
-                        ${uncovered.map(s => sectionRow(s, false)).join('')}
+                        ${uncovered.map(s => sectionRow(s, false))}
                     </div>` : ''}
                 ${aiSugHtml}`;
 
             statusEl.textContent = `Analysis complete — ${covered.length} covered, ${uncovered.length} custom.`;
         } catch (err) {
-            resultsEl.innerHTML = `<div style="text-align:center;padding:30px;color:#dc2626;font-size:12px;">Error: ${err.message}</div>`;
+            resultsEl.innerHTML = HtmlSafe.html`<div style="text-align:center;padding:30px;color:#dc2626;font-size:12px;">Error: ${err.message}</div>`;
             statusEl.textContent = 'Analysis failed.';
         } finally {
             analyzeBtn.disabled = false;
@@ -9186,7 +8986,7 @@ window.testFHIRMappings = async function() {
 
     // Show testing indicator
     const testButton = document.getElementById('btn-test-mappings') || document.querySelector('button[onclick="window.testFHIRMappings()"]');
-    const originalText = testButton?.innerHTML || '🧪 Test Transform';
+    const originalNodes = testButton ? Array.from(testButton.childNodes) : [];
     if (testButton) {
         testButton.innerHTML = '🔄 Testing...';
         testButton.disabled = true;
@@ -9196,7 +8996,8 @@ window.testFHIRMappings = async function() {
         // Re-run the transformation to test current mappings
         console.log('🔄 Re-running transformation...');
 
-        const response = await fetch('http://localhost:8080/api/fhir/test-transform-v3', {
+        const response = await fetch('/api/fhir/test-transform-v3', { // via the authenticated proxy (was a direct, cross-origin call to the Go port)
+            credentials: 'include',
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -9243,7 +9044,7 @@ window.testFHIRMappings = async function() {
     } finally {
         // Reset button
         if (testButton) {
-            testButton.innerHTML = originalText;
+            testButton.replaceChildren(...originalNodes);
             testButton.disabled = false;
         }
     }
@@ -9535,7 +9336,7 @@ window.editFHIRMapping = function(hl7Field, fhirPath, value) {
     modal.id = 'edit-mapping-modal';
     modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;';
 
-    modal.innerHTML = `
+    modal.innerHTML = HtmlSafe.html`
         <div style="background: white; border-radius: 12px; padding: 24px; max-width: 700px; width: 90%; max-height: 90vh; overflow-y: auto;">
             <h3 style="margin: 0 0 8px 0; color: #1e3a8a;">✏️ Edit Field Mapping</h3>
             <p style="margin: 0 0 20px 0; color: #6b7280; font-size: 14px;">Select from dropdown or enter custom path. Paths will be validated.</p>
@@ -9545,7 +9346,7 @@ window.editFHIRMapping = function(hl7Field, fhirPath, value) {
                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">📥 HL7 Source Field:</label>
                 <select id="edit-hl7-dropdown" style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 8px;" onchange="document.getElementById('edit-hl7-field').value = this.value; window.validateHL7Path();">
                     <option value="">-- Select HL7 Field --</option>
-                    ${hl7Fields.map(f => `<option value="${f}" ${f === hl7Field ? 'selected' : ''}>${f}</option>`).join('')}
+                    ${hl7Fields.map(f => HtmlSafe.html`<option value="${f}" ${f === hl7Field ? 'selected' : ''}>${f}</option>`)}
                 </select>
                 <input type="text" id="edit-hl7-field" value="${hl7Field}" placeholder="Or enter custom path (e.g., PID.5.1)" style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px;" oninput="window.validateHL7Path()">
                 <div id="hl7-validation" style="margin-top: 4px; font-size: 12px; min-height: 16px;"></div>
@@ -9556,7 +9357,7 @@ window.editFHIRMapping = function(hl7Field, fhirPath, value) {
                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">📤 FHIR Target Path:</label>
                 <select id="edit-fhir-dropdown" style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 8px;" onchange="document.getElementById('edit-fhir-path').value = this.value; window.validateFHIRPath();">
                     <option value="">-- Select FHIR Path --</option>
-                    ${fhirPaths.map(f => `<option value="${f}" ${f === fhirPath ? 'selected' : ''}>${f}</option>`).join('')}
+                    ${fhirPaths.map(f => HtmlSafe.html`<option value="${f}" ${f === fhirPath ? 'selected' : ''}>${f}</option>`)}
                 </select>
                 <input type="text" id="edit-fhir-path" value="${fhirPath}" placeholder="Or enter custom path (e.g., Patient.name[0].family)" style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px;" oninput="window.validateFHIRPath()">
                 <div id="fhir-validation" style="margin-top: 4px; font-size: 12px; min-height: 16px;"></div>
@@ -9649,7 +9450,7 @@ window.addResourceMapping = function(resourceType) {
     const modal = document.createElement('div');
     modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;';
 
-    modal.innerHTML = `
+    modal.innerHTML = HtmlSafe.html`
         <div style="background: white; border-radius: 12px; padding: 24px; max-width: 500px; width: 90%;">
             <h3 style="margin: 0 0 16px 0; color: #1e3a8a;">Add ${resourceType} Mapping</h3>
             <p style="color: #6b7280; margin-bottom: 20px;">This feature would allow adding custom field mappings for the ${resourceType} resource.</p>
@@ -9840,7 +9641,7 @@ window.createCustomMapping = function() {
     const modal = document.createElement('div');
     modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;';
 
-    modal.innerHTML = `
+    modal.innerHTML = HtmlSafe.html`
         <div style="background: white; border-radius: 12px; padding: 24px; max-width: 600px; width: 90%;">
             <h3 style="margin: 0 0 16px 0; color: #1e3a8a;">Create Custom Mapping</h3>
             <p style="color: #6b7280; margin-bottom: 20px;">Define a custom HL7 to FHIR field mapping.</p>
@@ -9907,10 +9708,10 @@ window.exportFHIRConfiguration = function() {
 window._transformBadge = function(transformType, index) {
     const isDirect = !transformType || transformType === 'direct';
     if (isDirect) {
-        return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;background:#f3f4f6;color:#9ca3af;border:1px solid #e5e7eb;white-space:nowrap;" title="No transform — value copied as-is">Direct</span>`;
+        return HtmlSafe.html`<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;background:#f3f4f6;color:#9ca3af;border:1px solid #e5e7eb;white-space:nowrap;" title="No transform — value copied as-is">Direct</span>`;
     }
     const label = window._transformLabel(transformType);
-    return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;white-space:nowrap;cursor:help;max-width:110px;overflow:hidden;text-overflow:ellipsis;" title="Transform applied: ${transformType}">${label}</span>`;
+    return HtmlSafe.html`<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;white-space:nowrap;cursor:help;max-width:110px;overflow:hidden;text-overflow:ellipsis;" title="Transform applied: ${transformType}">${label}</span>`;
 };
 
 // Returns the short human-readable label for a transform key.
@@ -9970,12 +9771,12 @@ window._hl7TransformOptions = function(current) {
 
     const known = TRANSFORMS.find(t => t.value === current);
     let options = TRANSFORMS.map(t =>
-        `<option value="${t.value}"${t.value === current ? ' selected' : ''}>${t.label}</option>`
-    ).join('');
+        HtmlSafe.html`<option value="${t.value}"${t.value === current ? ' selected' : ''}>${t.label}</option>`
+    );
 
     // If the current value isn't in the catalog, add it as a custom entry
     if (!known && current && current !== 'direct') {
-        options = `<option value="${current}" selected>Custom: ${current}</option>` + options;
+        options = [HtmlSafe.html`<option value="${current}" selected>Custom: ${current}</option>`, ...options];
     }
 
     return options;
@@ -10049,8 +9850,8 @@ window.viewRawFHIRJSON = function() {
         const btn = document.createElement('button');
         btn.className = 'fhir-type-tab';
         btn.dataset.rt = rt;
-        const badge = count > 1 ? ` <span style="background:#334155;border-radius:10px;padding:1px 7px;font-size:11px;">${count}</span>` : '';
-        btn.innerHTML = `<span style="font-size:13px;">${rt}</span>${badge}`;
+        const badge = count > 1 ? HtmlSafe.html` <span style="background:#334155;border-radius:10px;padding:1px 7px;font-size:11px;">${count}</span>` : '';
+        btn.innerHTML = HtmlSafe.html`<span style="font-size:13px;">${rt}</span>${badge}`;
         const isFirst = idx === 0;
         btn.style.cssText = `padding:10px 18px;border:none;border-bottom:3px solid ${isFirst?'#3b82f6':'transparent'};background:transparent;color:${isFirst?'#e2e8f0':'#94a3b8'};cursor:pointer;white-space:nowrap;flex-shrink:0;font-weight:${isFirst?'600':'400'};transition:all 0.15s;`;
         btn.addEventListener('click', () => window._fhirSelectType(rt));
@@ -10118,7 +9919,7 @@ window._applyJSONHighlight = function(pre) {
     // Colour braces / brackets / commas
     html = html.replace(/([{}\[\]])/g, '<span style="color:#b0bec5">$1</span>');
     pre.style.color = '#cdd6e0';
-    pre.innerHTML = html;
+    pre.innerHTML = HtmlSafe.raw(html); // escaped above; only fixed colour spans added
 };
 
 // Select a resource-type group — updates type tab highlight and rebuilds the list pane.

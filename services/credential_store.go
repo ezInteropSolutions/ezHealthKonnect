@@ -97,7 +97,7 @@ func NewCredentialStore(keyBase64 string) (*CredentialStore, error) {
 	if keyBase64 == "" {
 		return nil, fmt.Errorf("APP_CREDENTIAL_KEY is not set")
 	}
-	key, err := base64.StdEncoding.DecodeString(keyBase64)
+	key, err := decodeCredentialKey(keyBase64)
 	if err != nil {
 		return nil, fmt.Errorf("APP_CREDENTIAL_KEY is not valid base64: %w", err)
 	}
@@ -105,6 +105,23 @@ func NewCredentialStore(keyBase64 string) (*CredentialStore, error) {
 		return nil, fmt.Errorf("APP_CREDENTIAL_KEY must decode to exactly 32 bytes (got %d) — generate with: openssl rand -base64 32", len(key))
 	}
 	return &CredentialStore{key: key}, nil
+}
+
+// decodeCredentialKey accepts the key in standard base64 (`openssl rand -base64
+// 32`) or URL-safe base64 (the installers' .env-safe format), padded or not —
+// the same tolerance Node's Buffer.from(key, 'base64') has on the JS side.
+func decodeCredentialKey(keyBase64 string) ([]byte, error) {
+	var firstErr error
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		key, err := enc.DecodeString(strings.TrimSpace(keyBase64))
+		if err == nil {
+			return key, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return nil, firstErr
 }
 
 // NewNoOpCredentialStore returns a passthrough store for development / tests.

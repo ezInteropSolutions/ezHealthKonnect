@@ -51,7 +51,7 @@ class LayerContainer {
         // Group header
         const header = document.createElement('div');
         header.className = 'execution-group-header';
-        header.innerHTML = `
+        header.innerHTML = HtmlSafe.html`
             <i class="fas ${group.groupType === 'parallel' ? 'fa-stream' : 'fa-arrow-right'}"></i>
             ${group.groupType === 'parallel' ? 'Parallel Execution' : 'Sequential Execution'}
             <button class="group-delete-btn" style="margin-left: auto; background: none; border: none; cursor: pointer; color: #ef4444;">

@@ -1160,7 +1160,7 @@ class FlowchartCanvas {
             width: 90%;
         `;
 
-        dialog.innerHTML = `
+        dialog.innerHTML = HtmlSafe.html`
             <h3 style="margin: 0 0 16px 0; color: #1e293b; font-size: 18px; font-weight: 600;">
                 <i class="fas fa-trash-alt" style="color: #ef4444; margin-right: 8px;"></i>
                 Delete Step
@@ -1715,7 +1715,7 @@ class FlowchartCanvas {
                 z-index: 100000;
             `;
 
-            overlay.innerHTML = `
+            overlay.innerHTML = HtmlSafe.html`
                 <div style="background: white; border-radius: 12px; max-width: 400px; width: 90%; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);">
                     <div style="padding: 16px 20px; background: ${color.bg}; display: flex; align-items: center; gap: 10px;">
                         <span style="font-size: 20px;">${type === 'danger' ? '⚠️' : '❓'}</span>

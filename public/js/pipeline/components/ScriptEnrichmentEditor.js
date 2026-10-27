@@ -51,7 +51,7 @@ class ScriptEnrichmentEditor {
             return;
         }
 
-        this.container.innerHTML = `
+        this.container.innerHTML = HtmlSafe.html`
             <div class="script-enrichment-editor">
                 <!-- Main Content: Side-by-side layout -->
                 <div class="script-editor-body">
@@ -106,7 +106,7 @@ class ScriptEnrichmentEditor {
                                 class="code-editor"
                                 placeholder="// Write your JavaScript code here&#10;// Available: $vars - all variables from previous steps&#10;// Available: input - message data&#10;// Helper functions: getHL7Field(), calculateAge(), etc.&#10;&#10;var riskWeights = $vars['field_mapping.risk_weights'];&#10;&#10;return {&#10;    risk_score: 0,&#10;    risk_level: 'low'&#10;};"
                                 spellcheck="false"
-                            >${this.escapeHtml(this.script)}</textarea>
+                            >${this.script}</textarea>
                             <div class="line-numbers" id="lineNumbers"></div>
                         </div>
 
@@ -195,7 +195,7 @@ class ScriptEnrichmentEditor {
 
         // Show helpful message if no pipeline ID
         if (!this.options.pipelineId) {
-            panelContainer.innerHTML = `
+            panelContainer.innerHTML = HtmlSafe.html`
                 <div class="empty-state">
                     <div class="empty-icon">📋</div>
                     <p>Variables will appear here after you add steps to your pipeline</p>
@@ -245,7 +245,7 @@ class ScriptEnrichmentEditor {
             }
         } catch (error) {
             console.error('Failed to initialize variable panel:', error);
-            panelContainer.innerHTML = `
+            panelContainer.innerHTML = HtmlSafe.html`
                 <div class="error-state">
                     <div class="error-icon">⚠️</div>
                     <p>Failed to load variables</p>
@@ -403,9 +403,9 @@ class ScriptEnrichmentEditor {
         if (!editor || !lineNumbers) return;
 
         const lines = editor.value.split('\n').length;
-        lineNumbers.innerHTML = Array.from({ length: lines }, (_, i) =>
-            `<div class="line-number">${i + 1}</div>`
-        ).join('');
+        lineNumbers.innerHTML = HtmlSafe.html`${Array.from({ length: lines }, (_, i) =>
+            HtmlSafe.html`<div class="line-number">${i + 1}</div>`
+        )}`;
     }
 
     insertAtCursor(element, text) {
@@ -447,7 +447,7 @@ class ScriptEnrichmentEditor {
             } else {
                 statusEl.innerHTML = '<i class="fas fa-exclamation-circle"></i> Invalid';
                 statusEl.className = 'status-indicator status-error';
-                resultsEl.innerHTML = `
+                resultsEl.innerHTML = HtmlSafe.html`
                     <div class="validation-error">
                         <i class="fas fa-times-circle"></i>
                         <strong>Syntax Error:</strong> ${result.error || 'Unknown error'}
@@ -458,7 +458,7 @@ class ScriptEnrichmentEditor {
         } catch (error) {
             statusEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Error';
             statusEl.className = 'status-indicator status-error';
-            resultsEl.innerHTML = `
+            resultsEl.innerHTML = HtmlSafe.html`
                 <div class="validation-error">
                     <i class="fas fa-times-circle"></i>
                     <strong>Validation failed:</strong> ${error.message}
@@ -542,20 +542,20 @@ class ScriptEnrichmentEditor {
             z-index: 100000;
         `;
 
-        overlay.innerHTML = `
+        overlay.innerHTML = HtmlSafe.html`
             <div style="background: white; border-radius: 12px; max-width: 500px; width: 90%; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);">
                 <div style="padding: 16px 20px; background: #dbeafe; display: flex; align-items: center; justify-content: space-between;">
                     <span style="font-weight: 600; color: #1e293b;">📚 Available Helper Functions</span>
                     <button class="close-btn" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #64748b;">&times;</button>
                 </div>
                 <div style="padding: 16px 20px; max-height: 400px; overflow-y: auto;">
-                    ${helpers.map(h => `
+                    ${helpers.map(h => HtmlSafe.html`
                         <div style="padding: 12px; margin-bottom: 12px; background: #f8fafc; border-radius: 8px; border-left: 3px solid #3b82f6;">
                             <div style="font-weight: 600; color: #1e293b; margin-bottom: 6px;">${h.title}</div>
                             <code style="display: block; font-size: 13px; color: #3b82f6; background: #e0f2fe; padding: 8px 10px; border-radius: 4px; margin-bottom: 6px;">${h.code}</code>
                             <div style="font-size: 13px; color: #64748b;">${h.desc}</div>
                         </div>
-                    `).join('')}
+                    `)}
                 </div>
                 <div style="padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; text-align: right;">
                     <button class="got-it-btn" style="padding: 8px 16px; border: none; background: #3b82f6; color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">Got it</button>

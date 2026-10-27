@@ -237,7 +237,7 @@
                     console.log('Fallback Step 4 handler initializing...');
                     const step4Element = document.getElementById('step4');
                     if (step4Element) {
-                        step4Element.innerHTML = `
+                        step4Element.innerHTML = HtmlSafe.html`
                             <div class="step-header">
                                 <div class="step-progress">STEP 4 OF 5</div>
                                 <h3 class="step-title">HL7 → FHIR Transformation</h3>
