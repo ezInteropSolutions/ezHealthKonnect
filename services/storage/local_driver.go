@@ -35,7 +35,16 @@ var ErrInvalidObjectPath = errors.New("storage/local: invalid object path")
 
 // LocalDriver implements ObjectStorageDriver using local disk.
 type LocalDriver struct {
-	baseDir string // absolute, e.g. "/app/data/storage"
+	baseDir string        // absolute, e.g. "/app/data/storage"
+	names   fileNameCodec // key segment <-> file name for this OS; nil means as-is (see codec)
+}
+
+// codec returns the file-name codec, defaulting to as-is so a LocalDriver built by hand still works.
+func (d *LocalDriver) codec() fileNameCodec {
+	if d.names == nil {
+		return identityFileNames{}
+	}
+	return d.names
 }
 
 // NewLocalDriver creates a LocalDriver rooted at baseDir.
@@ -48,7 +57,7 @@ func NewLocalDriver(baseDir string) (*LocalDriver, error) {
 		return nil, fmt.Errorf("storage/local: create base dir %q: %w", abs, err)
 	}
 	log.Printf("✅ [ObjectStorage] Local driver initialised (baseDir=%s)", abs)
-	return &LocalDriver{baseDir: abs}, nil
+	return &LocalDriver{baseDir: abs, names: hostFileNames()}, nil
 }
 
 // DriverName returns "local".
@@ -80,7 +89,12 @@ func (d *LocalDriver) objectPath(bucket, key string) (string, error) {
 			return "", fmt.Errorf("%w: key %q", ErrInvalidObjectPath, key)
 		}
 	}
-	path := filepath.Join(dir, filepath.FromSlash(key))
+	// Each key segment becomes a file name this OS accepts (a colon in a message ID is invalid on Windows).
+	segments := strings.Split(key, "/")
+	for i, seg := range segments {
+		segments[i] = d.codec().Encode(seg)
+	}
+	path := filepath.Join(append([]string{dir}, segments...)...)
 	rel, err := filepath.Rel(dir, path)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("%w: key %q", ErrInvalidObjectPath, key)
@@ -222,7 +236,7 @@ func (d *LocalDriver) ListObjects(_ context.Context, bucket, prefix string) ([]O
 			return nil
 		}
 		rel, _ := filepath.Rel(bucketDir, path)
-		obj := ObjectInfo{Key: filepath.ToSlash(rel)}
+		obj := ObjectInfo{Key: d.decodeKey(filepath.ToSlash(rel))}
 		if info, _ := de.Info(); info != nil {
 			obj.Size = info.Size()
 			obj.LastModified = info.ModTime()
@@ -234,6 +248,15 @@ func (d *LocalDriver) ListObjects(_ context.Context, bucket, prefix string) ([]O
 		return nil, fmt.Errorf("storage/local: list %q/%q: %w", bucket, prefix, err)
 	}
 	return result, nil
+}
+
+// decodeKey turns a path relative to the bucket (slash-separated file names) back into the object key.
+func (d *LocalDriver) decodeKey(rel string) string {
+	segments := strings.Split(rel, "/")
+	for i, seg := range segments {
+		segments[i] = d.codec().Decode(seg)
+	}
+	return strings.Join(segments, "/")
 }
 
 // AppendObject appends data to an existing file (or creates it).
