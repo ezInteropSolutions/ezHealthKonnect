@@ -111,6 +111,23 @@ Until this is configured, partner calls are refused (`401 endpoint authenticatio
 | viewer | read interfaces, messages and monitoring; cannot change anything |
 | user | no access until given an operator or viewer role (including ezCompanion) |
 
+### What can each role see? (Settings → Access Policy)
+
+The table above says what a role can *change*. What a role can *see* is a setting an administrator edits under **Settings → Access Policy**, with no restart and no code change. For each of operator, viewer and user there are two choices:
+
+- **Interfaces they can see**: all interfaces, or only the ones they created themselves.
+- **Message content**: full content, or **details only**, which shows time, type, status and errors but not what is inside the message (raw, transformed and parsed content, the message journey, the mapping log).
+
+Defaults: operators see all interfaces with full content; viewers see all interfaces with details only; users see only their own interfaces. Administrators always see everything and cannot be restricted, so a wrong setting can never lock an administrator out. Changes apply within a few seconds and are recorded in the audit log (`ACCESS_POLICY_CHANGED`). A person whose role is set to details only sees a short explanation in the message screens instead of empty content, and a call for content from the API is refused with `403` and the code `MESSAGE_CONTENT_RESTRICTED`.
+
+### How do I change my own password?
+
+Click **Change password** at the bottom of the left menu (above Logout). Enter your current password and the new one twice. The new password must follow the minimum length set under Settings → Security and must differ from the current one. Each change is recorded in the audit log (`PASSWORD_CHANGED`). An administrator can also force a reset at next login from the Users page.
+
+### How do I manage code translations?
+
+A code translation turns a code from a sending system into the code the receiving side expects (for example a lab's own code for glucose into LOINC `2345-7`). Open **Code Translations** under Tools. A translation is either **shared** (applies to every interface) or belongs to **one interface**; an interface's own translation wins over a shared one for that interface. Operators and administrators can add, edit and delete translations, import many from a CSV file (columns `sourceSystem, sourceCode, targetSystem, targetCode, targetDisplay`; existing rows are updated, bad rows are reported by row number) and export the current view to CSV. Viewers can look but not change. Every change is audited.
+
 ezCompanion is available to viewers, operators and admins. It answers read-only questions (interface health, monitoring, DLQ statistics, analytics) directly; any action it proposes (activate, deactivate, retry) waits for an admin's approval before it runs.
 
 ## How are credentials and secrets protected?
