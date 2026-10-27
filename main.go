@@ -953,6 +953,12 @@ func main() {
 				}
 				cdaSchemaCtrl := controllers.NewCDASchemaController(db, cdaLoader, cdaMapper, cdaReqVocab)
 				cdaSchemaCtrl.RegisterRoutes(api.Group("/cda"))
+
+				// Code Translations management (/api/cda/code-translations) — the page that edits
+				// cda_code_translations; reads and writes the same table the terminology service looks up.
+				controllers.NewCDACodeTranslationsController(
+					cdaterminology.NewTranslationRepository(db), appAuditLogger,
+				).RegisterRoutes(api.Group("/cda"))
 				log.Printf("✅ CDA Schema Controller registered (/api/cda/schema, /api/cda/mappings, /api/cda/templates)")
 
 				// Sprint C — conformance validation (POST /api/cda/validate)

@@ -158,6 +158,7 @@ func (v *CodeValidator) validateNCIT(sys, code string) ValidationResult {
 type CodeTranslation struct {
 	ID            string    `json:"id"`
 	InterfaceID   *string   `json:"interfaceId,omitempty"` // nil = global
+	InterfaceName string    `json:"interfaceName,omitempty"` // filled by Query/Get only (display)
 	SourceSystem  string    `json:"sourceSystem"`
 	SourceCode    string    `json:"sourceCode"`
 	TargetSystem  string    `json:"targetSystem"`
@@ -274,18 +275,28 @@ func (r *TranslationRepository) Upsert(ctx context.Context, t CodeTranslation) e
 	if r.db == nil {
 		return fmt.Errorf("cda_terminology: no DB connection")
 	}
-	var ifaceID interface{}
+	// A shared (global) row has interface_id NULL, which the table's UNIQUE constraint cannot see
+	// (NULLs are distinct), so it conflicts on the partial unique index from V283 instead.
+	var err error
 	if t.InterfaceID != nil && *t.InterfaceID != "" {
-		ifaceID = *t.InterfaceID
+		_, err = r.db.ExecContext(ctx, `
+			INSERT INTO cda_code_translations
+			    (interface_id, source_system, source_code, target_system, target_code, target_display)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (interface_id, source_system, source_code, target_system)
+			DO UPDATE SET target_code = EXCLUDED.target_code,
+			              target_display = EXCLUDED.target_display
+		`, *t.InterfaceID, t.SourceSystem, t.SourceCode, t.TargetSystem, t.TargetCode, t.TargetDisplay)
+	} else {
+		_, err = r.db.ExecContext(ctx, `
+			INSERT INTO cda_code_translations
+			    (interface_id, source_system, source_code, target_system, target_code, target_display)
+			VALUES (NULL, $1, $2, $3, $4, $5)
+			ON CONFLICT (source_system, source_code, target_system) WHERE interface_id IS NULL
+			DO UPDATE SET target_code = EXCLUDED.target_code,
+			              target_display = EXCLUDED.target_display
+		`, t.SourceSystem, t.SourceCode, t.TargetSystem, t.TargetCode, t.TargetDisplay)
 	}
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO cda_code_translations
-		    (interface_id, source_system, source_code, target_system, target_code, target_display)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (interface_id, source_system, source_code, target_system)
-		DO UPDATE SET target_code = EXCLUDED.target_code,
-		              target_display = EXCLUDED.target_display
-	`, ifaceID, t.SourceSystem, t.SourceCode, t.TargetSystem, t.TargetCode, t.TargetDisplay)
 	if err != nil {
 		return fmt.Errorf("cda_terminology: upsert translation: %w", err)
 	}
