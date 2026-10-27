@@ -80,10 +80,14 @@ test.describe.serial('Connect a Device wizard ("ASTM over Serial Port" template)
         const portSelect = page.locator('select[data-tcf-field="port_name"][data-tcf-section="source"]');
         await expect(portSelect, 'a real COM Port select should render').toBeVisible({ timeout: 3000 });
 
-        // No real/virtual COM port exists in this test environment — the
-        // honest, expected state is "no ports detected", not a crash or a
-        // missing control.
-        await expect(portSelect.locator('option', { hasText: /No ports detected|— Select —/ })).toHaveCount(2);
+        // The list is fetched live from the host the app runs on: a machine with no serial ports shows the
+        // "— Select —" placeholder plus "No ports detected"; one that has ports (a CI runner has some) shows the
+        // placeholder plus the real ports. Either is correct; a crash or a missing control is not.
+        await expect(portSelect.locator('option', { hasText: /— Select —/ })).toHaveCount(1);
+        // Without a "No ports detected" entry, the host has real ports, so there is an option beyond the placeholder.
+        if ((await portSelect.locator('option', { hasText: /No ports detected/ }).count()) === 0) {
+            expect(await portSelect.locator('option').count(), 'ports were detected, so there is an option per port').toBeGreaterThan(1);
+        }
 
         const baudSelect = page.locator('select[data-tcf-field="baud_rate"][data-tcf-section="source"]');
         await expect(baudSelect, 'a Baud Rate select with static options should render').toBeVisible({ timeout: 3000 });

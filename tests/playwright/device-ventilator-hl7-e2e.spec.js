@@ -139,7 +139,9 @@ test.describe.serial('ICU ventilator over LAN (IHE PCD-01 ORU^R01 via HL7 over T
     test('wizard creates a live listener; a sustained PCD-01 stream on one connection is ACKed AA per control ID and delivered downstream', async ({ page, request }) => {
         ifaceName = `PW Ventilator PCD01 ${Date.now()}`;
         await cleanupInterfacesByName(request, ifaceName);
-        const recvUrl = `http://host.docker.internal:${receiver.address().port}/results`;
+        // Where the APP can reach this test's receiver: from inside the dev Docker container that is the host's
+        // special name; an installed app runs on the host itself (the installed-app CI jobs set RECEIVER_HOST).
+        const recvUrl = `http://${process.env.RECEIVER_HOST || 'host.docker.internal'}:${receiver.address().port}/results`;
 
         await openDeviceTemplate(page);
         await page.fill('#tcf_name', ifaceName);

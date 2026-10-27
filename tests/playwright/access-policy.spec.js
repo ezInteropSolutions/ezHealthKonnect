@@ -11,7 +11,7 @@ const DEFAULTS = {
     user:     { interfaceScope: 'own', messageContent: 'full' },
 };
 
-test.describe.configure({ mode: 'serial' }); // the tests change one shared setting
+test.describe.configure({ mode: 'serial', timeout: 120_000 }); // the tests change one shared setting; logins may wait out the rate limit
 
 test.describe('Access policy', () => {
     let operator, viewer, operatorApi, viewerApi, messageId;

@@ -228,7 +228,7 @@ test.describe('COV-S1 Setup', () => {
         for (const id of state.ids) expect(id).toBeTruthy();
 
         await Promise.all(state.ids.map(id =>
-            request.post(`http://localhost:3000/api/processing/interfaces/${id}/activate`)
+            request.post(`/api/processing/interfaces/${id}/activate`)
                    .catch(e => console.warn(`  Activation for ${id}: ${e.message}`))
         ));
 

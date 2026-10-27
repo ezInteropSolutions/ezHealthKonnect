@@ -138,7 +138,20 @@ test.describe.serial('Wizard-created interface: send, store, reprocess', () => {
             expect(row.message_type).toMatch(/ADT/);
             expect(row.message_size).toBe(Buffer.byteLength(HL7, 'utf8'));
             expect(row.raw_content_uri, 'raw content must be stored in object storage').toBeTruthy();
-            expect(['received', 'processing', 'processed', 'completed', 'delivered']).toContain(row.status);
+            const okStatuses = ['received', 'processing', 'processed', 'completed', 'delivered'];
+            let why = `status=${row.status} error_count=${row.error_count} last_error=${row.last_error_message}`;
+            if (!okStatuses.includes(row.status)) {
+                // Say which step failed: a bare "failed" is not enough to act on, least of all from a CI log.
+                try {
+                    const steps = await db.query(
+                        `SELECT s.step_name, s.step_type, s.status, s.error_message
+                           FROM step_executions s JOIN transformation_executions e ON e.id = s.execution_id
+                          WHERE e.message_id = $1 ORDER BY s.started_at`, [row.message_id]);
+                    const exec = await db.query(`SELECT status, error_message FROM transformation_executions WHERE message_id = $1`, [row.message_id]);
+                    why += ` | pipeline=${JSON.stringify(exec.rows)} | steps=${JSON.stringify(steps.rows)}`;
+                } catch (e) { why += ` | step lookup failed: ${e.message}`; }
+            }
+            expect(okStatuses, why).toContain(row.status);
             // A store-only (Passthrough) interface has nothing to deliver, so nothing may be recorded as an error.
             // This is the assertion that caught the wizard saving its outbound step as connector type 'sink'.
             expect(row.error_count).toBe(0);

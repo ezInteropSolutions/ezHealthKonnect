@@ -245,14 +245,15 @@ jobs:
       - name: Run the Playwright suite against the installed app
         env:
           BASE_URL: http://127.0.0.1:3000
+          RECEIVER_HOST: 127.0.0.1
           # service-restart-recovery.spec.js restarts the real services.
           RESTART_COMMAND: sudo systemctl restart ezhealthkonnect-api ezhealthkonnect
         run: npx playwright test --project=chromium
       - name: Application logs on failure
         if: failure()
         run: |
-          sudo journalctl -u ezhealthkonnect-api -u ezhealthkonnect --no-pager -n 200 || true
-          sudo tail -n 200 "$APP_DIR/logs/application/app.log" || true
+          sudo journalctl -u ezhealthkonnect-api -u ezhealthkonnect --no-pager -n 4000 || true
+          sudo tail -n 4000 "$APP_DIR/logs/application/app.log" || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -319,10 +320,27 @@ jobs:
               "ADMIN_PASSWORD=$pw",
               "DATABASE_URL=postgres://$(EnvGet 'DB_USER'):$(EnvGet 'DB_PASSWORD')@127.0.0.1:$(EnvGet 'DB_PORT')/$(EnvGet 'DB_NAME')?sslmode=disable"
           ) | Add-Content -Path $env:GITHUB_ENV
+      - name: Install the schema packs (what a customer does from Settings -> Schemas)
+        shell: pwsh
+        # Without them no HL7/FHIR message can be parsed, so every message the tests send ends up failed.
+        run: |
+          $catalog = Get-Content schemas/catalog.json -Raw | ConvertFrom-Json
+          foreach ($id in 'fhir-r4-base', 'fhir-r4-us-core', 'hl7-v2-25') {
+              $url = ($catalog | Where-Object { $_.id -eq $id }).download_url
+              Invoke-WebRequest $url -OutFile (Join-Path $env:RUNNER_TEMP "$id.zip")
+              Expand-Archive -Path (Join-Path $env:RUNNER_TEMP "$id.zip") -DestinationPath (Join-Path $env:APP_DIR "schemas") -Force
+          }
+          Restart-Service ezhealthkonnect
+          for ($i = 0; $i -lt 60; $i++) {
+              try { if ((Invoke-RestMethod 'http://127.0.0.1:3000/api/system/health' -TimeoutSec 10).database.status -eq 'connected') { exit 0 } } catch {}
+              Start-Sleep -Seconds 2
+          }
+          throw 'app did not come back after installing the schema packs'
       - name: Run the smoke set against the installed app
         shell: pwsh
         env:
           BASE_URL: http://127.0.0.1:3000
+          RECEIVER_HOST: 127.0.0.1
           RESTART_COMMAND: powershell -NoProfile -Command "Restart-Service ezhealthkonnect"
         run: >
           npx playwright test --project=chromium
@@ -338,7 +356,7 @@ jobs:
         run: |
           Get-Service ezhealthkonnect | Format-List | Out-String | Write-Host
           Get-ChildItem "$env:APP_DIR\logs" -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
-              Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 60 -ErrorAction SilentlyContinue | Write-Host }
+              Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 1500 -ErrorAction SilentlyContinue | Write-Host }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

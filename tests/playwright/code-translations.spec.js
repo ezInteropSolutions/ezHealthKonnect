@@ -8,6 +8,9 @@ const API = `${BASE_URL}/api/cda/code-translations`;
 const ANON = { cookies: [], origins: [] };
 
 test.describe('Code Translations', () => {
+    // Logins wait out the server's rate limit (10/min/IP) when a full run exceeds it, which can take a minute.
+    test.describe.configure({ timeout: 120_000 });
+
     // Everything this run creates uses its own source system, so cleanup and searches never touch other data.
     const system = `urn:pw:lab-${Date.now()}`;
     let viewer;

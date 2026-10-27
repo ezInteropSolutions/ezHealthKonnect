@@ -60,7 +60,7 @@ test.describe('MVP-S0 Infrastructure Health', () => {
     });
 
     test('MVP-S0-002 Node.js frontend is reachable', async ({ request }) => {
-        const res = await request.get('http://localhost:3000/login.html');
+        const res = await request.get('/login.html');
         expect(res.ok()).toBeTruthy();
     });
 
@@ -123,7 +123,7 @@ test.describe('MVP-S1 Interface Creation', () => {
         // (belt-and-suspenders in case auto_start didn't fire in the container)
         // Must go through the Node.js proxy on port 3000 so it gets X-Internal-Proxy-Secret
         await Promise.all(state.ids.map(id =>
-            request.post(`http://localhost:3000/api/processing/interfaces/${id}/activate`)
+            request.post(`/api/processing/interfaces/${id}/activate`)
                    .catch(e => console.warn(`  Activation for ${id}: ${e.message}`))
         ));
 
@@ -402,7 +402,7 @@ test.describe('MVP-S8 Monitoring', () => {
         // /api/monitoring is registered before session middleware in app.js (needs Bearer).
         // /api/analytics/monitoring/summary is registered AFTER session middleware — uses
         // requireAuth which accepts the storageState session cookie from the request fixture.
-        const res = await request.get('http://localhost:3000/api/analytics/monitoring/summary');
+        const res = await request.get('/api/analytics/monitoring/summary');
         expect(res.ok()).toBeTruthy();
     });
 });

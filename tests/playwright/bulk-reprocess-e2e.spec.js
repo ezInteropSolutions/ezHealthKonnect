@@ -134,7 +134,7 @@ test.afterAll(async () => {
 // in — a real user would hit the exact same "0 messages" until they cleared filters.
 async function gotoAndWidenDateFilter(page) {
     test.skip(!DB_URL, 'No DATABASE_URL — skipping bulk-reprocess fixture-dependent test');
-    await page.goto(`http://localhost:3000/messages.html?interfaceId=${TEST_INTERFACE_ID}`);
+    await page.goto(`/messages.html?interfaceId=${TEST_INTERFACE_ID}`);
     await page.waitForSelector('#filterDateFrom');
     await page.fill('#filterDateFrom', '2020-01-01T00:00');
     await page.click('button:has(i.fa-filter)');

@@ -7,6 +7,9 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 const NEW_PASSWORD = 'Changed-Pw#2026-x';
 
 test.describe('Change my password', () => {
+    // Logins wait out the server's rate limit (10/min/IP) when a full run exceeds it, which can take a minute.
+    test.describe.configure({ timeout: 120_000 });
+
     let user;
 
     test.beforeAll(async ({ seed }) => {

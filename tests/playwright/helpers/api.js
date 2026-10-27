@@ -10,7 +10,7 @@
  */
 
 class ApiHelper {
-    constructor(request, baseURL = 'http://localhost:3000') {
+    constructor(request, baseURL = process.env.BASE_URL || 'http://localhost:3000') {
         this.request = request;
         this.base = baseURL;
     }
