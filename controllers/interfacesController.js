@@ -1,6 +1,7 @@
 // controllers/interfacesController.js - UPDATED WITH CONNECTIVITY SUPPORT
 console.log('🔧 Loading Enhanced Interfaces Controller with Format + Connectivity Support...');
 const { GO_BACKEND_URL: _GO_URL, internalHeaders: _goHeaders, goClient: _goClient } = require('../services/goBackendClient');
+const accessPolicy = require('../services/AccessPolicyService');
 const auditService = require('../services/auditService');
 // Reuses pipelineController.js's own credential-key heuristic and encryption
 // (mirrors Go's isSensitiveKey()/EncryptConfigFields) rather than a second,
@@ -181,6 +182,7 @@ class InterfacesController {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             
             console.log(`🔍 Fetching interfaces for user: ${userEmail} (ID: ${userId})`);
@@ -245,7 +247,7 @@ class InterfacesController {
                      ORDER BY ts.sequence LIMIT 1) AS outbound_step_id
                 FROM interfaces i
                 LEFT JOIN users u ON i.created_by = u.id
-                WHERE i.user_id = :userId AND i.is_active = true
+                WHERE (i.user_id = :userId OR ${allInterfaces}) AND i.is_active = true
                 ORDER BY i.updated_at DESC
             `, {
                 replacements: { userId },
@@ -371,6 +373,7 @@ class InterfacesController {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             
             const {
@@ -606,6 +609,7 @@ class InterfacesController {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
@@ -652,7 +656,7 @@ class InterfacesController {
                      ORDER BY ts.sequence LIMIT 1) AS outbound_step_id
                 FROM interfaces i
                 LEFT JOIN users u ON i.created_by = u.id
-                WHERE i.id = :interfaceId AND i.user_id = :userId AND i.is_active = true
+                WHERE i.id = :interfaceId AND (i.user_id = :userId OR ${allInterfaces}) AND i.is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -781,6 +785,7 @@ class InterfacesController {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
@@ -789,7 +794,7 @@ class InterfacesController {
             // Get current interface
             const interfaceData = await this.database.sequelize.query(`
                 SELECT id, name, status FROM interfaces 
-                WHERE id = :interfaceId AND user_id = :userId AND is_active = true
+                WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces}) AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -849,6 +854,7 @@ class InterfacesController {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
@@ -857,7 +863,7 @@ class InterfacesController {
             // Get current interface
             const interfaceData = await this.database.sequelize.query(`
                 SELECT id, name, status FROM interfaces 
-                WHERE id = :interfaceId AND user_id = :userId AND is_active = true
+                WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces}) AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -917,6 +923,7 @@ class InterfacesController {
             await this.ensureDatabase();
             
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
@@ -925,7 +932,7 @@ class InterfacesController {
             // Get current interface
             const interfaceData = await this.database.sequelize.query(`
                 SELECT id, name, status FROM interfaces 
-                WHERE id = :interfaceId AND user_id = :userId AND is_active = true
+                WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces}) AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -992,6 +999,7 @@ class InterfacesController {
             await this.ensureDatabase();
 
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
@@ -1016,7 +1024,7 @@ class InterfacesController {
             // Get current interface
             const interfaceData = await this.database.sequelize.query(`
                 SELECT id, name, status FROM interfaces
-                WHERE id = :interfaceId AND user_id = :userId AND is_active = true
+                WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces}) AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT
@@ -1278,6 +1286,7 @@ class InterfacesController {
             await this.ensureDatabase();
 
             const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
             const userEmail = req.session.user.email;
             const interfaceId = req.params.interfaceId;
 
@@ -1358,7 +1367,7 @@ class InterfacesController {
             // Verify interface exists and belongs to user
             const existingInterface = await this.database.sequelize.query(`
                 SELECT id, name, status, source_config, target_config FROM interfaces
-                WHERE id = :interfaceId AND user_id = :userId AND is_active = true
+                WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces}) AND is_active = true
             `, {
                 replacements: { interfaceId, userId },
                 type: this.database.sequelize.QueryTypes.SELECT

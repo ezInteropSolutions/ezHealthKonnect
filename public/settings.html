@@ -421,7 +421,7 @@
         .doc-callout-body .doc-tip i { font-size: 12px; margin-top: 1px; flex-shrink: 0; color: #2563eb; }
     </style>
 </head>
-<body>
+<body data-requires-page="admin">
 <div class="dashboard-container">
     <!-- Sidebar Navigation -->
     <nav class="sidebar" id="sidebar">
@@ -516,6 +516,10 @@
                 <div class="settings-nav-item" data-section="security" onclick="switchSection('security')">
                     <span class="nav-icon"><i class="fas fa-shield-halved"></i></span>
                     Security
+                </div>
+                <div class="settings-nav-item" data-section="access" onclick="switchSection('access')">
+                    <span class="nav-icon"><i class="fas fa-user-lock"></i></span>
+                    Access Policy
                 </div>
                 <div class="settings-nav-item" data-section="atna" onclick="switchSection('atna')">
                     <span class="nav-icon"><i class="fas fa-file-shield"></i></span>
@@ -894,6 +898,48 @@
                     <div class="settings-actions">
                         <button class="btn btn-primary" id="atnaSaveBtn" onclick="saveATNA()"><i class="fas fa-floppy-disk"></i> Save Settings</button>
                         <span class="status-msg" id="atnaStatus"></span>
+                    </div>
+                </div>
+
+                <div class="settings-section" id="section-access">
+                    <div class="section-title-row">
+                        <i class="fas fa-user-lock" style="font-size:20px;color:#1e3a8a"></i>
+                        <h2>Access Policy</h2>
+                    </div>
+                    <p class="section-subtitle">Choose what each role can <strong>see</strong>. What a role can <em>change</em> is fixed by the role itself (viewers are read-only; operators can run integrations; only administrators manage users and settings). Changes apply within a few seconds, no restart needed.</p>
+
+                    <div class="settings-card">
+                        <table style="width:100%;border-collapse:collapse">
+                            <thead><tr style="text-align:left;font-size:12px;color:#6b7280">
+                                <th style="padding:6px 8px">Role</th><th style="padding:6px 8px">Interfaces they can see</th><th style="padding:6px 8px">Message content</th>
+                            </tr></thead>
+                            <tbody>
+                                <tr style="background:#f9fafb">
+                                    <td style="padding:10px 8px"><strong>Administrator</strong><div class="hint">Always sees everything. This cannot be restricted, so a mistake here can never lock you out.</div></td>
+                                    <td style="padding:10px 8px;color:#6b7280">All interfaces</td><td style="padding:10px 8px;color:#6b7280">Full message content</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:10px 8px;vertical-align:top"><strong>Operator</strong><div class="hint">Runs integrations day to day.</div></td>
+                                    <td style="padding:10px 8px"><select id="ap-operator-scope" class="form-control" aria-label="Operator: which interfaces"><option value="all">All interfaces</option><option value="own">Only interfaces they created</option></select></td>
+                                    <td style="padding:10px 8px"><select id="ap-operator-content" class="form-control" aria-label="Operator: message content"><option value="full">Full message content</option><option value="metadata">Details only (no content)</option></select></td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:10px 8px;vertical-align:top"><strong>Viewer</strong><div class="hint">Read-only. &ldquo;Details only&rdquo; shows time, type, status and errors, but not patient content.</div></td>
+                                    <td style="padding:10px 8px"><select id="ap-viewer-scope" class="form-control" aria-label="Viewer: which interfaces"><option value="all">All interfaces</option><option value="own">Only interfaces they created</option></select></td>
+                                    <td style="padding:10px 8px"><select id="ap-viewer-content" class="form-control" aria-label="Viewer: message content"><option value="full">Full message content</option><option value="metadata">Details only (no content)</option></select></td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:10px 8px;vertical-align:top"><strong>User</strong><div class="hint">Basic accounts (HL7 Reader).</div></td>
+                                    <td style="padding:10px 8px"><select id="ap-user-scope" class="form-control" aria-label="User: which interfaces"><option value="all">All interfaces</option><option value="own">Only interfaces they created</option></select></td>
+                                    <td style="padding:10px 8px"><select id="ap-user-content" class="form-control" aria-label="User: message content"><option value="full">Full message content</option><option value="metadata">Details only (no content)</option></select></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="settings-actions">
+                        <button class="btn btn-primary" id="accessSaveBtn" onclick="saveAccessPolicy()"><i class="fas fa-floppy-disk"></i> Save Settings</button>
+                        <span class="status-msg" id="accessStatus"></span>
                     </div>
                 </div>
 
@@ -2346,7 +2392,8 @@
 </div>
 
 <script src="/js/services/AuthService.js" defer></script>
-<script src="js/components/sidebar-nav.js?v=3" defer></script>
+<script src="/js/core/app-auth.js?v=2"></script>
+<script src="js/components/sidebar-nav.js?v=7" defer></script>
 <script>
 'use strict';
 
@@ -2394,7 +2441,7 @@ function updateTime() {
 }
 
 // ─── Section switching ────────────────────────────────────────────────────────
-const SECTIONS = ['smtp','security','atna','hl7fhir','queue','connectors','alerts','performance','storage','git','ezcompanion','ai','schemas','docker-ports'];
+const SECTIONS = ['smtp','security','access','atna','hl7fhir','queue','connectors','alerts','performance','storage','git','ezcompanion','ai','schemas','docker-ports'];
 
 function switchSection(name) {
     SECTIONS.forEach(s => {
@@ -2420,6 +2467,7 @@ async function loadSection(name) {
     switch (name) {
         case 'smtp':       return loadSMTP();
         case 'security':   return loadSecurity();
+        case 'access':     return loadAccessPolicy();
         case 'atna':       return loadATNA();
         case 'hl7fhir':    return loadHL7FHIR();
         case 'queue':      return loadQueue();
@@ -2707,6 +2755,37 @@ async function saveQueue() {
         setStatus('queueStatus', '✅ Queue settings saved', 'success');
     } catch (e) { setStatus('queueStatus', '❌ ' + e.message, 'error'); }
     finally { resetBtn('queueSaveBtn'); }
+}
+
+// ─── Access Policy ──────────────────────────────────────────────────────────
+const ACCESS_ROLES = ['operator', 'viewer', 'user'];
+
+async function loadAccessPolicy() {
+    try {
+        const d = await apiGet('/api/access-policy');
+        for (const role of ACCESS_ROLES) {
+            const p = d.roles[role] || {};
+            document.getElementById('ap-' + role + '-scope').value   = p.interfaceScope || 'own';
+            document.getElementById('ap-' + role + '-content').value = p.messageContent || 'metadata';
+        }
+    } catch (e) { showAlert('Access policy load failed: ' + e.message); }
+}
+
+async function saveAccessPolicy() {
+    setBtnLoading('accessSaveBtn', 'Saving…');
+    setStatus('accessStatus', 'Saving…', 'info');
+    try {
+        const roles = {};
+        for (const role of ACCESS_ROLES) {
+            roles[role] = {
+                interfaceScope: document.getElementById('ap-' + role + '-scope').value,
+                messageContent: document.getElementById('ap-' + role + '-content').value,
+            };
+        }
+        await apiPut('/api/access-policy', { roles });
+        setStatus('accessStatus', '✅ Saved — takes effect within a few seconds for everyone, no restart needed', 'success');
+    } catch (e) { setStatus('accessStatus', '❌ ' + e.message, 'error'); }
+    finally { resetBtn('accessSaveBtn'); }
 }
 
 // ─── ATNA Audit Export ──────────────────────────────────────────────────────
@@ -3758,6 +3837,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 </script>
-    <script src="/js/ai-assistant.js" defer></script>
+    <script src="/js/ai-assistant.js?v=2" defer></script>
 </body>
 </html>

@@ -750,8 +750,10 @@
             if (!r.ok) { window.location.href = '/'; return false; }
             const data = await r.json();
             if (!data.authenticated) { window.location.href = '/'; return false; }
-            if (data.user.role !== 'admin') {
-                document.querySelector('.main-content').innerHTML = '<div style="padding:3rem;text-align:center;color:#888"><i class="fas fa-lock fa-3x"></i><p style="margin-top:1rem">Admin access required.</p></div>';
+            // The "Access denied" panel for non-admins is shown by the shared guard (js/core/app-auth.js,
+            // <body data-requires-page="admin">); this page only has to stop. Same admin set as the server's
+            // requireAdmin, so a super_admin is not locked out of the page they may use.
+            if (!['admin', 'super_admin', 'superadmin'].includes(data.user.role)) {
                 return false;
             }
             const adminSec = document.getElementById('adminSection');

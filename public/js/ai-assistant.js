@@ -33,6 +33,8 @@
 
     async function checkAgentMode() {
         try {
+            // AI settings are admin-only. Everyone else keeps plain chat (agent mode stays off), without a 403.
+            if (window.appAuth) { await window.appAuth.whenReady(); if (!window.appAuth.can('aiSettings')) return; }
             const resp = await fetch('/api/system/settings/ai', { credentials: 'include' });
             if (!resp.ok) return;
             const body = await resp.json();

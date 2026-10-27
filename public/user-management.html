@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="css/user-management.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body>
+<body data-requires-page="admin">
     <div class="dashboard-container">
         <!-- Sidebar Navigation -->
         <nav class="sidebar" id="sidebar">
@@ -541,9 +541,10 @@
     <script src="/js/core/html-safe.js"></script>
     <script src="/js/core/app-dialogs.js"></script>
     <script src="/js/services/AuthService.js"></script>
-    <script src="js/components/sidebar-nav.js?v=3"></script>
-    <script src="js/user-management.js?v=10"></script>
+    <script src="/js/core/app-auth.js?v=2"></script>
+    <script src="js/components/sidebar-nav.js?v=7"></script>
+    <script src="js/user-management.js?v=11"></script>
     <script src="js/user-management-help.js?v=1"></script>
-    <script src="/js/ai-assistant.js"></script>
+    <script src="/js/ai-assistant.js?v=2"></script>
 </body>
 </html>

@@ -7356,10 +7356,15 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
                     if (resp.ok) {
                         const data = await resp.json();
                         const lastMsg = Array.isArray(data.messages) ? data.messages[0] : null;
-                        if (lastMsg?.raw_message) {
-                            sampleMessage = lastMsg.raw_message;
-                            // Persist so future refreshes skip this fetch
-                            try { localStorage.setItem('pipeline_last_sample_message', sampleMessage); } catch (_) {}
+                        // The list does not carry content (raw_message was dropped in V60); it lives in object storage.
+                        if (lastMsg?.message_id) {
+                            const rawResp = await fetch(`/api/messages/${encodeURIComponent(lastMsg.message_id)}/raw?interfaceId=${encodeURIComponent(interfaceId)}`);
+                            const rawData = rawResp.ok ? await rawResp.json() : null;
+                            if (rawData?.content) {
+                                sampleMessage = rawData.content;
+                                // Persist so future refreshes skip this fetch
+                                try { localStorage.setItem('pipeline_last_sample_message', sampleMessage); } catch (_) {}
+                            }
                         }
                     }
                 }

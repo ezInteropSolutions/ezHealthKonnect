@@ -289,10 +289,11 @@ class InterfaceService {
      * placeholders resolve to the stored secrets).
      * @returns {Promise<object|null>} the updated row (masked), or null when not found / not owned
      */
-    async updateInterface(interfaceId, fields, userId) {
+    async updateInterface(interfaceId, fields, userId, allInterfaces = false) {
         await this.ensureDatabaseConnection();
+        // allInterfaces: the caller's access policy (AccessPolicyService) lets them change interfaces they did not create
         const record = await this.database.models.Interface.findOne({
-            where: { id: interfaceId, user_id: userId, is_active: true }
+            where: allInterfaces ? { id: interfaceId, is_active: true } : { id: interfaceId, user_id: userId, is_active: true }
         });
         if (!record) return null;
 

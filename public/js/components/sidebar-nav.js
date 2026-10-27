@@ -38,6 +38,7 @@
                 { label: 'HL7 Reader',      href: 'hl7-reader.html',       icon: 'fas fa-stethoscope' },
                 { label: 'FHIR Validator',  href: 'fhir-validator.html',   icon: 'fas fa-shield-alt' },
                 { label: 'Code Templates',  href: 'code-templates.html',   icon: 'fas fa-code' },
+                { label: 'Code Translations', href: 'code-translations.html', icon: 'fas fa-language' },
                 { label: 'Git',             href: 'git.html',              icon: 'fab fa-git-alt' },
                 { label: 'Migration',       href: 'migration.html',        icon: 'fas fa-exchange-alt' }
             ]
@@ -45,9 +46,9 @@
         {
             title: 'Operations',
             sectionId: 'opsSection',
-            roles: ['engineer', 'admin', 'superadmin', 'super_admin'],
+            roles: ['engineer', 'operator', 'viewer', 'admin', 'superadmin', 'super_admin'],
             items: [
-                { label: 'Dead-Letter Q',  href: 'admin-dlq.html',           icon: 'fas fa-exclamation-triangle', badgeId: 'dlqBadge' },
+                { label: 'Dead-Letter Q',  href: 'admin-dlq.html',           icon: 'fas fa-exclamation-triangle', badgeId: 'dlqBadge', capability: 'dlq' }, // `capability`: see js/core/app-auth.js — the Dead-Letter queue API is admin-only in Go
                 { label: 'Message Trace',  href: 'message-trace.html',      icon: 'fas fa-route' }
             ]
         },
@@ -135,7 +136,7 @@
             h += '<div class="nav-items">';
             section.items.forEach(function (item) {
                 var active = isActive(item.href) ? ' active' : '';
-                h += '<a href="' + esc(item.href) + '" class="nav-item' + active + '">';
+                h += '<a href="' + esc(item.href) + '" class="nav-item' + active + '"' + (item.capability ? ' data-capability="' + esc(item.capability) + '"' : '') + '>';
                 h += '<span class="nav-icon"><i class="' + esc(item.icon) + '"></i></span>';
                 h += '<span class="nav-label">' + esc(item.label) + '</span>';
                 if (item.badgeId) {
@@ -155,6 +156,10 @@
              '<span class="user-name" id="userName">Loading...</span>' +
              '<span class="user-role" id="userRole">USER</span>' +
              '</div></div>' +
+             '<button class="logout-btn" id="sidebarChangePwdBtn" title="Change my password">' +
+             '<span class="nav-icon"><i class="fas fa-key"></i></span>' +
+             '<span class="nav-label">Change password</span>' +
+             '</button>' +
              '<button class="logout-btn" id="sidebarLogoutBtn" title="Logout">' +
              '<span class="nav-icon"><i class="fas fa-right-from-bracket"></i></span>' +
              '<span class="nav-label">Logout</span>' +
@@ -204,6 +209,49 @@
     function initLogoutBtn(sidebar) {
         var btn = sidebar.querySelector('#sidebarLogoutBtn');
         if (btn) btn.addEventListener('click', doLogout);
+        var pwd = sidebar.querySelector('#sidebarChangePwdBtn');
+        if (pwd) pwd.addEventListener('click', openChangePassword);
+    }
+
+    // ── Change my password ─────────────────────────────────────────────────────
+    // Not every page loads app-dialogs.js, so it is fetched on first use.
+    function withDialogs(cb) {
+        if (window.AppDialogs && window.AppDialogs.form) return cb();
+        var s = document.createElement('script');
+        s.src = '/js/core/app-dialogs.js';
+        s.onload = cb;
+        document.head.appendChild(s);
+    }
+
+    function openChangePassword() {
+        withDialogs(function () {
+            window.AppDialogs.form({
+                title: 'Change my password',
+                submitText: 'Change password',
+                fields: [
+                    { name: 'currentPassword', label: 'Current password', type: 'password', required: true, autocomplete: 'current-password' },
+                    { name: 'newPassword', label: 'New password', type: 'password', required: true, autocomplete: 'new-password' },
+                    { name: 'confirmPassword', label: 'Confirm new password', type: 'password', required: true, autocomplete: 'new-password' }
+                ],
+                onSubmit: function (v) {
+                    if (v.newPassword !== v.confirmPassword) {
+                        return Promise.reject(new Error('The new passwords do not match'));
+                    }
+                    return fetch('/api/auth/change-password', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ currentPassword: v.currentPassword, newPassword: v.newPassword })
+                    }).then(function (r) {
+                        return r.json().catch(function () { return {}; }).then(function (d) {
+                            if (!r.ok) throw new Error(d.message || ('Could not change the password (HTTP ' + r.status + ')'));
+                        });
+                    });
+                }
+            }).then(function (done) {
+                if (done) window.AppDialogs.toast('Password changed', 'success');
+            });
+        });
     }
 
     // ── User profile loader ────────────────────────────────────────────────────
@@ -228,6 +276,8 @@
 
         var role = (user.role || '').toLowerCase();
         var activeSectionId = getSectionForPage();
+        // After the section show/hide below has run: hide items this role may not use, and sections left empty.
+        window.setTimeout(function () { applyCapabilities(sidebar); }, 0);
 
         // /api/fhir/quality (backing the Mapping Review badge) is super_admin-only
         // by design — only start polling it once we've confirmed that's really the
@@ -259,6 +309,21 @@
         });
     }
 
+    // Hides nav items whose capability the server would refuse for this role, hides a restricted section that
+    // ends up with nothing to show, and starts the role-restricted pollers only when they can succeed.
+    function applyCapabilities(sidebar) {
+        var auth = window.appAuth;
+        if (!auth || !auth.user) return;
+        Array.prototype.forEach.call(sidebar.querySelectorAll('a[data-capability]'), function (a) {
+            a.style.display = auth.can(a.getAttribute('data-capability')) ? '' : 'none';
+        });
+        Array.prototype.forEach.call(sidebar.querySelectorAll('.nav-section[id]'), function (sec) {
+            var anyVisible = Array.prototype.some.call(sec.querySelectorAll('.nav-item'), function (a) { return a.style.display !== 'none'; });
+            if (!anyVisible) sec.style.display = 'none';
+        });
+        if (auth.can('dlq')) startDLQBadgePoller();
+    }
+
     function loadUser(sidebar) {
         // ── Fast path: read cached user from localStorage (instant, no flash) ──
         try {
@@ -270,6 +335,11 @@
         } catch (_) {}
 
         // ── Authoritative path: fetch from API ─────────────────────────────────
+        // AppAuth owns the single /api/auth/session request when it is on the page.
+        if (window.appAuth) {
+            window.appAuth.whenReady().then(function (user) { if (user) applyUser(sidebar, user); });
+            return;
+        }
         fetch('/api/auth/session', { credentials: 'include' })
             .then(function (r) {
                 if (r.status === 401) { window.location.href = '/login.html'; return null; }
@@ -335,7 +405,10 @@
 
     // ── DLQ badge poller ─────────────────────────────────────────────────────
     // Shows pending count on the Dead-Letter Q nav item. Runs every 2 minutes.
+    var _dlqPollerStarted = false;
     function startDLQBadgePoller() {
+        if (_dlqPollerStarted) return;
+        _dlqPollerStarted = true;
         function updateBadge() {
             fetch('/api/fhir/dlq/stats', { credentials: 'include' })
                 .then(function (r) { return r.ok ? r.json() : null; })
@@ -369,7 +442,8 @@
         // startMappingReviewBadgePoller() is NOT started here — it's super_admin-only
         // and gets started from applyUser() below, once the resolved role is actually
         // known to be super_admin (never fires at all for a plain admin).
-        startDLQBadgePoller();
+        // startDLQBadgePoller() is NOT started here: the Dead-Letter queue API is admin-only, so applyCapabilities()
+        // starts it only for a role that can call it (it used to 403 on every page for every non-admin).
     }
 
     if (document.readyState === 'loading') {

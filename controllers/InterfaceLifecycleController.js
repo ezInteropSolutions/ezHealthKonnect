@@ -3,6 +3,7 @@
 
 const ProcessingEngineService = require('../services/ProcessingEngineService');
 const auditService = require('../services/auditService');
+const accessPolicy = require('../services/AccessPolicyService');
 
 const GO_BACKEND_URL = process.env.GO_BACKEND_URL || `http://localhost:${process.env.API_PORT || 8080}`;
 
@@ -468,9 +469,10 @@ class InterfaceLifecycleController {
             const database = require('../config/database');
             const sequelize = database.sequelize;
 
-            // Verify user owns the interface
+            // Verify the user may see this interface (their own, or any when their role's access policy allows)
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.user || req.session?.user);
             const interfaceCheck = await sequelize.query(
-                'SELECT 1 FROM interfaces WHERE id = :interface_id AND user_id = :user_id',
+                `SELECT 1 FROM interfaces WHERE id = :interface_id AND (user_id = :user_id OR ${allInterfaces})`,
                 {
                     replacements: { interface_id: interfaceId, user_id: userId },
                     type: sequelize.QueryTypes.SELECT

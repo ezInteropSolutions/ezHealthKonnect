@@ -71,6 +71,38 @@
     "defaultResult": "success",
     "complianceFlags": { "hipaa": true }
   },
+  "CDA_CODE_TRANSLATION_CREATED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "CDA_CODE_TRANSLATION_UPDATED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "low",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "CDA_CODE_TRANSLATION_DELETED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "D",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "CDA_CODE_TRANSLATIONS_IMPORTED": {
+    "atnaEventId": "110100",
+    "atnaEventIdDisplay": "Application Activity",
+    "eventActionCode": "C",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
   "CDA_DEDUPE_REGISTRY_VIEWED": {
     "atnaEventId": "110112",
     "atnaEventIdDisplay": "Query",
@@ -368,6 +400,22 @@
     "atnaEventId": "110114",
     "atnaEventIdDisplay": "User Authentication",
     "eventActionCode": "E",
+    "defaultRiskLevel": "medium",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true }
+  },
+  "ACCESS_POLICY_CHANGED": {
+    "atnaEventId": "110113",
+    "atnaEventIdDisplay": "Security Alert",
+    "eventActionCode": "U",
+    "defaultRiskLevel": "high",
+    "defaultResult": "success",
+    "complianceFlags": { "hipaa": true, "access_control": true }
+  },
+  "PASSWORD_CHANGED": {
+    "atnaEventId": "110114",
+    "atnaEventIdDisplay": "User Authentication",
+    "eventActionCode": "U",
     "defaultRiskLevel": "medium",
     "defaultResult": "success",
     "complianceFlags": { "hipaa": true }

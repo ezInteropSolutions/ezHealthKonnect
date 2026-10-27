@@ -4,12 +4,16 @@
 const express = require('express');
 const MessageController = require('../controllers/MessageController');
 const { requireRole } = require('../middleware/auth');
+const { requireMessageContent } = require('../middleware/messageContentGate');
 
 const router = express.Router();
 
 // RBAC: messages are visible to operator+viewer; send/delete require operator+
 const canRead  = requireRole('admin', 'operator', 'viewer');
 const canWrite = requireRole('admin', 'operator');
+// Routes that return what is INSIDE a message. A role whose access policy is 'details only' (Settings -> Access policy)
+// is refused here; routes without this guard return details only (time, type, status, errors).
+const contentGate = requireMessageContent();
 
 // Session authentication middleware
 const sessionAuth = (req, res, next) => {
@@ -35,8 +39,8 @@ router.get('/test', (req, res) => {
 // INTERFACE-SPECIFIC MESSAGE ROUTES (Performance Optimized)
 router.get('/interface/:interfaceId',                                     sessionAuth, canRead,  (req, res) => MessageController.getInterfaceMessages(req, res));
 router.get('/interface/:interfaceId/stats',                               sessionAuth, canRead,  (req, res) => MessageController.getInterfaceStats(req, res));
-router.get('/interface/:interfaceId/message/:messageId/parsed',           sessionAuth, canRead,  (req, res) => MessageController.getParsedContent(req, res));
-router.get('/interface/:interfaceId/message/:messageId/fhir-output',      sessionAuth, canRead,  (req, res) => MessageController.getFhirOutput(req, res));
+router.get('/interface/:interfaceId/message/:messageId/parsed',           sessionAuth, canRead, contentGate,  (req, res) => MessageController.getParsedContent(req, res));
+router.get('/interface/:interfaceId/message/:messageId/fhir-output',      sessionAuth, canRead, contentGate,  (req, res) => MessageController.getFhirOutput(req, res));
 
 // BULK REPROCESS (V213) — registered before the /:messageId catch-all below,
 // same reason /interface/:interfaceId is: a bare literal path like
@@ -60,9 +64,9 @@ router.get('/stats', sessionAuth, canRead, (req, res) => {
 
 // Message detail reads                                   — viewer+
 router.get('/:messageId',                     sessionAuth, canRead,  (req, res) => MessageController.getMessageDetail(req, res));
-router.get('/:messageId/lineage',             sessionAuth, canRead,  (req, res) => MessageController.getDataLineage(req, res));
-router.get('/:messageId/dedupe-suppressions', sessionAuth, canRead,  (req, res) => MessageController.getDedupeSuppressions(req, res));
-router.get('/:messageId/coverage-audit',      sessionAuth, canRead,  (req, res) => MessageController.getCoverageAudit(req, res));
+router.get('/:messageId/lineage',             sessionAuth, canRead, contentGate,  (req, res) => MessageController.getDataLineage(req, res));
+router.get('/:messageId/dedupe-suppressions', sessionAuth, canRead, contentGate,  (req, res) => MessageController.getDedupeSuppressions(req, res));
+router.get('/:messageId/coverage-audit',      sessionAuth, canRead, contentGate,  (req, res) => MessageController.getCoverageAudit(req, res));
 router.get('/:messageId/errors',              sessionAuth, canRead,  (req, res) => MessageController.getMessageErrors(req, res));
 router.get('/:messageId/logs',                sessionAuth, canRead,  (req, res) => MessageController.getMessageLogs(req, res));
 

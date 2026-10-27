@@ -435,6 +435,8 @@ const {
 const GO_READ_ROLES = ['admin', 'super_admin', 'operator', 'viewer', 'engineer'];
 const GO_WRITE_ROLES = ['admin', 'super_admin', 'operator', 'engineer'];
 const _goRoleGate = _requireRoleByMethod(GO_READ_ROLES, GO_WRITE_ROLES);
+// Message CONTENT (raw / transformed / parsed) is refused for roles whose access policy is 'details only'.
+const _messageContentGate = require('./middleware/messageContentGate').requireMessageContent();
 // ezCompanion: chatting is a POST, so it needs a reader role on every method.
 // Its read-only tools (health, monitoring, DLQ stats, analytics) answer
 // directly, so a no-permission 'user' must not reach it; its actions still
@@ -636,6 +638,7 @@ console.log('🔄 Mounting /api/auth...');
 app.use('/api/auth', authRoutes);
 console.log('🔄 Mounting /api/users...');
 app.use('/api/users', userRoutes);
+app.use('/api/access-policy', require('./routes/accessPolicy')); // Settings -> Access policy (admin only inside)
 console.log('🔄 Mounting /api/audit-logs...');
 const auditLogRoutes = require('./controllers/auditController');
 app.use('/api/audit-logs', auditLogRoutes);
@@ -654,12 +657,12 @@ console.log('✅ Interface template routes mounted');
 console.log('🔄 Mounting /api/wizard...');
 app.use('/api/wizard', wizardRoutes);
 // Forward object-storage endpoints to Go BEFORE local message routes
-app.get('/api/messages/:messageId/raw', _verifyToken, _goRoleGate, forwardToGo);
-app.get('/api/messages/:messageId/transformed', _verifyToken, _goRoleGate, forwardToGo);
+app.get('/api/messages/:messageId/raw', _verifyToken, _goRoleGate, _messageContentGate, forwardToGo);
+app.get('/api/messages/:messageId/transformed', _verifyToken, _goRoleGate, _messageContentGate, forwardToGo);
 app.get('/api/messages/:messageId/logs', _verifyToken, _goRoleGate, forwardToGo);
-app.get('/api/messages/:messageId/mapping-log', _verifyToken, _goRoleGate, forwardToGo);
-app.get('/api/messages/:messageId/parsed-cda', _verifyToken, _goRoleGate, forwardToGo);
-app.get('/api/messages/:messageId/parsed-content', _verifyToken, _goRoleGate, forwardToGo);
+app.get('/api/messages/:messageId/mapping-log', _verifyToken, _goRoleGate, _messageContentGate, forwardToGo);
+app.get('/api/messages/:messageId/parsed-cda', _verifyToken, _goRoleGate, _messageContentGate, forwardToGo);
+app.get('/api/messages/:messageId/parsed-content', _verifyToken, _goRoleGate, _messageContentGate, forwardToGo);
 console.log('🔄 Mounting /api/messages...');
 app.use('/api/messages', messageRoutes);
 
@@ -760,6 +763,8 @@ app.get('/api/dashboard/recent-activity', async (req, res) => {
     try {
         const { sequelize } = require('./config/database');
         const { QueryTypes } = require('sequelize');
+        // Everyone's activity for roles allowed to see all interfaces; otherwise only the user's own.
+        const canSeeAll = await require('./services/AccessPolicyService').canSeeAllInterfaces(req.session.user);
         const rows = await sequelize.query(`
             SELECT
                 al.action,
@@ -769,9 +774,10 @@ app.get('/api/dashboard/recent-activity', async (req, res) => {
                 u.name AS user_name
             FROM audit_logs al
             LEFT JOIN users u ON u.id = al.user_id
+            WHERE (al.user_id = :uid OR ${canSeeAll})
             ORDER BY al.created_at DESC
             LIMIT 8
-        `, { type: QueryTypes.SELECT });
+        `, { type: QueryTypes.SELECT, replacements: { uid: req.session.user.id } });
         res.json({ success: true, activity: rows });
     } catch (e) {
         res.json({ success: false, error: e.message });

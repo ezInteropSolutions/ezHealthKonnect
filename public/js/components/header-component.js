@@ -69,7 +69,7 @@
                     " onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
                         <i class="fas fa-question"></i>
                     </button>
-                    <button class="create-btn" onclick="openWizard()" id="createInterfaceBtn">
+                    <button class="create-btn" data-requires="write" onclick="openWizard()" id="createInterfaceBtn">
                         <span class="btn-icon">+</span>
                         <span class="btn-text">Create Interface</span>
                     </button>

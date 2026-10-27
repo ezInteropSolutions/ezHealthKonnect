@@ -1244,7 +1244,7 @@ function getMiniActionButtons(interface) {
         ? `Template update available (v${updateVersions}) for: ${pendingUpdates.map(u => u.messageType).join(', ')}`
         : '';
     const updateBadge = pendingUpdates.length > 0
-        ? HtmlSafe.html`<button class="act-btn act-btn-indigo" style="position:relative;" title="${updateTitle}"
+        ? HtmlSafe.html`<button data-requires="write" class="act-btn act-btn-indigo" style="position:relative;" title="${updateTitle}"
                    onclick="event.stopPropagation(); openMappingUpdateModal('${interface.id}')">
                <i class="fas fa-arrow-up-from-bracket"></i>
                <span style="position:absolute;top:-4px;right:-4px;background:#7c3aed;color:white;border-radius:50%;font-size:9px;font-weight:700;width:14px;height:14px;display:flex;align-items:center;justify-content:center;line-height:1;">${pendingUpdates.length}</span>
@@ -1256,13 +1256,13 @@ function getMiniActionButtons(interface) {
             ${updateBadge}
             ${reviewBadge}
 
-            <button class="act-btn ${runtimeColor}" title="${runtimeTitle}"
+            <button data-requires="write" class="act-btn ${runtimeColor}" title="${runtimeTitle}"
                     onclick="event.stopPropagation(); ${runtimeAction}"
                     id="runtime-btn-${interface.id}">
                 ${runtimeIcon}
             </button>
 
-            <button class="act-btn act-btn-red" title="Stop Processing"
+            <button data-requires="write" class="act-btn act-btn-red" title="Stop Processing"
                     onclick="event.stopPropagation(); deactivateInterfaceProcessing('${interface.id}')"
                     id="stop-btn-${interface.id}"
                     ${!showStop ? 'disabled' : ''}>
@@ -1281,7 +1281,7 @@ function getMiniActionButtons(interface) {
                     <i class="fas fa-ellipsis-h"></i>
                 </button>
                 <div class="dropdown-menu-minimal" id="actions-menu-${interface.id}">
-                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); showEditModal('${interface.id}'); closeActionsMenu('${interface.id}')">
+                    <div class="dropdown-item-minimal" data-requires="write" onclick="event.stopPropagation(); showEditModal('${interface.id}'); closeActionsMenu('${interface.id}')">
                         <i class="far fa-edit"></i><span>Edit</span>
                     </div>
                     <div class="dropdown-item-minimal" onclick="event.stopPropagation(); configurePipeline('${interface.id}'); closeActionsMenu('${interface.id}')">
@@ -1294,15 +1294,15 @@ function getMiniActionButtons(interface) {
                         <i class="far fa-circle-exclamation"></i><span>Review Queue${pendingReview > 0 ? ` (${pendingReview})` : ''}</span>
                     </div>
                     ${interface.status === 'error' ? HtmlSafe.html`
-                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); resetInterface('${interface.id}'); closeActionsMenu('${interface.id}')">
+                    <div class="dropdown-item-minimal" data-requires="write" onclick="event.stopPropagation(); resetInterface('${interface.id}'); closeActionsMenu('${interface.id}')">
                         <i class="fas fa-sync"></i><span>Reset</span>
                     </div>` : ''}
-                    <div class="dropdown-item-minimal" onclick="event.stopPropagation(); openSaveAsTemplateModal('${interface.id}'); closeActionsMenu('${interface.id}')">
+                    <div class="dropdown-item-minimal" data-requires="write" onclick="event.stopPropagation(); openSaveAsTemplateModal('${interface.id}'); closeActionsMenu('${interface.id}')">
                         <i class="far fa-bookmark"></i><span>Save as Template</span>
                     </div>
                     <div class="dropdown-divider-minimal"></div>
                     ${canDelete ? HtmlSafe.html`
-                    <div class="dropdown-item-minimal danger" onclick="event.stopPropagation(); confirmDeleteInterface('${interface.id}'); closeActionsMenu('${interface.id}')">
+                    <div class="dropdown-item-minimal danger" data-requires="write" onclick="event.stopPropagation(); confirmDeleteInterface('${interface.id}'); closeActionsMenu('${interface.id}')">
                         <i class="far fa-trash-alt"></i><span>Delete</span>
                     </div>` : HtmlSafe.html`
                     <div class="dropdown-item-minimal disabled" title="Stop interface first">

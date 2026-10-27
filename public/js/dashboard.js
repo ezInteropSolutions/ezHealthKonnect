@@ -1410,6 +1410,8 @@ async function loadSystemStatus() {
 
     // DLQ count — pending + retrying entries
     try {
+        // The Dead-Letter queue API is admin-only; asking as anyone else just produces a 403 on every load.
+        if (window.appAuth) { await window.appAuth.whenReady(); if (!window.appAuth.can('dlq')) return; }
         const r = await fetch('/api/fhir/dlq/stats', { credentials: 'include' });
         if (r.ok) {
             const d = await r.json();

@@ -37,9 +37,11 @@ function getPool() {
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const _cache = {};
 
-async function getSetting(key, defaultValue = {}) {
+// ttlMs lets a caller whose setting gates access (see AccessPolicyService) accept only a few seconds of staleness
+// instead of the default five minutes, since this cache is per process and the admin API runs in another one.
+async function getSetting(key, defaultValue = {}, ttlMs = CACHE_TTL_MS) {
     const cached = _cache[key];
-    if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    if (cached && Date.now() - cached.ts < ttlMs) {
         return cached.value;
     }
     try {

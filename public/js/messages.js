@@ -803,6 +803,7 @@ class MessageManager {
             const message = this.messageData.message;
             const container = document.getElementById('messageLineageView');
 
+            if (this._contentRestricted()) { container.innerHTML = HtmlSafe.html`${this._restrictedNotice()}`; return; }
             container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading data lineage...</div>';
 
             // Get lineage data from backend. Dedupe suppression lineage and CDA
@@ -1336,6 +1337,7 @@ class MessageManager {
         try {
             const container = document.getElementById('messageTransformationsView');
 
+            if (this._contentRestricted()) { container.innerHTML = HtmlSafe.html`${this._restrictedNotice()}`; return; }
             container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading transformation pipeline...</div>';
 
             // Get lineage data from backend which includes transformation steps
@@ -1749,6 +1751,7 @@ class MessageManager {
     async loadMappingLog(messageId) {
         try {
             const container = document.getElementById('messageMappingLogView');
+            if (this._contentRestricted()) { container.innerHTML = HtmlSafe.html`${this._restrictedNotice()}`; return; }
             container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading mapping log...</div>';
 
             const ifaceId = this.currentInterfaceId || this.messageData?.message?.interface_id || '';
@@ -2347,12 +2350,26 @@ class MessageManager {
         window.open(`admin-dlq.html?message_id=${encodeURIComponent(messageId)}`, '_blank');
     }
 
+    /** True when the signed-in role gets message details but not content (Settings -> Access policy). */
+    _contentRestricted() {
+        return !!(window.appAuth && window.appAuth.user && !window.appAuth.canViewMessageContent());
+    }
+
+    _restrictedNotice() {
+        return HtmlSafe.html`<div role="status" style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:1.5rem;text-align:center;color:#475569;">
+            <i class="fas fa-user-lock" style="font-size:1.5rem;color:#94a3b8;display:block;margin-bottom:0.5rem;"></i>
+            <div style="font-weight:600;margin-bottom:0.25rem;">Message content is not available for your role</div>
+            <div style="font-size:0.85rem;color:#64748b;">You can see the details of this message (time, type, status and errors). Ask an administrator if you need to see its content.</div>
+        </div>`;
+    }
+
     async loadMessageContent(messageId) {
         const container = document.getElementById('messageContentView');
         if (!container || !this.messageData) return;
 
         const { message } = this.messageData;
 
+        if (this._contentRestricted()) { container.innerHTML = HtmlSafe.html`${this._restrictedNotice()}`; return; }
         container.innerHTML = '<div class="text-center" style="padding:2rem;"><i class="fas fa-spinner fa-spin"></i> Loading content...</div>';
 
         // Fetch inbound and outbound content in parallel
@@ -2367,11 +2384,6 @@ class MessageManager {
         let outboundContent = transformedData?.content || null;
         // source = "outbound" → exact delivered payload; "pipeline" → fallback pipeline context
         const outboundSource  = transformedData?.source || 'pipeline';
-
-        // Fallback: use inline raw_message from the already-loaded message record
-        if (!rawContent && message.raw_message) {
-            rawContent = message.raw_message;
-        }
 
         // Fallback: fetch stored FHIR bundle from cda_documents for CDA/CCD messages
         if (!outboundContent && this.currentInterfaceId &&
