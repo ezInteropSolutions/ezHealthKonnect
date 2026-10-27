@@ -38,10 +38,15 @@ login() {
 }
 
 step "Prepare upgrade-test bundles"
-python3 "$HERE/make_variant_bundle.py" "$BUNDLE_V1" "$WORK/v2.zip" v0.0.2-ci \
+# The installer refuses downgrades, so the upgrade targets must be NEWER than the bundle under test: a pull request
+# builds it as v0.0.1-ci, a release as the tag (v26.10). Derive them instead of hardcoding.
+BASE_VERSION=$(python3 "$HERE/bundle_version.py" "$BUNDLE_V1")
+V2_VERSION=$(python3 "$HERE/bundle_version.py" "$BUNDLE_V1" --bump 1)
+V3_VERSION=$(python3 "$HERE/bundle_version.py" "$BUNDLE_V1" --bump 2)
+python3 "$HERE/make_variant_bundle.py" "$BUNDLE_V1" "$WORK/v2.zip" $V2_VERSION \
   --add database/migrations/V90001__E2E_Upgrade_Marker.sql \
   "CREATE TABLE e2e_upgrade_marker (id int PRIMARY KEY); INSERT INTO e2e_upgrade_marker VALUES (1);"
-python3 "$HERE/make_variant_bundle.py" "$WORK/v2.zip" "$WORK/v3.zip" v0.0.3-ci \
+python3 "$HERE/make_variant_bundle.py" "$WORK/v2.zip" "$WORK/v3.zip" $V3_VERSION \
   --add database/migrations/V90002__E2E_Failing_Migration.sql \
   "CREATE TABLE e2e_must_not_exist (id int); SELECT 1/0;"
 
@@ -86,9 +91,9 @@ echo "patient-data" > "$DIR/storage/e2e-object.txt"; chown ezhealthkonnect: "$DI
 SECRETS_BEFORE=$(grep -E '^(DB_PASSWORD|SESSION_SECRET|JWT_SECRET|APP_CREDENTIAL_KEY)=' "$DIR/.env" | sha256sum)
 pass "interface and stored object created"
 
-step "Upgrade to v0.0.2-ci (adds a migration)"
+step "Upgrade to $V2_VERSION (adds a migration)"
 "$INSTALLER" upgrade --dir "$DIR" --bundle "$WORK/v2.zip" || fail "upgrade to v2 failed"
-[ "$(version)" = "v0.0.2-ci" ] || fail "version after upgrade: $(version)"
+[ "$(version)" = "$V2_VERSION" ] || fail "version after upgrade: $(version)"
 health || fail "not healthy after upgrade"
 [ "$(psql_app 'SELECT count(*) FROM e2e_upgrade_marker')" = "1" ] || fail "new migration not applied"
 [ "$(psql_app "SELECT count(*) FROM interfaces WHERE name='E2E Interface'")" = "1" ] || fail "data lost in upgrade"
@@ -98,21 +103,21 @@ login || fail "admin cannot log in after upgrade"
 ls "$DIR/backups"/*/database.dump >/dev/null || fail "no upgrade backup"
 pass "upgraded with data, secrets and login intact"
 
-step "Upgrade to v0.0.3-ci with a failing migration must roll back"
+step "Upgrade to $V3_VERSION with a failing migration must roll back"
 if "$INSTALLER" upgrade --dir "$DIR" --bundle "$WORK/v3.zip" > "$WORK/v3.log" 2>&1; then
   cat "$WORK/v3.log"; fail "an upgrade with a failing migration must fail"
 fi
 grep -q "rolled back" "$WORK/v3.log" || { cat "$WORK/v3.log"; fail "failure was not rolled back"; }
-[ "$(version)" = "v0.0.2-ci" ] || fail "version after failed upgrade: $(version)"
+[ "$(version)" = "$V2_VERSION" ] || fail "version after failed upgrade: $(version)"
 health || fail "previous version not healthy after automatic rollback"
 [ "$(psql_app "SELECT to_regclass('e2e_must_not_exist') IS NULL")" = "t" ] || fail "failed migration left objects behind"
 [ "$(psql_app 'SELECT count(*) FROM e2e_upgrade_marker')" = "1" ] || fail "data lost in automatic rollback"
 login || fail "admin cannot log in after automatic rollback"
 pass "failed upgrade rolled back automatically"
 
-step "Manual rollback to v0.0.1-ci"
+step "Manual rollback to $BASE_VERSION"
 "$INSTALLER" rollback --dir "$DIR" --yes || fail "rollback failed"
-[ "$(version)" = "v0.0.1-ci" ] || fail "version after rollback: $(version)"
+[ "$(version)" = "$BASE_VERSION" ] || fail "version after rollback: $(version)"
 health || fail "not healthy after rollback"
 [ "$(psql_app "SELECT to_regclass('e2e_upgrade_marker') IS NULL")" = "t" ] || fail "database not restored to before the upgrade"
 [ "$(psql_app "SELECT count(*) FROM interfaces WHERE name='E2E Interface'")" = "1" ] || fail "data from before the upgrade lost"

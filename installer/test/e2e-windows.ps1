@@ -93,8 +93,13 @@ if ($PostgresMode -eq 'existing') {
 }
 
 Step 'Upgrade-test bundles'
-python "$Here\make_variant_bundle.py" $BundleV1 "$Work\v2.zip" v0.0.2-ci --add database/migrations/V90001__E2E_Upgrade_Marker.sql 'CREATE TABLE e2e_upgrade_marker (id int PRIMARY KEY); INSERT INTO e2e_upgrade_marker VALUES (1);'
-python "$Here\make_variant_bundle.py" "$Work\v2.zip" "$Work\v3.zip" v0.0.3-ci --add database/migrations/V90002__E2E_Failing_Migration.sql 'CREATE TABLE e2e_must_not_exist (id int); SELECT 1/0;'
+# The installer refuses downgrades, so the upgrade targets must be NEWER than the bundle under test: a pull request
+# builds it as v0.0.1-ci, a release as the tag (v26.10). Derive them instead of hardcoding.
+$BaseVersion = (python "$Here\bundle_version.py" $BundleV1).Trim()
+$V2Version = (python "$Here\bundle_version.py" $BundleV1 --bump 1).Trim()
+$V3Version = (python "$Here\bundle_version.py" $BundleV1 --bump 2).Trim()
+python "$Here\make_variant_bundle.py" $BundleV1 "$Work\v2.zip" $V2Version --add database/migrations/V90001__E2E_Upgrade_Marker.sql 'CREATE TABLE e2e_upgrade_marker (id int PRIMARY KEY); INSERT INTO e2e_upgrade_marker VALUES (1);'
+python "$Here\make_variant_bundle.py" "$Work\v2.zip" "$Work\v3.zip" $V3Version --add database/migrations/V90002__E2E_Failing_Migration.sql 'CREATE TABLE e2e_must_not_exist (id int); SELECT 1/0;'
 
 Step 'Install (headless)'
 $answers | ConvertTo-Json | Set-Content -Encoding ascii "$Work\answers.json"
@@ -140,10 +145,10 @@ Set-Content "$Dir\storage\e2e-object.txt" 'patient-data'
 $secretsBefore = (Get-Content "$Dir\.env" | Where-Object { $_ -match '^(DB_PASSWORD|SESSION_SECRET|JWT_SECRET|APP_CREDENTIAL_KEY)=' }) -join "`n"
 Pass 'interface and stored object created'
 
-Step 'Upgrade to v0.0.2-ci'
+Step "Upgrade to $V2Version"
 $r = Run-Installer @('upgrade', '--dir', $Dir, '--bundle', "$Work\v2.zip")
 if ($r.Code -ne 0) { Fail 'upgrade to v2 failed' }
-if ((Version) -ne 'v0.0.2-ci') { Fail "version after upgrade: $(Version)" }
+if ((Version) -ne $V2Version) { Fail "version after upgrade: $(Version)" }
 if (-not (Healthy)) { Fail 'not healthy after upgrade' }
 if ((Psql-App 'SELECT count(*) FROM e2e_upgrade_marker') -ne '1') { Fail 'new migration not applied' }
 if ((Psql-App "SELECT count(*) FROM interfaces WHERE name='E2E Interface'") -ne '1') { Fail 'data lost in upgrade' }
@@ -158,16 +163,16 @@ Step 'Failing upgrade must roll back'
 $r = Run-Installer @('upgrade', '--dir', $Dir, '--bundle', "$Work\v3.zip")
 if ($r.Code -eq 0) { Fail 'an upgrade with a failing migration must fail' }
 if ($r.Out -notmatch 'rolled back') { Fail 'failure was not rolled back' }
-if ((Version) -ne 'v0.0.2-ci') { Fail "version after failed upgrade: $(Version)" }
+if ((Version) -ne $V2Version) { Fail "version after failed upgrade: $(Version)" }
 if (-not (Healthy)) { Fail 'previous version not healthy after automatic rollback' }
 if ((Psql-App "SELECT to_regclass('e2e_must_not_exist') IS NULL") -ne 't') { Fail 'failed migration left objects' }
 Login
 Pass 'failed upgrade rolled back automatically'
 
-Step 'Manual rollback to v0.0.1-ci'
+Step "Manual rollback to $BaseVersion"
 $r = Run-Installer @('rollback', '--dir', $Dir, '--yes')
 if ($r.Code -ne 0) { Fail 'rollback failed' }
-if ((Version) -ne 'v0.0.1-ci') { Fail "version after rollback: $(Version)" }
+if ((Version) -ne $BaseVersion) { Fail "version after rollback: $(Version)" }
 if (-not (Healthy)) { Fail 'not healthy after rollback' }
 if ((Psql-App "SELECT to_regclass('e2e_upgrade_marker') IS NULL") -ne 't') { Fail 'database not restored' }
 if ((Psql-App "SELECT count(*) FROM interfaces WHERE name='E2E Interface'") -ne '1') { Fail 'data from before the upgrade lost' }
