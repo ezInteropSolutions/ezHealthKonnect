@@ -4,7 +4,9 @@ package ai
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -90,6 +92,93 @@ func (s *EmbeddingService) IngestText(ctx context.Context, sourceType, sourceRef
 		return stored, fmt.Errorf("%d of %d chunks failed: %s", len(chunkErrs), len(chunks), strings.Join(chunkErrs, "; "))
 	}
 	return stored, nil
+}
+
+// contentHash is the fingerprint stored with a chunk set so an unchanged text is not embedded again.
+func contentHash(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
+// IngestTextIfChanged is IngestText for knowledge that is re-derived from live data (interfaces, pipelines, IG
+// mappings): when the text for (sourceType, sourceRef) is byte-identical to what is already stored, nothing is
+// embedded and skipped is true; otherwise the old chunks are replaced. Embedding is the expensive part (about 3 per
+// second on a CPU-only Ollama), and this used to run for EVERY interface and pipeline on EVERY start, so a restart
+// kept the model busy for minutes and questions queued behind it. The hash is kept in the chunk metadata
+// (content_hash), so no schema change is involved.
+func (s *EmbeddingService) IngestTextIfChanged(ctx context.Context, sourceType, sourceRef, sourceFile, text string, metadata map[string]interface{}) (stored int, skipped bool, err error) {
+	if s.db == nil {
+		return 0, false, nil
+	}
+	hash := contentHash(text)
+	var existing sql.NullString
+	row := s.db.QueryRowContext(ctx, `
+		SELECT metadata->>'content_hash' FROM ai_knowledge_chunks
+		WHERE source_type = $1 AND source_ref = $2 ORDER BY (metadata->>'chunk_index')::int NULLS LAST LIMIT 1`, sourceType, sourceRef)
+	if scanErr := row.Scan(&existing); scanErr == nil && existing.Valid && existing.String == hash {
+		return 0, true, nil
+	}
+	meta := map[string]interface{}{"content_hash": hash}
+	for k, v := range metadata {
+		meta[k] = v
+	}
+	// Embed first, replace after: if the model is down the old (slightly stale) chunks stay rather than the entry
+	// disappearing from the knowledge base.
+	n, ingestErr := s.ingestFresh(ctx, sourceType, sourceRef, sourceFile, text, meta)
+	return n, false, ingestErr
+}
+
+// ingestFresh embeds text and swaps it in for the existing chunks of (sourceType, sourceRef) in one transaction.
+func (s *EmbeddingService) ingestFresh(ctx context.Context, sourceType, sourceRef, sourceFile, text string, meta map[string]interface{}) (int, error) {
+	if s.db == nil {
+		return 0, nil
+	}
+	chunks := chunkText(text, chunkSize, chunkOverlap)
+	embedder := s.embeddr
+	if embedder == nil {
+		embedder = s.ollama
+	}
+	type prepared struct {
+		content string
+		vector  string
+		meta    []byte
+	}
+	var rows []prepared
+	for i, chunk := range chunks {
+		if strings.TrimSpace(chunk) == "" {
+			continue
+		}
+		embedding, err := embedder.Embed(ctx, chunk)
+		if err != nil {
+			return 0, fmt.Errorf("chunk %d embed: %w", i, err)
+		}
+		m := map[string]interface{}{"chunk_index": i, "total_chunks": len(chunks)}
+		for k, v := range meta {
+			m[k] = v
+		}
+		metaJSON, _ := json.Marshal(m)
+		rows = append(rows, prepared{chunk, float32SliceToPGVector(embedding), metaJSON})
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := tx.ExecContext(ctx, `DELETE FROM ai_knowledge_chunks WHERE source_type = $1 AND source_ref = $2`, sourceType, sourceRef); err != nil {
+		return 0, err
+	}
+	for _, r := range rows {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO ai_knowledge_chunks (id, source_type, source_ref, source_file, content, embedding, metadata)
+			VALUES ($1, $2, $3, $4, $5, $6::vector, $7)`,
+			uuid.New().String(), sourceType, sourceRef, sourceFile, r.content, r.vector, r.meta); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(rows), nil
 }
 
 // ClearSourceType deletes all chunks for a given source type (before re-ingestion).
