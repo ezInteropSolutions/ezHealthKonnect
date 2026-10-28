@@ -37,9 +37,13 @@ const HTTP_ALIAS_KEYS = ['endpoint', 'authType', 'authUsername', 'authPassword',
  * the rest of what the user typed: retries, keep-alive, TLS, the ACK block, headers, polling interval ...
  * Empty values are not copied (an untouched form field is not a setting).
  */
+// Keys the wizard form carries for its own bookkeeping (a copy of the whole connector config, the legacy connectivity
+// name, the step wrapper fields). They are not connector settings and must not be saved into the step.
+const WIZARD_ONLY_KEYS = new Set(['connectorconfig', 'connectorConfig', 'connectivity', 'contentField', 'contentType', 'timeoutMs']);
+
 function keepRemainingSettings(wizardConfig, normalized, renamedKeys = []) {
     for (const [key, value] of Object.entries(wizardConfig)) {
-        if (renamedKeys.includes(key) || key in normalized) continue;
+        if (renamedKeys.includes(key) || WIZARD_ONLY_KEYS.has(key) || key in normalized) continue;
         if (value === undefined || value === null || value === '') continue;
         normalized[key] = value;
     }

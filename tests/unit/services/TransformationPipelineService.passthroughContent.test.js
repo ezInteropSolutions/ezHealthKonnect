@@ -124,3 +124,14 @@ describe('the wizard keeps every setting the user entered (not a short whitelist
             expect(cfg).toMatchObject({ host: 'h', connection_string: 'cs', collection: 'c', polling_interval: 30, batch_size: 50 });
         });
 });
+
+describe('wizard bookkeeping keys are not saved as connector settings', () => {
+    it('TCP/MLLP drops the nested copy of the connector config and the legacy connectivity name', () => {
+        const svc = new TransformationPipelineService();
+        const cfg = svc.normalizeWizardConfig({
+            host: '0.0.0.0', port: 6638, keep_alive: false,
+            connectivity: 'tcp', connectorconfig: { connectorType: 'tcp_mllp', config: { port: 6638 } }, contentField: '', contentType: 'application/json', timeoutMs: 30000,
+        }, 'tcp_mllp');
+        expect(cfg).toEqual({ host: '0.0.0.0', port: 6638, keep_alive: false });
+    });
+});
