@@ -308,7 +308,9 @@ class MessageManager {
             this.interfaces.forEach(interfaceItem => {
                 const option = document.createElement('option');
                 option.value = interfaceItem.id;
-                const ifmt = interfaceItem.sourceFormat || interfaceItem.messageType || interfaceItem.sourceType || '';
+                // A format of "unknown" says nothing — show just the name rather than "Name (unknown)".
+                const rawFmt = interfaceItem.sourceFormat || interfaceItem.messageType || interfaceItem.sourceType || '';
+                const ifmt = /^unknown$/i.test(String(rawFmt)) ? '' : rawFmt;
                 option.textContent = ifmt ? `${interfaceItem.name} (${ifmt})` : interfaceItem.name;
                 if (interfaceItem.id === this.currentInterfaceId) {
                     option.selected = true;
@@ -444,7 +446,7 @@ class MessageManager {
                 </td>
                 <td>
                     ${this.renderProcessingTime(message)}
-                    ${message.error_count > 0 ? HtmlSafe.html`<br><small class="text-danger">${message.error_count} errors</small>` : ''}
+                    ${message.error_count > 0 ? HtmlSafe.html`<br><small class="text-danger" title="${message.last_error_message || ''}">${message.error_count} errors</small>` : ''}
                 </td>
                 <td>
                     <div class="btn-group btn-group-sm">
@@ -738,7 +740,8 @@ class MessageManager {
             ((stats.successful_messages / stats.total_messages) * 100).toFixed(1) : 0;
 
         if (totalMessages) totalMessages.textContent = stats.total_messages || 0;
-        if (activeInterfaces) activeInterfaces.textContent = this.interfaces?.length || 0;
+        // "Active" interfaces — not every interface the page happens to have loaded (inactive, draft and errored ones too).
+        if (activeInterfaces) activeInterfaces.textContent = (this.interfaces || []).filter((i) => i.status === 'active').length;
         if (successRate) successRate.textContent = `${successPercent}%`;
 
         console.log('✅ Stats updated via alternative method');
@@ -754,6 +757,9 @@ class MessageManager {
         if (overviewTab) overviewTab.classList.add('active');
         const overviewBtn = document.getElementById('overviewTabBtn');
         if (overviewBtn) overviewBtn.classList.add('active');
+
+        // Clear the previous message's error indicator until this message's detail arrives
+        this.updateErrorsTabIndicator({});
 
         // Clear content tab cache
         const contentView = document.getElementById('messageContentView');
@@ -773,6 +779,15 @@ class MessageManager {
 
                 // Update modal subtitle with message context
                 const message = data.data.message;
+                this.updateErrorsTabIndicator(message);
+
+                // Open this exact message in Message Trace (scoped to its interface)
+                const traceLink = document.getElementById('traceLinkBtn');
+                if (traceLink) {
+                    traceLink.href = 'message-trace.html?interfaceId=' + encodeURIComponent(message.interface_id || this.currentInterfaceId || '') +
+                        '&id=' + encodeURIComponent(message.message_id);
+                    traceLink.style.display = 'inline-flex';
+                }
                 const subtitle = document.getElementById('modalMessageSubtitle');
                 if (subtitle) {
                     subtitle.textContent = `${message.message_id}${message.message_type ? ' · ' + message.message_type : ''}`;
@@ -1466,10 +1481,13 @@ class MessageManager {
             container.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading errors...</div>';
 
             // Fetch errors from API
-            const response = await fetch(`/api/messages/${encodeURIComponent(messageId)}/errors?interfaceId=${message.interface_id}`);
+            const ifaceId = this.currentInterfaceId || message.interface_id;
+            const response = await fetch(`/api/messages/${encodeURIComponent(messageId)}/errors?interfaceId=${encodeURIComponent(ifaceId)}`);
 
+            // Say WHY it failed (permission, not found, server) — never a bare "unable to load".
             if (!response.ok) {
-                throw new Error('Failed to fetch errors');
+                const body = await response.json().catch(() => ({}));
+                throw new Error(body.error || `The server answered ${response.status}`);
             }
 
             const result = await response.json();
@@ -1479,6 +1497,12 @@ class MessageManager {
             }
 
             const { errors, summary } = result.data;
+
+            // A failure recorded only as a summary (no detailed stack): still show it — never hide a failure.
+            if ((!errors || errors.length === 0) && summary && (summary.error_count > 0 || summary.last_error_message)) {
+                container.innerHTML = HtmlSafe.html`${this.renderRecordedError(summary)}`;
+                return;
+            }
 
             // If no errors, show a success message
             if (!errors || errors.length === 0) {
@@ -1493,8 +1517,6 @@ class MessageManager {
                         </div>
                     </div>
                 `;
-                // Hide the errors tab if no errors
-                document.getElementById('errorsTabBtn').style.display = 'none';
                 return;
             }
 
@@ -1504,8 +1526,48 @@ class MessageManager {
         } catch (error) {
             console.error('Failed to load errors:', error);
             document.getElementById('messageErrorsView').innerHTML =
-                '<div class="alert alert-warning">Unable to load error data.</div>';
+                HtmlSafe.html`<div class="alert alert-warning">Unable to load error data: ${error.message}</div>`;
         }
+    }
+
+    /** "?interfaceId=<id>" for the open message's interface, or "" when it is not known. */
+    _interfaceQuery() {
+        const id = this.currentInterfaceId || this.messageData?.message?.interface_id || '';
+        return id ? `?interfaceId=${encodeURIComponent(id)}` : '';
+    }
+
+    /** Red count badge on the Errors tab (and a red tab) as soon as a message with errors is opened. */
+    updateErrorsTabIndicator(message) {
+        const n = Number(message.error_count) || 0;
+        const failed = ['failed', 'error'].includes(message.status);
+        const btn = document.getElementById('errorsTabBtn');
+        const badge = document.getElementById('errorsTabBadge');
+        if (btn) btn.classList.toggle('has-errors', n > 0 || failed);
+        if (badge) {
+            badge.textContent = n > 0 ? String(n) : (failed ? '!' : '');
+            badge.style.display = (n > 0 || failed) ? 'inline-block' : 'none';
+        }
+        const view = document.getElementById('messageErrorsView');
+        if (view) view.innerHTML = '<div class="loading">Loading errors...</div>';
+    }
+
+    /** A failure we only have the summary for (processed before detailed capture, or capture unavailable). */
+    renderRecordedError(summary) {
+        const when = summary.last_error_timestamp ? new Date(summary.last_error_timestamp).toLocaleString() : null;
+        return HtmlSafe.html`
+            <div style="max-width: 1400px; margin: 0 auto;">
+                <div style="background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-left: 4px solid #dc2626;">
+                    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
+                        <span style="background: #fee2e2; color: #dc2626; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">${String(summary.error_severity || 'error').toUpperCase()}</span>
+                        <span style="color: #64748b; font-size: 0.85rem;">${summary.last_error_stage ? summary.last_error_stage + ' · ' : ''}${when || ''}</span>
+                    </div>
+                    <h6 style="color: #1e3a8a; margin: 0 0 0.5rem 0; font-weight: 600; font-size: 1rem;">${summary.last_error_message || 'The message failed.'}</h6>
+                    <div style="color: #64748b; font-size: 0.85rem;">
+                        ${summary.error_count > 0 ? HtmlSafe.html`<strong>${summary.error_count}</strong> error${summary.error_count === 1 ? '' : 's'} recorded. ` : ''}
+                        Detailed error context (stage, type, recovery, stack trace) was not captured for this message. See the <strong>Logs</strong> tab for the full processing history.
+                    </div>
+                </div>
+            </div>`;
     }
 
     renderErrorStack(errors, summary) {
@@ -1540,10 +1602,11 @@ class MessageManager {
         const errorHtml = Object.entries(errorsByType)
             .sort(([a], [b]) => {
                 const order = { 'critical': 0, 'error': 1, 'warning': 2 };
-                return order[a] - order[b];
+                return (order[a] ?? 1) - (order[b] ?? 1);
             })
             .map(([severity, severityErrors]) => {
-                const config = severityConfig[severity];
+                // An unexpected severity must still render (as an error), never throw and blank the tab.
+                const config = severityConfig[severity] || severityConfig.error;
                 return severityErrors.map((err, index) => {
                     const timestamp = new Date(err.error_timestamp).toLocaleString();
                     const hasStackTrace = err.stack_trace && err.stack_trace.length > 0;
@@ -2152,6 +2215,15 @@ class MessageManager {
                     <span style="margin-left: auto; font-size: 0.8rem; color: #64748b;">${this.formatDateTime(message.received_at)}</span>
                 </div>
 
+                ${['failed', 'error'].includes(message.status) ? HtmlSafe.html`
+                <div role="alert" style="background:#fef2f2;border:1px solid #fecaca;border-left:4px solid #dc2626;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem;display:flex;gap:1rem;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:240px;">
+                        <div style="font-weight:700;color:#991b1b;margin-bottom:0.25rem;">This message failed</div>
+                        <div style="color:#7f1d1d;font-size:0.9rem;word-break:break-word;">${message.last_error_message || 'No error message was recorded.'}</div>
+                    </div>
+                    <button type="button" class="btn-modern btn-modern-secondary" onclick="openMessageTab('errors')">View error details</button>
+                </div>` : ''}
+
                 <!-- Info grid -->
                 <div class="row g-3">
                     <div class="col-md-6">
@@ -2372,10 +2444,13 @@ class MessageManager {
         if (this._contentRestricted()) { container.innerHTML = HtmlSafe.html`${this._restrictedNotice()}`; return; }
         container.innerHTML = '<div class="text-center" style="padding:2rem;"><i class="fas fa-spinner fa-spin"></i> Loading content...</div>';
 
-        // Fetch inbound and outbound content in parallel
+        // Fetch inbound and outbound content in parallel. The interface is passed so the server reads that interface's
+        // message table directly; without it the Go handler scans EVERY interface's table to find the message (6-9 s
+        // with ~2,200 interfaces for a 259-byte message).
+        const iq = this._interfaceQuery();
         const [rawResult, transformedResult] = await Promise.allSettled([
-            fetch(`/api/messages/${encodeURIComponent(messageId)}/raw`).then(r => r.ok ? r.json() : null),
-            fetch(`/api/messages/${encodeURIComponent(messageId)}/transformed`).then(r => r.ok ? r.json() : null),
+            fetch(`/api/messages/${encodeURIComponent(messageId)}/raw${iq}`).then(r => r.ok ? r.json() : null),
+            fetch(`/api/messages/${encodeURIComponent(messageId)}/transformed${iq}`).then(r => r.ok ? r.json() : null),
         ]);
 
         const rawData         = rawResult.status === 'fulfilled' ? rawResult.value : null;
@@ -2462,7 +2537,12 @@ class MessageManager {
         })();
 
         // Outbound panel label and toggle depend on whether we have the exact sent payload
-        const outboundLabel = outboundSource === 'outbound' ? 'Outbound (Sent)' : 'Pipeline Output';
+        // The exact payload is stored before delivery is attempted, so for a FAILED message it is what was attempted,
+        // not what was sent — say so.
+        const deliveryFailed = ['failed', 'error'].includes(message.status) || message.delivery_status === 'failed';
+        const outboundLabel = outboundSource === 'outbound'
+            ? (deliveryFailed ? 'Outbound (attempted, not delivered)' : 'Outbound (Sent)')
+            : 'Pipeline Output';
 
         if (isFHIRBundle && typeof ClinicalDocumentViewer !== 'undefined') {
             const height = 'calc(90vh - 280px)';
@@ -2514,9 +2594,11 @@ class MessageManager {
 
     async _toggleOutboundSource(messageId, currentSource) {
         const nextSource = currentSource === 'outbound' ? 'pipeline' : 'outbound';
+        const ifaceId = this.currentInterfaceId || this.messageData?.message?.interface_id || '';
+        const ifaceParam = ifaceId ? `interfaceId=${encodeURIComponent(ifaceId)}` : '';
         const url = nextSource === 'pipeline'
-            ? `/api/messages/${messageId}/transformed?source=pipeline`
-            : `/api/messages/${messageId}/transformed`;
+            ? `/api/messages/${messageId}/transformed?source=pipeline${ifaceParam ? '&' + ifaceParam : ''}`
+            : `/api/messages/${messageId}/transformed${ifaceParam ? '?' + ifaceParam : ''}`;
         try {
             const data = await fetch(url).then(r => r.ok ? r.json() : null);
             if (!data) return;
@@ -2627,8 +2709,12 @@ class MessageManager {
         let typeTag, highlighted;
         if (isEmpty) {
             typeTag = '';
-            highlighted = HtmlSafe.html`<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:0.85rem;">
-                <span><i class="fas fa-minus-circle" style="margin-right:0.4rem;"></i>Not available</span></div>`;
+            // Say WHY there is nothing: a message that failed before delivery produced no output.
+            const failedBeforeOutput = side === 'outbound' && ['failed', 'error'].includes(this.messageData?.message?.status);
+            highlighted = HtmlSafe.html`<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:1rem;text-align:center;color:#94a3b8;font-size:0.85rem;">
+                <span><i class="fas fa-minus-circle" style="margin-right:0.4rem;"></i>${failedBeforeOutput
+                    ? 'No output was produced: this message failed before it could be delivered. See the Errors tab for why.'
+                    : 'Not available'}</span></div>`;
         } else if (isHL7) {
             typeTag = HtmlSafe.html`<span style="background:#dbeafe;color:#1e40af;padding:0.2rem 0.55rem;border-radius:4px;font-size:0.75rem;font-weight:600;">HL7 v2</span>`;
             highlighted = this._highlightHL7(content);
@@ -3634,8 +3720,13 @@ function logout() {
         .then(() => window.location.href = 'login.html');
 }
 
-// Tab switching functionality
+// Tab switching functionality. Buttons are `<name>TabBtn`, panels are `<name>Tab`; used by the tab buttons and by
+// in-page links (e.g. the failed-message banner on Overview).
 function switchTab(tabName) {
+    openMessageTab(tabName);
+}
+
+function openMessageTab(tabName) {
     // Hide all tab contents
     document.querySelectorAll('.tab-content').forEach(tab => {
         tab.classList.remove('active');
@@ -3646,15 +3737,16 @@ function switchTab(tabName) {
         btn.classList.remove('active');
     });
 
-    // Show selected tab content
+    // Show selected tab content and mark its button
     document.getElementById(tabName + 'Tab').classList.add('active');
-
-    // Add active class to clicked button
-    event.target.closest('.tab-btn').classList.add('active');
+    const activeBtn = document.getElementById(tabName + 'TabBtn');
+    if (activeBtn) activeBtn.classList.add('active');
 
     // Load tab-specific content
     if (tabName === 'journey' && messageManager.selectedMessageId) {
         messageManager.loadDataLineage(messageManager.selectedMessageId);
+    } else if (tabName === 'errors' && messageManager.selectedMessageId) {
+        messageManager.loadErrors(messageManager.selectedMessageId);
     } else if (tabName === 'content' && messageManager.selectedMessageId) {
         messageManager.loadMessageContent(messageManager.selectedMessageId);
     } else if (tabName === 'logs' && messageManager.selectedMessageId) {

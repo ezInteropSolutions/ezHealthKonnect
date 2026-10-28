@@ -10,6 +10,8 @@ const { requireAuth } = require('../middleware/auth');
 const settingsService = require('../services/settingsService');
 const accessPolicy = require('../services/AccessPolicyService');
 const RateLimiter = require('../middleware/rateLimiter');
+const passwordResetTokens = require('../services/PasswordResetTokenService');
+const { PasswordResetTokenService } = passwordResetTokens;
 
 // Per-IP throttle on login attempts — separate from the existing per-account
 // lockout below (which only kicks in after repeated failures against ONE email).
@@ -20,8 +22,14 @@ const loginRateLimiter = new RateLimiter({ windowMs: 60 * 1000, max: 10 });
 // POST /api/auth/login - User login
 router.post('/login', loginRateLimiter.middleware(), async (req, res) => {
     try {
-        const { email, password } = req.body;
-        
+        const { email, password } = req.body || {};
+
+        // Malformed input is a client error. Without this, a missing/non-string value reached the user
+        // lookup, threw, and surfaced as a 500.
+        if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
+            return res.status(400).json({ message: 'Email and password are required' });
+        }
+
         console.log(`🔐 Login attempt for: ${email}`);
         
         // Find user
@@ -137,10 +145,14 @@ router.post('/login', loginRateLimiter.middleware(), async (req, res) => {
                 riskLevel: 'medium',
                 complianceFlags: { forced_password_reset: true }
             });
+            // The password was just verified, so this caller may complete the reset: hand out the single-use token
+            // that /reset-password requires (it no longer trusts a bare userId).
+            const dbUserForReset = await userService.database.models.User.findByPk(user.id);
             return res.status(403).json({
                 message: 'Your password must be changed before you can continue.',
                 requiresPasswordReset: true,
-                userId: user.id
+                userId: user.id,
+                resetToken: await passwordResetTokens.issue(dbUserForReset)
             });
         }
 
@@ -221,29 +233,48 @@ router.post('/login', loginRateLimiter.middleware(), async (req, res) => {
     }
 });
 
-// POST /api/auth/reset-password — Complete a forced password reset (no session needed)
-// Called from the force-reset page with userId + new password.
-router.post('/reset-password', async (req, res) => {
+// POST /api/auth/reset-password — Complete a forced password reset (no session needed).
+// Requires the single-use resetToken that /login issued after the CURRENT password was verified; a bare userId is
+// not a credential. Every failure answers identically so the endpoint cannot be used to learn which accounts exist
+// or are flagged. Rate limited per IP.
+const resetPasswordRateLimiter = new RateLimiter({ windowMs: 60 * 1000, max: 5 });
+router.post('/reset-password', resetPasswordRateLimiter.middleware(), async (req, res) => {
+    const INVALID = { message: 'This password reset link is invalid or has expired. Please sign in again.' };
     try {
-        const { userId, password } = req.body;
-        if (!userId || !password) {
-            return res.status(400).json({ message: 'userId and password are required' });
+        const { userId, resetToken, password } = req.body || {};
+        if (typeof userId !== 'string' || typeof resetToken !== 'string' || typeof password !== 'string' || !userId || !resetToken || !password) {
+            return res.status(400).json({ message: 'userId, resetToken and password are required' });
         }
-        if (password.length < 8) {
-            return res.status(400).json({ message: 'Password must be at least 8 characters' });
+        const secPolicy = await settingsService.getSecuritySettings();
+        const minLength = secPolicy.password_min_length || 8;
+        if (password.length < minLength) {
+            return res.status(400).json({ message: `Password must be at least ${minLength} characters` });
         }
 
         const User = userService.database.models.User;
-        const user = await User.findByPk(userId);
-        if (!user) return res.status(404).json({ message: 'User not found' });
-        if (!user.force_password_reset) {
-            return res.status(400).json({ message: 'No password reset is required for this account' });
+        const user = /^[0-9a-f-]{36}$/i.test(userId) ? await User.findByPk(userId) : null;
+        if (!user || !user.force_password_reset || !passwordResetTokens.verify(user, resetToken)) {
+            await auditService.logEvent({
+                userId: user ? user.id : null,
+                action: 'PASSWORD_RESET_COMPLETED',
+                entityType: 'User',
+                metadata: { method: 'forced_reset', reason: 'invalid or expired reset token' },
+                ipAddress: req.clientIP,
+                userAgent: req.get('User-Agent'),
+                result: 'failure',
+                riskLevel: 'high',
+                complianceFlags: { forced_password_reset: true }
+            });
+            return res.status(400).json(INVALID);
         }
 
-        const hashed = await bcrypt.hash(password, 12);
         // The model's attribute is password_hash. A `password` key is not an attribute and Sequelize silently
         // ignores it, which left the old password valid after a "successful" reset.
-        await user.update({ password_hash: hashed, force_password_reset: false, login_attempts: 0, locked_until: null });
+        await user.update({
+            password_hash: await bcrypt.hash(password, 12),
+            force_password_reset: false, login_attempts: 0, locked_until: null,
+            ...PasswordResetTokenService.cleared(),   // single use
+        });
 
         await auditService.logEvent({
             userId: user.id,

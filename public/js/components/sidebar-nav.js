@@ -17,9 +17,9 @@
         {
             title: 'Main',
             items: [
-                { label: 'Dashboard',    href: 'dashboard.html',           icon: 'far fa-house' },
+                { label: 'Dashboard',    href: 'dashboard.html',           icon: 'fas fa-house' },
                 { label: 'Interfaces',   href: 'interfaces.html',          icon: 'fas fa-plug' },
-                { label: 'Review Queue', href: 'review-queue.html',        icon: 'far fa-circle-exclamation', badgeId: 'rqNavBadge' },
+                { label: 'Review Queue', href: 'review-queue.html',        icon: 'fas fa-circle-exclamation', badgeId: 'rqNavBadge' },
                 { label: 'Templates',    href: 'dashboard.html#templates', icon: 'far fa-file-lines' }
             ]
         },

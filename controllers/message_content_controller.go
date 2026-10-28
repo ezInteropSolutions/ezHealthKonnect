@@ -244,7 +244,8 @@ func (mc *MessageContentController) GetTransformedContent(c *gin.Context) {
 	data, err := mc.objStorage.GetTransformedContent(c.Request.Context(), interfaceID, messageID)
 	if err != nil {
 		if isNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Transformed content not yet available"})
+			// "Not yet available" read as "wait" even for a message that will never have any (it failed before delivery).
+			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "No transformed content is stored for this message"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": fmt.Sprintf("Failed to retrieve transformed content: %v", err)})
@@ -502,74 +503,94 @@ func (mc *MessageContentController) resolveInterfaceID(messageID string) string 
 	return ""
 }
 
-// resolveByCorrelationID scans every interface message table for a row with the
-// given correlation_id (populated on every inbound message — see
-// models.InboundMessage.CorrelationID) and returns its (interface_id, message_id).
-// Returns ("", "") if the correlation_id isn't found in any table. Mirrors
-// resolveInterfaceID's cross-table scan pattern, keyed by correlation_id instead
-// of message_id since GetMessageTrace's caller only has the correlation_id.
-func (mc *MessageContentController) resolveByCorrelationID(correlationID string) (interfaceID, messageID string) {
+// findTraceMatches returns the messages of ONE interface that match id: by message_id, by the row's uuid, or by
+// correlation_id (up to 20, ranked: exact matches first, then newest first). The table comes from
+// interface_table_metadata (never from the request) and is quoted as an identifier. nil, nil = nothing matched or the
+// interface has no message table.
+func (mc *MessageContentController) findTraceMatches(interfaceID, id string) ([]traceMatch, error) {
 	if mc.db == nil {
-		return "", ""
+		return nil, fmt.Errorf("database not available")
 	}
 
-	rows, err := mc.db.Query(`SELECT interface_id, table_name FROM interface_table_metadata WHERE table_name IS NOT NULL`)
+	var table string
+	err := mc.db.QueryRow(
+		`SELECT table_name FROM interface_table_metadata WHERE interface_id = $1 AND table_name IS NOT NULL LIMIT 1`,
+		interfaceID,
+	).Scan(&table)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
 	if err != nil {
-		return "", ""
+		return nil, fmt.Errorf("look up message table: %w", err)
+	}
+
+	rows, err := mc.db.Query(fmt.Sprintf(`
+		SELECT id::text, message_id, COALESCE(correlation_id, ''), COALESCE(status, ''), received_at
+		FROM %s
+		WHERE message_id = $1 OR id::text = $1 OR correlation_id = $1
+		ORDER BY received_at DESC
+		LIMIT 20`, quoteIdentifier(table)), id)
+	if err != nil {
+		return nil, fmt.Errorf("query messages: %w", err)
 	}
 	defer rows.Close()
 
-	type tableInfo struct {
-		interfaceID string
-		tableName   string
-	}
-	var tables []tableInfo
+	var found []traceMatch
 	for rows.Next() {
-		var t tableInfo
-		if err := rows.Scan(&t.interfaceID, &t.tableName); err == nil {
-			tables = append(tables, t)
+		var m traceMatch
+		if err := rows.Scan(&m.ID, &m.MessageID, &m.CorrelationID, &m.Status, &m.ReceivedAt); err != nil {
+			return nil, fmt.Errorf("scan message: %w", err)
 		}
+		found = append(found, m)
 	}
-
-	for _, t := range tables {
-		query := fmt.Sprintf(`SELECT message_id FROM %s WHERE correlation_id = $1 LIMIT 1`, t.tableName)
-		var msgID string
-		if err := mc.db.QueryRow(query, correlationID).Scan(&msgID); err == nil {
-			return t.interfaceID, msgID
-		}
-	}
-	return "", ""
+	return rankTraceMatches(found, id), rows.Err()
 }
 
-// GetMessageTrace resolves a correlation_id to its message across every interface
-// and returns the full per-message lifecycle log timeline — the same NDJSON entries
-// GetProcessingLogs returns, but reachable from just the correlation_id (e.g. pasted
-// from an error email or alert) without knowing which interface the message came
-// from or its internal message_id.
-// GET /api/system/message-trace/:correlationId
+// GetMessageTrace returns the full per-message lifecycle log timeline — the same NDJSON entries GetProcessingLogs
+// returns — for a message of ONE interface, found from its message id or its correlation id.
+// GET /api/system/message-trace/:correlationId?interfaceId=<uuid>
+//
+// interfaceId is required: a correlation id is the sender's reusable control id (HL7 MSH-10) and non-HL7 messages
+// have none, so an unscoped lookup could only ever guess. When an id matches several messages of the interface the
+// most recent is traced, "ambiguous" is true, and every match is returned so the caller can pick another.
 func (mc *MessageContentController) GetMessageTrace(c *gin.Context) {
-	correlationID := c.Param("correlationId")
-	if correlationID == "" {
+	id := c.Param("correlationId")
+	if id == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   "correlationId path parameter is required",
+			"error":   "message id or correlation id is required",
 		})
 		return
 	}
 
-	interfaceID, messageID := mc.resolveByCorrelationID(correlationID)
-	if interfaceID == "" || messageID == "" {
-		c.JSON(http.StatusNotFound, gin.H{
+	interfaceID := c.Query("interfaceId")
+	if !isUUID(interfaceID) {
+		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   "no message found for this correlation_id",
+			"error":   "interfaceId query parameter is required and must be a UUID",
 		})
 		return
 	}
+
+	matches, err := mc.findTraceMatches(interfaceID, id)
+	if err != nil {
+		log.Printf("⚠️  GetMessageTrace(%s): %v", interfaceID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "trace lookup failed"})
+		return
+	}
+	if len(matches) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "no message found for this id in this interface",
+		})
+		return
+	}
+	selected := matches[0]
 
 	var entries []storage.LogEntry
 	if mc.objStorage != nil {
 		var err error
-		entries, err = mc.objStorage.GetLogs(c.Request.Context(), interfaceID, messageID)
+		entries, err = mc.objStorage.GetLogs(c.Request.Context(), interfaceID, selected.MessageID)
 		if err != nil && !isNotFound(err) {
 			log.Printf("⚠️  GetMessageTrace: %v", err)
 		}
@@ -577,9 +598,13 @@ func (mc *MessageContentController) GetMessageTrace(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":        true,
-		"correlation_id": correlationID,
+		"id":             id,
+		"correlation_id": selected.CorrelationID,
 		"interface_id":   interfaceID,
-		"message_id":     messageID,
+		"message_id":     selected.MessageID,
+		"matched_by":     selected.MatchedBy,
+		"ambiguous":      traceAmbiguous(matches),
+		"matches":        matches,
 		"timeline":       entries,
 		"count":          len(entries),
 	})

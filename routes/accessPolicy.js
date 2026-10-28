@@ -16,7 +16,7 @@ const auditService = require('../services/auditService');
 const settingsService = require('../services/settingsService');
 const accessPolicy = require('../services/AccessPolicyService');
 
-const { INTERFACE_SCOPES, MESSAGE_CONTENT_LEVELS, DEFAULT_ROLE_POLICIES, SETTING_KEY } = accessPolicy;
+const { INTERFACE_SCOPES, MESSAGE_CONTENT_LEVELS, DEFAULT_ROLE_POLICIES, ALL_INTERFACES_ROLES, SETTING_KEY } = accessPolicy;
 const CONFIGURABLE_ROLES = Object.keys(DEFAULT_ROLE_POLICIES);
 
 const fail = (res, status, error) => res.status(status).json({ success: false, error, message: error });
@@ -45,6 +45,9 @@ router.put('/', requireAuth, requireAdmin, async (req, res) => {
             if (!p) return fail(res, 400, `The policy for "${role}" is missing`);
             if (!INTERFACE_SCOPES.includes(p.interfaceScope)) {
                 return fail(res, 400, `"${role}": interfaces must be one of ${INTERFACE_SCOPES.join(', ')}`);
+            }
+            if (ALL_INTERFACES_ROLES.includes(role) && p.interfaceScope !== 'all') {
+                return fail(res, 400, `"${role}" always sees all interfaces; only message content can be restricted`);
             }
             if (!MESSAGE_CONTENT_LEVELS.includes(p.messageContent)) {
                 return fail(res, 400, `"${role}": message content must be one of ${MESSAGE_CONTENT_LEVELS.join(', ')}`);

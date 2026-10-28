@@ -83,10 +83,11 @@ test.describe('Access policy', () => {
     test('an admin can change a role\'s policy and it applies at once, then restore it', async ({ seed }) => {
         const admin = seed.api.request;
 
-        // Viewer limited to their own interfaces: the admin's interface disappears for them.
-        expect((await putPolicy(admin, { ...DEFAULTS, viewer: { interfaceScope: 'own', messageContent: 'metadata' } })).ok()).toBeTruthy();
-        expect(await interfaceIds(viewerApi)).not.toContain(seed.interfaceId);
-        expect((await listMessages(viewerApi, seed)).status()).toBeGreaterThanOrEqual(400);
+        // Support/monitoring roles cannot be scoped to "own" interfaces: refused, nothing saved, still visible.
+        expect((await putPolicy(admin, { ...DEFAULTS, viewer: { interfaceScope: 'own', messageContent: 'metadata' } })).status()).toBe(400);
+        expect((await putPolicy(admin, { ...DEFAULTS, operator: { interfaceScope: 'own', messageContent: 'full' } })).status()).toBe(400);
+        expect(await interfaceIds(viewerApi)).toContain(seed.interfaceId);
+        expect(await interfaceIds(operatorApi)).toContain(seed.interfaceId);
 
         // Viewer allowed full content on all interfaces.
         expect((await putPolicy(admin, { ...DEFAULTS, viewer: { interfaceScope: 'all', messageContent: 'full' } })).ok()).toBeTruthy();

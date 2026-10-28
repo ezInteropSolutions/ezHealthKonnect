@@ -9,7 +9,7 @@ class InterfaceTableManager {
         this.database = require('../config/database');
         this.tableCache = new Map(); // Cache of existing interface tables
         this.schemaTemplate = this.getMessageTableSchema();
-        this.CURRENT_SCHEMA_VERSION = '1.2'; // Increment when schema changes
+        this.CURRENT_SCHEMA_VERSION = '1.3'; // Increment when schema changes (1.3: error-capture columns, V284)
         this.REQUIRED_COLUMNS = [
             'id', 'message_id', 'correlation_id', 'interface_id', 'status', 'priority',
             'received_at', 'source_type', 'source_endpoint', 'source_ip',
@@ -20,6 +20,8 @@ class InterfaceTableManager {
             'parsed_at', 'parsing_status', 'parsing_time_ms', 'parsing_error',
             // Error handling
             'error_count', 'last_error_message', 'last_error_at',
+            // Error capture (V23 add_error_to_message_stack / get_message_errors / Go ErrorCaptureService)
+            'error_stack', 'last_error_timestamp', 'last_error_stage', 'error_severity',
             // Delivery
             'target_endpoint', 'delivery_status', 'delivery_attempts', 'last_delivery_attempt_at',
             // Object storage URIs
@@ -145,6 +147,11 @@ class InterfaceTableManager {
             'transformation_type': 'VARCHAR(100)',
             // Error handling
             'last_error_at': 'TIMESTAMP WITH TIME ZONE',
+            // Error capture (V23). NOT NULL DEFAULT '[]' so `error_stack || new_error` can never evaluate to NULL.
+            'error_stack': "JSONB NOT NULL DEFAULT '[]'::jsonb",
+            'last_error_timestamp': 'TIMESTAMP WITH TIME ZONE',
+            'last_error_stage': 'VARCHAR(50)',
+            'error_severity': 'VARCHAR(20)',
             'retry_count': 'INTEGER DEFAULT 0',
             'max_retries': 'INTEGER DEFAULT 3',
             // Delivery
@@ -260,6 +267,13 @@ class InterfaceTableManager {
                 error_count INTEGER DEFAULT 0,
                 last_error_message TEXT,
                 last_error_at TIMESTAMP WITH TIME ZONE,
+
+                -- Error capture (V23): one JSON entry per error/warning, written by add_error_to_message_stack()
+                -- and read by get_message_errors() (the message viewer's Errors tab) and the Go ErrorCaptureService.
+                error_stack JSONB NOT NULL DEFAULT '[]'::jsonb,
+                last_error_timestamp TIMESTAMP WITH TIME ZONE,
+                last_error_stage VARCHAR(50),
+                error_severity VARCHAR(20),
 
                 -- Delivery information
                 target_endpoint VARCHAR(500),
@@ -564,9 +578,11 @@ class InterfaceTableManager {
         const statsQuery = `
             SELECT
                 COUNT(*) as total_messages,
-                COUNT(CASE WHEN status IN ('sent', 'delivered') THEN 1 END) as successful_messages,
+                -- 'processed' is the status a successfully processed message ENDS in; counting only sent/delivered
+                -- made the success rate 0% for practically every interface.
+                COUNT(CASE WHEN status IN ('processed', 'sent', 'delivered') THEN 1 END) as successful_messages,
                 COUNT(CASE WHEN status IN ('failed', 'error') THEN 1 END) as failed_messages,
-                COUNT(CASE WHEN status IN ('received', 'processing') THEN 1 END) as processing_messages,
+                COUNT(CASE WHEN status IN ('received', 'processing', 'transformed', 'reprocessing') THEN 1 END) as processing_messages,
                 AVG(processing_time_ms) as avg_processing_time,
                 MAX(received_at) as last_message_at,
                 MIN(received_at) as first_message_at,

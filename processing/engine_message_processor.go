@@ -557,6 +557,12 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 				logger.LogParsingComplete(messageType, result.ParsingTime.Milliseconds(), len(result.ParsedJSON))
 			}
 
+			// Only HL7-over-MLLP supplies a type at ingest (from MSH-9). For REST/ASTM/file/EDI/NCPDP/CDA inbounds the
+			// row was left blank and the message list showed "Unknown" although the parser had just worked out the type.
+			if messageType == "" {
+				pe.recordDetectedMessageType(interfaceID, msg.MessageID, result.Metadata.MessageType)
+			}
+
 			// Store parsed JSON in object storage
 			if pe.objectStorage != nil && result.ParsedJSON != nil {
 				parsedURI, err := pe.objectStorage.StoreParsedContent(ctx, interfaceID, msg.MessageID, result.ParsedJSON)
@@ -1065,6 +1071,22 @@ func (pe *ProcessingEngine) updateStorageURI(interfaceID, messageID, column, uri
 	if _, err := pe.db.Exec(query, uri, messageID); err != nil {
 		// Column may not exist on tables created before V56 migration — non-fatal
 		log.Printf("⚠️  updateStorageURI(%s.%s): %v", tableName, column, err)
+	}
+}
+
+// recordDetectedMessageType saves the message type the PARSER detected (an EDI transaction set, an NCPDP transaction,
+// a FHIR resource type, ...) when the connector supplied none. It only fills a blank type — a type the connector
+// already recorded (e.g. HL7 MSH-9) is never overwritten — and a failure is non-fatal (display only).
+func (pe *ProcessingEngine) recordDetectedMessageType(interfaceID, messageID, detected string) {
+	if pe.db == nil || detected == "" {
+		return
+	}
+	tableName := fmt.Sprintf("messages_intf_%s", sanitizeInterfaceID(interfaceID))
+	query := fmt.Sprintf(
+		`UPDATE %s SET message_type = $1, updated_at = NOW() WHERE message_id = $2 AND (message_type IS NULL OR message_type = '')`,
+		tableName)
+	if _, err := pe.db.Exec(query, detected, messageID); err != nil {
+		log.Printf("⚠️  recordDetectedMessageType(%s): %v", tableName, err)
 	}
 }
 

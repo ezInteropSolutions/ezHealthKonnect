@@ -5,10 +5,11 @@
  * TC-TRACE-001  Page title contains "Message Trace"
  * TC-TRACE-002  Page header and search box render
  * TC-TRACE-003  Sidebar "Message Trace" nav item is present (Operations section)
- * TC-TRACE-004  Searching an unknown correlation ID shows a "no message found" state
- * TC-TRACE-005  Searching a real correlation ID renders the timeline with expected stages
- * TC-TRACE-006  Deep link (?correlationId=...) auto-runs the trace on load
+ * TC-TRACE-004  Searching an unknown ID in an interface shows a "no message found" state that names the interface
+ * TC-TRACE-005  Picking an interface + a real correlation ID renders the timeline with expected stages
+ * TC-TRACE-006  Deep link (?interfaceId=...&id=...) auto-runs the trace on load
  * TC-TRACE-007  No horizontal overflow at 1280px
+ * TC-TRACE-008  Tracing without choosing an interface asks for one (the trace is scoped to one interface)
  *
  * TC-TRACE-005/006 send a real HL7 message over MLLP (self-contained fixture —
  * does not depend on any prior manual test run) with a unique correlation ID,
@@ -49,6 +50,7 @@ test.describe('Message Trace', () => {
         const header = page.locator('.page-header');
         await expect(header).toBeVisible();
         await expect(header.getByText(/message trace/i)).toBeVisible();
+        await expect(page.locator('#interfaceInput')).toBeVisible();
         await expect(page.locator('#correlationInput')).toBeVisible();
         await expect(page.locator('#traceBtn')).toBeVisible();
     });
@@ -61,11 +63,13 @@ test.describe('Message Trace', () => {
     });
 
     // ── TC-TRACE-004 ─────────────────────────────────────────────────────────────
-    test('TC-TRACE-004 unknown correlation ID shows not-found state', async ({ page }) => {
+    test('TC-TRACE-004 unknown ID shows a not-found state naming the interface', async ({ page, seed }) => {
+        await page.locator('#interfaceInput').fill(seed.interfaceName);
         await page.locator('#correlationInput').fill('no-such-correlation-id-xyz');
         await page.locator('#traceBtn').click();
         await expect(page.locator('.empty.error')).toBeVisible({ timeout: 8000 });
         await expect(page.locator('.empty.error')).toContainText(/no message found/i);
+        await expect(page.locator('.empty.error')).toContainText(seed.interfaceName);
     });
 
     // ── TC-TRACE-005 ─────────────────────────────────────────────────────────────
@@ -74,6 +78,7 @@ test.describe('Message Trace', () => {
         await sendTestMessage(seed, controlId);
         await page.waitForTimeout(3000); // allow async pipeline (parse -> transform -> deliver) to finish
 
+        await page.locator('#interfaceInput').fill(seed.interfaceName);
         await page.locator('#correlationInput').fill(controlId);
         await page.locator('#traceBtn').click();
 
@@ -100,12 +105,20 @@ test.describe('Message Trace', () => {
         await sendTestMessage(seed, controlId);
         await page.waitForTimeout(3000);
 
-        await page.goto('/message-trace.html?correlationId=' + encodeURIComponent(controlId));
+        // The legacy ?correlationId= parameter still works, but the interface must now be given too.
+        await page.goto('/message-trace.html?interfaceId=' + seed.interfaceId + '&correlationId=' + encodeURIComponent(controlId));
         await page.waitForLoadState('domcontentloaded');
 
         await expect(page.locator('#correlationInput')).toHaveValue(controlId);
         await expect(page.locator('#resultPanel')).toBeVisible({ timeout: 10000 });
         await expect(page.locator('.timeline-row').first()).toBeVisible({ timeout: 10000 });
+    });
+
+    // ── TC-TRACE-008 ─────────────────────────────────────────────────────────────
+    test('TC-TRACE-008 tracing without an interface asks for one', async ({ page }) => {
+        await page.locator('#correlationInput').fill('anything');
+        await page.locator('#traceBtn').click();
+        await expect(page.locator('.empty.error')).toContainText(/pick the interface/i);
     });
 
     // ── TC-TRACE-007 ─────────────────────────────────────────────────────────────

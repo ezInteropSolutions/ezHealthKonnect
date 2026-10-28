@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reports – ezHealthKonnect</title>
     <link rel="stylesheet" href="css/dashboard.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css">
     <style>
         /* ── Design tokens ───────────────────────────────────────────────────── */
         :root {
@@ -223,10 +223,10 @@
         <div class="nav-section">
             <div class="section-header"><span class="section-title">Main</span><i class="fas fa-chevron-down nav-section-chevron"></i></div>
             <div class="nav-items">
-                <a href="dashboard.html" class="nav-item"><span class="nav-icon"><i class="far fa-house"></i></span><span class="nav-label">Dashboard</span></a>
+                <a href="dashboard.html" class="nav-item"><span class="nav-icon"><i class="fas fa-house"></i></span><span class="nav-label">Dashboard</span></a>
                 <a href="interfaces.html" class="nav-item"><span class="nav-icon"><i class="fas fa-plug"></i></span><span class="nav-label">Interfaces</span></a>
                 <a href="messages.html" class="nav-item"><span class="nav-icon"><i class="far fa-envelope"></i></span><span class="nav-label">Messages</span></a>
-                <a href="review-queue.html" class="nav-item"><span class="nav-icon"><i class="far fa-circle-exclamation"></i></span><span class="nav-label">Review Queue</span></a>
+                <a href="review-queue.html" class="nav-item"><span class="nav-icon"><i class="fas fa-circle-exclamation"></i></span><span class="nav-label">Review Queue</span></a>
                 <a href="dashboard.html#templates" class="nav-item"><span class="nav-icon"><i class="far fa-file-lines"></i></span><span class="nav-label">Templates</span></a>
             </div>
         </div>
@@ -288,7 +288,7 @@
             <!-- Gallery help -->
             <div class="help-box">
                 <button class="help-box-toggle open" id="galleryHelpToggle">
-                    <span><i class="far fa-circle-info" style="margin-right:7px;color:var(--pink)"></i>How to use the Report Gallery</span>
+                    <span><i class="fas fa-circle-info" style="margin-right:7px;color:var(--pink)"></i>How to use the Report Gallery</span>
                     <i class="fas fa-chevron-up"></i>
                 </button>
                 <div class="help-box-body open" id="galleryHelpBody">
@@ -323,7 +323,7 @@
             <!-- Builder help (collapsible) -->
             <div class="help-box" style="margin-bottom:20px">
                 <button class="help-box-toggle" id="builderHelpToggle">
-                    <span><i class="far fa-circle-info" style="margin-right:7px;color:var(--pink)"></i>Builder guide — click to expand</span>
+                    <span><i class="fas fa-circle-info" style="margin-right:7px;color:var(--pink)"></i>Builder guide — click to expand</span>
                     <i class="fas fa-chevron-down"></i>
                 </button>
                 <div class="help-box-body" id="builderHelpBody">
@@ -430,7 +430,7 @@
                             <input type="number" id="bldLimit" value="100" min="1" max="10000">
                             <span class="fg-hint">Max rows returned. Keep ≤ 500 for fast UI rendering.</span>
                         </div>
-                        <button class="btn-primary" id="runBtn"><i class="far fa-play"></i> Run Report</button>
+                        <button class="btn-primary" id="runBtn"><i class="fas fa-play"></i> Run Report</button>
                         <button class="btn-outline" id="saveBtn"><i class="far fa-floppy-disk"></i> Save Report</button>
                     </div>
                 </div>
@@ -721,9 +721,9 @@ async function runBuilder() {
         if (!resp.ok || error) throw new Error(error || resp.statusText);
         renderResults(panel, data, cfg);
     } catch (e) {
-        panel.innerHTML = HtmlSafe.html`<div class="empty"><i class="far fa-triangle-exclamation"></i><p>${e.message}</p></div>`;
+        panel.innerHTML = HtmlSafe.html`<div class="empty"><i class="fas fa-triangle-exclamation"></i><p>${e.message}</p></div>`;
     } finally {
-        btn.disabled = false; btn.innerHTML = '<i class="far fa-play"></i> Run Report';
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-play"></i> Run Report';
     }
 }
 
@@ -765,7 +765,7 @@ async function loadSaved() {
                 </div>
             </div>`)}</div>`;
     } catch (e) {
-        cont.innerHTML = HtmlSafe.html`<div class="empty"><i class="far fa-triangle-exclamation"></i><p>${e.message}</p></div>`;
+        cont.innerHTML = HtmlSafe.html`<div class="empty"><i class="fas fa-triangle-exclamation"></i><p>${e.message}</p></div>`;
     }
 }
 
@@ -792,7 +792,7 @@ function renderResults(panel, result, cfg) {
         <div class="res-head">
             <h3>Results — ${cfg.data_source}</h3>
             <span class="res-meta">${meta}</span>
-            <button class="export-btn" onclick="exportCSV()" title="Export as CSV"><i class="far fa-file-arrow-down"></i> Export CSV</button>
+            <button class="export-btn" onclick="exportCSV()" title="Export as CSV"><i class="fas fa-file-arrow-down"></i> Export CSV</button>
         </div>
         <div class="res-body">${body}</div>`;
     // Store result for export
@@ -800,7 +800,7 @@ function renderResults(panel, result, cfg) {
 }
 
 function renderTable(result) {
-    if (!result.rows?.length) return HtmlSafe.raw('<div class="empty"><i class="far fa-inbox"></i><p>No data for this query and time range.</p></div>');
+    if (!result.rows?.length) return HtmlSafe.raw('<div class="empty"><i class="fas fa-inbox"></i><p>No data for this query and time range.</p></div>');
     const cols = result.columns || Object.keys(result.rows[0]);
     return HtmlSafe.html`<table class="data-table">
         <thead><tr>${cols.map(c => HtmlSafe.html`<th>${c}</th>`)}</tr></thead>
@@ -824,7 +824,7 @@ function renderBar(result) {
 }
 
 function renderMetricCards(result) {
-    if (!result.rows?.length) return HtmlSafe.raw('<div class="empty"><i class="far fa-gauge"></i><p>No data</p></div>');
+    if (!result.rows?.length) return HtmlSafe.raw('<div class="empty"><i class="fas fa-gauge"></i><p>No data</p></div>');
     const row = result.rows[0];
     const cols = result.columns || Object.keys(row);
     return HtmlSafe.html`<div class="mc-grid">${cols.map(c => HtmlSafe.html`<div class="mc-card"><div class="mc-val">${fmt(row[c])}</div><div class="mc-lbl">${c.replace(/_/g,' ')}</div></div>`)}</div>`;

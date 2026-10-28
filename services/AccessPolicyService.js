@@ -17,6 +17,11 @@ const SETTING_KEY = 'access_policy';
 const INTERFACE_SCOPES = ['all', 'own'];
 const MESSAGE_CONTENT_LEVELS = ['full', 'metadata'];
 
+// Roles that always see every interface, whatever is stored: operators and viewers are the support and monitoring
+// staff, who cannot do their job (or help anyone) if part of the system is hidden from them. Only what they may read
+// INSIDE a message (messageContent) is a policy choice for them. Scoping to "own" interfaces is for the plain user role.
+const ALL_INTERFACES_ROLES = Object.freeze(['operator', 'viewer']);
+
 // Roles that are never restricted.
 const UNRESTRICTED_ROLES = ['admin', 'super_admin', 'superadmin'];
 
@@ -49,8 +54,10 @@ class AccessPolicyService {
         const base = DEFAULT_ROLE_POLICIES[key] || FALLBACK_POLICY;
         const stored = await this.settings.getSetting(SETTING_KEY, {}, POLICY_TTL_MS);
         const mine = stored && stored.roles && stored.roles[key];
+        const scope = ALL_INTERFACES_ROLES.includes(key) ? 'all'
+            : INTERFACE_SCOPES.includes(mine && mine.interfaceScope) ? mine.interfaceScope : base.interfaceScope;
         return {
-            interfaceScope: INTERFACE_SCOPES.includes(mine && mine.interfaceScope) ? mine.interfaceScope : base.interfaceScope,
+            interfaceScope: scope,
             messageContent: MESSAGE_CONTENT_LEVELS.includes(mine && mine.messageContent) ? mine.messageContent : base.messageContent,
         };
     }
@@ -76,6 +83,7 @@ class AccessPolicyService {
 module.exports = new AccessPolicyService();
 module.exports.AccessPolicyService = AccessPolicyService;
 module.exports.DEFAULT_ROLE_POLICIES = DEFAULT_ROLE_POLICIES;
+module.exports.ALL_INTERFACES_ROLES = ALL_INTERFACES_ROLES;
 module.exports.INTERFACE_SCOPES = INTERFACE_SCOPES;
 module.exports.MESSAGE_CONTENT_LEVELS = MESSAGE_CONTENT_LEVELS;
 module.exports.SETTING_KEY = SETTING_KEY;

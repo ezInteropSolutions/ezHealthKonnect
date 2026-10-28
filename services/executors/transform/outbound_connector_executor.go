@@ -265,6 +265,18 @@ func (e *OutboundConnectorExecutor) Execute(
 		})
 	}
 
+	// Persist the exact payload BEFORE attempting delivery, so it exists whatever the outcome. It used to be stored only
+	// after a successful send, which left a failed delivery with nothing to show in the message viewer (the
+	// Transformed tab said "not yet available"). The payload that was prepared and attempted is the key evidence for
+	// diagnosing the failure, and it is what a redrive resends. Full content, no truncation; the URI also goes into the
+	// NDJSON log (details.request.body_uri) so the frontend can load it on demand.
+	outboundURI := ""
+	if storeFn := models.GetStoreOutboundFn(ctx); storeFn != nil {
+		ifaceID, _ := ctx.Value("interface_id").(string)
+		msgID, _ := ctx.Value("message_id").(string)
+		outboundURI = storeFn(ifaceID, msgID, content, resolvedContentType)
+	}
+
 	// Send
 	result, err := connector.Send(ctx, outMsg)
 
@@ -339,6 +351,12 @@ func (e *OutboundConnectorExecutor) Execute(
 			"success":        false,
 			"connector_type": config.ConnectorType,
 			"delivery_error": err.Error(),
+			// The payload that was attempted, so the failed step still links to what was (not) delivered.
+			"request": map[string]interface{}{
+				"content_type": resolvedContentType,
+				"body_size":    len(content),
+				"body_uri":     outboundURI,
+			},
 		}
 		e.SetStepOutputWithDetails(outputData, variables, details)
 		return outputData, fmt.Errorf("outbound delivery failed: %w", err)
@@ -351,14 +369,7 @@ func (e *OutboundConnectorExecutor) Execute(
 		"bytes_sent":     len(content),
 	}
 
-	// Persist exact sent payload to object storage (full content, no truncation).
-	// The URI is stored in the NDJSON log so the frontend can load the full payload on demand.
-	outboundURI := ""
-	if storeFn := models.GetStoreOutboundFn(ctx); storeFn != nil {
-		ifaceID, _ := ctx.Value("interface_id").(string)
-		msgID, _ := ctx.Value("message_id").(string)
-		outboundURI = storeFn(ifaceID, msgID, content, resolvedContentType)
-	}
+	// (The exact payload was already persisted above, before the send; outboundURI references it.)
 
 	// body_preview in step_executions (DB) stays truncated for row-size efficiency.
 	// The full payload is in object storage, referenced by body_uri in the NDJSON log.
@@ -570,6 +581,7 @@ func resolveAndSerializeContent(inputData map[string]interface{}, config outboun
 		outputFormat, _ = msg["_format"].(string)
 	}
 	// ContentType config can override the format
+	formatOverridden := true
 	switch config.ContentType {
 	case "application/hl7-v2":
 		outputFormat = "hl7v2"
@@ -577,6 +589,8 @@ func resolveAndSerializeContent(inputData map[string]interface{}, config outboun
 		outputFormat = "fhir"
 	case "text/csv":
 		outputFormat = "csv"
+	default:
+		formatOverridden = false
 	}
 
 	// Resolve raw content value
@@ -596,6 +610,12 @@ func resolveAndSerializeContent(inputData map[string]interface{}, config outboun
 		} else {
 			raw = inputData
 		}
+	} else if config.ContentField != "" && !formatOverridden && isFHIRResource(raw) {
+		// The step explicitly selected a FHIR resource/Bundle. Its own shape decides the wire format — NOT the input
+		// message's _format. Without this a CDA -> FHIR pipeline (input _format "cda") serialised its Bundle straight
+		// back to CDA XML and delivered the original document while reporting success. An explicit ContentType
+		// (handled above) still wins.
+		outputFormat = "fhir"
 	}
 
 	// If the resolved value is already a string — use it as-is (no double serialization)
@@ -615,6 +635,16 @@ func resolveAndSerializeContent(inputData map[string]interface{}, config outboun
 		return string(b), "application/json"
 	}
 	return body, ct
+}
+
+// isFHIRResource reports whether v is a FHIR resource or Bundle (a JSON object with a string resourceType).
+func isFHIRResource(v interface{}) bool {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	rt, ok := m["resourceType"].(string)
+	return ok && rt != ""
 }
 
 func (e *OutboundConnectorExecutor) Validate(step *models.TransformationStep) error {

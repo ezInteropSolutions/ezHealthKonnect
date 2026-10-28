@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FHIR Validation Review Queue - ezHealthKonnect</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="css/dashboard.css">
     <link rel="stylesheet" href="css/layout/main-layout.css?v=5">
     <style>
@@ -227,7 +227,7 @@
                 </div>
                 <div class="nav-items">
                     <a href="dashboard.html" class="nav-item">
-                        <span class="nav-icon"><i class="far fa-house"></i></span>
+                        <span class="nav-icon"><i class="fas fa-house"></i></span>
                         <span class="nav-label">Dashboard</span>
                     </a>
                     <a href="interfaces.html" class="nav-item">
@@ -239,7 +239,7 @@
                         <span class="nav-label">Messages</span>
                     </a>
                     <a href="review-queue.html" class="nav-item active">
-                        <span class="nav-icon"><i class="far fa-circle-exclamation"></i></span>
+                        <span class="nav-icon"><i class="fas fa-circle-exclamation"></i></span>
                         <span class="nav-label">Review Queue</span>
                         <span class="nav-badge" id="rqNavBadge" style="display:none"></span>
                     </a>
@@ -317,7 +317,7 @@
         <div class="rq-header">
             <div class="rq-header-left">
                 <div>
-                    <p class="rq-title"><i class="far fa-circle-exclamation" style="margin-right:6px;color:#d97706;"></i>FHIR Validation Review Queue</p>
+                    <p class="rq-title"><i class="fas fa-circle-exclamation" style="margin-right:6px;color:#d97706;"></i>FHIR Validation Review Queue</p>
                     <p class="rq-subtitle">Messages held for missing required fields — action required before delivery</p>
                 </div>
                 <div class="rq-stats">
@@ -327,7 +327,7 @@
                 </div>
             </div>
             <button class="rq-btn rq-btn-primary" onclick="loadQueue()" style="gap:6px;display:flex;align-items:center;">
-                <i class="far fa-rotate-right"></i> Refresh
+                <i class="fas fa-rotate-right"></i> Refresh
             </button>
         </div>
 
@@ -378,7 +378,7 @@
                     </thead>
                     <tbody id="rqTableBody">
                         <tr><td colspan="6" style="text-align:center;padding:40px;color:#94a3b8;">
-                            <i class="far fa-circle-notch fa-spin" style="font-size:20px;"></i>
+                            <i class="fas fa-circle-notch fa-spin" style="font-size:20px;"></i>
                             <div style="margin-top:8px;">Loading review queue…</div>
                         </td></tr>
                     </tbody>
@@ -411,13 +411,13 @@
         <div class="rq-modal-body">
             <div class="rq-tabs">
                 <button class="rq-tab active" onclick="switchRQTab('failures', this)">
-                    <i class="far fa-triangle-exclamation" style="margin-right:5px;"></i>Failures &amp; Actions
+                    <i class="fas fa-triangle-exclamation" style="margin-right:5px;"></i>Failures &amp; Actions
                 </button>
                 <button class="rq-tab" onclick="switchRQTab('hl7', this)">
-                    <i class="far fa-code" style="margin-right:5px;"></i>Raw HL7
+                    <i class="fas fa-code" style="margin-right:5px;"></i>Raw HL7
                 </button>
                 <button class="rq-tab" onclick="switchRQTab('fhir', this)">
-                    <i class="far fa-code-branch" style="margin-right:5px;"></i>Partial FHIR
+                    <i class="fas fa-code-branch" style="margin-right:5px;"></i>Partial FHIR
                 </button>
             </div>
 
@@ -452,10 +452,10 @@
         </div>
         <div class="rq-modal-footer">
             <button class="rq-btn rq-btn-danger" onclick="rejectItem()">
-                <i class="far fa-ban" style="margin-right:4px;"></i>Reject &amp; DLQ
+                <i class="fas fa-ban" style="margin-right:4px;"></i>Reject &amp; DLQ
             </button>
             <button class="rq-btn rq-btn-warn" onclick="overrideItem()">
-                <i class="far fa-forward" style="margin-right:4px;"></i>Override &amp; Deliver As-Is
+                <i class="fas fa-forward" style="margin-right:4px;"></i>Override &amp; Deliver As-Is
             </button>
             <button class="rq-btn rq-btn-primary" onclick="resolveWithValues()">
                 <i class="far fa-paper-plane" style="margin-right:4px;"></i>Apply Values &amp; Deliver

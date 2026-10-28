@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Message Management - ezHealthKonnect</title>
     <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
     <!-- Match dashboard theme -->
     <link rel="stylesheet" href="css/dashboard.css">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="/vendor/fontawesome/css/all.min.css" rel="stylesheet">
     <style>
         /* Override dashboard styles for messages page */
         .main-content {
@@ -73,6 +73,21 @@
         }
         .tab-btn i {
             font-size: 1rem;
+        }
+        /* Errors tab: red when the message has errors, with a count badge */
+        .tab-btn.has-errors { color: #b91c1c; }
+        .tab-btn.has-errors.active { color: #b91c1c; border-bottom-color: #b91c1c; }
+        .tab-badge {
+            display: none;
+            min-width: 1.25rem;
+            padding: 0.05rem 0.4rem;
+            border-radius: 999px;
+            background: #dc2626;
+            color: #fff;
+            font-size: 0.72rem;
+            font-weight: 700;
+            line-height: 1.25rem;
+            text-align: center;
         }
         .tab-content {
             display: none;
@@ -472,7 +487,7 @@
                     </div>
                     <div class="nav-items">
                         <a href="dashboard.html" class="nav-item">
-                            <span class="nav-icon"><i class="far fa-house"></i></span>
+                            <span class="nav-icon"><i class="fas fa-house"></i></span>
                             <span class="nav-label">Dashboard</span>
                         </a>
                         <a href="interfaces.html" class="nav-item">
@@ -710,6 +725,9 @@
                 <button class="tab-btn" id="journeyTabBtn" onclick="switchTab('journey')">
                     <i class="fas fa-route"></i> Journey
                 </button>
+                <button class="tab-btn" id="errorsTabBtn" onclick="switchTab('errors')">
+                    <i class="fas fa-exclamation-triangle"></i> Errors <span class="tab-badge" id="errorsTabBadge"></span>
+                </button>
                 <button class="tab-btn" id="logsTabBtn" onclick="switchTab('logs')">
                     <i class="fas fa-list-alt"></i> Logs
                 </button>
@@ -740,6 +758,13 @@
                     </div>
                 </div>
 
+                <!-- Errors Tab -->
+                <div id="errorsTab" class="tab-content">
+                    <div id="messageErrorsView">
+                        <div class="loading">Loading errors...</div>
+                    </div>
+                </div>
+
                 <!-- Logs Tab -->
                 <div id="logsTab" class="tab-content">
                     <div id="messageLogsView">
@@ -763,6 +788,10 @@
                     </button>
                 </div>
                 <div class="footer-right" style="display: flex; gap: 0.75rem;">
+                    <a class="btn-modern btn-modern-secondary" id="traceLinkBtn" href="message-trace.html" target="_blank" rel="noopener" style="display: none; text-decoration: none;">
+                        <i class="fas fa-route"></i>
+                        <span>Trace</span>
+                    </a>
                     <button type="button" class="btn-modern btn-modern-warning" id="reprocessBtn" onclick="reprocessMessage()" style="display: none;">
                         <i class="fas fa-sync-alt"></i>
                         <span>Reprocess</span>
@@ -847,7 +876,7 @@
         });
     </script>
     <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <!-- Authentication Service (OOB) -->
     <script src="/js/core/app-dialogs.js"></script>
     <script src="/js/services/AuthService.js"></script>

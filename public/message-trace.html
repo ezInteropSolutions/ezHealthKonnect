@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Message Trace – ezHealthKonnect</title>
     <link rel="stylesheet" href="css/dashboard.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css">
     <style>
         /* ── Design tokens (same palette as monitoring.html) ─────────────────── */
         :root {
@@ -55,6 +55,13 @@
             font-size: 13px; font-family: 'SFMono-Regular', Consolas, monospace;
         }
         .search-panel input:focus { outline: none; border-color: var(--pink-mid); }
+        .search-panel { flex-wrap: wrap; }
+        .search-panel #interfaceInput { flex: 1 1 280px; font-family: inherit; }
+        .search-panel #correlationInput { flex: 2 1 320px; }
+        .trace-notice { margin: 0 0 14px; padding: 12px 14px; border: 1px solid #fde68a; background: #fffbeb; border-radius: 8px; font-size: 13px; color: #78350f; }
+        .match-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+        .match-btn { text-align: left; padding: 7px 10px; border: 1px solid var(--card-border); border-radius: 6px; background: #fff; cursor: pointer; font-size: 12px; font-family: 'SFMono-Regular', Consolas, monospace; }
+        .match-btn:hover { border-color: var(--pink-mid); }
         .search-btn {
             padding: 10px 20px; border-radius: 8px; border: none;
             background: var(--pink); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
@@ -125,14 +132,16 @@
     <div class="page-header">
         <div>
             <h1><i class="fas fa-route"></i>Message Trace</h1>
-            <p>Paste a correlation ID (from an error email or alert) to see a message's full processing timeline</p>
+            <p>Pick the interface, then paste a message ID or correlation ID to see the message's full processing timeline</p>
         </div>
     </div>
 
     <div class="trace-body">
 
         <div class="search-panel">
-            <input type="text" id="correlationInput" placeholder="e.g. tcp_abc123def456..." autocomplete="off">
+            <input type="text" id="interfaceInput" list="interfaceList" placeholder="Interface — start typing its name" autocomplete="off" aria-label="Interface">
+            <datalist id="interfaceList"></datalist>
+            <input type="text" id="correlationInput" placeholder="Message ID or correlation ID, e.g. tcp_abc123def456..." autocomplete="off" aria-label="Message ID or correlation ID">
             <button class="search-btn" id="traceBtn"><i class="fas fa-magnifying-glass"></i> Trace</button>
         </div>
 
@@ -160,17 +169,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!ok) return;
 
     const input = document.getElementById('correlationInput');
-    const btn = document.getElementById('traceBtn');
-
-    btn.addEventListener('click', runTrace);
+    document.getElementById('traceBtn').addEventListener('click', () => runTrace());
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') runTrace(); });
+    // "Trace another" buttons rendered for an ambiguous id (event delegation; the id travels in data-id, never in markup).
+    document.getElementById('resultBody').addEventListener('click', (e) => {
+        const btn = e.target.closest('.match-btn');
+        if (btn) { input.value = btn.dataset.id; runTrace(); }
+    });
 
-    // Support deep-linking: message-trace.html?correlationId=xyz
+    try { await loadInterfaces(); } catch (err) { showNotice('Could not load the interface list: ' + err.message); }
+    finally { resolveInterfacesReady(); }
+
+    // Deep-linking: message-trace.html?interfaceId=<uuid>&id=<message or correlation id>   (legacy: &correlationId=)
     const params = new URLSearchParams(window.location.search);
-    const preset = params.get('correlationId');
-    if (preset) {
-        input.value = preset;
-        runTrace();
+    const presetIface = params.get('interfaceId');
+    const presetId = params.get('id') || params.get('correlationId');
+    if (presetIface && interfacesById.has(presetIface)) document.getElementById('interfaceInput').value = interfaceLabel(interfacesById.get(presetIface));
+    if (presetId) {
+        input.value = presetId;
+        if (presetIface) runTrace();
     }
 });
 
@@ -181,37 +198,82 @@ const levelIcons = {
     debug:   'fa-bug',
 };
 
+const interfaceByLabel = new Map();
+const interfacesById = new Map();
+// Resolves once the interface list has loaded (or failed). A Trace pressed before that must wait for it, not claim
+// "No interface matches" about an interface that simply has not arrived yet.
+let resolveInterfacesReady;
+const interfacesReady = new Promise((resolve) => { resolveInterfacesReady = resolve; });
+const interfaceLabel = (i) => i.name + '  ·  ' + String(i.id).slice(0, 8);
+
+async function loadInterfaces() {
+    const res = await fetch('/api/interfaces', { credentials: 'include' });
+    if (!res.ok) throw new Error('the server answered ' + res.status);
+    const body = await res.json();
+    const list = body.data || body.interfaces || body;
+    const datalist = document.getElementById('interfaceList');
+    list.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).forEach((i) => {
+        interfaceByLabel.set(interfaceLabel(i), i);
+        interfacesById.set(i.id, i);
+        const opt = document.createElement('option');   // DOM API, so a hostile interface name stays text
+        opt.value = interfaceLabel(i);
+        datalist.appendChild(opt);
+    });
+}
+
+// A datalist label ("Name · 1a2b3c4d") or an exact, unique name.
+function resolveInterface(value) {
+    const v = value.trim();
+    if (!v) return { error: 'Pick the interface the message belongs to.' };
+    if (interfaceByLabel.has(v)) return { iface: interfaceByLabel.get(v) };
+    const byName = [...interfacesById.values()].filter((i) => String(i.name).toLowerCase() === v.toLowerCase());
+    if (byName.length === 1) return { iface: byName[0] };
+    if (byName.length > 1) return { error: byName.length + ' interfaces are named "' + v + '". Choose one from the list so the trace is for the right one.' };
+    return { error: 'No interface matches "' + v + '". Choose one from the list.' };
+}
+
+function showNotice(message) {
+    document.getElementById('resultPanel').style.display = '';
+    document.getElementById('countPill').textContent = '';
+    document.getElementById('idsMeta').textContent = '';
+    document.getElementById('resultBody').innerHTML = HtmlSafe.html`<div class="empty error"><i class="fas fa-circle-exclamation"></i><p>${message}</p></div>`;
+}
+
 async function runTrace() {
     const input = document.getElementById('correlationInput');
     const btn = document.getElementById('traceBtn');
-    const panel = document.getElementById('resultPanel');
     const body = document.getElementById('resultBody');
     const countPill = document.getElementById('countPill');
     const idsMeta = document.getElementById('idsMeta');
 
-    const correlationId = input.value.trim();
-    if (!correlationId) return;
+    const traceId = input.value.trim();
+    await interfacesReady;
+    const resolved = resolveInterface(document.getElementById('interfaceInput').value);
+    if (resolved.error) { showNotice(resolved.error); return; }
+    if (!traceId) { showNotice('Enter a message ID or a correlation ID.'); return; }
+    const iface = resolved.iface;
 
     btn.disabled = true;
-    panel.style.display = '';
+    document.getElementById('resultPanel').style.display = '';
     countPill.textContent = '';
     idsMeta.textContent = '';
     body.innerHTML = '<div class="empty"><i class="fas fa-spinner fa-spin"></i><p>Tracing...</p></div>';
 
     try {
-        const res = await fetch('/api/system/message-trace/' + encodeURIComponent(correlationId), {
+        const res = await fetch('/api/system/message-trace/' + encodeURIComponent(traceId) + '?interfaceId=' + encodeURIComponent(iface.id), {
             credentials: 'include',
         });
 
         if (res.status === 404) {
-            body.innerHTML = '<div class="empty error"><i class="fas fa-magnifying-glass"></i>' +
-                '<p><strong>No message found</strong> for this correlation ID.<br>Double-check the ID and try again.</p></div>';
+            body.innerHTML = HtmlSafe.html`<div class="empty error"><i class="fas fa-magnifying-glass"></i>
+                <p><strong>No message found</strong> in <strong>${iface.name}</strong> for this ID.<br>
+                Check the interface and the ID. The message's own ID (shown in the message list) always works; a correlation ID only matches messages that carried one.</p></div>`;
             return;
         }
         if (!res.ok) {
-            const errText = await res.text();
+            const errBody = await res.json().catch(() => ({}));
             body.innerHTML = HtmlSafe.html`<div class="empty error"><i class="fas fa-triangle-exclamation"></i>
-                <p><strong>Request failed</strong> (${res.status})<br>${errText}</p></div>`;
+                <p><strong>Request failed</strong> (${res.status})<br>${errBody.error || 'The server could not complete the trace.'}</p></div>`;
             return;
         }
 
@@ -221,16 +283,23 @@ async function runTrace() {
             return;
         }
 
-        idsMeta.textContent = 'interface: ' + data.interface_id + '  ·  message: ' + data.message_id;
+        idsMeta.textContent = 'interface: ' + iface.name + '  ·  message: ' + data.message_id;
         countPill.textContent = data.count + ' event' + (data.count === 1 ? '' : 's');
+
+        const others = (data.matches || []).filter((m) => m.message_id !== data.message_id);
+        const notice = data.ambiguous
+            ? HtmlSafe.html`<div class="trace-notice"><strong>${(data.matches || []).length} messages in this interface share "${traceId}".</strong>
+                Showing the most recent. Trace another:
+                <div class="match-list">${others.map((m) => HtmlSafe.html`<button type="button" class="match-btn" data-id="${m.message_id}">${m.message_id} · ${m.status} · ${new Date(m.received_at).toLocaleString()}</button>`)}</div></div>`
+            : '';
 
         const timeline = data.timeline || [];
         if (timeline.length === 0) {
-            body.innerHTML = '<div class="empty"><i class="fas fa-inbox"></i><p>No log entries recorded for this message.</p></div>';
+            body.innerHTML = HtmlSafe.html`${notice}<div class="empty"><i class="fas fa-inbox"></i><p>No log entries recorded for this message.</p></div>`;
             return;
         }
 
-        body.innerHTML = HtmlSafe.html`<div class="timeline">${timeline.map(renderEntry)}</div>`;
+        body.innerHTML = HtmlSafe.html`${notice}<div class="timeline">${timeline.map(renderEntry)}</div>`;
     } catch (err) {
         body.innerHTML = HtmlSafe.html`<div class="empty error"><i class="fas fa-plug-circle-xmark"></i><p><strong>Could not reach the server.</strong><br>${err.message}</p></div>`;
     } finally {

@@ -2,6 +2,31 @@
 // Handles transformation pipeline creation and management for wizard
 // CANONICAL FLOW: Wizard → Pipeline → Steps → Template
 
+// What an outbound connector step DELIVERS, by wizard flow. A flow that builds a FHIR bundle delivers that bundle
+// (the default). A passthrough delivers the ORIGINAL message — the parsed message's `raw` field — byte for byte, in
+// its own format. Previously every outbound step was saved as contentField "fhirBundle" + "application/fhir+json",
+// so a passthrough (which builds no bundle) delivered the whole parsed-message envelope labelled as FHIR: ~387 KB of
+// JSON for a 4-segment HL7 message. A new flow is one row here.
+const FLOW_OUTBOUND_CONTENT = {
+    hl7_passthrough:  { contentField: 'raw', contentType: 'application/hl7-v2' },
+    fhir_passthrough: { contentField: 'raw', contentType: 'application/fhir+json' },
+};
+// Flows whose pipeline builds a FHIR bundle (FLOW_STEP_TEMPLATES in addDefaultPipelineSteps): the outbound step delivers it.
+const FHIR_BUNDLE_FLOWS = new Set(['hl7_to_fhir', 'hl7_to_fhir_r5', 'hl7_to_fhir_stu3', 'ccd_to_fhir']);
+const FHIR_BUNDLE_CONTENT = { contentField: 'fhirBundle', contentType: 'application/fhir+json' };
+// Every other flow adds no transform step, so its output IS its input: deliver the original content, whatever the
+// format (EDI, NCPDP, CSV, DICOM text, ...). No contentType is forced, since the format is not known here.
+const ORIGINAL_CONTENT = { contentField: 'raw' };
+
+// The settings the wizard copies into a file connector's step: the connector's real, documented options (see its
+// connectivity_types config schema). Previously only directory_path/file_pattern were kept, so a file writer's
+// filename_pattern / create_subdirs / overwrite_existing / encoding and a file listener's polling_interval /
+// after_processing / archive_path ... were silently discarded.
+const FILE_CONNECTOR_KEYS = {
+    file_listener: ['directory_path', 'file_pattern', 'polling_interval', 'after_processing', 'archive_path', 'recursive', 'create_dirs', 'encoding'],
+    file_writer:   ['directory_path', 'file_pattern', 'filename_pattern', 'create_subdirs', 'overwrite_existing', 'encoding'],
+};
+
 class TransformationPipelineService {
     /**
      * Get sequelize instance (lazy - called at request time, not module load)
@@ -241,7 +266,7 @@ class TransformationPipelineService {
         if (connectivityInfo?.targetConnectivity) {
             await this.addConnectorStep(
                 sequelize, t, pipelineId,
-                'outbound', connectivityInfo.targetConnectivity, connectivityInfo.targetConfig
+                'outbound', connectivityInfo.targetConnectivity, connectivityInfo.targetConfig, transformationFlow
             );
             count++;
         }
@@ -253,7 +278,7 @@ class TransformationPipelineService {
     /**
      * Add a connector step (inbound or outbound) to the pipeline
      */
-    async addConnectorStep(sequelize, t, pipelineId, direction, connectivityType, wizardConfig = {}) {
+    async addConnectorStep(sequelize, t, pipelineId, direction, connectivityType, wizardConfig = {}, transformationFlow = null) {
         if (!connectivityType) return; // no source/target connector configured for this interface
 
         // Legacy short-name aliases predating the modern ConnectorConfigBuilder
@@ -307,8 +332,10 @@ class TransformationPipelineService {
                 config.contentField = 'ediX12';
                 config.contentType  = 'application/edi-x12';
             } else {
-                config.contentField = 'fhirBundle';
-                config.contentType  = 'application/fhir+json';
+                const content = FLOW_OUTBOUND_CONTENT[transformationFlow]
+                    || (FHIR_BUNDLE_FLOWS.has(transformationFlow) ? FHIR_BUNDLE_CONTENT : ORIGINAL_CONTENT);
+                config.contentField = content.contentField;
+                if (content.contentType) config.contentType = content.contentType;
             }
         } else {
             config.timeoutMs = 30000;
@@ -438,9 +465,10 @@ class TransformationPipelineService {
             return normalized;
         }
 
-        if (connectorTypeName === 'file_listener' || connectorTypeName === 'file_writer') {
-            if (wizardConfig.directory_path) normalized.directory_path = wizardConfig.directory_path;
-            if (wizardConfig.file_pattern)   normalized.file_pattern   = wizardConfig.file_pattern;
+        if (FILE_CONNECTOR_KEYS[connectorTypeName]) {
+            for (const key of FILE_CONNECTOR_KEYS[connectorTypeName]) {
+                if (wizardConfig[key] !== undefined && wizardConfig[key] !== '') normalized[key] = wizardConfig[key];
+            }
             return normalized;
         }
 

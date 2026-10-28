@@ -5,14 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>System Settings - ezHealthKonnect</title>
     <!-- Preconnect so the CDN TLS handshake starts in parallel with HTML parse -->
-    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
     <link rel="stylesheet" href="css/dashboard.css">
     <link rel="stylesheet" href="css/user-management.css">
     <!-- Font Awesome: non-render-blocking async load -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css"
           media="print" onload="this.media='all'">
     <noscript>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+        <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css">
     </noscript>
     <style>
         /* ── Enterprise Settings Layout ───────────────────────────────────── */
@@ -442,10 +441,10 @@
                     <i class="fas fa-chevron-down nav-section-chevron"></i>
                 </div>
                 <div class="nav-items">
-                    <a href="dashboard.html" class="nav-item"><span class="nav-icon"><i class="far fa-house"></i></span><span class="nav-label">Dashboard</span></a>
+                    <a href="dashboard.html" class="nav-item"><span class="nav-icon"><i class="fas fa-house"></i></span><span class="nav-label">Dashboard</span></a>
                     <a href="interfaces.html" class="nav-item"><span class="nav-icon"><i class="fas fa-plug"></i></span><span class="nav-label">Interfaces</span></a>
                     <a href="messages.html" class="nav-item"><span class="nav-icon"><i class="far fa-envelope"></i></span><span class="nav-label">Messages</span></a>
-                    <a href="review-queue.html" class="nav-item"><span class="nav-icon"><i class="far fa-circle-exclamation"></i></span><span class="nav-label">Review Queue</span></a>
+                    <a href="review-queue.html" class="nav-item"><span class="nav-icon"><i class="fas fa-circle-exclamation"></i></span><span class="nav-label">Review Queue</span></a>
                     <a href="dashboard.html#templates" class="nav-item"><span class="nav-icon"><i class="far fa-file-lines"></i></span><span class="nav-label">Templates</span></a>
                 </div>
             </div>
@@ -920,12 +919,12 @@
                                 </tr>
                                 <tr>
                                     <td style="padding:10px 8px;vertical-align:top"><strong>Operator</strong><div class="hint">Runs integrations day to day.</div></td>
-                                    <td style="padding:10px 8px"><select id="ap-operator-scope" class="form-control" aria-label="Operator: which interfaces"><option value="all">All interfaces</option><option value="own">Only interfaces they created</option></select></td>
+                                    <td style="padding:10px 8px"><select id="ap-operator-scope" class="form-control" aria-label="Operator: which interfaces" disabled title="Support and monitoring roles always see every interface"><option value="all">All interfaces (always)</option></select></td>
                                     <td style="padding:10px 8px"><select id="ap-operator-content" class="form-control" aria-label="Operator: message content"><option value="full">Full message content</option><option value="metadata">Details only (no content)</option></select></td>
                                 </tr>
                                 <tr>
                                     <td style="padding:10px 8px;vertical-align:top"><strong>Viewer</strong><div class="hint">Read-only. &ldquo;Details only&rdquo; shows time, type, status and errors, but not patient content.</div></td>
-                                    <td style="padding:10px 8px"><select id="ap-viewer-scope" class="form-control" aria-label="Viewer: which interfaces"><option value="all">All interfaces</option><option value="own">Only interfaces they created</option></select></td>
+                                    <td style="padding:10px 8px"><select id="ap-viewer-scope" class="form-control" aria-label="Viewer: which interfaces" disabled title="Support and monitoring roles always see every interface"><option value="all">All interfaces (always)</option></select></td>
                                     <td style="padding:10px 8px"><select id="ap-viewer-content" class="form-control" aria-label="Viewer: message content"><option value="full">Full message content</option><option value="metadata">Details only (no content)</option></select></td>
                                 </tr>
                                 <tr>
@@ -1125,7 +1124,7 @@
 
                     <div class="settings-card">
                         <div class="settings-card-header">
-                            <i class="fas fa-trash-clock" style="color:#f59e0b"></i>
+                            <i class="fas fa-trash" style="color:#f59e0b"></i>
                             <div><h3>Retention Policy</h3><p>How long messages and DLQ entries are kept before automatic cleanup.</p></div>
                         </div>
                         <div class="settings-card-body">

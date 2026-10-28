@@ -77,6 +77,38 @@ test.describe('Change my password', () => {
         }
     });
 
+    // The real page flow: sign in -> redirected to the reset page -> the token is not left in the address bar,
+    // and opening the page without one (a bare userId link) is sent back to sign-in.
+    test('the forced-reset page works from the sign-in redirect and refuses a link without a token', async ({ seed, browser }) => {
+        const email = `pw-forced-ui-${Date.now()}@example.org`;
+        const oldPw = 'PwTest-Forced#2026a';
+        const newPw = 'PwTest-Forced#2026c';
+        const created = await seed.api.request.post(`${BASE_URL}/api/users`, { data: { email, password: oldPw, name: 'PW Forced UI', role: 'user' } });
+        expect(created.ok()).toBeTruthy();
+        const id = (await created.json()).user?.id;
+        expect((await seed.api.request.post(`${BASE_URL}/api/users/${id}/force-reset`)).ok()).toBeTruthy();
+        const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+        try {
+            const page = await ctx.newPage();
+            await page.goto('/force-reset.html?userId=' + id);   // no token
+            await expect(page).not.toHaveURL(/force-reset/, { timeout: 10_000 });
+
+            await page.goto('/login.html');
+            await page.locator('#email').fill(email);
+            await page.locator('#password').fill(oldPw);
+            await page.locator('#loginButton').click();
+            await page.waitForURL(/force-reset\.html/, { timeout: 30_000 });
+            expect(page.url()).not.toContain('token=');          // dropped from the address bar once read
+            await page.locator('#password').fill(newPw);
+            await page.locator('#confirmPassword').fill(newPw);
+            await page.locator('#submit-btn').click();
+            await expect(page.locator('#success-view')).toBeVisible({ timeout: 15_000 });
+        } finally {
+            await ctx.close();
+            await deleteUser(seed.api.request, BASE_URL, id);
+        }
+    });
+
     // The first-login / admin-forced reset must really set the password the user typed, not just clear the flag.
     test('a forced password reset sets the new password', async ({ seed, playwright }) => {
         const email = `pw-forced-${Date.now()}@example.org`;
@@ -92,10 +124,17 @@ test.describe('Change my password', () => {
         try {
             const first = await loginWithRetry(api, { data: { email, password: oldPw } });
             expect(first.status()).toBe(403);
-            const { requiresPasswordReset, userId } = await first.json();
+            const { requiresPasswordReset, userId, resetToken } = await first.json();
             expect(requiresPasswordReset).toBe(true);
 
-            expect((await api.post('/api/auth/reset-password', { data: { userId, password: newPw } })).ok()).toBeTruthy();
+            // A bare userId, or the wrong token, is not enough to set the password.
+            expect((await api.post('/api/auth/reset-password', { data: { userId, password: newPw } })).status()).toBe(400);
+            expect((await api.post('/api/auth/reset-password', { data: { userId, resetToken: 'f'.repeat(64), password: newPw } })).status()).toBe(400);
+            expect((await loginWithRetry(api, { data: { email, password: newPw } })).status()).toBe(401);   // still the old password
+
+            expect((await api.post('/api/auth/reset-password', { data: { userId, resetToken, password: newPw } })).ok()).toBeTruthy();
+            // Single use: the same token cannot reset it again.
+            expect((await api.post('/api/auth/reset-password', { data: { userId, resetToken, password: 'Another#Pass9' } })).status()).toBe(400);
 
             expect((await loginWithRetry(api, { data: { email, password: oldPw } })).status()).toBe(401);
             expect((await loginWithRetry(api, { data: { email, password: newPw } })).ok()).toBeTruthy();

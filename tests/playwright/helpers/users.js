@@ -50,9 +50,9 @@ async function createUserWithRole(adminRequest, baseURL, role, label = '') {
     try {
         const login = await loginWithRetry(fresh, { data: { email, password: PASSWORD } });
         if (login.status() === 403) {
-            const { requiresPasswordReset, userId } = await login.json();
+            const { requiresPasswordReset, userId, resetToken } = await login.json();
             if (requiresPasswordReset) {
-                const reset = await fresh.post('/api/auth/reset-password', { data: { userId, password: PASSWORD } });
+                const reset = await fresh.post('/api/auth/reset-password', { data: { userId, resetToken, password: PASSWORD } });
                 if (!reset.ok()) throw new Error(`forced reset failed (${reset.status()}): ${(await reset.text()).slice(0, 200)}`);
             }
         }

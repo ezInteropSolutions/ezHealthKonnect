@@ -1233,7 +1233,7 @@ function getMiniActionButtons(interface) {
         ? HtmlSafe.html`<a href="review-queue.html?interfaceId=${interface.id}" onclick="event.stopPropagation()"
               class="act-btn act-btn-amber" title="${pendingReview} message${pendingReview > 1 ? 's' : ''} need FHIR review"
               style="position:relative;text-decoration:none;">
-               <i class="far fa-triangle-exclamation"></i>
+               <i class="fas fa-triangle-exclamation"></i>
                <span style="position:absolute;top:-4px;right:-4px;background:#dc2626;color:white;border-radius:50%;font-size:9px;font-weight:700;width:14px;height:14px;display:flex;align-items:center;justify-content:center;line-height:1;">${pendingReview > 9 ? '9+' : pendingReview}</span>
            </a>`
         : '';
@@ -1291,7 +1291,7 @@ function getMiniActionButtons(interface) {
                         <i class="far fa-file-alt"></i><span>Details</span>
                     </div>
                     <div class="dropdown-item-minimal" onclick="event.stopPropagation(); window.location.href='review-queue.html?interfaceId=${interface.id}'; closeActionsMenu('${interface.id}')">
-                        <i class="far fa-circle-exclamation"></i><span>Review Queue${pendingReview > 0 ? ` (${pendingReview})` : ''}</span>
+                        <i class="fas fa-circle-exclamation"></i><span>Review Queue${pendingReview > 0 ? ` (${pendingReview})` : ''}</span>
                     </div>
                     ${interface.status === 'error' ? HtmlSafe.html`
                     <div class="dropdown-item-minimal" data-requires="write" onclick="event.stopPropagation(); resetInterface('${interface.id}'); closeActionsMenu('${interface.id}')">

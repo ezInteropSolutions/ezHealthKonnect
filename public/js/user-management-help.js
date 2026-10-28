@@ -534,7 +534,7 @@
 
 <div class="hp-section">
   <button class="hp-section-toggle">
-    <i class="fas fa-shield-check"></i> Principle of Least Privilege
+    <i class="fas fa-shield-halved"></i> Principle of Least Privilege
     <i class="fas fa-chevron-down hp-chevron"></i>
   </button>
   <div class="hp-section-body">
