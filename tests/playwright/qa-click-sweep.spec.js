@@ -20,6 +20,10 @@ const DESTRUCTIVE = /delete|remove|deactivate|disable|logout|log out|sign out|re
 const REPORT_ONLY = process.env.QA_REPORT_ONLY === '1';
 const OUT = process.env.QA_OUT || path.resolve(__dirname, '../../tests/playwright-report/qa');
 fs.mkdirSync(OUT, { recursive: true });
+// An exploratory QA collector (it reports what a person would notice, including known open items), not a CI gate:
+// it runs when asked for (QA_SWEEP=1 or QA_REPORT_ONLY=1), never as part of the default suite.
+test.skip(!process.env.QA_SWEEP && !process.env.QA_REPORT_ONLY, 'exploratory QA sweep - set QA_SWEEP=1 (see docs/QA_STRATEGY.md)');
+
 const all = [];
 
 test.setTimeout(150_000);

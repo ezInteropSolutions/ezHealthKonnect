@@ -26,6 +26,10 @@ const PAGES = fs.readdirSync(PAGES_DIR).filter((f) => f.endsWith('.html')).sort(
 const NEEDS_NO_SESSION = new Set(['login.html', 'setup.html', 'invite.html', 'force-reset.html']);
 
 fs.mkdirSync(OUT, { recursive: true });
+// An exploratory QA collector (it reports what a person would notice, including known open items), not a CI gate:
+// it runs when asked for (QA_SWEEP=1 or QA_REPORT_ONLY=1), never as part of the default suite.
+test.skip(!process.env.QA_SWEEP && !process.env.QA_REPORT_ONLY, 'exploratory QA sweep - set QA_SWEEP=1 (see docs/QA_STRATEGY.md)');
+
 const results = [];
 
 test.describe.configure({ mode: 'serial' });

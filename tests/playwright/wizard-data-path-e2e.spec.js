@@ -20,7 +20,7 @@ const { Client } = require('pg');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 const DB_URL = process.env.DATABASE_URL;
-const WIZARD_PORT = parseInt(process.env.G6_MLLP_PORT || '6630', 10); // inside the dev stack's published 6610-6670
+const WIZARD_PORT = parseInt(process.env.G6_MLLP_PORT || '6638', 10); // inside the dev stack's published 6610-6670
 
 // Unique control id + patient so the stored message can be recognised unambiguously.
 const STAMP = Date.now();

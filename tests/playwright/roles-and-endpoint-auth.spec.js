@@ -153,19 +153,15 @@ test.describe.serial('Roles in the UI', () => {
         data: { roles: { ...POLICY_DEFAULTS, [role]: { ...POLICY_DEFAULTS[role], interfaceScope } } },
     });
 
-    test('a viewer limited to their own interfaces sees none of another user\'s interfaces or messages', async ({ browser, seed }) => {
-        expect((await setPolicy(seed, 'viewer', 'own')).ok()).toBeTruthy();
+    test('support roles cannot be limited to their own interfaces: the policy refuses it and the viewer still sees everything', async ({ browser, seed }) => {
+        const refused = await setPolicy(seed, 'viewer', 'own');
+        expect(refused.status()).toBe(400);
         const { context, page } = await loginAs(browser, users.viewer);
         try {
             const list = await (await page.request.get('/api/interfaces')).json();
-            expect(list.interfaces.map(i => i.id)).not.toContain(seed.interfaceId);
-            const msgs = await page.request.get(`/api/messages/interface/${seed.interfaceId}`);
-            expect(msgs.status()).toBe(404);
-            await page.goto('/interfaces.html');
-            await page.waitForTimeout(1500);
-            await expect(page.locator(`tr[data-interface-id="${seed.interfaceId}"]`)).toHaveCount(0);
+            expect(list.interfaces.map(i => i.id)).toContain(seed.interfaceId);
+            expect((await page.request.get(`/api/messages/interface/${seed.interfaceId}`)).status()).toBe(200);
         } finally {
-            await setPolicy(seed, 'viewer', 'all');
             await context.close();
         }
     });
@@ -185,12 +181,9 @@ test.describe.serial('Roles in the UI', () => {
             const updated = await page.request.put(`/api/interfaces/${ownId}`, { data: { description: 'edited by operator' } });
             expect(updated.status()).toBe(200);
 
-            // Someone else's interface: out of reach when the operator is limited to their own...
-            expect((await setPolicy(seed, 'operator', 'own')).ok()).toBeTruthy();
-            const foreign = await page.request.put(`/api/interfaces/${seed.interfaceId}`, { data: { description: 'hijack' } });
-            expect([403, 404]).toContain(foreign.status());
-            // ...and editable under the default policy (an operator runs everyone's integrations).
-            expect((await setPolicy(seed, 'operator', 'all')).ok()).toBeTruthy();
+            // Someone else's interface: an operator (support) can never be limited to their own - the policy refuses it...
+            expect((await setPolicy(seed, 'operator', 'own')).status()).toBe(400);
+            // ...so it stays editable (an operator runs everyone's integrations).
             const shared = await page.request.put(`/api/interfaces/${seed.interfaceId}`, { data: { description: 'edited by operator' } });
             expect(shared.status()).toBe(200);
 

@@ -401,3 +401,6 @@ last-run result. Blank cells are known gaps, visible to everyone.
 | 9 | UAT scripts in `tests/uat/`, coverage matrix, escape log, release checklist in `docs/RELEASE_CHECKLIST.md` | Escape 6 |
 
 Phases 0–3 are small and remove the failure class seen in v26.10; 4–9 make QA comprehensive.
+
+## Running the exploratory sweeps
+`qa-ui-sweep.spec.js` (every page x 4 viewports) and `qa-click-sweep.spec.js` (presses every non-destructive button) are collectors, not CI gates: they report findings, including known open items. They are skipped unless `QA_SWEEP=1` or `QA_REPORT_ONLY=1` is set (`QA_OFFLINE=1` also aborts every off-origin request).

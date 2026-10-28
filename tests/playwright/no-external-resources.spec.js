@@ -26,6 +26,11 @@ test.describe('no third-party resources', () => {
             const page = await ctx.newPage();
             const gates = attachGates(page, { origin });
             await page.goto(`/${file}`, { waitUntil: 'networkidle' });
+            // Fonts load lazily once something uses them; on a loaded CI runner networkidle can come before that.
+            await page.evaluate(async () => {
+                await Promise.all(['900', '400'].map((w) => document.fonts.load(`${w} 1em "Font Awesome 6 Free"`).catch(() => [])));
+                await document.fonts.ready;
+            });
             await page.waitForTimeout(800);
             const f = await gates.collect();
             expect(f.offOrigin, `${file} asked another origin for something`).toEqual([]);
