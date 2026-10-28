@@ -1,6 +1,12 @@
 // Ultra Compact Interfaces Management - FIXED VERSION
+// `interfaces` / `filteredInterfaces` hold ONE page: the server filters, sorts and pages (GET /api/interfaces?limit=..).
+// Fetching the whole list made this page slower with every interface (~0.5 s and 1.5 MB at ~970) and ran a runtime-status
+// lookup for every row on every refresh.
 let interfaces = [];
 let filteredInterfaces = [];
+let listTotal = 0;        // interfaces matching the current filters (all pages)
+let listCounts = null;    // { total, running, paused, stopped, error } over everything the user may see (summary cards)
+let listRequestSeq = 0;   // a slower, older response must not overwrite a newer one
 let currentUser = null;
 
 // Pagination state
@@ -417,9 +423,8 @@ function handlePageSizeChange() {
     }
     
     currentPage = 1;
-    calculatePagination();
-    renderInterfacesTable();
-    
+    loadInterfaces();
+
     console.log('✅ Page size updated to:', pageSize);
 }
 
@@ -588,9 +593,9 @@ function addAutoRefreshIndicator() {
 // ENHANCED: Update refresh rate with better error handling
 function updateRefreshRate() {
     try {
-        const hasErrors = interfaces.some(i => i.status === 'error');
-        const hasRunning = interfaces.some(i => i.status === 'running');
-        const totalInterfaces = interfaces.length;
+        const hasErrors = listCounts ? listCounts.error > 0 : interfaces.some(i => i.status === 'error');
+        const hasRunning = listCounts ? listCounts.running > 0 : interfaces.some(i => i.status === 'running');
+        const totalInterfaces = listCounts ? listCounts.total : interfaces.length;
         
         // Determine optimal refresh rate
         if (hasErrors) {
@@ -677,21 +682,18 @@ async function performAutoRefresh() {
         if (refreshIcon) refreshIcon.classList.add('refreshing');
         
         // Refresh data silently (no loading state)
-        const response = await fetch('/api/interfaces', {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            
+        const result = await fetchInterfacesPage();
+
+        if (result) {
             // Only update if data actually changed
-            const newInterfacesJson = JSON.stringify(data.interfaces);
-            const currentInterfacesJson = JSON.stringify(interfaces);
-            
+            const newInterfacesJson = JSON.stringify(result.page) + result.total + JSON.stringify(result.counts);
+            const currentInterfacesJson = JSON.stringify(interfaces) + listTotal + JSON.stringify(listCounts);
+
             if (newInterfacesJson !== currentInterfacesJson) {
-                interfaces = data.interfaces || [];
-                filteredInterfaces = [...interfaces];
+                interfaces = result.page;
+                filteredInterfaces = interfaces;
+                listTotal = result.total;
+                if (result.counts) listCounts = result.counts;
 
                 populateMessageTypeFilter();
                 updateSummaryCards();
@@ -710,23 +712,66 @@ async function performAutoRefresh() {
     }
 }
 
+/** The query string for the current page, filters and sort. */
+function buildListQuery() {
+    const params = new URLSearchParams();
+    params.set('limit', String(pageSize));
+    params.set('offset', String((currentPage - 1) * pageSize));
+    params.set('sort', sortColumn);
+    params.set('dir', sortDirection);
+    params.set('counts', '1');
+    const value = (id) => (document.getElementById(id)?.value || '').trim();
+    const search = value('interfaceSearchInput');
+    if (search) params.set('q', search);
+    const status = value('statusFilter');
+    if (status && status !== 'all') params.set('status', status);
+    const type = value('typeFilter');
+    if (type && type !== 'all') params.set('sourceType', type);
+    const format = value('messageTypeFilter');
+    if (format && format !== 'all') params.set('format', format);
+    return params.toString();
+}
+
+/**
+ * Fetches the current page. Returns { page, total, counts } or null when the response is stale (a newer request was
+ * made meanwhile) or the page number is past the end after a delete (it refetches the last page itself).
+ */
+async function fetchInterfacesPage() {
+    const seq = ++listRequestSeq;
+    const response = await fetch('/api/interfaces?' + buildListQuery(), {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+    });
+    if (seq !== listRequestSeq) return null;
+    if (response.status === 401) {
+        window.location.href = 'login.html';
+        return null;
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    const data = await response.json();
+    const total = Number(data.total) || 0;
+    const lastPage = Math.max(1, Math.ceil(total / pageSize));
+    if (currentPage > lastPage) {   // e.g. the last row of the last page was deleted
+        currentPage = lastPage;
+        return fetchInterfacesPage();
+    }
+    return { page: data.interfaces || [], total, counts: data.counts || null };
+}
+
 // Load interfaces from backend
 async function loadInterfaces() {
     try {
         console.log('🔄 Loading interfaces from API...');
-        
-        const response = await fetch('/api/interfaces', {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        console.log('📡 API Response:', response.status);
-        
-        if (response.ok) {
-            const data = await response.json();
-            interfaces = data.interfaces || [];
-            filteredInterfaces = [...interfaces];
-            console.log('✅ Interfaces loaded:', interfaces.length);
+
+        const result = await fetchInterfacesPage();
+        if (!result) return;   // superseded by a newer request, or redirected to login
+
+        {
+            interfaces = result.page;
+            filteredInterfaces = interfaces;
+            listTotal = result.total;
+            if (result.counts) listCounts = result.counts;
+            console.log('✅ Interfaces loaded:', interfaces.length, 'of', listTotal);
 
             // Load review queue counts and mapping updates in background — non-blocking
             loadReviewQueueCounts();
@@ -736,14 +781,8 @@ async function loadInterfaces() {
             updateSummaryCards();
             calculatePagination();
             renderInterfacesTable();
-        } else if (response.status === 401) {
-            console.log('❌ Unauthorized - redirecting to login');
-            window.location.href = 'login.html';
-            return;
-        } else {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-        
+
     } catch (error) {
         console.error('❌ Error loading interfaces:', error);
         console.log('🔄 Falling back to mock data');
@@ -812,7 +851,8 @@ async function loadInterfaces() {
                 createdBy: 'admin@ezhealthkonnect.com'
             }
         ];
-        filteredInterfaces = [...interfaces];
+        filteredInterfaces = interfaces;
+        listTotal = interfaces.length;
         
         updateSummaryCards();
         calculatePagination();
@@ -906,11 +946,15 @@ async function loadMappingUpdates() {
 
 // Update summary cards
 function updateSummaryCards() {
-    const total = interfaces.length;
-    const running = interfaces.filter(i => i.status === 'running').length;
-    const stopped = interfaces.filter(i => i.status === 'stopped').length;
-    const paused = interfaces.filter(i => i.status === 'paused').length;
-    
+    // Counted by the server over everything the user may see (not just this page or the filtered rows).
+    const c = listCounts || {
+        total: interfaces.length,
+        running: interfaces.filter(i => i.status === 'running' || i.status === 'active').length,
+        stopped: interfaces.filter(i => i.status === 'stopped').length,
+        paused: interfaces.filter(i => i.status === 'paused').length,
+    };
+    const { total, running, stopped, paused } = c;
+
     document.getElementById('totalInterfaces').textContent = total;
     document.getElementById('runningInterfaces').textContent = running;
     document.getElementById('stoppedInterfaces').textContent = stopped;
@@ -919,7 +963,7 @@ function updateSummaryCards() {
 
 // Calculate pagination
 function calculatePagination() {
-    totalPages = Math.ceil(filteredInterfaces.length / pageSize);
+    totalPages = Math.ceil(listTotal / pageSize);
     if (currentPage > totalPages) currentPage = 1;
     if (totalPages === 0) totalPages = 1;
 }
@@ -933,7 +977,8 @@ function sortBy(col) {
         sortDirection = 'asc';
     }
     updateSortHeaders();
-    renderInterfacesTable();
+    currentPage = 1;
+    loadInterfaces();
 }
 
 // Update header arrow indicators
@@ -947,7 +992,7 @@ function updateSortHeaders() {
     }
 }
 
-// Return a sorted copy of filteredInterfaces
+// Sorting now happens on the server (ORDER BY in GET /api/interfaces). Kept for any caller that sorts a page locally.
 function getSortedInterfaces() {
     const sorted = [...filteredInterfaces];
     sorted.sort((a, b) => {
@@ -997,7 +1042,7 @@ function getSortedInterfaces() {
 function renderInterfacesTable() {
     const tbody = document.getElementById('interfacesTableBody');
     
-    if (filteredInterfaces.length === 0) {
+    if (interfaces.length === 0) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="8" class="empty-state">
@@ -1011,10 +1056,8 @@ function renderInterfacesTable() {
         return;
     }
     
-    // Get items for current page (sorted)
-    const startIndex = (currentPage - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    const pageItems = getSortedInterfaces().slice(startIndex, endIndex);
+    // The server already returned exactly this page, filtered and sorted.
+    const pageItems = interfaces;
 
     tbody.innerHTML = HtmlSafe.html`${pageItems.map(createCompactTableRow)}`;
     updateSortHeaders();
@@ -1601,59 +1644,36 @@ function formatCompactNumber(num) {
 // No-op: message type dropdown is now a static curated list
 function populateMessageTypeFilter() {}
 
-// Apply filters
+// Apply filters: the server filters; go back to page 1 and reload.
 function applyFilters() {
-    const statusFilter = document.getElementById('statusFilter')?.value || 'all';
-    const typeFilter = document.getElementById('typeFilter')?.value || 'all';
-    const messageTypeFilter = document.getElementById('messageTypeFilter')?.value || 'all';
-    const searchQuery = (document.getElementById('interfaceSearchInput')?.value || '').trim().toLowerCase();
-
-    filteredInterfaces = interfaces.filter(iface => {
-        const statusMatch = statusFilter === 'all' ||
-            (iface.status || '').toLowerCase() === statusFilter ||
-            (iface.interfaceStatus || iface.interface_status || '').toLowerCase() === statusFilter;
-        const typeMatch = typeFilter === 'all' ||
-            (iface.sourceType || iface.source_type || '').toLowerCase().includes(typeFilter);
-        // Format filter operates on sourceType (hl7v2, fhir, cda, x12, json, xml, csv)
-        // This is the actual inbound source format, not the generic message_type default
-        const srcFmt = (iface.sourceType || iface.source_type || '').toLowerCase().trim();
-        const fmtFilter = messageTypeFilter.toLowerCase().trim();
-        const msgTypeMatch = fmtFilter === 'all' || srcFmt === fmtFilter;
-        const nameMatch = !searchQuery ||
-            (iface.name || '').toLowerCase().includes(searchQuery) ||
-            (iface.description || '').toLowerCase().includes(searchQuery);
-        return statusMatch && typeMatch && msgTypeMatch && nameMatch;
-    });
-
     currentPage = 1;
-    calculatePagination();
-    renderInterfacesTable();
+    loadInterfaces();
 }
 
 function goToPage(page) {
     if (page >= 1 && page <= totalPages) {
         currentPage = page;
-        renderInterfacesTable();
+        loadInterfaces();
     }
 }
 
 function goToPreviousPage() {
     if (currentPage > 1) {
         currentPage--;
-        renderInterfacesTable();
+        loadInterfaces();
     }
 }
 
 function goToNextPage() {
     if (currentPage < totalPages) {
         currentPage++;
-        renderInterfacesTable();
+        loadInterfaces();
     }
 }
 
 // Update pagination info and controls
 function updatePaginationInfo() {
-    const totalItems = filteredInterfaces.length;
+    const totalItems = listTotal;
     const infoElement = document.querySelector('.pagination-info');
     if (!infoElement) return;
 
@@ -1664,7 +1684,8 @@ function updatePaginationInfo() {
 
     const startItem = (currentPage - 1) * pageSize + 1;
     const endItem = Math.min(currentPage * pageSize, totalItems);
-    const filtered = totalItems < interfaces.length ? ` (filtered from ${interfaces.length})` : '';
+    const everything = listCounts ? listCounts.total : totalItems;
+    const filtered = totalItems < everything ? ` (filtered from ${everything})` : '';
     infoElement.innerHTML = HtmlSafe.html`Showing <strong>${startItem}–${endItem}</strong> of <strong>${totalItems}</strong> interfaces${filtered}`;
 }
 
@@ -1672,7 +1693,7 @@ function updatePaginationControls() {
     const paginationContainer = document.querySelector('.pagination-controls');
     if (!paginationContainer) return;
 
-    if (totalPages <= 1 && filteredInterfaces.length === 0) {
+    if (totalPages <= 1 && listTotal === 0) {
         paginationContainer.innerHTML = '';
         return;
     }

@@ -245,14 +245,18 @@ class InterfacesController {
                 LEFT JOIN users u ON i.created_by = u.id
                 WHERE (i.user_id = :userId OR ${allInterfaces}) AND i.is_active = true
                   ${listOptions.search ? 'AND (i.name ILIKE :search OR i.description ILIKE :search)' : ''}
-                  ${listOptions.status ? 'AND i.status = :status' : ''}
-                ORDER BY i.updated_at DESC, i.id
+                  ${listOptions.status ? 'AND LOWER(i.status) = :status' : ''}
+                  ${listOptions.sourceType ? 'AND i.source_type ILIKE :sourceType' : ''}
+                  ${listOptions.format ? 'AND LOWER(TRIM(i.source_type)) = :format' : ''}
+                ORDER BY ${listOptions.orderBy}, i.id
                 ${listOptions.limit ? 'LIMIT :limit OFFSET :offset' : ''}
             `, {
                 replacements: {
                     userId,
                     search: listOptions.search ? `%${listOptions.search.replace(/[\\%_]/g, '\\$&')}%` : null,
                     status: listOptions.status,
+                    sourceType: listOptions.sourceType ? `%${listOptions.sourceType.replace(/[\\%_]/g, '\\$&')}%` : null,
+                    format: listOptions.format,
                     limit: listOptions.limit,
                     offset: listOptions.offset,
                 },
@@ -349,12 +353,29 @@ class InterfacesController {
                 riskLevel: 'low'
             }).catch(err => console.warn('⚠️ Failed to write INTERFACES_VIEWED audit log:', err.message));
 
+            // The page asks for the summary-card numbers with the first page: they cover everything the user may see,
+            // not just the filtered or visible rows (the browser used to count them from the full list).
+            let counts;
+            if (listOptions.limit && listOptions.counts) {
+                const [row] = await this.database.sequelize.query(`
+                    SELECT COUNT(*)::int AS total,
+                           COUNT(*) FILTER (WHERE LOWER(i.status) IN ('active', 'running'))::int AS running,
+                           COUNT(*) FILTER (WHERE LOWER(i.status) = 'paused')::int AS paused,
+                           COUNT(*) FILTER (WHERE LOWER(i.status) IN ('configured', 'draft', 'testing', 'retired', 'inactive', 'stopped'))::int AS stopped,
+                           COUNT(*) FILTER (WHERE LOWER(i.status) = 'error')::int AS error
+                    FROM interfaces i
+                    WHERE (i.user_id = :userId OR ${allInterfaces}) AND i.is_active = true
+                `, { replacements: { userId }, type: this.database.sequelize.QueryTypes.SELECT });
+                counts = row;
+            }
+
             return res.json({
                 success: true,
                 interfaces: transformedInterfaces,
                 // total = the whole matching list when paged, else what was returned (as before)
                 total: listOptions.limit ? Number(interfaces[0]?.total_count || 0) : transformedInterfaces.length,
                 ...(listOptions.limit ? { pagination: { limit: listOptions.limit, offset: listOptions.offset } } : {}),
+                ...(counts ? { counts } : {}),
                 timestamp: new Date().toISOString()
             });
 
@@ -367,6 +388,27 @@ class InterfacesController {
                 debug: error.message
             });
         }
+    }
+
+    /**
+     * ORDER BY for the list: the sort key is looked up in a fixed table, never interpolated from the request.
+     * Default (no sort) is most recently updated first, as before.
+     */
+    static orderByFor(sort, dir) {
+        const columns = {
+            name: 'LOWER(i.name)',
+            status: "LOWER(COALESCE(i.status, ''))",
+            // the Runtime column's order: running, paused, stopped, anything else
+            runtime: "CASE WHEN LOWER(i.status) IN ('active','running') THEN 1 WHEN LOWER(i.status) = 'paused' THEN 2 ELSE 3 END",
+            created: 'i.created_at',
+            lastUpdated: 'i.updated_at',
+            statistics: 'COALESCE(i.total_processed, 0)',
+            lastActivity: 'i.last_processed_at',
+        };
+        const column = Object.prototype.hasOwnProperty.call(columns, sort) ? columns[sort] : 'i.updated_at';
+        const direction = String(dir).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+        // NULLs (never active) sort last in both directions
+        return `${column} ${direction} NULLS LAST`;
     }
 
     /** Connectivity for the list: masked as before; the light view keeps the type but not the connection settings. */
@@ -387,8 +429,13 @@ class InterfacesController {
             limit: limit || null,
             offset: limit ? Math.max(parseInt(query.offset, 10) || 0, 0) : null,
             search: typeof query.q === 'string' && query.q.trim() ? query.q.trim().slice(0, 100) : null,
-            status: typeof query.status === 'string' && /^[a-z_]{1,30}$/.test(query.status) ? query.status : null,
+            status: typeof query.status === 'string' && /^[a-z_]{1,30}$/i.test(query.status) ? query.status.toLowerCase() : null,
+            // source type contains / source format equals (the page's two filters)
+            sourceType: typeof query.sourceType === 'string' && /^[a-z0-9_]{1,30}$/i.test(query.sourceType) ? query.sourceType : null,
+            format: typeof query.format === 'string' && /^[a-z0-9_]{1,30}$/i.test(query.format) ? query.format.toLowerCase() : null,
             summary: query.view === 'summary',
+            counts: query.counts === '1',
+            orderBy: InterfacesController.orderByFor(query.sort, query.dir),
         };
     }
 

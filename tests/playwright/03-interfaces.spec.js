@@ -331,10 +331,12 @@ test.describe('Interfaces', () => {
         const ccdId = await createInterface(`TC-IFACE-019 CCD ${unique}`, 'CCD');
         const nonCcdId = await createInterface(`TC-IFACE-019 ADT ${unique}`, 'ADT^A01');
 
-        // Reload so the page's own interfaces list (fetched once on load,
-        // before these fixtures existed) picks both up.
+        // Reload, then narrow the (server-paged) list to the fixtures: with many interfaces they are not on page 1.
         await page.reload();
         await page.waitForLoadState('domcontentloaded');
+        // Wait for the first page to be on screen (the search listener is attached by then), then narrow it.
+        await page.waitForFunction(() => typeof interfaces !== 'undefined' && interfaces.length > 0);
+        await page.locator("#interfaceSearchInput").fill(String(unique));   // both fixture names carry the timestamp
         await page.waitForFunction(
             (ids) => typeof interfaces !== 'undefined' && ids.every(id => interfaces.some(i => i.id === id)),
             [ccdId, nonCcdId],
