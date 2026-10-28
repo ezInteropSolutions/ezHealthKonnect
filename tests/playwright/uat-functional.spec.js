@@ -158,15 +158,17 @@ test.describe('2 Interfaces', () => {
         expect(problems, 'hostile search text must not break the page or the API').toEqual([]);
     });
 
-    test('OPS-10 interface header counters agree with the rows and the API', async ({ page }) => {
-        test.fail(true, 'KNOWN DEFECT: the Interfaces header shows "0 RUNNING / 0 STOPPED / 0 PAUSED" while the same page lists Listening/Stopped interfaces (and the API reports 769 active / 201 inactive).');
+    // Was a known defect (header showed 0 RUNNING / 0 STOPPED while rows were Listening): the cards counted
+    // status === 'running', a value no interface has. They now come from the server's counts over everything visible.
+    test('OPS-10 interface header counters agree with the API counts', async ({ page, request }) => {
+        const { counts } = await (await request.get('/api/interfaces?limit=1&counts=1')).json();
         await page.goto('/interfaces.html', { waitUntil: 'networkidle' });
-        await page.waitForTimeout(4000);
-        const chip = async (label) => parseInt(((await page.getByText(new RegExp(`^\\s*\\d+\\s*${label}`, 'i')).first().innerText().catch(() => '0')).match(/\d+/) || ['0'])[0], 10);
-        const running = await chip('RUNNING');
-        const rowsListening = await page.locator('table tbody tr', { hasText: 'Listening' }).count();
-        expect(rowsListening, 'page shows listening rows').toBeGreaterThan(0);
-        expect(running, 'RUNNING counter must not be 0 while rows are Listening').toBeGreaterThan(0);
+        await expect(page.locator('#totalInterfaces')).toHaveText(String(counts.total), { timeout: 15_000 });
+        await expect(page.locator('#runningInterfaces')).toHaveText(String(counts.running));
+        await expect(page.locator('#stoppedInterfaces')).toHaveText(String(counts.stopped));
+        await expect(page.locator('#pausedInterfaces')).toHaveText(String(counts.paused));
+        // sanity: the counts are consistent with each other
+        expect(counts.running + counts.paused + counts.stopped + counts.error).toBeLessThanOrEqual(counts.total);
     });
 
     test('IFC-10 status filter shows only matching interfaces', async ({ page, seed }) => {

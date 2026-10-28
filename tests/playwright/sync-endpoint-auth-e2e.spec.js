@@ -52,7 +52,12 @@ async function partnerCheck(ctx, interfaceId, headers = {}) {
 }
 
 async function openEditModal(page, interfaceId) {
+    // The page lists one server-side page at a time, so narrow it to this interface before it can be opened.
+    const got = await (await page.request.get(`/api/interfaces/${interfaceId}`)).json();
+    const name = (got.interface || got).name;
     await page.goto('/interfaces.html');
+    await page.waitForFunction(() => typeof interfaces !== 'undefined' && interfaces.length > 0);
+    await page.locator('#interfaceSearchInput').fill(name);
     await page.waitForFunction(
         (id) => typeof interfaces !== 'undefined' && interfaces.some(i => i.id === id),
         interfaceId, { timeout: 15000 }

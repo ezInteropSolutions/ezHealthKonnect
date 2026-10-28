@@ -25,7 +25,7 @@ test.describe('no third-party resources', () => {
             });
             const page = await ctx.newPage();
             const gates = attachGates(page, { origin });
-            await page.goto(`/${file}`, { waitUntil: 'networkidle' });
+            await page.goto(`/${file}`, { waitUntil: 'load' });   // 'networkidle' never settles on pages that poll, on a slow runner
             // Fonts load lazily once something uses them; on a loaded CI runner networkidle can come before that.
             await page.evaluate(async () => {
                 await Promise.all(['900', '400'].map((w) => document.fonts.load(`${w} 1em "Font Awesome 6 Free"`).catch(() => [])));
