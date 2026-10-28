@@ -461,7 +461,7 @@
 <script src="/js/core/html-safe.js"></script>
 <script src="/js/core/app-dialogs.js"></script>
     <script src="/js/services/AuthService.js"></script>
-<script src="/js/core/app-auth.js?v=2"></script>
+<script src="/js/core/app-auth.js?v=3"></script>
 <script src="js/components/sidebar-nav.js?v=7"></script>
 <script>
 /* ── Metadata ──────────────────────────────────────────────────────────────── */
@@ -852,7 +852,7 @@ async function loadInterfaceOptions() {
     const sel = document.getElementById('bldInterface');
     if (!sel || sel.options.length > 1) return; // already loaded
     try {
-        const data = await fetch('/api/interfaces', { credentials: 'include' }).then(r => r.json());
+        const data = await fetch('/api/interfaces?view=summary', { credentials: 'include' }).then(r => r.json());
         const list = Array.isArray(data) ? data : (data.data || data.interfaces || []);
         list.filter(i => i.is_active !== false && !i.deleted_at)
             .sort((a, b) => (a.name || '').localeCompare(b.name || ''))

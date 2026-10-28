@@ -452,7 +452,7 @@
 <script src="/js/core/html-safe.js"></script>
 <script src="/js/core/app-dialogs.js"></script>
     <script src="/js/services/AuthService.js"></script>
-<script src="/js/core/app-auth.js?v=2"></script>
+<script src="/js/core/app-auth.js?v=3"></script>
 <script src="js/components/sidebar-nav.js?v=7"></script>
 <script>
 'use strict';
@@ -691,7 +691,7 @@ function makeSlug(name) {
 // ── Interfaces ────────────────────────────────────────────────────────────────
 async function loadInterfaces() {
     try {
-        const res  = await fetch('/api/interfaces', { credentials: 'include' });
+        const res  = await fetch('/api/interfaces?view=summary', { credentials: 'include' });
         const body = await res.json();
         interfaces = Array.isArray(body) ? body : (body.data || body.interfaces || []);
     } catch { interfaces = []; }

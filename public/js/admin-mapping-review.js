@@ -33,8 +33,11 @@
         document.getElementById('loadMoreBtn').addEventListener('click', function () {
             loadRecords(false);
         });
-        loadStats();
-        loadRecords(true);
+        // The server answers 403 to anyone but a super administrator (and app-auth already replaces the page with an
+        // "access denied" panel for them); do not fire the data calls at all, or every plain admin gets console 403s.
+        const start = function () { loadStats(); loadRecords(true); };
+        if (window.appAuth) window.appAuth.whenReady().then(function () { if (window.appAuth.can('superAdmin')) start(); });
+        else start();
     });
 
     // ── API helpers ──────────────────────────────────────────────────────────

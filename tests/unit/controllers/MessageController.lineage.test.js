@@ -43,3 +43,34 @@ describe('getDataLineage', () => {
         expect(sqls.some((s) => s.includes('messages_intf_aaaa_bbbb'))).toBe(true);
     });
 });
+
+describe('getDataLineage with the interface known', () => {
+    beforeEach(() => mockQuery.mockReset());
+    const id = '11111111-2222-3333-4444-555555555555';
+
+    it('searches only that interface (one table, not every interface)', async () => {
+        mockQuery
+            .mockResolvedValueOnce([{ id, name: "O'Brien", source_type: 'x', target_type: 'y' }])
+            .mockResolvedValue([]);
+        await controller.getDataLineage({ ...req, query: { interfaceId: id } }, mockRes());
+        const sqls = mockQuery.mock.calls.map((c) => String(c[0]));
+        expect(sqls[0]).toMatch(/AND id = :wantedInterface/);
+        expect(mockQuery.mock.calls[0][1].replacements.wantedInterface).toBe(id);
+        expect(sqls.filter((s) => s.includes('messages_intf_')).length).toBe(1);
+    });
+
+    it('ignores an interfaceId that is not a UUID', async () => {
+        mockQuery.mockResolvedValue([]);
+        await controller.getDataLineage({ ...req, query: { interfaceId: "x'; DROP TABLE users;--" } }, mockRes());
+        expect(String(mockQuery.mock.calls[0][0])).not.toMatch(/wantedInterface/);
+        expect(mockQuery.mock.calls[0][1].replacements.wantedInterface).toBeNull();
+    });
+
+    it('never splices the interface name into SQL text', async () => {
+        mockQuery
+            .mockResolvedValueOnce([{ id, name: "O'Brien", source_type: 'x', target_type: 'y' }])
+            .mockResolvedValue([]);
+        await controller.getDataLineage({ ...req, query: { interfaceId: id } }, mockRes());
+        for (const c of mockQuery.mock.calls) expect(String(c[0])).not.toContain("O'Brien");
+    });
+});

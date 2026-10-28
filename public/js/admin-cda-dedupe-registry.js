@@ -25,7 +25,7 @@
 
     async function loadInterfaces() {
         try {
-            const res = await fetch('/api/interfaces', { credentials: 'include', headers: _authHeaders() });
+            const res = await fetch('/api/interfaces?view=summary', { credentials: 'include', headers: _authHeaders() });
             const body = await res.json();
             const list = body.data || body.interfaces || body || [];
             const select = el('searchInterface');

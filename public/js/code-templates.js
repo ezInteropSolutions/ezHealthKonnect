@@ -40,7 +40,7 @@ async function loadTemplates() {
 
 async function loadInterfaces() {
     try {
-        const res = await fetch('/api/interfaces', { credentials: 'include' });
+        const res = await fetch('/api/interfaces?view=summary', { credentials: 'include' });
         const json = await res.json();
         const ifaces = json.data || json.interfaces || [];
         const sel = document.getElementById('f-interfaces');

@@ -187,9 +187,21 @@ class InterfacesController {
             
             console.log(`🔍 Fetching interfaces for user: ${userEmail} (ID: ${userId})`);
 
+            // Optional paging / search / light rows. With none of these the answer is the full list exactly as before
+            // (about twenty pages read it); pages that only need names (selectors, filters) ask for view=summary, and
+            // large lists use limit/offset/q, so the cost no longer grows with the number of interfaces.
+            const listOptions = this.parseListOptions(req.query);
+            const heavy = (sql) => (listOptions.summary ? 'NULL' : sql);
+            const stepConfig = (col, type) => heavy(`(SELECT ${col}
+                     FROM transformation_steps ts
+                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
+                     WHERE tp.interface_id = i.id AND ts.step_type = '${type}'
+                     ORDER BY ts.sequence LIMIT 1)`);
+
             // ✅ UPDATED: Include connectivity fields, deployment settings, and logging settings in SELECT
             const interfaces = await this.database.sequelize.query(`
                 SELECT
+                    COUNT(*) OVER() AS total_count,
                     i.id,
                     i.user_id,
                     i.name,
@@ -198,11 +210,11 @@ class InterfacesController {
                     i.source_connectivity,
                     i.target_type,
                     i.target_connectivity,
-                    i.source_config,
-                    i.target_config,
+                    ${heavy('i.source_config')} AS source_config,
+                    ${heavy('i.target_config')} AS target_config,
                     i.message_type,
-                    i.processing_rules,
-                    i.transformation_mapping,
+                    ${heavy('i.processing_rules')} AS processing_rules,
+                    ${heavy('i.transformation_mapping')} AS transformation_mapping,
                     i.status,
                     i.deployment_mode,
                     i.auto_start,
@@ -223,34 +235,27 @@ class InterfacesController {
                     i.created_at,
                     i.updated_at,
                     i.version,
-                    i.processing_stats,
+                    ${heavy('i.processing_stats')} AS processing_stats,
                     u.email as created_by_email,
-                    (SELECT ts.config::text
-                     FROM transformation_steps ts
-                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
-                     WHERE tp.interface_id = i.id AND ts.step_type = 'connector.inbound'
-                     ORDER BY ts.sequence LIMIT 1) AS inbound_step_config,
-                    (SELECT ts.id::text
-                     FROM transformation_steps ts
-                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
-                     WHERE tp.interface_id = i.id AND ts.step_type = 'connector.inbound'
-                     ORDER BY ts.sequence LIMIT 1) AS inbound_step_id,
-                    (SELECT ts.config::text
-                     FROM transformation_steps ts
-                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
-                     WHERE tp.interface_id = i.id AND ts.step_type = 'connector.outbound'
-                     ORDER BY ts.sequence LIMIT 1) AS outbound_step_config,
-                    (SELECT ts.id::text
-                     FROM transformation_steps ts
-                     JOIN transformation_pipelines tp ON tp.id = ts.pipeline_id
-                     WHERE tp.interface_id = i.id AND ts.step_type = 'connector.outbound'
-                     ORDER BY ts.sequence LIMIT 1) AS outbound_step_id
+                    ${stepConfig('ts.config::text', 'connector.inbound')} AS inbound_step_config,
+                    ${stepConfig('ts.id::text', 'connector.inbound')} AS inbound_step_id,
+                    ${stepConfig('ts.config::text', 'connector.outbound')} AS outbound_step_config,
+                    ${stepConfig('ts.id::text', 'connector.outbound')} AS outbound_step_id
                 FROM interfaces i
                 LEFT JOIN users u ON i.created_by = u.id
                 WHERE (i.user_id = :userId OR ${allInterfaces}) AND i.is_active = true
-                ORDER BY i.updated_at DESC
+                  ${listOptions.search ? 'AND (i.name ILIKE :search OR i.description ILIKE :search)' : ''}
+                  ${listOptions.status ? 'AND i.status = :status' : ''}
+                ORDER BY i.updated_at DESC, i.id
+                ${listOptions.limit ? 'LIMIT :limit OFFSET :offset' : ''}
             `, {
-                replacements: { userId },
+                replacements: {
+                    userId,
+                    search: listOptions.search ? `%${listOptions.search.replace(/[\\%_]/g, '\\$&')}%` : null,
+                    status: listOptions.status,
+                    limit: listOptions.limit,
+                    offset: listOptions.offset,
+                },
                 type: this.database.sequelize.QueryTypes.SELECT
             });
 
@@ -265,10 +270,10 @@ class InterfacesController {
 
                 // ✅ UPDATED: Include source and target connectivity
                 sourceType: item.source_type,
-                sourceConnectivity: configProtector.maskForDisplay(item.source_connectivity),
+                sourceConnectivity: this.connectivityForList(item.source_connectivity, listOptions.summary),
                 sourceFormat: this.deriveSourceFormat(item.source_connectivity),
                 targetType: item.target_type,
-                targetConnectivity: configProtector.maskForDisplay(item.target_connectivity),
+                targetConnectivity: this.connectivityForList(item.target_connectivity, listOptions.summary),
 
                 sourceConfig: configProtector.maskForDisplay(this.parseJsonField(item.source_config)),
                 targetConfig: configProtector.maskForDisplay(this.parseJsonField(item.target_config)),
@@ -347,7 +352,9 @@ class InterfacesController {
             return res.json({
                 success: true,
                 interfaces: transformedInterfaces,
-                total: transformedInterfaces.length,
+                // total = the whole matching list when paged, else what was returned (as before)
+                total: listOptions.limit ? Number(interfaces[0]?.total_count || 0) : transformedInterfaces.length,
+                ...(listOptions.limit ? { pagination: { limit: listOptions.limit, offset: listOptions.offset } } : {}),
                 timestamp: new Date().toISOString()
             });
 
@@ -360,6 +367,29 @@ class InterfacesController {
                 debug: error.message
             });
         }
+    }
+
+    /** Connectivity for the list: masked as before; the light view keeps the type but not the connection settings. */
+    connectivityForList(connectivity, summary) {
+        const masked = configProtector.maskForDisplay(connectivity);
+        if (!summary || !masked || typeof masked !== 'object') return masked;
+        const { config, ...rest } = masked;
+        return rest;
+    }
+
+    /**
+     * ?limit=<1..500>&offset=<n>&q=<text>&status=<status>&view=summary  (all optional, validated, never raw SQL).
+     * No limit = the full list, as before.
+     */
+    parseListOptions(query = {}) {
+        const limit = Math.min(Math.max(parseInt(query.limit, 10) || 0, 0), 500);
+        return {
+            limit: limit || null,
+            offset: limit ? Math.max(parseInt(query.offset, 10) || 0, 0) : null,
+            search: typeof query.q === 'string' && query.q.trim() ? query.q.trim().slice(0, 100) : null,
+            status: typeof query.status === 'string' && /^[a-z_]{1,30}$/.test(query.status) ? query.status : null,
+            summary: query.view === 'summary',
+        };
     }
 
     /**

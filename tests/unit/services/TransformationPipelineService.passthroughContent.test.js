@@ -94,3 +94,33 @@ describe('normalizeWizardConfig keeps the file connectors\' real settings', () =
         expect(service.normalizeWizardConfig({ directory_path: '/out' }, 'file_writer')).toEqual({ directory_path: '/out' });
     });
 });
+
+describe('the wizard keeps every setting the user entered (not a short whitelist)', () => {
+    const svc = new TransformationPipelineService();
+
+    it('TCP/MLLP keeps keep-alive, TLS, retries and the ACK block, not only host and port', () => {
+        const cfg = svc.normalizeWizardConfig({
+            host: 'h', port: '2575', keep_alive: true, use_tls: true, max_retries: 3, expect_ack: true,
+            ack: { mode: 'immediate', on_error: 'nack' }, ignored_blank: '',
+        }, 'tcp_mllp_outbound');
+        expect(cfg).toEqual({ host: 'h', port: 2575, keep_alive: true, use_tls: true, max_retries: 3, expect_ack: true,
+            ack: { mode: 'immediate', on_error: 'nack' } });
+    });
+
+    it('HTTP outbound renames the form keys and keeps retries, headers and the rest', () => {
+        const cfg = svc.normalizeWizardConfig({
+            endpoint: 'http://x', authType: 'basic', authUsername: 'u', authPassword: 'p',
+            method: 'PUT', retry_attempts: 4, retry_delay_seconds: 2, headers: { A: 'b' },
+        }, 'http_outbound');
+        expect(cfg).toMatchObject({ url: 'http://x', authentication_type: 'basic_auth', username: 'u', password: 'p',
+            method: 'PUT', retry_attempts: 4, retry_delay_seconds: 2, headers: { A: 'b' } });
+        for (const old of ['endpoint', 'authType', 'authUsername', 'authPassword']) expect(cfg).not.toHaveProperty(old);
+    });
+
+    it.each(['postgresql_inbound', 'mysql_outbound', 'mongodb_inbound', 'sqlserver_inbound'])(
+        '%s keeps connection string, collection, polling interval and batch size', (type) => {
+            const cfg = svc.normalizeWizardConfig({ host: 'h', port: 1, connection_string: 'cs', collection: 'c',
+                polling_interval: 30, batch_size: 50 }, type);
+            expect(cfg).toMatchObject({ host: 'h', connection_string: 'cs', collection: 'c', polling_interval: 30, batch_size: 50 });
+        });
+});

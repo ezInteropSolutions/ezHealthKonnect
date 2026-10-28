@@ -161,7 +161,7 @@
 <script src="/js/core/html-safe.js"></script>
 <script src="/js/core/app-dialogs.js"></script>
 <script src="/js/services/AuthService.js"></script>
-<script src="/js/core/app-auth.js?v=2"></script>
+<script src="/js/core/app-auth.js?v=3"></script>
 <script src="js/components/sidebar-nav.js?v=7"></script>
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
@@ -207,7 +207,7 @@ const interfacesReady = new Promise((resolve) => { resolveInterfacesReady = reso
 const interfaceLabel = (i) => i.name + '  ·  ' + String(i.id).slice(0, 8);
 
 async function loadInterfaces() {
-    const res = await fetch('/api/interfaces', { credentials: 'include' });
+    const res = await fetch('/api/interfaces?view=summary', { credentials: 'include' });
     if (!res.ok) throw new Error('the server answered ' + res.status);
     const body = await res.json();
     const list = body.data || body.interfaces || body;

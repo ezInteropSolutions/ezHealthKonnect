@@ -247,7 +247,7 @@ class MessageManager {
 
     async loadInterfaces() {
         try {
-            const response = await fetch('/api/interfaces', {
+            const response = await fetch('/api/interfaces?view=summary', {
                 credentials: 'include'
             });
             if (response.ok) {
@@ -827,7 +827,7 @@ class MessageManager {
             // case: most interfaces have no cda.dedupe step, or haven't opted
             // into coverage tracking) must never block the main lineage view.
             const [lineageResponse, dedupeResponse, coverageResponse] = await Promise.all([
-                fetch(`/api/messages/${encodeURIComponent(messageId)}/lineage`),
+                fetch(`/api/messages/${encodeURIComponent(messageId)}/lineage${this._interfaceQuery()}`),
                 fetch(`/api/messages/${encodeURIComponent(messageId)}/dedupe-suppressions`).catch(() => null),
                 fetch(`/api/messages/${encodeURIComponent(messageId)}/coverage-audit`).catch(() => null),
             ]);

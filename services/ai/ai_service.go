@@ -236,15 +236,25 @@ func heuristicDetect(msg string) (FormatDetection, bool) {
 	return FormatDetection{}, false
 }
 
+// mshFields splits only the MSH segment. The message is segment-delimited by CR (or LF/CRLF in files), so splitting
+// the whole message on "|" ran the last MSH field into the next segment ("2.5\rPID").
+func mshFields(msg string) []string {
+	line := msg
+	if i := strings.IndexAny(line, "\r\n"); i != -1 {
+		line = line[:i]
+	}
+	return strings.Split(line, "|")
+}
+
 func extractHL7MsgType(msg string) string {
-	if f := strings.Split(msg, "|"); len(f) > 8 {
+	if f := mshFields(msg); len(f) > 8 {
 		return f[8]
 	}
 	return ""
 }
 func extractHL7Version(msg string) string {
-	if f := strings.Split(msg, "|"); len(f) > 11 {
-		return f[11]
+	if f := mshFields(msg); len(f) > 11 {
+		return strings.SplitN(f[11], "^", 2)[0] // MSH-12 may carry components ("2.5.1^...")
 	}
 	return ""
 }

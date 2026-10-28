@@ -27,6 +27,25 @@ const FILE_CONNECTOR_KEYS = {
     file_writer:   ['directory_path', 'file_pattern', 'filename_pattern', 'create_subdirs', 'overwrite_existing', 'encoding'],
 };
 
+// Wizard form keys that normalizeWizardConfig renames to the connector's own names; they must not also be copied
+// across under the old name.
+const HTTP_ALIAS_KEYS = ['endpoint', 'authType', 'authUsername', 'authPassword', 'bearerToken', 'apiKey', 'apiKeyHeader'];
+
+/**
+ * Copies every setting the user entered that normalization has not already handled. The wizard used to keep a short
+ * whitelist per connector (TCP/MLLP: host and port only; HTTP: five fields; databases: eight), silently discarding
+ * the rest of what the user typed: retries, keep-alive, TLS, the ACK block, headers, polling interval ...
+ * Empty values are not copied (an untouched form field is not a setting).
+ */
+function keepRemainingSettings(wizardConfig, normalized, renamedKeys = []) {
+    for (const [key, value] of Object.entries(wizardConfig)) {
+        if (renamedKeys.includes(key) || key in normalized) continue;
+        if (value === undefined || value === null || value === '') continue;
+        normalized[key] = value;
+    }
+    return normalized;
+}
+
 class TransformationPipelineService {
     /**
      * Get sequelize instance (lazy - called at request time, not module load)
@@ -443,16 +462,16 @@ class TransformationPipelineService {
             // Strip undefined keys so they don't pollute the stored config
             Object.keys(normalized).forEach(k => { if (normalized[k] === undefined) delete normalized[k]; });
 
-            if (wizardConfig.method)          normalized.method          = wizardConfig.method;
-            if (wizardConfig.content_type)    normalized.content_type    = wizardConfig.content_type;
-            if (wizardConfig.timeout_seconds) normalized.timeout_seconds = wizardConfig.timeout_seconds;
-            return normalized;
+            // Everything else the user entered (method, content_type, timeouts, retry_attempts, retry_delay_seconds,
+            // headers, ...) is the connector's own setting and is kept as typed.
+            return keepRemainingSettings(wizardConfig, normalized, HTTP_ALIAS_KEYS);
         }
 
         if (connectorTypeName === 'tcp_mllp' || connectorTypeName === 'tcp_mllp_inbound' || connectorTypeName === 'tcp_mllp_outbound') {
             if (wizardConfig.host) normalized.host = wizardConfig.host;
             if (wizardConfig.port) normalized.port = parseInt(wizardConfig.port, 10) || wizardConfig.port;
-            return normalized;
+            // Keep-alive, TLS, retries, the ACK/NACK block and the rest are real connector settings: not dropped.
+            return keepRemainingSettings(wizardConfig, normalized);
         }
 
         if (connectorTypeName === 'sink_outbound') {
@@ -474,9 +493,8 @@ class TransformationPipelineService {
 
         if (connectorTypeName.includes('postgresql') || connectorTypeName.includes('mysql') ||
             connectorTypeName.includes('mongodb')    || connectorTypeName.includes('sqlserver')) {
-            ['host', 'port', 'database', 'username', 'password', 'ssl_mode', 'query', 'table_name']
-                .forEach(key => { if (wizardConfig[key] !== undefined) normalized[key] = wizardConfig[key]; });
-            return normalized;
+            // Connection string, collection, polling interval, batch size, mark-as-read query ... are all real settings.
+            return keepRemainingSettings(wizardConfig, normalized);
         }
 
         return { ...wizardConfig };
