@@ -87,7 +87,7 @@ Each entry links to the template fix that addresses it.
 ### Regression suite
 
 Every mapping bug found in production automatically becomes a regression test
-case. The test harness (`tests/hl7-scale-test.js`) is extended with the exact
+case. The test harness (`tests/perf/hl7-scale-test.js`) is extended with the exact
 HL7 that exposed the bug and the expected FHIR output. CI runs it on every
 build. No mapping regression can ship undetected.
 
@@ -248,7 +248,7 @@ Total: **10–12 weeks** to enterprise production grade.
 
 ## Scale Test Reference
 
-The scale test harness lives at `tests/hl7-scale-test.js`. Run it with:
+The scale test harness lives at `tests/perf/hl7-scale-test.js`. Run it with:
 
 ```powershell
 # Full corpus, standard validation

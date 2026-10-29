@@ -344,12 +344,12 @@ jobs:
           RESTART_COMMAND: powershell -NoProfile -Command "Restart-Service ezhealthkonnect"
         run: >
           npx playwright test --project=chromium
-          tests/playwright/02-dashboard.spec.js
-          tests/playwright/03-interfaces.spec.js
-          tests/playwright/06-messages.spec.js
-          tests/playwright/wizard-data-path-e2e.spec.js
-          tests/playwright/roles-and-endpoint-auth.spec.js
-          tests/playwright/service-restart-recovery.spec.js
+          tests/playwright/core/02-dashboard.spec.js
+          tests/playwright/core/03-interfaces.spec.js
+          tests/playwright/core/06-messages.spec.js
+          tests/playwright/pipeline/wizard-data-path-e2e.spec.js
+          tests/playwright/security/roles-and-endpoint-auth.spec.js
+          tests/playwright/platform/service-restart-recovery.spec.js
       - name: Application logs on failure
         if: failure()
         shell: pwsh

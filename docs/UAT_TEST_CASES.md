@@ -7,7 +7,7 @@ real surface — the navigation, every page's controls (captured from the live p
 `docs/CAPABILITIES_GUIDE.md`.
 
 **Legend** — Pri: P1 must pass to release · P2 should pass · P3 nice to have.
-Auto: `A` automated and run (`tests/playwright/uat-functional.spec.js`) · `P` planned — automatable, not yet built · `M` manual only.
+Auto: `A` automated and run (`tests/playwright/core/uat-functional.spec.js`) · `P` planned — automatable, not yet built · `M` manual only.
 Result column is filled by the run log at the bottom (Pass / Fail / Blocked / Not run).
 
 ## Personas
