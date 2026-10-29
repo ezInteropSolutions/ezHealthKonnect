@@ -3,7 +3,7 @@
  * UAT functional cases (docs/UAT_TEST_CASES.md). Each test is named with its case ID and asserts what
  * the persona would see, not that code ran. Uses the seeded real interface (helpers/seeded.js).
  */
-const { test, expect } = require('../helpers/seeded');
+const { test, expect, NAME_PREFIX } = require('../helpers/seeded');
 const { request: pwRequest } = require('@playwright/test');
 const { createUserWithRole, deleteUser, loginWithRetry, PASSWORD } = require('../helpers/users');
 const { sendMLLP, parseAckCode } = require('../helpers/mllp');
@@ -187,24 +187,45 @@ test.describe('2 Interfaces', () => {
         expect(after, `filter "${active.trim()}" must not widen the list`).toBeLessThanOrEqual(before);
     });
 
-    test('IFC-11 paging: page size changes the rows shown and Next moves on', async ({ page }) => {
+    test('IFC-11 paging: page size changes the rows shown and Next moves on', async ({ page, seed }) => {
         await page.goto('/interfaces.html', { waitUntil: 'networkidle' });
-        await page.locator('#pageSize').selectOption({ index: 0 });
-        await page.waitForTimeout(600);
-        const first = await page.locator('[id^="runtime-btn-"]').count();
-        const sizes = await page.locator('#pageSize option').allTextContents();
-        await page.locator('#pageSize').selectOption({ index: sizes.length - 1 });
-        await page.waitForTimeout(800);
-        const last = await page.locator('[id^="runtime-btn-"]').count();
-        expect(last, 'a larger page size shows at least as many rows').toBeGreaterThanOrEqual(first);
-        await page.locator('#pageSize').selectOption({ index: 0 });
-        await page.waitForTimeout(600);
-        const idsP1 = await page.locator('[id^="runtime-btn-"]').evaluateAll((e) => e.map((x) => x.id));
-        await page.getByRole('button', { name: /Next/ }).first().click();
-        await page.waitForTimeout(800);
-        const idsP2 = await page.locator('[id^="runtime-btn-"]').evaluateAll((e) => e.map((x) => x.id));
-        expect(idsP2.length).toBeGreaterThan(0);
-        expect(idsP2.filter((i) => idsP1.includes(i)), 'page 2 must not repeat page 1 rows').toEqual([]);
+        // Paging needs more interfaces than the smallest page size. Create the shortfall here (and remove it
+        // afterwards) instead of relying on interfaces other specs happened to leave behind, which made this
+        // test depend on spec execution order.
+        const smallest = Number(await page.locator('#pageSize option').first().getAttribute('value'));
+        expect(Number.isFinite(smallest) && smallest > 0, 'smallest page size is a number').toBe(true);
+        const existing = (await seed.api.listInterfaces()).length;
+        const filler = [];
+        try {
+            for (let n = existing; n <= smallest; n++) {
+                const created = await seed.api.createInterface({
+                    ...hl7SinkPayload(9700 + n),
+                    name: `${NAME_PREFIX}paging_${n}_${Date.now()}`,
+                    description: 'Playwright paging filler (inactive)', auto_start: false, status: 'draft',
+                });
+                filler.push(created.interfaceId || created.data?.interfaceId || created.id);
+            }
+            if (filler.length) await page.reload({ waitUntil: 'networkidle' });
+
+            await page.locator('#pageSize').selectOption({ index: 0 });
+            await page.waitForTimeout(600);
+            const first = await page.locator('[id^="runtime-btn-"]').count();
+            const sizes = await page.locator('#pageSize option').allTextContents();
+            await page.locator('#pageSize').selectOption({ index: sizes.length - 1 });
+            await page.waitForTimeout(800);
+            const last = await page.locator('[id^="runtime-btn-"]').count();
+            expect(last, 'a larger page size shows at least as many rows').toBeGreaterThanOrEqual(first);
+            await page.locator('#pageSize').selectOption({ index: 0 });
+            await page.waitForTimeout(600);
+            const idsP1 = await page.locator('[id^="runtime-btn-"]').evaluateAll((e) => e.map((x) => x.id));
+            await page.getByRole('button', { name: /Next/ }).first().click();
+            await page.waitForTimeout(800);
+            const idsP2 = await page.locator('[id^="runtime-btn-"]').evaluateAll((e) => e.map((x) => x.id));
+            expect(idsP2.length).toBeGreaterThan(0);
+            expect(idsP2.filter((i) => idsP1.includes(i)), 'page 2 must not repeat page 1 rows').toEqual([]);
+        } finally {
+            for (const id of filler) if (id) await seed.api.deleteInterface(id).catch(() => {});
+        }
     });
 
     test('IFC-12 pause then resume processing changes state and matches the backend', async ({ page, seed }) => {
