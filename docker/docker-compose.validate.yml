@@ -1,4 +1,4 @@
-# docker-compose.validate.yml
+# docker/docker-compose.validate.yml
 # Overlay used only by validate-image.ps1.
 # Overrides ports to avoid conflicts with a running production stack,
 # and removes HL7/FHIR listener ports that are not needed for smoke testing.

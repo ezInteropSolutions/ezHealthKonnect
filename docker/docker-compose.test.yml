@@ -5,9 +5,9 @@ version: '3.8'
 # ============================================================
 # Provides real services for connector integration tests.
 # Usage:
-#   docker-compose -f docker-compose.test.yml up -d
+#   docker-compose -f docker/docker-compose.test.yml up -d
 #   go test ./services/connectors/ -tags integration -v -run "TestIntegration"
-#   docker-compose -f docker-compose.test.yml down -v
+#   docker-compose -f docker/docker-compose.test.yml down -v
 
 services:
 
@@ -60,7 +60,7 @@ services:
       retries: 20
     volumes:
       - mysql_test_data:/var/lib/mysql
-      - ./tests/integration/sql/mysql_seed.sql:/docker-entrypoint-initdb.d/seed.sql
+      - ../tests/integration/sql/mysql_seed.sql:/docker-entrypoint-initdb.d/seed.sql
 
   # ── RabbitMQ ───────────────────────────────────────────────
   rabbitmq_test:
@@ -125,7 +125,7 @@ services:
       retries: 20
     volumes:
       - localstack_test_data:/var/lib/localstack
-      - ./tests/integration/scripts/localstack_init.sh:/etc/localstack/init/ready.d/init.sh
+      - ../tests/integration/scripts/localstack_init.sh:/etc/localstack/init/ready.d/init.sh
 
   # ── SQL Server ─────────────────────────────────────────────
   sqlserver_test:
@@ -144,7 +144,7 @@ services:
       start_period: 30s
     volumes:
       - sqlserver_test_data:/var/opt/mssql
-      - ./tests/integration/scripts/sqlserver_seed.sh:/sqlserver_seed.sh
+      - ../tests/integration/scripts/sqlserver_seed.sh:/sqlserver_seed.sh
 
   # ── Oracle XE ──────────────────────────────────────────────
   oracle_test:
@@ -164,7 +164,7 @@ services:
       start_period: 90s
     volumes:
       - oracle_test_data:/opt/oracle/oradata
-      - ./tests/integration/scripts/oracle_seed.sql:/container-entrypoint-initdb.d/01_seed.sql
+      - ../tests/integration/scripts/oracle_seed.sql:/container-entrypoint-initdb.d/01_seed.sql
 
   # ── SFTP (atmoz/sftp) ──────────────────────────────────────
   sftp_test:
@@ -175,7 +175,7 @@ services:
     command: testuser:testpassword:::upload
     volumes:
       - sftp_test_data:/home/testuser/upload
-      - ./tests/integration/scripts/sftp_seed.sh:/etc/sftp.d/seed.sh
+      - ../tests/integration/scripts/sftp_seed.sh:/etc/sftp.d/seed.sh
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 22 || exit 1"]
       interval: 5s

@@ -75,3 +75,6 @@ dist/go-api-darwin-amd64
 # Jest coverage report (jest.config.js coverageDirectory) and load/perf run results
 tests/coverage/
 tests/results/
+
+# Runtime logs written at the repo root by local runs
+logs/
