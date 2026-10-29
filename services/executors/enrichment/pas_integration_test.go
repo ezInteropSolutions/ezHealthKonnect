@@ -53,7 +53,7 @@ func initFHIRRegistryPAS(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // V212 step config loader — reads directly from the actual migration file so
 // this test can never drift from what's really deployed. Same principle as
-// tests/pas_template_test.js's loadV212NewGroups(): the migration SQL is the
+// tests/scripts/pas_template_test.js's loadV212NewGroups(): the migration SQL is the
 // single source of truth for Zone 2's step configs, not a second
 // independently-maintained Go copy (which is exactly how bugs 1/2/5/6
 // happened earlier in this template's history).

@@ -7489,7 +7489,7 @@ OBX|3|NM|2075-0^Chloride||102|mmol/L</pre>
     // Step builders (pipeline/components/*Builder.js) return HtmlSafe values.
     // A plain string is treated as TEXT (escaped), never as markup, and logged
     // as an error so a builder that bypasses HtmlSafe is caught immediately.
-    // Guarded by tests/playwright/toolbox-step-coverage.spec.js.
+    // Guarded by tests/playwright/pipeline/toolbox-step-coverage.spec.js.
     _builderMarkup(markup) {
         if (markup instanceof HtmlSafe.SafeHtml) return markup;
         const name = this.activeStepBuilder && this.activeStepBuilder.constructor && this.activeStepBuilder.constructor.name;

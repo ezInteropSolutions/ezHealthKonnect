@@ -15,7 +15,7 @@
  *
  * CAPABILITIES mirrors the role lists in app.js (GO_READ_ROLES / GO_WRITE_ROLES), the Node route gates
  * (requireRole('admin', 'operator', ...)) and the Go handlers that are admin-only (e.g. /api/fhir/dlq).
- * When a server rule changes, change it here too — tests/playwright/roles-and-endpoint-auth.spec.js
+ * When a server rule changes, change it here too — tests/playwright/security/roles-and-endpoint-auth.spec.js
  * fails if the two drift apart.
  *
  * Writes the server refuses (403 + a message) are turned into one visible toast by installRefusalNotice().

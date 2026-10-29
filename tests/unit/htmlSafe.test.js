@@ -39,7 +39,7 @@ describe('HtmlSafe.html', () => {
 
 describe('HtmlSafe.sanitize without a DOM', () => {
     // The browser path (allowlist rebuild in an inert document) is covered by
-    // tests/playwright/ui-xss-regression.spec.js; without DOMParser it must
+    // tests/playwright/security/ui-xss-regression.spec.js; without DOMParser it must
     // never pass markup through.
     it('falls back to showing the markup as text', () => {
         expect(String(sanitize('<b onclick="x()">hi</b>'))).toBe('&lt;b onclick=&quot;x()&quot;&gt;hi&lt;/b&gt;');
