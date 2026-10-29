@@ -15,7 +15,7 @@ const CONFIG = {
   inputInterfaceId: 'df5c7bc7-5dbe-4c47-8298-a4729b26ebd4',
   outputInterfaceId:'05e7d40d-7e36-40fc-a943-9584edc8cbe0',
   socketTimeoutMs:  7000,
-  resultsDir:       path.join(__dirname, 'hl7-scale-test-results'),
+  resultsDir:       path.join(__dirname, 'results', 'hl7-scale-test-results'),
 };
 
 const args = process.argv.slice(2);

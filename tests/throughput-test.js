@@ -13,7 +13,7 @@
  *   --host       H    MLLP host (default: localhost)
  *   --chaos           Enable chaos injection scenarios
  *   --chaos-rate R    Fraction of messages that are chaos payloads (default: 0.2)
- *   --output     PATH JSON results output path (default: tests/throughput-results.json)
+ *   --output     PATH JSON results output path (default: tests/results/throughput-results.json)
  *   --baseline        Run a clean 100-message baseline and exit (no chaos)
  *
  * Exit code:
@@ -37,7 +37,7 @@ const MLLP_PORT   = parseInt(getArg('--port', '6613'), 10);
 const MLLP_HOST   = getArg('--host', 'localhost');
 const CHAOS_MODE  = hasFlag('--chaos');
 const CHAOS_RATE  = parseFloat(getArg('--chaos-rate', '0.2'));
-const OUTPUT      = getArg('--output', path.join(__dirname, 'throughput-results.json'));
+const OUTPUT      = getArg('--output', path.join(__dirname, 'results', 'throughput-results.json'));
 const BASELINE    = hasFlag('--baseline');
 const TIMEOUT_MS  = parseInt(getArg('--timeout-ms', '10000'), 10);
 
@@ -339,6 +339,7 @@ async function main() {
       unexpected:        chaosFail,
     } : null,
   };
+  fs.mkdirSync(path.dirname(OUTPUT), { recursive: true });
   fs.writeFileSync(OUTPUT, JSON.stringify({ summary, results }, null, 2), 'utf8');
   console.log(`\nResults written to: ${OUTPUT}`);
 

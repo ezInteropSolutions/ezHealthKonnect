@@ -26,7 +26,7 @@
  *   --base       URL  Node.js base URL (default: http://localhost:3000)
  *   --email      E    Admin email for login (default: admin@ezhealthkonnect.com)
  *   --password   P    Admin password (default: admin123)
- *   --output     PATH JSON results output path (default: tests/cda-transform-load-results.json)
+ *   --output     PATH JSON results output path (default: tests/results/cda-transform-load-results.json)
  *
  * Exit code:
  *   0 — all requests succeeded (HTTP 200)
@@ -49,7 +49,7 @@ const SAMPLE_PATH = getArg('--sample', path.join(__dirname, '..', 'cda', 'docume
 const BASE_URL    = getArg('--base', 'http://localhost:3000');
 const EMAIL       = getArg('--email', 'admin@ezhealthkonnect.com');
 const PASSWORD    = getArg('--password', 'admin123');
-const OUTPUT      = getArg('--output', path.join(__dirname, 'cda-transform-load-results.json'));
+const OUTPUT      = getArg('--output', path.join(__dirname, 'results', 'cda-transform-load-results.json'));
 const TIMEOUT_MS  = parseInt(getArg('--timeout-ms', '15000'), 10);
 
 // ── HTTP helper (no external dependency, matches throughput-test.js's style) ──
@@ -234,6 +234,7 @@ async function main() {
     failed,
     latency: { avg: avgLat, p50, p90, p95, p99 },
   };
+  fs.mkdirSync(path.dirname(OUTPUT), { recursive: true });
   fs.writeFileSync(OUTPUT, JSON.stringify({ summary, results }, null, 2), 'utf8');
   console.log(`\nResults written to: ${OUTPUT}`);
 

@@ -264,6 +264,6 @@ node tests\hl7-scale-test.js --wait 15 --level strict
 node tests\hl7-scale-test.js --repeat 10 --wait 30 --level standard
 ```
 
-Results written to `tests/hl7-scale-test-results/`. Failing messages saved
+Results written to `tests/results/hl7-scale-test-results/`. Failing messages saved
 with both the raw HL7 input and the FHIR bundle received, for use as regression
 cases.
