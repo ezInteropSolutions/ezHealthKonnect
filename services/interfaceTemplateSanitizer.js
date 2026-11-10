@@ -494,7 +494,57 @@ function mergeValuesIntoPipelineConnectorSteps(pipelineConfig, sourceValues, tar
     return { ...pipelineConfig, execution_groups: groups };
 }
 
+/**
+ * Merge user-provided values into named pipeline steps — for settings that
+ * belong to steps other than the connectors, such as the address and OAuth
+ * credentials of a service several API-call steps share. A template declares
+ * these as required_connection_fields entries with section "steps":
+ *
+ *   {section: "steps", field: "oauth2ClientSecret", step_aliases: ["fetch_patient", ...],
+ *    label, type, hint, required}
+ *
+ * The targets come only from the TEMPLATE's own declarations; the caller's
+ * stepValues is just {field: value}, so a request can't aim a value at a step
+ * the template didn't name, or at a field it didn't declare. Each value is
+ * written at its dot-path inside step.config of every step whose step_alias
+ * is listed. Blank values are skipped (the step keeps the template's value).
+ *
+ * @param {object} pipelineConfig - {execution_groups: [...]}
+ * @param {Array}  fieldDefs      - the template's required_connection_fields
+ * @param {object} stepValues     - {field: value} as entered by the user
+ * @returns {object} - a new pipeline_config
+ */
+function mergeValuesIntoPipelineSteps(pipelineConfig, fieldDefs, stepValues) {
+    if (!pipelineConfig || !Array.isArray(pipelineConfig.execution_groups)) return pipelineConfig;
+    if (!Array.isArray(fieldDefs) || !stepValues || typeof stepValues !== 'object') return pipelineConfig;
+
+    // alias -> {field: value}
+    const byAlias = {};
+    for (const def of fieldDefs) {
+        if (!def || def.section !== 'steps' || typeof def.field !== 'string' || !Array.isArray(def.step_aliases)) continue;
+        if (!Object.prototype.hasOwnProperty.call(stepValues, def.field)) continue;
+        const value = stepValues[def.field];
+        if (value === undefined || value === null || value === '') continue;
+        for (const alias of def.step_aliases) {
+            if (typeof alias !== 'string' || !alias) continue;
+            (byAlias[alias] || (byAlias[alias] = {}))[def.field] = value;
+        }
+    }
+    if (Object.keys(byAlias).length === 0) return pipelineConfig;
+
+    const groups = pipelineConfig.execution_groups.map(group => ({
+        ...group,
+        steps: (group.steps || []).map(step => {
+            const values = step && byAlias[step.step_alias];
+            if (!values) return step;
+            return { ...step, config: mergeTemplateWithUserValues(isPlainObject(step.config) ? step.config : {}, values) };
+        }),
+    }));
+    return { ...pipelineConfig, execution_groups: groups };
+}
+
 module.exports = {
+    mergeValuesIntoPipelineSteps,
     sanitizeConfig,
     sanitizePipelineConfig,
     buildRequiredFieldsManifest,

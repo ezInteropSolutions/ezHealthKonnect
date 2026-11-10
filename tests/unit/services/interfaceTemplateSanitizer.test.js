@@ -13,6 +13,7 @@ const {
     sanitizeInterfaceForTemplate,
     mergeTemplateWithUserValues,
     mergeValuesIntoPipelineConnectorSteps,
+    mergeValuesIntoPipelineSteps,
     SENSITIVE_PATTERNS,
 } = require('../../../services/interfaceTemplateSanitizer');
 
@@ -323,5 +324,60 @@ describe('mergeValuesIntoPipelineConnectorSteps', () => {
     it('is a no-op on a malformed/missing pipelineConfig rather than throwing', () => {
         expect(mergeValuesIntoPipelineConnectorSteps(null, { port: 1 }, {})).toBeNull();
         expect(mergeValuesIntoPipelineConnectorSteps({}, { port: 1 }, {})).toEqual({});
+    });
+});
+
+
+describe('mergeValuesIntoPipelineSteps', () => {
+    const pipeline = () => ({
+        execution_groups: [
+            { sequence: 5, steps: [{ step_type: 'connector.inbound', step_alias: 'in', config: { connectorType: 'x', config: {} } }] },
+            { sequence: 10, steps: [{ step_type: 'pre.enrichment.api', step_alias: 'fetch_a', config: { endpoint: '', authType: 'oauth2' } }] },
+            { sequence: 20, steps: [{ step_type: 'pre.enrichment.api', step_alias: 'fetch_b', config: { endpoint: '', nested: { keep: 1 } } }] },
+            { sequence: 30, steps: [{ step_type: 'pre.enrichment.api', step_alias: 'other', config: { endpoint: 'https://untouched' } }] },
+        ],
+    });
+    const defs = [
+        { section: 'steps', field: 'baseUrl', step_aliases: ['fetch_a', 'fetch_b'] },
+        { section: 'steps', field: 'oauth2ClientSecret', step_aliases: ['fetch_a'] },
+        { section: 'steps', field: 'nested.token', step_aliases: ['fetch_b'] },
+        { section: 'source', field: 'port' },
+    ];
+    const stepsOf = (cfg) => cfg.execution_groups.flatMap(g => g.steps);
+
+    it('writes each value into exactly the steps the template names', () => {
+        const out = mergeValuesIntoPipelineSteps(pipeline(), defs, {
+            baseUrl: 'https://ezis.example.org', oauth2ClientSecret: 's3cr3t', 'nested.token': 't',
+        });
+        const [inbound, a, b, other] = stepsOf(out);
+        expect(a.config).toEqual({ endpoint: '', authType: 'oauth2', baseUrl: 'https://ezis.example.org', oauth2ClientSecret: 's3cr3t' });
+        expect(b.config).toEqual({ endpoint: '', nested: { keep: 1, token: 't' }, baseUrl: 'https://ezis.example.org' });
+        expect(other.config).toEqual({ endpoint: 'https://untouched' });
+        expect(inbound.config).toEqual({ connectorType: 'x', config: {} });
+    });
+
+    it('ignores fields the template did not declare for steps', () => {
+        const out = mergeValuesIntoPipelineSteps(pipeline(), defs, { port: 1234, endpoint: 'https://evil', other: 'x' });
+        expect(stepsOf(out).map(s => s.config)).toEqual(stepsOf(pipeline()).map(s => s.config));
+    });
+
+    it('skips blank values so the template value stays', () => {
+        const out = mergeValuesIntoPipelineSteps(pipeline(), defs, { baseUrl: '', oauth2ClientSecret: null });
+        expect(stepsOf(out)[1].config).toEqual({ endpoint: '', authType: 'oauth2' });
+    });
+
+    it('does not mutate the input', () => {
+        const input = pipeline();
+        const before = JSON.stringify(input);
+        mergeValuesIntoPipelineSteps(input, defs, { baseUrl: 'https://x' });
+        expect(JSON.stringify(input)).toBe(before);
+    });
+
+    it('tolerates missing or malformed arguments', () => {
+        expect(mergeValuesIntoPipelineSteps(null, defs, {})).toBeNull();
+        const p = pipeline();
+        expect(mergeValuesIntoPipelineSteps(p, null, { baseUrl: 'x' })).toBe(p);
+        expect(mergeValuesIntoPipelineSteps(p, defs, null)).toBe(p);
+        expect(mergeValuesIntoPipelineSteps(p, [{ section: 'steps', field: 'baseUrl', step_aliases: 'fetch_a' }], { baseUrl: 'x' })).toBe(p);
     });
 });

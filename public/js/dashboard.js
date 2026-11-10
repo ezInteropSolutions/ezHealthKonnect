@@ -694,6 +694,7 @@ function _renderRequiredFieldsSection(fields) {
         <div style="margin-bottom:18px;padding:14px;background:#fff;border:1px solid #e8ecf0;border-radius:8px">
             <div style="font-size:0.85rem;font-weight:700;color:#1a1a2e;margin-bottom:10px">Connection Details</div>
             ${sectionBlock('Source Connection', bySection.source)}
+            ${sectionBlock((bySection.steps && bySection.steps[0].section_label) || 'Service Connection', bySection.steps)}
             ${sectionBlock('Destination Connection', bySection.target)}
         </div>`;
 }
@@ -803,6 +804,9 @@ async function useTemplate(id) {
 function _collectTemplateConnectionValues() {
     const sourceValues = {};
     const targetValues = {};
+    // section "steps": values the template writes into its own named
+    // pipeline steps (e.g. a shared service's URL and OAuth credentials).
+    const stepValues = {};
     // Tracked separately from sourceValues/targetValues (which deliberately
     // omit blank fields so they don't overwrite a template default) — used
     // only to decide whether it's honest to attempt activation at all. See
@@ -838,10 +842,14 @@ function _collectTemplateConnectionValues() {
             return;
         }
 
-        (section === 'target' ? targetValues : sourceValues)[field] = value;
+        if (section === 'steps') {
+            stepValues[field] = value;
+        } else {
+            (section === 'target' ? targetValues : sourceValues)[field] = value;
+        }
     });
 
-    return { sourceValues, targetValues, missingRequiredSourceField };
+    return { sourceValues, targetValues, stepValues, missingRequiredSourceField };
 }
 
 async function _submitConfigureTemplate(templateId) {
@@ -856,7 +864,7 @@ async function _submitConfigureTemplate(templateId) {
         return;
     }
 
-    const { sourceValues, targetValues, missingRequiredSourceField } = _collectTemplateConnectionValues();
+    const { sourceValues, targetValues, stepValues, missingRequiredSourceField } = _collectTemplateConnectionValues();
 
     btn.textContent = 'Creating…';
     btn.disabled = true;
@@ -873,7 +881,7 @@ async function _submitConfigureTemplate(templateId) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ interface_name: name, source_values: sourceValues, target_values: targetValues }),
+            body: JSON.stringify({ interface_name: name, source_values: sourceValues, target_values: targetValues, step_values: stepValues }),
         });
         const scaffoldData = await scaffoldRes.json();
         if (!scaffoldData.success) throw new Error(scaffoldData.error || 'Failed to load template');

@@ -561,7 +561,7 @@ exports.previewSanitization = async (req, res) => {
 exports.useTemplate = async (req, res) => {
     try {
         const { id } = req.params;
-        const { source_values = {}, target_values = {}, interface_name } = req.body;
+        const { source_values = {}, target_values = {}, step_values = {}, interface_name } = req.body;
 
         // Load template — cast id to text to avoid uuid vs varchar type mismatch in OR clause
         const rows = await sequelize.query(`
@@ -590,8 +590,14 @@ exports.useTemplate = async (req, res) => {
         // values into those steps too, so a value a user actually typed
         // (e.g. a device template's port/host_query.enabled) reaches the
         // connector that actually runs, not just the scaffold's display copy.
-        const mergedPipelineConfig = sanitizer.mergeValuesIntoPipelineConnectorSteps(
-            tmpl.pipeline_config || {}, source_values, target_values
+        // Values for non-connector steps (section "steps", e.g. a service's
+        // address and OAuth credentials shared by several API-call steps):
+        // written only into the steps the template's own field definitions
+        // name — see mergeValuesIntoPipelineSteps.
+        const mergedPipelineConfig = sanitizer.mergeValuesIntoPipelineSteps(
+            sanitizer.mergeValuesIntoPipelineConnectorSteps(tmpl.pipeline_config || {}, source_values, target_values),
+            tmpl.required_connection_fields || [],
+            step_values
         );
 
         // Increment usage count (fire-and-forget)
