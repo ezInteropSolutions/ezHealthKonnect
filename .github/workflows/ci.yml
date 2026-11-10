@@ -59,8 +59,11 @@ jobs:
       # Mirrors docker-compose.yml's postgres service (same DB name/user/password)
       # so DB-touching tests get a real schema to run against, not just the
       # nil-DB safety-branch tests that make up most of the suite today.
+      # pgvector image: the AI knowledge-base code stores and searches
+      # embeddings as `vector`, so its real-database tests need the extension
+      # (docker-compose.yml uses pgvector/pgvector too).
       postgres:
-        image: postgres:17
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_DB: ezhealthkonnect
           POSTGRES_USER: ezhealth_user
