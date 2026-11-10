@@ -92,10 +92,10 @@ func TestHTTPRestInbound_CheckAuth_ApiKey(t *testing.T) {
 	})
 	good := &http.Request{Header: http.Header{"X-Api-Key": []string{"secret123"}}}
 	bad := &http.Request{Header: http.Header{"X-Api-Key": []string{"wrong"}}}
-	if !c.checkAuth(good) {
+	if !c.checkAuth(good, nil) {
 		t.Error("expected correct API key to pass auth")
 	}
-	if c.checkAuth(bad) {
+	if c.checkAuth(bad, nil) {
 		t.Error("expected incorrect API key to fail auth")
 	}
 }
@@ -106,10 +106,10 @@ func TestHTTPRestInbound_CheckAuth_BasicAuth(t *testing.T) {
 	})
 	good := &http.Request{Header: http.Header{"Authorization": []string{basicAuthHeaderValue("user1", "pass1")}}}
 	bad := &http.Request{Header: http.Header{"Authorization": []string{basicAuthHeaderValue("user1", "wrong")}}}
-	if !c.checkAuth(good) {
+	if !c.checkAuth(good, nil) {
 		t.Error("expected correct basic auth credentials to pass")
 	}
-	if c.checkAuth(bad) {
+	if c.checkAuth(bad, nil) {
 		t.Error("expected incorrect basic auth credentials to fail")
 	}
 }
@@ -120,10 +120,10 @@ func TestHTTPRestInbound_CheckAuth_BearerToken(t *testing.T) {
 	})
 	good := &http.Request{Header: http.Header{"Authorization": []string{"Bearer tok-abc"}}}
 	bad := &http.Request{Header: http.Header{"Authorization": []string{"Bearer wrong"}}}
-	if !c.checkAuth(good) {
+	if !c.checkAuth(good, nil) {
 		t.Error("expected correct bearer token to pass")
 	}
-	if c.checkAuth(bad) {
+	if c.checkAuth(bad, nil) {
 		t.Error("expected incorrect bearer token to fail")
 	}
 }
@@ -131,7 +131,7 @@ func TestHTTPRestInbound_CheckAuth_BearerToken(t *testing.T) {
 func TestHTTPRestInbound_CheckAuth_None(t *testing.T) {
 	c := newTestHTTPRestInbound(t, map[string]interface{}{"port": 18089, "authentication_type": "none"})
 	req := &http.Request{Header: http.Header{}}
-	if !c.checkAuth(req) {
+	if !c.checkAuth(req, nil) {
 		t.Error("expected auth_type none to always pass")
 	}
 }

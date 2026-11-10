@@ -538,6 +538,19 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 			}
 			innerConfig["interface_id"] = interfaceID
 
+			// Step configs store secret fields encrypted at rest (the pipeline
+			// and interface editors encrypt them as ENC:v1: strings); decrypt
+			// before the connector sees them, as the legacy path below always
+			// has. Without this, an inbound connector's password, token or
+			// signing secret reached it still encrypted.
+			if decrypted, decErr := pe.credStore.DecryptConfigFields(innerConfig); decErr != nil {
+				log.Printf("⚠️  [CredentialStore] Failed to decrypt connector config for step '%s': %v", step.stepName, decErr)
+				stepWarnings = append(stepWarnings, fmt.Sprintf("%s: stored credentials could not be decrypted", step.stepName))
+				continue
+			} else {
+				innerConfig = decrypted
+			}
+
 			// PHI safety: file_listener connectors never fail Start() on a directory
 			// overlap (Glob/Walk just silently sees whatever's in the directory), so
 			// this has to be a proactive pre-check rather than a reactive Start()-error
@@ -605,6 +618,9 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 			}
 			if oc, ok := connector.(OutcomeAwareConnector); ok {
 				pe.registerOutcomeConnector(interfaceID, oc)
+			}
+			if cc, ok := connector.(CursorAwareConnector); ok && pe.db != nil {
+				cc.SetCursorStore(NewPostgresCursorStore(pe.db))
 			}
 
 			if pipelineAware, ok := connector.(PipelineAwareConnector); ok {
@@ -750,6 +766,9 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 		}
 		if oc, ok := connector.(OutcomeAwareConnector); ok {
 			pe.registerOutcomeConnector(interfaceID, oc)
+		}
+		if cc, ok := connector.(CursorAwareConnector); ok && pe.db != nil {
+			cc.SetCursorStore(NewPostgresCursorStore(pe.db))
 		}
 
 		if pipelineAware, ok := connector.(PipelineAwareConnector); ok {
