@@ -92,6 +92,17 @@ type ValidationAwareConnector interface {
 	SupportsValidationFeedback() bool
 }
 
+// OutcomeAwareConnector is implemented by inbound connectors that need to know
+// when a message they emitted has finished processing — not merely been
+// stored — before answering their sender. The engine calls OnMessageOutcome
+// exactly once per message the connector emitted (per part, when the engine
+// splits a batch payload; part IDs are the original ID plus "-partN"), from
+// the engine's own goroutine. Implementations must not block: hand the
+// outcome to whatever is waiting and return.
+type OutcomeAwareConnector interface {
+	OnMessageOutcome(outcome models.MessageOutcome)
+}
+
 // PipelineExecutor is the minimal pipeline-resolution/execution capability a
 // connector needs to synchronously answer a live request on the SAME
 // connection/association it arrived on — e.g. TCP/MLLP answering an HL7

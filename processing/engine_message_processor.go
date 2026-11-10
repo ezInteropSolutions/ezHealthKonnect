@@ -100,6 +100,8 @@ func (pe *ProcessingEngine) processSingleMessage(interfaceID string, msg *models
 				log.Printf("⚠️  NACK send failed for interface %s: %v", interfaceID, err)
 			}
 		}
+		pe.reportOutcome(outcomeOf(interfaceID, msg.MessageID, models.OutcomeRejected,
+			fmt.Errorf("message type %q is not accepted by this interface", msg.MessageType)))
 		return
 	}
 
@@ -125,6 +127,8 @@ func (pe *ProcessingEngine) processSingleMessage(interfaceID string, msg *models
 		}
 
 		pe.updateInterfaceError(interfaceID)
+		pe.reportOutcome(outcomeOf(interfaceID, msg.MessageID, models.OutcomeFailed,
+			fmt.Errorf("the message could not be stored: %w", err)))
 		return
 	}
 
@@ -174,6 +178,8 @@ func (pe *ProcessingEngine) processSingleMessage(interfaceID string, msg *models
 				}
 			}()
 		}
+		pe.reportOutcome(outcomeOf(interfaceID, msg.MessageID, models.OutcomeRejected,
+			fmt.Errorf("the interface's queue is full")))
 	}
 
 	// Update interface statistics
@@ -318,40 +324,64 @@ func (pe *ProcessingEngine) updateInterfaceError(interfaceID string) {
 // storeAndParseWithRecovery wraps storeAndParse with panic recovery (V23 - Error Handling Enhancement).
 // queueDepth is the backpressure worker pool depth observed when this job was picked up —
 // threaded through to storeAndParse purely for the QUEUE lifecycle log entry.
+//
+// It runs synchronously in the interface's pool worker. (It used to hand the
+// work to ErrorHandler.SafeExecuteAsync, which starts its own goroutine — so
+// the pool job returned at once and the pool bounded nothing, and the call
+// passed the message and interface IDs in swapped order.) When the message
+// never reaches a pipeline, its outcome is reported here; a launched
+// pipeline reports its own (launchPipeline).
 func (pe *ProcessingEngine) storeAndParseWithRecovery(interfaceID string, msg *models.InboundMessage, queueDepth int) {
-	// Use error handler if available for panic recovery
+	launched := false
+	var early models.MessageOutcome
+	work := func() error {
+		launched, early = pe.storeAndParse(interfaceID, msg, queueDepth)
+		return nil
+	}
+
 	if pe.errorHandler != nil {
-		pe.errorHandler.SafeExecuteAsync(msg.MessageID, interfaceID, models.StageJSONConversion, func() error {
-			pe.storeAndParse(interfaceID, msg, queueDepth)
-			return nil
-		})
+		if err := pe.errorHandler.ExecuteWithPanicRecovery(interfaceID, msg.MessageID, models.StageJSONConversion, work); err != nil {
+			pe.reportOutcome(outcomeOf(interfaceID, msg.MessageID, models.OutcomeFailed, err))
+			return
+		}
 	} else {
-		// Fallback: manual panic recovery
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("🚨 PANIC RECOVERED in storeAndParse: %v (message: %s)", r, msg.MessageID)
-				if pe.errorService != nil {
-					errCtx := models.NewErrorContext(
-						models.StageJSONConversion,
-						models.SeverityCritical,
-						models.ErrorTypePanic,
-						fmt.Sprintf("Panic during JSON conversion: %v", r),
-						"System panic recovered during message parsing",
-						"", // Stack trace captured by errorHandler
-						models.RecoveryPanicRecovered,
-					)
-					pe.errorService.CaptureError(interfaceID, msg.MessageID, errCtx)
-				}
-			}
+		panicked := func() (r interface{}) {
+			defer func() { r = recover() }()
+			_ = work()
+			return nil
 		}()
-		pe.storeAndParse(interfaceID, msg, queueDepth)
+		if panicked != nil {
+			log.Printf("🚨 PANIC RECOVERED in storeAndParse: %v (message: %s)", panicked, msg.MessageID)
+			if pe.errorService != nil {
+				errCtx := models.NewErrorContext(
+					models.StageJSONConversion,
+					models.SeverityCritical,
+					models.ErrorTypePanic,
+					fmt.Sprintf("Panic during JSON conversion: %v", panicked),
+					"System panic recovered during message parsing",
+					"",
+					models.RecoveryPanicRecovered,
+				)
+				pe.errorService.CaptureError(interfaceID, msg.MessageID, errCtx)
+			}
+			pe.reportOutcome(panicOutcome(interfaceID, msg.MessageID, panicked))
+			return
+		}
+	}
+	if !launched {
+		pe.reportOutcome(early)
 	}
 }
 
 // storeAndParse stores raw message in MongoDB and triggers JSON parsing.
 // queueDepth is the backpressure worker pool depth observed at pickup — logged as
 // part of the initial "Message received" entry (QUEUE lifecycle point).
-func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.InboundMessage, queueDepth int) {
+//
+// It returns launched = true once the message's pipeline has been handed to
+// launchPipeline, which reports the outcome. Otherwise the returned outcome
+// says why nothing ran, for the caller to report.
+func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.InboundMessage, queueDepth int) (launched bool, outcome models.MessageOutcome) {
+	outcome = outcomeOf(interfaceID, msg.MessageID, models.OutcomeSkipped, nil)
 	ctx := context.Background()
 
 	// Inject ProcessingEngine into context for validation feedback
@@ -493,10 +523,14 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 						ParsedAt:    time.Now(),
 					},
 				}
-				go pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, msg.Headers["File-Name"], fhirResult, logger)
-			} else {
-				log.Printf("⚠️  FHIR JSON parse failed for %s — skipping pipeline: %v", msg.MessageID, parseResult.Error)
+				pe.launchPipeline(func() models.MessageOutcome {
+					return pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, msg.Headers["File-Name"], fhirResult, logger)
+				}, interfaceID)
+				return true, outcome
 			}
+			log.Printf("⚠️  FHIR JSON parse failed for %s — skipping pipeline: %v", msg.MessageID, parseResult.Error)
+			return false, outcomeOf(interfaceID, msg.MessageID, models.OutcomeFailed,
+				fmt.Errorf("FHIR JSON parse failed: %v", parseResult.Error))
 		}
 
 	} else if pe.parserService != nil {
@@ -513,7 +547,7 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 				"error_count":             1,
 				"processing_completed_at": time.Now(),
 			})
-			return
+			return false, outcomeOf(interfaceID, msg.MessageID, models.OutcomeFailed, fmt.Errorf("message content is empty"))
 		}
 
 		if logger != nil {
@@ -549,6 +583,7 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 				"error_count":             1,
 				"processing_completed_at": time.Now(),
 			})
+			return false, outcomeOf(interfaceID, msg.MessageID, models.OutcomeFailed, fmt.Errorf("parse failed: %w", err))
 		} else {
 			log.Printf("✅ JSON conversion completed for %s in %dms",
 				msg.MessageID, result.ParsingTime.Milliseconds())
@@ -575,12 +610,15 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 
 			// STEP 3: Trigger transformation pipeline (MVC + OOB pattern)
 			if pe.transformationService != nil {
-				go pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, msg.Headers["File-Name"], result, logger)
-			} else {
-				log.Printf("⚠️  Transformation service not available - skipping transformation")
+				pe.launchPipeline(func() models.MessageOutcome {
+					return pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, msg.Headers["File-Name"], result, logger)
+				}, interfaceID)
+				return true, outcome
 			}
+			log.Printf("⚠️  Transformation service not available - skipping transformation")
 		}
 	}
+	return false, outcome
 }
 
 // executeTransformationPipelineWithLogger executes transformation with logging support
@@ -592,7 +630,7 @@ func (pe *ProcessingEngine) executeTransformationPipelineWithLogger(
 	sourceFileName string,
 	parseResult *models.ParserResult,
 	logger *services.ProcessingLogger,
-) {
+) models.MessageOutcome {
 	if logger != nil {
 		logger.Info(services.LogCategoryTransformation, "Starting transformation pipeline", map[string]interface{}{
 			"message_type": messageType,
@@ -600,7 +638,7 @@ func (pe *ProcessingEngine) executeTransformationPipelineWithLogger(
 	}
 
 	// Call existing implementation
-	pe.executeTransformationPipeline(ctx, interfaceID, messageID, messageType, sourceFileName, parseResult, logger)
+	return pe.executeTransformationPipeline(ctx, interfaceID, messageID, messageType, sourceFileName, parseResult, logger)
 }
 
 // executeTransformationPipeline executes the transformation pipeline (MVC + OOB)
@@ -613,7 +651,8 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	sourceFileName string,
 	parseResult *models.ParserResult,
 	procLogger *services.ProcessingLogger, // named to avoid shadowing the services/logger package used below
-) {
+) (outcome models.MessageOutcome) {
+	outcome = outcomeOf(interfaceID, messageID, models.OutcomeSkipped, nil)
 	log.Printf("🔄 [MVC PIPELINE] FUNCTION ENTERED - message: %s", messageID)
 	startTime := time.Now()
 	log.Printf("🔄 [MVC PIPELINE] Starting transformation pipeline for message: %s (type: %s)", messageID, messageType)
@@ -655,6 +694,7 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 				)
 				pe.errorService.CaptureError(interfaceID, messageID, errCtx)
 			}
+			outcome = panicOutcome(interfaceID, messageID, r)
 		}
 	}()
 
@@ -678,13 +718,13 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 			)
 			pe.errorService.CaptureError(interfaceID, messageID, errCtx)
 		}
-		return
+		return outcomeOf(interfaceID, messageID, models.OutcomeFailed, fmt.Errorf("no pipeline could be loaded: %w", err))
 	}
 
 	if pipeline == nil {
 		log.Printf("⏭️  [MVC PIPELINE] No transformation pipeline configured for interface %s, message type %s - skipping transformation",
 			interfaceID, messageType)
-		return
+		return outcome
 	}
 
 	log.Printf("📋 [MVC PIPELINE] Executing pipeline: %s (%d steps)", pipeline.PipelineName, len(pipeline.Steps))
@@ -702,7 +742,7 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 			"error_count":             1,
 			"processing_completed_at": time.Now(),
 		})
-		return
+		return outcomeOf(interfaceID, messageID, models.OutcomeFailed, fmt.Errorf("the pipeline received no parse result"))
 	}
 
 	// Step 2: Wire parsed_format into pipeline message envelope as _format.
@@ -801,7 +841,7 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 			)
 			pe.errorService.CaptureError(interfaceID, messageID, errCtx)
 		}
-		return
+		return outcomeOf(interfaceID, messageID, models.OutcomeFailed, err)
 	}
 
 	executionTime := time.Since(startTime)
@@ -813,8 +853,11 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	// Actual delivery to a downstream system is tracked separately in delivery_status
 	// by the connector.outbound pipeline step via updateDeliveryStatus().
 	finalStatus := "processed"
+	outcome = outcomeOf(interfaceID, messageID, models.OutcomeProcessed, nil)
 	if result.Status != "completed" {
 		finalStatus = "failed"
+		outcome = outcomeOf(interfaceID, messageID, models.OutcomeFailed,
+			fmt.Errorf("the pipeline ended with status %q", result.Status))
 	}
 	pe.updateMessageStatus(interfaceID, messageID, finalStatus, map[string]interface{}{
 		"processing_completed_at": time.Now(),
@@ -858,6 +901,7 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	// Step 4: Delivery is handled by the connector.outbound pipeline step (seq 295).
 	// The OutboundConnectorExecutor calls connector.Send() during ExecutePipeline above.
 	// No separate deliverMessage() call is needed here.
+	return outcome
 }
 
 // storeTransformedMessage stores the transformation output in object storage (View layer)
