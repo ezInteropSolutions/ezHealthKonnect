@@ -9,6 +9,7 @@ import (
 	"ezhealthkonnect/services/response"
 	"fmt"
 	"log"
+	neturl "net/url"
 	"strings"
 	"time"
 )
@@ -68,7 +69,7 @@ func (e *APIEnrichmentExecutor) Execute(
 	log.Printf("🌐 [API Enrichment] Calling API: %s %s", config.Method, config.Endpoint)
 
 	// Build URL with field mappings
-	url := e.buildURL(config.Endpoint, config.FieldMappings, inputData)
+	url := joinBaseURL(config.BaseURL, e.buildURLWith(config.Endpoint, config.FieldMappings, inputData, config.EncodePlaceholders))
 
 	// Build request body — bodyRef takes priority over requestBody
 	var requestBody interface{}
@@ -99,6 +100,7 @@ func (e *APIEnrichmentExecutor) Execute(
 		Timeout:     time.Duration(config.TimeoutMs) * time.Millisecond,
 		RetryCount:  config.RetryCount,
 		RetryDelay:  time.Duration(config.RetryDelayMs) * time.Millisecond,
+		AcceptStatuses: config.AcceptStatuses,
 	}
 
 	// Create authentication configuration
@@ -332,14 +334,44 @@ func (e *APIEnrichmentExecutor) buildURL(
 	fieldMappings map[string]string,
 	inputData map[string]interface{},
 ) string {
+	return e.buildURLWith(urlTemplate, fieldMappings, inputData, false)
+}
+
+// buildURLWith substitutes each {placeholder} with its mapped field's value,
+// path-escaped when encode is set.
+func (e *APIEnrichmentExecutor) buildURLWith(
+	urlTemplate string,
+	fieldMappings map[string]string,
+	inputData map[string]interface{},
+	encode bool,
+) string {
 	url := urlTemplate
 	for key, fieldPath := range fieldMappings {
 		value := executors.GetNestedValue(inputData, fieldPath)
 		if value != nil {
-			url = strings.ReplaceAll(url, "{"+key+"}", fmt.Sprintf("%v", value))
+			s := fmt.Sprintf("%v", value)
+			if encode {
+				s = neturl.PathEscape(s)
+				// PathEscape leaves "." alone; ".." as a whole segment would
+				// still climb a level once a server cleans the path.
+				if s == "." || s == ".." {
+					s = strings.ReplaceAll(s, ".", "%2E")
+				}
+			}
+			url = strings.ReplaceAll(url, "{"+key+"}", s)
 		}
 	}
 	return url
+}
+
+// joinBaseURL prefixes a relative endpoint with base; an absolute endpoint
+// (http:// or https://), or an empty base, is returned as is.
+func joinBaseURL(base, endpoint string) string {
+	base = strings.TrimSpace(base)
+	if base == "" || strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
+		return endpoint
+	}
+	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(endpoint, "/")
 }
 
 // buildQueryParams creates query parameters with field mapping replacements
