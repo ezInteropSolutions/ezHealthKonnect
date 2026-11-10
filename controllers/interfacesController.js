@@ -467,6 +467,7 @@ class InterfacesController {
                 targetConnectivity,
                 messageType,
                 acceptedMessageFamilies, // array e.g. ["ADT","ORU"] or null = accept all
+                processing_order,        // V288: 'parallel' (default) | 'in_order'
                 sourceConfig,
                 targetConfig,
                 processingRules,
@@ -550,6 +551,10 @@ class InterfacesController {
             replacements.acceptedMessageFamilies = Array.isArray(acceptedMessageFamilies) && acceptedMessageFamilies.length > 0
                 ? JSON.stringify(acceptedMessageFamilies)
                 : null;
+            if (processing_order !== undefined && processing_order !== null && !['parallel', 'in_order'].includes(processing_order)) {
+                return res.status(400).json({ success: false, error: "processing_order must be 'parallel' or 'in_order'" });
+            }
+            replacements.processingOrder = processing_order || 'parallel';
 
             const newInterfaces = await this.database.sequelize.query(`
                 INSERT INTO interfaces (
@@ -561,6 +566,7 @@ class InterfacesController {
                     deployment_mode, auto_start, deployment_delay_seconds,
                     deployment_status,
                     accepted_message_families,
+                    processing_order,
                     status, created_by, updated_by, created_at, updated_at, is_active
                 ) VALUES (
                     :userId, :name, :description,
@@ -571,6 +577,7 @@ class InterfacesController {
                     :deploymentMode, :autoStart, :deploymentDelay,
                     'not_deployed',
                     :acceptedMessageFamilies::jsonb,
+                    :processingOrder,
                     'inactive', :userId, :userId, NOW(), NOW(), true
                 ) RETURNING *
             `, {

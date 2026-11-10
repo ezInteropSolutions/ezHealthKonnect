@@ -611,6 +611,7 @@ exports.useTemplate = async (req, res) => {
             interface_scaffold: {
                 name: interface_name || `${tmpl.name} (from template)`,
                 message_type: tmpl.message_type,
+                processing_order: tmpl.processing_order || 'parallel',
                 source_connector_type: tmpl.source_connector_type,
                 source_config: sourceConfig,
                 target_connector_type: tmpl.target_connector_type,

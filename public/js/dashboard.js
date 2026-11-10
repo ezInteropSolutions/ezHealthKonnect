@@ -898,6 +898,7 @@ async function _submitConfigureTemplate(templateId) {
             body: JSON.stringify({
                 name: s.name,
                 messageType: s.message_type || 'HL7v2',
+                processing_order: s.processing_order || 'parallel',
                 description: `Created from template: ${s.template_name}`,
                 sourceType: '',
                 targetType: '',
