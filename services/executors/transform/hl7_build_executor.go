@@ -56,6 +56,8 @@
 //	                       OBR so each order's own results are interleaved
 //	                       right after it, not appended as one big OBX block
 //	                       after every OBR)}
+//	fields[].transform   — a named value transform (hl7_value_transforms.go):
+//	                       hl7_date, hl7_datetime, uppercase
 //	escapeValues         — true escapes HL7 delimiters and line breaks in
 //	                       every value read from the message (sourcePath and
 //	                       fallbackPaths; literals are written as given), per
@@ -130,6 +132,10 @@ type hl7FieldMappingRow struct {
 
 	// RepeatPath, Components, ItemCondition and MaxRepetitions configure a
 	// repeating field — see the package comment.
+	// Transform names a value transform (hl7_value_transforms.go), e.g.
+	// "hl7_date", applied to values read from the message.
+	Transform string `json:"transform,omitempty"`
+
 	RepeatPath     string                 `json:"repeatPath,omitempty"`
 	Components     []hl7ComponentMapping  `json:"components,omitempty"`
 	ItemCondition  map[string]interface{} `json:"itemCondition,omitempty"`
@@ -145,6 +151,7 @@ type hl7ComponentMapping struct {
 	FallbackPaths []string          `json:"fallbackPaths,omitempty"`
 	ValueMap      map[string]string `json:"valueMap,omitempty"`
 	LiteralValue  string            `json:"literalValue,omitempty"`
+	Transform     string            `json:"transform,omitempty"`
 }
 
 // hl7SegmentConfig configures one non-MSH segment: either a single instance
@@ -496,7 +503,7 @@ func (e *HL7BuildExecutor) applyHL7Field(seg *hl7builder.Segment, source, topLev
 	if fm.RepeatPath != "" {
 		return e.applyRepeatingField(seg, source, topLevel, fm, escape)
 	}
-	if v, ok := resolveHL7Value(source, fm.SourcePath, fm.FallbackPaths, fm.LiteralValue, fm.ValueMap, escape); ok {
+	if v, ok := resolveHL7Value(source, fm.SourcePath, fm.FallbackPaths, fm.LiteralValue, fm.ValueMap, fm.Transform, escape); ok {
 		return e.setSegmentField(seg, fm.FieldKey, 1, v)
 	}
 	return false
@@ -505,22 +512,33 @@ func (e *HL7BuildExecutor) applyHL7Field(seg *hl7builder.Segment, source, topLev
 // resolveHL7Value returns the first present value among sourcePath,
 // fallbackPaths and literal, value-mapped; values read from the message are
 // escaped when escape is set, literals never.
-func resolveHL7Value(source map[string]interface{}, sourcePath string, fallbackPaths []string, literal string, valueMap map[string]string, escape bool) (string, bool) {
-	fromData := func(s string) string {
+func resolveHL7Value(source map[string]interface{}, sourcePath string, fallbackPaths []string, literal string, valueMap map[string]string, transform string, escape bool) (string, bool) {
+	fromData := func(s string) (string, bool) {
+		s, ok, known := applyHL7Transform(transform, s)
+		if !known {
+			log.Printf("  ⚠️  [hl7.build] unknown transform %q; value used as is", transform)
+		}
+		if !ok {
+			return "", false
+		}
 		s = mapValue(s, valueMap)
 		if escape {
 			s = hl7builder.EscapeValue(s)
 		}
-		return s
+		return s, true
 	}
 	if sourcePath != "" {
 		if s, ok := stringifyValue(executors.GetFieldValue(source, sourcePath)); ok {
-			return fromData(s), true
+			if v, ok := fromData(s); ok {
+				return v, true
+			}
 		}
 	}
 	for _, fp := range fallbackPaths {
 		if s, ok := stringifyValue(executors.GetFieldValue(source, fp)); ok {
-			return fromData(s), true
+			if v, ok := fromData(s); ok {
+				return v, true
+			}
 		}
 	}
 	if literal != "" {
@@ -558,7 +576,7 @@ func (e *HL7BuildExecutor) applyRepeatingField(seg *hl7builder.Segment, source, 
 				if c.Position == "" {
 					continue
 				}
-				if v, ok := resolveHL7Value(el, c.SourcePath, c.FallbackPaths, c.LiteralValue, c.ValueMap, escape); ok {
+				if v, ok := resolveHL7Value(el, c.SourcePath, c.FallbackPaths, c.LiteralValue, c.ValueMap, c.Transform, escape); ok {
 					values[c.Position] = v
 				}
 			}
@@ -567,11 +585,13 @@ func (e *HL7BuildExecutor) applyRepeatingField(seg *hl7builder.Segment, source, 
 				continue
 			}
 			if s, ok := stringifyValue(el); ok {
-				s = mapValue(s, fm.ValueMap)
-				if escape {
-					s = hl7builder.EscapeValue(s)
+				if s, ok, _ = applyHL7Transform(fm.Transform, s); ok {
+					s = mapValue(s, fm.ValueMap)
+					if escape {
+						s = hl7builder.EscapeValue(s)
+					}
+					values[""] = s
 				}
-				values[""] = s
 			}
 		}
 		if len(values) == 0 {

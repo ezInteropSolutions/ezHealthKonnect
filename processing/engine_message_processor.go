@@ -761,7 +761,14 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	// Inject delivery callback so OutboundConnectorExecutor can own its DB update.
 	// The executor reads this from context and calls it after connector.Send() completes,
 	// giving us correct delivery_status regardless of how many outbound steps exist.
-	ctx = context.WithValue(ctx, "delivery_status_fn", models.DeliveryStatusFn(pe.updateDeliveryStatus))
+	// The wrapper also notes a failed delivery (e.g. an MLLP NACK), which an
+	// outbound step reports without failing the pipeline: the message's
+	// outcome must not say "processed" when its destination refused it.
+	deliveries := &deliveryTracker{}
+	ctx = context.WithValue(ctx, "delivery_status_fn", models.DeliveryStatusFn(func(ifaceID, msgID, status, detail string) {
+		deliveries.record(status)
+		pe.updateDeliveryStatus(ifaceID, msgID, status, detail)
+	}))
 	ctx = context.WithValue(ctx, "message_id", messageID)
 	ctx = context.WithValue(ctx, "interface_id", interfaceID)
 	// Attach a per-message structured logger so all pipeline log lines carry msg_id + corr_id.
@@ -854,6 +861,10 @@ func (pe *ProcessingEngine) executeTransformationPipeline(
 	// by the connector.outbound pipeline step via updateDeliveryStatus().
 	finalStatus := "processed"
 	outcome = outcomeOf(interfaceID, messageID, models.OutcomeProcessed, nil)
+	if deliveries.failed() {
+		outcome = outcomeOf(interfaceID, messageID, models.OutcomeFailed,
+			fmt.Errorf("a destination did not accept the message"))
+	}
 	if result.Status != "completed" {
 		finalStatus = "failed"
 		outcome = outcomeOf(interfaceID, messageID, models.OutcomeFailed,

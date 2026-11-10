@@ -218,3 +218,42 @@ func TestHL7Build_TriggerFromData(t *testing.T) {
 		t.Fatal("an unmapped trigger built a message")
 	}
 }
+
+func TestHL7ValueTransforms(t *testing.T) {
+	cases := []struct{ name, in, want string; ok bool }{
+		{"hl7_date", "1987-03-14", "19870314", true},
+		{"hl7_date", "1987-03", "198703", true},
+		{"hl7_date", "1987", "1987", true},
+		{"hl7_date", "1987-03-14T09:30:00Z", "19870314", true},
+		{"hl7_date", "14/03/1987", "", false},
+		{"hl7_datetime", "2026-11-10T11:11:33.452998Z", "20261110111133+0000", true},
+		{"hl7_datetime", "2026-11-10T16:41:33+05:30", "20261110164133+0530", true},
+		{"hl7_datetime", "2026-11-10", "20261110", true},
+		{"hl7_datetime", "yesterday", "", false},
+		{"uppercase", "male", "MALE", true},
+	}
+	for _, c := range cases {
+		got, ok, known := applyHL7Transform(c.name, c.in)
+		if !known || ok != c.ok || (ok && got != c.want) {
+			t.Errorf("%s(%q) = %q,%v,%v want %q,%v", c.name, c.in, got, ok, known, c.want, c.ok)
+		}
+	}
+	if _, _, known := applyHL7Transform("nope", "x"); known {
+		t.Error("unknown transform reported as known")
+	}
+}
+
+func TestHL7Build_TransformInMapping(t *testing.T) {
+	initHL7Schema(t)
+	cfg := map[string]interface{}{
+		"messageType": "ADT", "triggerEvent": "A31", "version": "2.5.1",
+		"segments": []interface{}{map[string]interface{}{"segment": "PID", "fields": []interface{}{
+			map[string]interface{}{"fieldKey": "PID.7", "sourcePath": "birthDate", "transform": "hl7_date"},
+			map[string]interface{}{"fieldKey": "PID.8", "sourcePath": "gender", "valueMap": map[string]interface{}{"female": "F"}},
+		}}},
+	}
+	got := pidLine(t, hl7Lines(t, runHL7Build(t, cfg, map[string]interface{}{"birthDate": "2008-02-20", "gender": "female"}), "hl7Message"))
+	if got != "PID|||||||20080220|F" {
+		t.Fatalf("PID = %q", got)
+	}
+}

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/connectors"
@@ -140,4 +141,28 @@ func (pe *ProcessingEngine) launchPipeline(run func() models.MessageOutcome, int
 // panicOutcome is the outcome of a message whose processing panicked.
 func panicOutcome(interfaceID, messageID string, r interface{}) models.MessageOutcome {
 	return outcomeOf(interfaceID, messageID, models.OutcomeFailed, fmt.Errorf("processing panicked: %v", r))
+}
+
+// deliveryTracker records whether any outbound delivery of one message
+// failed. Outbound steps report a refused delivery (an MLLP NACK, an HTTP
+// error status) through the delivery-status callback without failing the
+// pipeline, so the outcome reads it from here.
+type deliveryTracker struct {
+	mu        sync.Mutex
+	anyFailed bool
+}
+
+func (d *deliveryTracker) record(status string) {
+	if status != "failed" {
+		return
+	}
+	d.mu.Lock()
+	d.anyFailed = true
+	d.mu.Unlock()
+}
+
+func (d *deliveryTracker) failed() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.anyFailed
 }
