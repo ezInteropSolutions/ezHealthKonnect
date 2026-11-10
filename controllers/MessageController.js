@@ -1534,24 +1534,29 @@ class MessageController {
             let inputMessage;
             try {
                 // Find which interface table contains this message
-                const allInterfaces = await this.database.sequelize.query(`
+                // `allInterfaces` above is the access-policy flag; the rows get their own name so the query's
+                // ${allInterfaces} is not read from this declaration's own temporal dead zone.
+                // The viewer passes the interface the message belongs to: that is one table, not a scan of every
+                // interface's table (cost grew with the number of interfaces: 1.6-3.3 s at ~970). Without it the
+                // old search over all accessible interfaces still works.
+                const wantedInterface = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(req.query && req.query.interfaceId || ''))
+                    ? String(req.query.interfaceId) : null;
+                const accessibleInterfaces = await this.database.sequelize.query(`
                     SELECT id, name, source_type, target_type FROM interfaces WHERE (user_id = :userId OR ${allInterfaces})
+                    ${wantedInterface ? 'AND id = :wantedInterface' : ''}
                 `, {
-                    replacements: { userId },
+                    replacements: { userId, wantedInterface },
                     type: this.database.sequelize.QueryTypes.SELECT
                 });
 
-                for (const intf of allInterfaces) {
+                for (const intf of accessibleInterfaces) {
                     const tableName = `messages_intf_${intf.id.replace(/-/g, '_')}`;
                     try {
+                        // The interface's name/types are attached in JS below, never spliced into the SQL text
+                        // (a name containing a quote broke the query - and was an injection point).
                         const result = await this.database.sequelize.query(`
-                            SELECT
-                                m.*,
-                                '${intf.id}' as interface_id,
-                                '${intf.name}' as interface_name,
-                                '${intf.source_type}' as interface_source_type,
-                                '${intf.target_type}' as interface_target_type
-                            FROM ${tableName} m
+                            SELECT m.*
+                            FROM "${tableName}" m
                             WHERE m.message_id = :messageId
                             LIMIT 1
                         `, {
@@ -1561,6 +1566,10 @@ class MessageController {
 
                         if (result.length > 0) {
                             inputMessage = result[0];
+                            inputMessage.interface_id = intf.id;
+                            inputMessage.interface_name = intf.name;
+                            inputMessage.interface_source_type = intf.source_type;
+                            inputMessage.interface_target_type = intf.target_type;
                             inputMessage.input_table_name = tableName;
                             break;
                         }
@@ -1867,15 +1876,27 @@ class MessageController {
             const { messageId } = req.params;
             const { interfaceId } = req.query;
 
-            if (!interfaceId) {
+            // The interface id becomes part of a table identifier below, so it must be a UUID — never free text.
+            if (!interfaceId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(interfaceId))) {
                 return res.status(400).json({
                     success: false,
-                    error: 'interfaceId query parameter is required'
+                    error: 'interfaceId query parameter is required and must be a UUID'
                 });
             }
 
-            // Get table name
-            const tableName = `messages_intf_${interfaceId.replace(/-/g, '_')}`;
+            // Same ownership / access-policy rule as every other message endpoint.
+            const userId = req.session.user.id;
+            const allInterfaces = await accessPolicy.canSeeAllInterfaces(req.session.user);
+            const visible = await this.database.sequelize.query(
+                `SELECT id FROM interfaces WHERE id = :interfaceId AND (user_id = :userId OR ${allInterfaces})`,
+                { replacements: { interfaceId, userId }, type: this.database.sequelize.QueryTypes.SELECT }
+            );
+            if (!visible || visible.length === 0) {
+                return res.status(404).json({ success: false, error: 'Interface not found' });
+            }
+
+            // Get table name (validated UUID above, and quoted as an identifier)
+            const tableName = `messages_intf_${String(interfaceId).replace(/-/g, '_')}`;
 
             // Call PostgreSQL get_message_errors() function
             const errors = await this.database.sequelize.query(`
@@ -1898,12 +1919,13 @@ class MessageController {
             // Also get error summary
             const summary = await this.database.sequelize.query(`
                 SELECT
+                    status,
                     error_count,
                     last_error_message,
                     last_error_timestamp,
                     last_error_stage,
                     error_severity
-                FROM ${tableName}
+                FROM "${tableName}"
                 WHERE message_id = :messageId
             `, {
                 replacements: { messageId },

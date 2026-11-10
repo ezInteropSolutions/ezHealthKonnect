@@ -30,8 +30,8 @@ Set text with `textContent` wherever no markup is needed. `DOMUtils.createElemen
 
 ## Pipeline step builders
 
-`render(step)` must return HtmlSafe markup. `PropertiesPanel._builderMarkup` shows a plain-string result as text and logs an error, and `tests/playwright/toolbox-step-coverage.spec.js` fails if any registered builder returns a string or double-escapes.
+`render(step)` must return HtmlSafe markup. `PropertiesPanel._builderMarkup` shows a plain-string result as text and logs an error, and `tests/playwright/pipeline/toolbox-step-coverage.spec.js` fails if any registered builder returns a string or double-escapes.
 
 ## Tests
 
-`tests/playwright/ui-xss-regression.spec.js` plants hostile values (interface and step names, templates, alert rules, user names, code templates, Mirth files, reports, FHIR resources, clinical documents, message data, DLQ rows, ezCompanion answers, Test Pipeline results) and checks that nothing runs and that each value appears as text, escaped exactly once.
+`tests/playwright/security/ui-xss-regression.spec.js` plants hostile values (interface and step names, templates, alert rules, user names, code templates, Mirth files, reports, FHIR resources, clinical documents, message data, DLQ rows, ezCompanion answers, Test Pipeline results) and checks that nothing runs and that each value appears as text, escaped exactly once.

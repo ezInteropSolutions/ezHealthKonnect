@@ -208,7 +208,7 @@ node tests\hl7-scale-test.js --types "ADT^A01,ORU^R01" --wait 10
 node tests\hl7-scale-test.js --repeat 3 --concurrent 3 --wait 30
 ```
 
-Results are written to `tests/hl7-scale-test-results/`. Open the HTML report for a visual summary.
+Results are written to `tests/results/hl7-scale-test-results/`. Open the HTML report for a visual summary.
 
 ---
 

@@ -93,7 +93,7 @@ const CDARequirementsHelper = {
      * on whether a panel has been opened yet, either key may be live. Reads
      * both defensively rather than assuming one shape, matching this
      * codebase's own established test convention (see
-     * tests/playwright/cda-fhir-pipeline.spec.js's `s.stepType || s.step_type`).
+     * tests/playwright/cda/cda-fhir-pipeline.spec.js's `s.stepType || s.step_type`).
      */
     findMapToCanonicalStep(panel) {
         const pipeline = panel && panel.builder && panel.builder.pipeline;

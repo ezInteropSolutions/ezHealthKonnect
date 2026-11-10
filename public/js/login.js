@@ -39,7 +39,8 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
             // Admin has forced a password reset — redirect to the reset page
             showMessage('Password reset required. Redirecting…', 'error');
             setTimeout(() => {
-                window.location.href = `force-reset.html?userId=${result.userId}`;
+                // The token travels in the URL fragment, which is never sent to a server or logged.
+                window.location.href = `force-reset.html?userId=${encodeURIComponent(result.userId)}#token=${encodeURIComponent(result.resetToken || '')}`;
             }, 1200);
         } else if (response.status === 423) {
             // Account locked

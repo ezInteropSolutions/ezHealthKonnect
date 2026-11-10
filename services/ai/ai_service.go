@@ -110,10 +110,20 @@ type StatusResult struct {
 	QueueCap         int            `json:"queue_cap"`
 	KnowledgeChunks  int            `json:"knowledge_chunks"`
 	ChunksBySource   map[string]int `json:"chunks_by_source"`
-	Error            string         `json:"error,omitempty"`
+	// Indexing is the background knowledge refresh. While Running, answers can be slow: the embedding model is shared.
+	Indexing IndexingStatus `json:"indexing"`
+	Error    string         `json:"error,omitempty"`
 }
 
 // Status returns the health and readiness of the AI subsystem.
+// IndexingStatus is the background knowledge refresh, without any call to the model.
+func (s *AIService) IndexingStatus() IndexingStatus {
+	if s.Operational == nil {
+		return IndexingStatus{}
+	}
+	return s.Operational.progress.Snapshot()
+}
+
 func (s *AIService) Status(ctx context.Context) StatusResult {
 	result := StatusResult{
 		ProviderEnabled: s.llm != nil,
@@ -133,6 +143,10 @@ func (s *AIService) Status(ctx context.Context) StatusResult {
 	// Embed model name if available
 	if ep, ok := s.embedder.(EmbedProvider); ok {
 		result.EmbedModel = ep.EmbedModelName()
+	}
+
+	if s.Operational != nil {
+		result.Indexing = s.Operational.progress.Snapshot()
 	}
 
 	// Queue stats if available
@@ -236,15 +250,25 @@ func heuristicDetect(msg string) (FormatDetection, bool) {
 	return FormatDetection{}, false
 }
 
+// mshFields splits only the MSH segment. The message is segment-delimited by CR (or LF/CRLF in files), so splitting
+// the whole message on "|" ran the last MSH field into the next segment ("2.5\rPID").
+func mshFields(msg string) []string {
+	line := msg
+	if i := strings.IndexAny(line, "\r\n"); i != -1 {
+		line = line[:i]
+	}
+	return strings.Split(line, "|")
+}
+
 func extractHL7MsgType(msg string) string {
-	if f := strings.Split(msg, "|"); len(f) > 8 {
+	if f := mshFields(msg); len(f) > 8 {
 		return f[8]
 	}
 	return ""
 }
 func extractHL7Version(msg string) string {
-	if f := strings.Split(msg, "|"); len(f) > 11 {
-		return f[11]
+	if f := mshFields(msg); len(f) > 11 {
+		return strings.SplitN(f[11], "^", 2)[0] // MSH-12 may carry components ("2.5.1^...")
 	}
 	return ""
 }
@@ -1140,7 +1164,8 @@ func (s *AIService) BackgroundIngestAll(schemaDir string) {
 		// re-ingested per source only when its content changed since the last
 		// successful ingestion (knowledge_sources.go) — so an upgrade picks up
 		// new docs and schemas, while an unchanged restart re-embeds nothing.
-		// Operational data (interfaces, pipelines) is always refreshed.
+		// Operational data (interfaces, pipelines, IG mappings) is re-read on every start but re-embedded only when its
+		// text changed (IngestTextIfChanged), so an unchanged restart costs queries, not model time.
 		schemaResults := s.Ingestion.IngestChanged(ctx, schemaDir)
 		if len(schemaResults) > 0 {
 			log.Printf("🤖 AI KB — refreshed %d changed knowledge source(s)", len(schemaResults))

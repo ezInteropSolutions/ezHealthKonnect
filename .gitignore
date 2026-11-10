@@ -70,3 +70,11 @@ installer/assets/bundle-darwin.zip
 dist/go-api-linux-amd64
 dist/go-api-darwin-arm64
 dist/go-api-darwin-amd64
+
+# ── Generated test output — never commit ───────────────────────────────────────
+# Jest coverage report (jest.config.js coverageDirectory) and load/perf run results
+tests/coverage/
+tests/results/
+
+# Runtime logs written at the repo root by local runs
+logs/

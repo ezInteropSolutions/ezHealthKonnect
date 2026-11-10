@@ -65,7 +65,7 @@ func (ctrl *GitController) RegisterRoutes(rg *gin.RouterGroup) {
 func (ctrl *GitController) List(c *gin.Context) {
 	repos, err := ctrl.svc.List(c.Request.Context(), ctrl.userIDFromContext(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	if repos == nil {
@@ -90,7 +90,7 @@ func (ctrl *GitController) Create(c *gin.Context) {
 	createdBy := ctrl.userIDFromContext(c)
 	repo, err := ctrl.svc.Create(c.Request.Context(), req, createdBy)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": repo})
@@ -101,7 +101,7 @@ func (ctrl *GitController) Create(c *gin.Context) {
 func (ctrl *GitController) Get(c *gin.Context) {
 	repo, err := ctrl.svc.Get(c.Request.Context(), c.Param("id"), ctrl.userIDFromContext(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	if repo == nil {
@@ -121,7 +121,7 @@ func (ctrl *GitController) Update(c *gin.Context) {
 	}
 	repo, err := ctrl.svc.Update(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": repo})
@@ -131,7 +131,7 @@ func (ctrl *GitController) Update(c *gin.Context) {
 // DELETE /api/git/:id
 func (ctrl *GitController) Delete(c *gin.Context) {
 	if err := ctrl.svc.Delete(c.Request.Context(), c.Param("id")); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -154,7 +154,7 @@ func (ctrl *GitController) TestConnection(c *gin.Context) {
 func (ctrl *GitController) Push(c *gin.Context) {
 	pushed, err := ctrl.svc.Push(c.Request.Context(), c.Param("id"), ctrl.userIDFromContext(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	msg := "Already up to date"
@@ -178,7 +178,7 @@ func (ctrl *GitController) InterfaceDiff(c *gin.Context) {
 	}
 	result, err := ctrl.svc.InterfaceDiff(c.Request.Context(), c.Param("id"), interfaceID, exportedBy)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
@@ -189,7 +189,7 @@ func (ctrl *GitController) InterfaceDiff(c *gin.Context) {
 func (ctrl *GitController) Pull(c *gin.Context) {
 	changed, err := ctrl.svc.Pull(c.Request.Context(), c.Param("id"), ctrl.userIDFromContext(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	msg := "Already up to date"
@@ -204,7 +204,7 @@ func (ctrl *GitController) Pull(c *gin.Context) {
 func (ctrl *GitController) Status(c *gin.Context) {
 	files, err := ctrl.svc.GetStatus(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	if files == nil {
@@ -223,7 +223,7 @@ func (ctrl *GitController) Log(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	commits, err := ctrl.svc.GetLog(c.Request.Context(), c.Param("id"), limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	if commits == nil {
@@ -239,7 +239,7 @@ func (ctrl *GitController) Log(c *gin.Context) {
 func (ctrl *GitController) ListBranches(c *gin.Context) {
 	branches, err := ctrl.svc.ListBranches(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	current, _ := ctrl.svc.CurrentBranch(c.Request.Context(), c.Param("id"))
@@ -257,7 +257,7 @@ func (ctrl *GitController) CreateBranch(c *gin.Context) {
 		return
 	}
 	if err := ctrl.svc.CreateBranch(c.Request.Context(), c.Param("id"), body.Name, ctrl.userIDFromContext(c)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Branch created: " + body.Name})
@@ -274,7 +274,7 @@ func (ctrl *GitController) Checkout(c *gin.Context) {
 		return
 	}
 	if err := ctrl.svc.Checkout(c.Request.Context(), c.Param("id"), body.Branch, ctrl.userIDFromContext(c)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Checked out: " + body.Branch})
@@ -297,7 +297,7 @@ func (ctrl *GitController) CommitInterface(c *gin.Context) {
 
 	sha, err := ctrl.svc.CommitInterface(c.Request.Context(), c.Param("id"), req, ctrl.userIDFromContext(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -344,7 +344,7 @@ func (ctrl *GitController) ExportPreview(c *gin.Context) {
 	}
 	bundle, err := ctrl.svc.ExportPreview(c.Request.Context(), c.Param("interfaceId"), exportedBy)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	if bundle == nil {
@@ -362,7 +362,7 @@ func (ctrl *GitController) GetSyncLog(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	entries, err := ctrl.svc.GetSyncLog(c.Request.Context(), c.Param("id"), limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		writeGitError(c, err)
 		return
 	}
 	if entries == nil {
@@ -388,4 +388,19 @@ func (ctrl *GitController) userIDFromContext(c *gin.Context) *string {
 		}
 	}
 	return nil
+}
+
+// writeGitError answers a failed git operation. A repository whose local copy is missing is a 409 with an
+// instruction (it was answered 500 "repository does not exist", which looked like a server fault and filled the
+// browser console on the Git page); everything else stays a 500 with the underlying message.
+func writeGitError(c *gin.Context, err error) {
+	if services.IsRepoNotCloned(err) {
+		c.JSON(http.StatusConflict, gin.H{
+			"success": false,
+			"code":    "REPO_NOT_CLONED",
+			"error":   "This repository has no local copy yet. Run a sync (clone) first, or check the remote URL and credentials.",
+		})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 }

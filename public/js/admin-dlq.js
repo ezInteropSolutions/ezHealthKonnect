@@ -43,7 +43,7 @@
     }
 
     async function apiFetchInterfaces() {
-        const res = await fetch('/api/interfaces', {
+        const res = await fetch('/api/interfaces?view=summary', {
             credentials: 'include',
             headers: _authHeaders(),
         });

@@ -6,6 +6,7 @@ package ai
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -42,6 +43,10 @@ type MessageTracerService struct {
 	db *sql.DB
 }
 
+// ErrNoExecutionRecord means no pipeline run is recorded for the message: the caller asked about something that is
+// not there (a 404), not a server fault.
+var ErrNoExecutionRecord = errors.New("no execution record found")
+
 func newMessageTracerService(db *sql.DB) *MessageTracerService {
 	return &MessageTracerService{db: db}
 }
@@ -68,7 +73,7 @@ func (t *MessageTracerService) Trace(ctx context.Context, messageID, interfaceID
 		LIMIT 1
 	`, messageID).Scan(&execID, &msgType, &status, &startedAt, &durationMS)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("no execution record found for message %s — it may not have been processed yet", messageID)
+		return nil, fmt.Errorf("%w: message %s — it may not have been processed yet", ErrNoExecutionRecord, messageID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("lookup execution: %w", err)

@@ -3,7 +3,7 @@
 //
 // These tests require real infrastructure — start it with:
 //
-//	docker-compose -f docker-compose.test.yml up -d
+//	docker-compose -f docker/docker-compose.test.yml up -d
 //
 // Then run:
 //
@@ -40,7 +40,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// ─── Test infrastructure addresses (match docker-compose.test.yml) ────────────
+// ─── Test infrastructure addresses (match docker/docker-compose.test.yml) ────────────
 // Override host via TEST_INFRA_HOST env var (e.g. "host.docker.internal" when
 // running tests inside a Docker container that can't reach localhost ports).
 

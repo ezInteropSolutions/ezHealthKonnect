@@ -6,7 +6,7 @@
 // Promoted from a throwaway full-stack-verification script used during the
 // DICOM Storage SCP connector's own implementation (see CLAUDE.md's "Phase
 // 2 — Fujifilm DICOM Storage SCP" section) — kept here because
-// tests/playwright/dicom-wizard-e2e.spec.js needs the same real DIMSE
+// tests/playwright/devices/dicom-wizard-e2e.spec.js needs the same real DIMSE
 // client and no lightweight JS library speaks the real wire protocol (only
 // file-parsing libraries like dcmjs exist in the npm ecosystem; hand-rolling
 // DICOM's own association negotiation in JS, unlike ASTM's simple ENQ/ACK

@@ -1,7 +1,7 @@
 // jest.config.js
 // Unit-test config for the Node.js layer. Deliberately scoped to tests/unit/
 // only — kept separate from tests/playwright/ (browser E2E, its own runner)
-// and the existing hand-rolled load/E2E scripts in tests/ (pas_template_test.js
+// and the existing hand-rolled load/E2E scripts in tests/perf and tests/scripts (pas_template_test.js
 // etc.), which are run directly via `node`, not Jest.
 module.exports = {
     testEnvironment: 'node',

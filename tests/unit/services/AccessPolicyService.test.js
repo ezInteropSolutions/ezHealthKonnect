@@ -21,14 +21,23 @@ describe('AccessPolicyService', () => {
     });
 
     test('a stored value overrides the default for that role only', async () => {
-        const svc = new AccessPolicyService(settingsReturning({ roles: { viewer: { interfaceScope: 'own', messageContent: 'full' } } }));
-        expect(await svc.policyFor('viewer')).toEqual({ interfaceScope: 'own', messageContent: 'full' });
+        const svc = new AccessPolicyService(settingsReturning({ roles: { viewer: { interfaceScope: 'all', messageContent: 'full' }, user: { interfaceScope: 'all', messageContent: 'metadata' } } }));
+        expect(await svc.policyFor('viewer')).toEqual({ interfaceScope: 'all', messageContent: 'full' });
+        expect(await svc.policyFor('user')).toEqual({ interfaceScope: 'all', messageContent: 'metadata' });
         expect(await svc.policyFor('operator')).toEqual({ interfaceScope: 'all', messageContent: 'full' });
     });
 
     test('a half-specified or invalid stored value falls back per field, not wholesale', async () => {
-        const svc = new AccessPolicyService(settingsReturning({ roles: { viewer: { interfaceScope: 'own', messageContent: 'everything' } } }));
-        expect(await svc.policyFor('viewer')).toEqual({ interfaceScope: 'own', messageContent: 'metadata' });
+        const svc = new AccessPolicyService(settingsReturning({ roles: { user: { interfaceScope: 'own', messageContent: 'everything' } } }));
+        expect(await svc.policyFor('user')).toEqual({ interfaceScope: 'own', messageContent: 'full' });
+    });
+
+    test.each(['operator', 'viewer'])('%s always sees every interface, even if "own" is stored', async (role) => {
+        const svc = new AccessPolicyService(settingsReturning({ roles: { [role]: { interfaceScope: 'own', messageContent: 'metadata' } } }));
+        const p = await svc.policyFor(role);
+        expect(p.interfaceScope).toBe('all');
+        expect(p.messageContent).toBe('metadata');   // content stays a real choice
+        expect(await svc.canSeeAllInterfaces({ role })).toBe(true);
     });
 
     test('an unknown or missing role gets the most restrictive policy', async () => {

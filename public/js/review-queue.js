@@ -45,7 +45,7 @@ function applyInterfaceContext() {
     if (header) {
         const back = document.createElement('a');
         back.href = 'interfaces.html';
-        back.innerHTML = '<i class="far fa-arrow-left" style="margin-right:5px;"></i>Back to Interfaces';
+        back.innerHTML = '<i class="fas fa-arrow-left" style="margin-right:5px;"></i>Back to Interfaces';
         back.style.cssText = 'font-size:12px;color:#2563eb;text-decoration:none;white-space:nowrap;';
         header.insertBefore(back, header.firstChild);
     }
@@ -195,7 +195,7 @@ function renderTable() {
     if (total === 0) {
         tbody.innerHTML = `<tr><td colspan="6">
             <div class="rq-empty">
-                <i class="far fa-inbox"></i>
+                <i class="fas fa-inbox"></i>
                 <strong>No items found</strong>
                 <span>The review queue is empty or no items match your filters.</span>
             </div>
@@ -248,7 +248,7 @@ function renderRow(item) {
                     <i class="far fa-pen-to-square" style="margin-right:3px;"></i>Review
                 </button>
                 <button class="rq-btn rq-btn-danger" data-id="${item.id}" onclick="quickReject(this.dataset.id)">
-                    <i class="far fa-ban"></i>
+                    <i class="fas fa-ban"></i>
                 </button>
             </div>
         </td>
@@ -411,7 +411,7 @@ function renderFailureList(failures) {
     list.innerHTML = HtmlSafe.html`${failures.map((f, idx) => {
         const isWarn = f.severity === 'warning';
         const rowCls = isWarn ? 'failure-row warn' : 'failure-row';
-        const icoCls = isWarn ? 'far fa-triangle-exclamation' : 'fas fa-circle-xmark';
+        const icoCls = isWarn ? 'fas fa-triangle-exclamation' : 'fas fa-circle-xmark';
         const field  = f.field || f.fhir_path || 'unknown';
         const desc   = f.message || f.description || `Missing required field: ${field}`;
         const policy = f.on_missing || f.onMissing || 'queue_review';

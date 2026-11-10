@@ -652,7 +652,7 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 
 // ── Interface / Rule selects ───────────────────────────────────────────────────
 function populateInterfaceSelects() {
-    fetch('/api/interfaces', { credentials: 'include' })
+    fetch('/api/interfaces?view=summary', { credentials: 'include' })
         .then(function(r) { return r.json(); })
         .then(function(res) {
             var interfaces = res.data || res.interfaces || [];

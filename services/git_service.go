@@ -13,6 +13,7 @@ package services
 // ================================================================
 
 import (
+	"errors"
 	"context"
 	"fmt"
 	"os"
@@ -521,4 +522,10 @@ func (gs *GitService) TestConnection(
 // ResolvedLocalPath exposes the computed local path for external use.
 func (gs *GitService) ResolvedLocalPath(repo *models.GitRepository) string {
 	return gs.resolvedLocalPath(repo)
+}
+
+// IsRepoNotCloned reports that the repository record exists but its local copy does not (never cloned, or the data
+// directory was cleared). That is a state the user can fix by syncing again, not a server fault.
+func IsRepoNotCloned(err error) bool {
+	return errors.Is(err, git.ErrRepositoryNotExists)
 }

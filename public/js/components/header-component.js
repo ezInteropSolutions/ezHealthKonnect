@@ -22,7 +22,7 @@
                     <!-- Status tiles inline in header -->
                     <div class="header-status-tiles">
                         <div class="status-tile">
-                            <i class="far fa-layer-group status-tile-icon"></i>
+                            <i class="fas fa-layer-group status-tile-icon"></i>
                             <span class="status-tile-value" id="totalInterfaces">0</span>
                             <span class="status-tile-label">Total</span>
                         </div>

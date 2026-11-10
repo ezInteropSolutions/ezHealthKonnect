@@ -74,7 +74,7 @@ func (mps *MessageParserService) ParseToJSON(
 
 	// STEP 5: Update status in PostgreSQL
 	if err := mps.updateParsingStatus(ctx, interfaceID, messageID, &MessageStatusUpdate{
-		Status:         "parsed",
+		Status:         "", // lifecycle status is the engine's; parsing progress lives in parsing_status
 		MessageType:    result.Metadata.MessageType,
 		ParsedAt:       result.Metadata.ParsedAt,
 		ParsingStatus:  "success",

@@ -1,0 +1,137 @@
+// tests/unit/services/TransformationPipelineService.passthroughContent.test.js
+//
+// Regression (v26.10 UAT, format x connectivity matrix): the wizard saved EVERY outbound connector step (except
+// EDI/AS2) with contentField "fhirBundle" + contentType "application/fhir+json", whatever the flow. A passthrough has
+// no fhirBundle, so the executor fell back to the whole parsed-message envelope and labelled it FHIR: an HL7
+// passthrough delivered a ~387 KB JSON document (full schema embedded) instead of the HL7 message, and a FHIR
+// passthrough handed the destination FHIR server {"_format":"fhir","_semantic_index":...} instead of the resource.
+// A passthrough must deliver the ORIGINAL content (the parsed message's `raw` field), byte for byte.
+//
+// Also: normalizeWizardConfig kept only directory_path/file_pattern for the file connectors, silently discarding a
+// file writer's filename_pattern/create_subdirs/overwrite_existing/encoding and most of a file listener's settings.
+jest.mock('../../../config/database', () => ({}));
+
+const TransformationPipelineService = require('../../../services/TransformationPipelineService');
+
+function makeSequelize() {
+    const inserted = [];
+    return {
+        inserted,
+        QueryTypes: { SELECT: 'SELECT' },
+        query: jest.fn(async (sql, opts) => {
+            if (/INSERT INTO transformation_steps/.test(sql)) inserted.push(opts.bind);
+            return [];
+        }),
+    };
+}
+
+async function outboundConfig(connectivity, flow, wizardConfig = {}) {
+    const service = new TransformationPipelineService();
+    const sequelize = makeSequelize();
+    await service.addConnectorStep(sequelize, {}, 'p1', 'outbound', connectivity, wizardConfig, flow);
+    return JSON.parse(sequelize.inserted[0][4]);
+}
+
+describe('outbound step content depends on the flow', () => {
+    it('HL7 passthrough delivers the original HL7 (raw), not a FHIR-labelled envelope', async () => {
+        const cfg = await outboundConfig('file', 'hl7_passthrough', { directory_path: '/tmp/x' });
+        expect(cfg.contentField).toBe('raw');
+        expect(cfg.contentType).toBe('application/hl7-v2');
+    });
+
+    it('FHIR passthrough delivers the original FHIR resource (raw) as FHIR JSON', async () => {
+        const cfg = await outboundConfig('http', 'fhir_passthrough', { url: 'http://x' });
+        expect(cfg.contentField).toBe('raw');
+        expect(cfg.contentType).toBe('application/fhir+json');
+    });
+
+    it.each(['passthrough', 'file_processor', 'others', 'fhir_receiver', undefined, 'some_future_flow'])(
+        'flow %s adds no transform, so it delivers the original content whatever its format', async (flow) => {
+            const cfg = await outboundConfig('http', flow, { url: 'http://x' });
+            expect(cfg.contentField).toBe('raw');
+            expect(cfg.contentType).toBeUndefined();
+        });
+
+    it.each(['hl7_to_fhir', 'hl7_to_fhir_r5', 'hl7_to_fhir_stu3', 'ccd_to_fhir'])(
+        'flow %s still delivers the FHIR bundle it builds', async (flow) => {
+            const cfg = await outboundConfig('http', flow, { url: 'http://x' });
+            expect(cfg.contentField).toBe('fhirBundle');
+            expect(cfg.contentType).toBe('application/fhir+json');
+        });
+
+    it.each(['edi_x12_outbound', 'as2_outbound'])('%s still delivers the built X12 document, whatever the flow', async (type) => {
+        const cfg = await outboundConfig(type, 'hl7_passthrough', {});
+        expect(cfg.contentField).toBe('ediX12');
+        expect(cfg.contentType).toBe('application/edi-x12');
+    });
+
+    it('an inbound step carries no content settings', async () => {
+        const service = new TransformationPipelineService();
+        const sequelize = makeSequelize();
+        await service.addConnectorStep(sequelize, {}, 'p1', 'inbound', 'tcp', { port: 2575 }, 'hl7_passthrough');
+        const cfg = JSON.parse(sequelize.inserted[0][4]);
+        expect(cfg.contentField).toBeUndefined();
+        expect(cfg.contentType).toBeUndefined();
+    });
+});
+
+describe('normalizeWizardConfig keeps the file connectors\' real settings', () => {
+    const service = new TransformationPipelineService();
+
+    it('file_writer keeps its naming and overwrite options', () => {
+        const wizard = { directory_path: '/out', filename_pattern: '{message_id}.hl7', create_subdirs: true, overwrite_existing: false, encoding: 'UTF-8', junk: 'x' };
+        expect(service.normalizeWizardConfig(wizard, 'file_writer')).toEqual({
+            directory_path: '/out', filename_pattern: '{message_id}.hl7', create_subdirs: true, overwrite_existing: false, encoding: 'UTF-8',
+        });
+    });
+
+    it('file_listener keeps its polling and after-processing options', () => {
+        const wizard = { directory_path: '/in', file_pattern: '*.hl7', polling_interval: 2, after_processing: 'delete', archive_path: '/arch', recursive: true, create_dirs: true, encoding: 'UTF-8' };
+        expect(service.normalizeWizardConfig(wizard, 'file_listener')).toEqual(wizard);
+    });
+
+    it('does not invent keys that were not supplied', () => {
+        expect(service.normalizeWizardConfig({ directory_path: '/out' }, 'file_writer')).toEqual({ directory_path: '/out' });
+    });
+});
+
+describe('the wizard keeps every setting the user entered (not a short whitelist)', () => {
+    const svc = new TransformationPipelineService();
+
+    it('TCP/MLLP keeps keep-alive, TLS, retries and the ACK block, not only host and port', () => {
+        const cfg = svc.normalizeWizardConfig({
+            host: 'h', port: '2575', keep_alive: true, use_tls: true, max_retries: 3, expect_ack: true,
+            ack: { mode: 'immediate', on_error: 'nack' }, ignored_blank: '',
+        }, 'tcp_mllp_outbound');
+        expect(cfg).toEqual({ host: 'h', port: 2575, keep_alive: true, use_tls: true, max_retries: 3, expect_ack: true,
+            ack: { mode: 'immediate', on_error: 'nack' } });
+    });
+
+    it('HTTP outbound renames the form keys and keeps retries, headers and the rest', () => {
+        const cfg = svc.normalizeWizardConfig({
+            endpoint: 'http://x', authType: 'basic', authUsername: 'u', authPassword: 'p',
+            method: 'PUT', retry_attempts: 4, retry_delay_seconds: 2, headers: { A: 'b' },
+        }, 'http_outbound');
+        expect(cfg).toMatchObject({ url: 'http://x', authentication_type: 'basic_auth', username: 'u', password: 'p',
+            method: 'PUT', retry_attempts: 4, retry_delay_seconds: 2, headers: { A: 'b' } });
+        for (const old of ['endpoint', 'authType', 'authUsername', 'authPassword']) expect(cfg).not.toHaveProperty(old);
+    });
+
+    it.each(['postgresql_inbound', 'mysql_outbound', 'mongodb_inbound', 'sqlserver_inbound'])(
+        '%s keeps connection string, collection, polling interval and batch size', (type) => {
+            const cfg = svc.normalizeWizardConfig({ host: 'h', port: 1, connection_string: 'cs', collection: 'c',
+                polling_interval: 30, batch_size: 50 }, type);
+            expect(cfg).toMatchObject({ host: 'h', connection_string: 'cs', collection: 'c', polling_interval: 30, batch_size: 50 });
+        });
+});
+
+describe('wizard bookkeeping keys are not saved as connector settings', () => {
+    it('TCP/MLLP drops the nested copy of the connector config and the legacy connectivity name', () => {
+        const svc = new TransformationPipelineService();
+        const cfg = svc.normalizeWizardConfig({
+            host: '0.0.0.0', port: 6638, keep_alive: false,
+            connectivity: 'tcp', connectorconfig: { connectorType: 'tcp_mllp', config: { port: 6638 } }, contentField: '', contentType: 'application/json', timeoutMs: 30000,
+        }, 'tcp_mllp');
+        expect(cfg).toEqual({ host: '0.0.0.0', port: 6638, keep_alive: false });
+    });
+});

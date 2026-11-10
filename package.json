@@ -13,8 +13,8 @@
     "dictionary": "node services/hl7_dictionary_service.js",
     "dictionary:dev": "nodemon services/hl7_dictionary_service.js",
     "test:dictionary": "node test_dictionary.js",
-    "test:pas": "node tests/pas_template_test.js",
-    "test:pas:db": "PAS_TEST_DB=1 node tests/pas_template_test.js",
+    "test:pas": "node tests/scripts/pas_template_test.js",
+    "test:pas:db": "PAS_TEST_DB=1 node tests/scripts/pas_template_test.js",
     "start:all": "concurrently \"npm run dictionary\" \"go run main.go\"",
     "dev:all": "concurrently \"npm run dictionary:dev\" \"go run main.go\"",
     "lint:xss": "eslint public"

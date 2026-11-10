@@ -11,17 +11,20 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // OperationalIngestionService ingests live system data into the AI knowledge base.
 type OperationalIngestionService struct {
 	db        *sql.DB
 	embedding *EmbeddingService
+	progress  *IngestProgress // never nil in a constructed service; nil-safe anyway
 }
 
 // NewOperationalIngestionService creates a new OperationalIngestionService.
 func NewOperationalIngestionService(db *sql.DB, embedding *EmbeddingService) *OperationalIngestionService {
-	return &OperationalIngestionService{db: db, embedding: embedding}
+	return &OperationalIngestionService{db: db, embedding: embedding, progress: NewIngestProgress()}
 }
 
 // ─── Interface ingestion ──────────────────────────────────────────────────────
@@ -71,10 +74,10 @@ func (o *OperationalIngestionService) IngestInterface(ctx context.Context, inter
 		return fmt.Errorf("query interface %s: %w", interfaceID, err)
 	}
 
-	successRate := 0.0
-	if totalProc > 0 {
-		successRate = float64(successProc) / float64(totalProc) * 100
-	}
+	// Message counts and success rate are deliberately NOT embedded: they change with every message, so they made the
+	// text different on every start (forcing a re-embed of every interface) and went stale in the store anyway. Live
+	// numbers come from the agent's analytics tools.
+	_, _, _ = totalProc, successProc, failedProc
 
 	text := fmt.Sprintf(`Interface Configuration: "%s"
 ID: %s
@@ -84,7 +87,6 @@ Target: %s (connectivity: %s)
 Message Type: %s
 Status: %s / %s
 Deployment Mode: %s
-Statistics: %d messages processed (%.1f%% success, %d failures)
 Active: %v
 Created: %s`,
 		name, interfaceID, description,
@@ -92,21 +94,19 @@ Created: %s`,
 		targetType, targetConn,
 		msgType, status, interfaceStatus,
 		deploymentMode,
-		totalProc, successRate, failedProc,
 		isActive,
 		createdAt.Format("2006-01-02"),
 	)
 
 	ref := "interface:" + interfaceID
-	o.deleteChunks(ctx, ref)
-
-	_, err = o.embedding.IngestText(ctx, "operational", ref, "db:interfaces", text,
+	_, skipped, err := o.embedding.IngestTextIfChanged(ctx, "operational", ref, "db:interfaces", text,
 		map[string]interface{}{
 			"entity_type":  "interface",
 			"entity_id":    interfaceID,
 			"name":         name,
 			"message_type": msgType,
 		})
+	o.progress.Step(skipped)
 	return err
 }
 
@@ -131,6 +131,9 @@ func (o *OperationalIngestionService) IngestAllInterfaces(ctx context.Context) *
 		}
 	}
 
+	o.removeStale(ctx, "interface:", ids)
+	o.progress.Begin("interfaces", len(ids))
+	defer o.progress.End()
 	for _, id := range ids {
 		result.FilesScanned++
 		if err := o.IngestInterface(ctx, id); err != nil {
@@ -209,15 +212,14 @@ func (o *OperationalIngestionService) IngestPipeline(ctx context.Context, pipeli
 	sb.WriteString(fmt.Sprintf("\nTotal Steps: %d", stepCount))
 
 	ref := "pipeline:" + pipelineID
-	o.deleteChunks(ctx, ref)
-
-	_, err = o.embedding.IngestText(ctx, "operational", ref, "db:transformation_pipelines", sb.String(),
+	_, skipped, err := o.embedding.IngestTextIfChanged(ctx, "operational", ref, "db:transformation_pipelines", sb.String(),
 		map[string]interface{}{
 			"entity_type":  "pipeline",
 			"entity_id":    pipelineID,
 			"interface_id": interfaceID,
 			"message_type": messageType,
 		})
+	o.progress.Step(skipped)
 	return err
 }
 
@@ -242,6 +244,9 @@ func (o *OperationalIngestionService) IngestAllPipelines(ctx context.Context) *I
 		}
 	}
 
+	o.removeStale(ctx, "pipeline:", ids)
+	o.progress.Begin("pipelines", len(ids))
+	defer o.progress.End()
 	for _, id := range ids {
 		result.FilesScanned++
 		if err := o.IngestPipeline(ctx, id); err != nil {
@@ -285,9 +290,9 @@ func (o *OperationalIngestionService) IngestErrorPatterns(ctx context.Context) *
 	}
 	defer rows.Close()
 
-	// Clear stale error pattern chunks before re-ingesting
-	_, _ = o.db.ExecContext(ctx,
-		`DELETE FROM ai_knowledge_chunks WHERE source_type = 'operational' AND source_ref LIKE 'error_pattern:%'`)
+	// Patterns that are still current keep their chunks (unchanged text is not re-embedded); the ones that are no
+	// longer reported are removed once the loop is done.
+	currentRefs := []string{}
 
 	for rows.Next() {
 		var interfaceID, errorMsg string
@@ -315,7 +320,8 @@ Last Seen: %s`,
 
 		result.FilesScanned++
 		ref := fmt.Sprintf("error_pattern:%s:%d", interfaceID, lastSeen.Unix())
-		n, err := o.embedding.IngestText(ctx, "operational", ref, "db:audit_logs", text,
+		currentRefs = append(currentRefs, ref)
+		n, _, err := o.embedding.IngestTextIfChanged(ctx, "operational", ref, "db:audit_logs", text,
 			map[string]interface{}{
 				"entity_type":  "error_pattern",
 				"interface_id": interfaceID,
@@ -326,6 +332,10 @@ Last Seen: %s`,
 			result.Errors = append(result.Errors, fmt.Sprintf("embed error for %s: %v", interfaceID, err))
 		}
 	}
+
+	_, _ = o.db.ExecContext(ctx,
+		`DELETE FROM ai_knowledge_chunks WHERE source_type = 'operational' AND source_ref LIKE 'error_pattern:%'
+		   AND NOT (source_ref = ANY($1))`, pq.Array(currentRefs))
 
 	log.Printf("✅ AI KB — Error Patterns: %d patterns, %d chunks, %d errors",
 		result.FilesScanned, result.ChunksStored, len(result.Errors))
@@ -505,10 +515,7 @@ func (o *OperationalIngestionService) ingestIGAnchors(ctx context.Context) *Inge
 		}
 
 		ref := "ig_anchor:" + seg
-		_, _ = o.db.ExecContext(ctx,
-			`DELETE FROM ai_knowledge_chunks WHERE source_type = 'ig_anchors' AND source_ref = $1`, ref)
-
-		if _, err := o.embedding.IngestText(ctx, "ig_anchors", ref, "db:ig_field_anchors", sb.String(),
+		if _, _, err := o.embedding.IngestTextIfChanged(ctx, "ig_anchors", ref, "db:ig_field_anchors", sb.String(),
 			map[string]interface{}{
 				"entity_type": "ig_anchor",
 				"segment":     seg,
@@ -574,10 +581,7 @@ func (o *OperationalIngestionService) ingestAssemblyRules(ctx context.Context) *
 		}
 
 		ref := "assembly_rules:" + msgType
-		_, _ = o.db.ExecContext(ctx,
-			`DELETE FROM ai_knowledge_chunks WHERE source_type = 'ig_assemblyrules' AND source_ref = $1`, ref)
-
-		if _, err := o.embedding.IngestText(ctx, "ig_assemblyrules", ref, "db:assembly_rules", sb.String(),
+		if _, _, err := o.embedding.IngestTextIfChanged(ctx, "ig_assemblyrules", ref, "db:assembly_rules", sb.String(),
 			map[string]interface{}{
 				"entity_type":  "assembly_rules",
 				"message_type": msgType,
@@ -647,10 +651,7 @@ func (o *OperationalIngestionService) ingestValueMappings(ctx context.Context) *
 		}
 
 		ref := "hl7_valueset:" + table
-		_, _ = o.db.ExecContext(ctx,
-			`DELETE FROM ai_knowledge_chunks WHERE source_type = 'ig_valuesets' AND source_ref = $1`, ref)
-
-		if _, err := o.embedding.IngestText(ctx, "ig_valuesets", ref, "db:hl7_fhir_value_mappings", sb.String(),
+		if _, _, err := o.embedding.IngestTextIfChanged(ctx, "ig_valuesets", ref, "db:hl7_fhir_value_mappings", sb.String(),
 			map[string]interface{}{
 				"entity_type": "value_mapping",
 				"hl7_table":   table,
@@ -688,6 +689,18 @@ func (o *OperationalIngestionService) IngestAll(ctx context.Context) []Ingestion
 }
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
+
+// removeStale drops the chunks of interfaces/pipelines that no longer exist or are no longer active (they used to
+// stay in the knowledge base forever, so the assistant kept answering about deleted interfaces).
+func (o *OperationalIngestionService) removeStale(ctx context.Context, prefix string, currentIDs []string) {
+	refs := make([]string, 0, len(currentIDs))
+	for _, id := range currentIDs {
+		refs = append(refs, prefix+id)
+	}
+	_, _ = o.db.ExecContext(ctx,
+		`DELETE FROM ai_knowledge_chunks WHERE source_type = 'operational' AND source_ref LIKE $1 AND NOT (source_ref = ANY($2))`,
+		prefix+"%", pq.Array(refs))
+}
 
 func (o *OperationalIngestionService) deleteChunks(ctx context.Context, ref string) {
 	_, _ = o.db.ExecContext(ctx,

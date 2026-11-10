@@ -15,7 +15,7 @@
  *
  * CAPABILITIES mirrors the role lists in app.js (GO_READ_ROLES / GO_WRITE_ROLES), the Node route gates
  * (requireRole('admin', 'operator', ...)) and the Go handlers that are admin-only (e.g. /api/fhir/dlq).
- * When a server rule changes, change it here too — tests/playwright/roles-and-endpoint-auth.spec.js
+ * When a server rule changes, change it here too — tests/playwright/security/roles-and-endpoint-auth.spec.js
  * fails if the two drift apart.
  *
  * Writes the server refuses (403 + a message) are turned into one visible toast by installRefusalNotice().
@@ -257,6 +257,36 @@
             }
         }
     }
+
+    // Clipboard fallback. navigator.clipboard exists only in a secure context (HTTPS or localhost) and can still refuse
+    // (no permission); the installer sets up plain-HTTP installs by default, where every "Copy" button in the app
+    // (22 call sites) threw "Cannot read properties of undefined (reading 'writeText')". Same call, old-style copy
+    // when the modern one is missing or refused; still rejects when neither works, so callers' .catch handlers run.
+    (function installClipboardFallback() {
+        try {
+            var nativeClip = navigator.clipboard;
+            var nativeWrite = nativeClip && nativeClip.writeText ? nativeClip.writeText.bind(nativeClip) : null;
+            var legacyCopy = function (text) {
+                return new Promise(function (resolve, reject) {
+                    var ta = document.createElement('textarea');
+                    ta.value = String(text);
+                    ta.setAttribute('readonly', '');
+                    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    var ok = false;
+                    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+                    document.body.removeChild(ta);
+                    if (ok) resolve(); else reject(new Error('Copy to clipboard is not permitted in this browser'));
+                });
+            };
+            var writeText = function (text) {
+                return nativeWrite ? nativeWrite(text).catch(function () { return legacyCopy(text); }) : legacyCopy(text);
+            };
+            if (!nativeClip) Object.defineProperty(navigator, 'clipboard', { value: { writeText: writeText }, configurable: true });
+            else nativeClip.writeText = writeText;
+        } catch (e) { /* leave the browser's own behaviour */ }
+    })();
 
     var instance = new AppAuth();
     instance.installRefusalNotice();

@@ -1566,7 +1566,7 @@ func (pe *ProcessingEngine) PublishValidationFeedback(feedback *models.Validatio
 // re-runs any messages stuck in 'received' or 'processing' state that have not
 // progressed in the last 5 minutes (i.e. the process crashed mid-pipeline).
 // Called as a goroutine from Start() after the message queue is running.
-// Covered end to end by tests/playwright/service-restart-recovery.spec.js.
+// Covered end to end by tests/playwright/platform/service-restart-recovery.spec.js.
 func (pe *ProcessingEngine) recoverUnprocessedMessages(ctx context.Context) {
 	// Brief startup delay — let connectors initialise before we flood the queue.
 	time.Sleep(10 * time.Second)

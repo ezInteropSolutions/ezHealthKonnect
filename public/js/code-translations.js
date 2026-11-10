@@ -165,7 +165,7 @@ class CodeTranslationsPage {
 
     async _loadInterfaces() {
         try {
-            const res = await fetch('/api/interfaces', { credentials: 'include' });
+            const res = await fetch('/api/interfaces?view=summary', { credentials: 'include' });
             const json = await res.json();
             const list = json.data || json.interfaces || [];
             this.interfaces = list.map(i => ({ id: i.id, name: i.name || i.id }))

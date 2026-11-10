@@ -659,11 +659,32 @@
         div.innerHTML = '<span></span><span></span><span></span>';
         msgs.appendChild(div);
         msgs.scrollTop = msgs.scrollHeight;
+        explainSlowStart();
+    }
+
+    // While the knowledge base is being (re)indexed the model is shared with it, so answers queue. Say so instead of
+    // leaving a silent spinner: asked once per question, cheap (the endpoint never calls the model).
+    function explainSlowStart() {
+        fetch('/api/ai/indexing', { credentials: 'include' }).then(r => r.ok ? r.json() : null).then(body => {
+            const s = body && body.data;
+            if (!s || !s.running || !document.getElementById('ai-typing-indicator')) return;
+            const note = document.createElement('div');
+            note.className = 'ai-msg assistant';
+            note.id = 'ai-indexing-note';
+            note.style.cssText = 'font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a';
+            note.textContent = 'Still indexing your ' + (s.phase || 'data') + ' (' + s.done + ' of ' + s.total +
+                '). Answers can be slow until that finishes - it only happens after an upgrade or the first start.';
+            const msgs = document.getElementById('ai-messages');
+            msgs.insertBefore(note, document.getElementById('ai-typing-indicator'));
+            msgs.scrollTop = msgs.scrollHeight;
+        }).catch(() => {});
     }
 
     function hideTyping() {
         const el = document.getElementById('ai-typing-indicator');
         if (el) el.remove();
+        const note = document.getElementById('ai-indexing-note');
+        if (note) note.remove();
     }
 
     function updateContextBar() {

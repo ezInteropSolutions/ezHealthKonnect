@@ -1265,17 +1265,16 @@ function showDashboard() {
 // Fetch interface count and update tile
 async function loadInterfaceCount() {
     try {
-        const response = await fetch('/api/interfaces', { credentials: 'include' });
+        // Only the numbers are needed: one row plus the server-side counts, not every interface.
+        const response = await fetch('/api/interfaces?limit=1&counts=1', { credentials: 'include' });
         if (response.ok) {
             const data = await response.json();
-            const count = data.total ?? (Array.isArray(data.interfaces) ? data.interfaces.length : 0);
+            const count = data.counts?.total ?? data.total ?? (Array.isArray(data.interfaces) ? data.interfaces.length : 0);
             const el = document.getElementById('interfaceCount');
             if (el) el.textContent = count;
 
             // Also update the header "Active" stat with running interfaces
-            const active = Array.isArray(data.interfaces)
-                ? data.interfaces.filter(i => i.status === 'active' || i.status === 'running').length
-                : 0;
+            const active = data.counts ? data.counts.running : 0;
             const activeEl = document.querySelector('.header-stats .stat-item:first-child .stat-value');
             if (activeEl) activeEl.textContent = active;
         }

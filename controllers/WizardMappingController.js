@@ -9,7 +9,25 @@ const Joi = require('joi');
 class WizardMappingController {
     constructor() {
         this.wizardMappingService = new WizardMappingService();
-        //this.logger = require('../utils/logger') || console; // Fallback to console if logger not available
+        this.logger = WizardMappingController.createLogger();
+    }
+
+    /**
+     * Same shape as MessageTypeMappingService.getLogger(): use the shared logger when the project has
+     * one, otherwise console. `this.logger` was previously never assigned, so every handler threw on its
+     * first log call and the unhandled rejection from its own catch block crashed the Node process.
+     */
+    static createLogger() {
+        try {
+            return require('../utils/logger');
+        } catch (error) {
+            return {
+                info: console.log.bind(console, '[INFO]'),
+                warn: console.warn.bind(console, '[WARN]'),
+                error: console.error.bind(console, '[ERROR]'),
+                debug: console.log.bind(console, '[DEBUG]')
+            };
+        }
     }
 
     /**

@@ -263,8 +263,12 @@ func (ims *InterfaceMessageService) UpdateMessageParsingStatus(
 	query := fmt.Sprintf(`
 		UPDATE %s
 		SET
-			status = $1,
-			message_type = $2,
+			-- status is the message lifecycle (received/processing/.../failed), owned by the engine; "parsed" is not
+			-- one of its allowed values, so the old unconditional write made the CHECK constraint reject the WHOLE
+			-- update and parsed_at / parsing_status / parsing_time_ms / message_type were never saved. An empty value
+			-- now leaves the column as it is.
+			status = COALESCE(NULLIF($1, ''), status),
+			message_type = COALESCE(NULLIF($2, ''), message_type),
 			parsed_at = $3,
 			parsing_status = $4,
 			parsing_time_ms = $5,

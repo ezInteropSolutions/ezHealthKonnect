@@ -33,6 +33,9 @@ function shouldAutoActivateOnWizardComplete(wizardData) {
     return !!(wizardData && (wizardData.auto_start || wizardData.deployment_mode === 'auto'));
 }
 
+// Wizard flows that only store messages (FlowRegistry.js: isSinkOnly) - keep in step with that file.
+const SINK_ONLY_FLOWS = new Set(['passthrough', 'fhir_receiver']);
+
 class WizardController {
     /**
      * Constructor - Bind methods to preserve 'this' context for Express route handlers
@@ -1101,8 +1104,11 @@ class WizardController {
                 sourceConnectorConfig: wizardData.sourceConnectorConfig || null,
                 sourceConfig: wizardData.sourceConfig || {},
                 targetType: wizardData.targetType || 'fhir',
-                targetConnectivity: wizardData.targetConnectivity || 'http',
-                targetConnectorConfig: wizardData.targetConnectorConfig || null,
+                // A store-only flow has no external destination, whatever the form still holds: the target connector
+                // builder initialises asynchronously and could leave an HTTP default in the payload, which gave a
+                // Passthrough interface an HTTP outbound step with no endpoint ("endpoint is required" on every message).
+                targetConnectivity: SINK_ONLY_FLOWS.has(wizardData.transformationFlow) ? 'sink' : (wizardData.targetConnectivity || 'http'),
+                targetConnectorConfig: SINK_ONLY_FLOWS.has(wizardData.transformationFlow) ? null : (wizardData.targetConnectorConfig || null),
                 targetConfig: wizardData.targetConfig || {},
                 messageType: wizardData.messageType || 'ADT^A01',
                 mappings: wizardData.mappings || wizardData.customMappings || [],

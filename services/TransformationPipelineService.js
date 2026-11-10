@@ -2,6 +2,54 @@
 // Handles transformation pipeline creation and management for wizard
 // CANONICAL FLOW: Wizard → Pipeline → Steps → Template
 
+// What an outbound connector step DELIVERS, by wizard flow. A flow that builds a FHIR bundle delivers that bundle
+// (the default). A passthrough delivers the ORIGINAL message — the parsed message's `raw` field — byte for byte, in
+// its own format. Previously every outbound step was saved as contentField "fhirBundle" + "application/fhir+json",
+// so a passthrough (which builds no bundle) delivered the whole parsed-message envelope labelled as FHIR: ~387 KB of
+// JSON for a 4-segment HL7 message. A new flow is one row here.
+const FLOW_OUTBOUND_CONTENT = {
+    hl7_passthrough:  { contentField: 'raw', contentType: 'application/hl7-v2' },
+    fhir_passthrough: { contentField: 'raw', contentType: 'application/fhir+json' },
+};
+// Flows whose pipeline builds a FHIR bundle (FLOW_STEP_TEMPLATES in addDefaultPipelineSteps): the outbound step delivers it.
+const FHIR_BUNDLE_FLOWS = new Set(['hl7_to_fhir', 'hl7_to_fhir_r5', 'hl7_to_fhir_stu3', 'ccd_to_fhir']);
+const FHIR_BUNDLE_CONTENT = { contentField: 'fhirBundle', contentType: 'application/fhir+json' };
+// Every other flow adds no transform step, so its output IS its input: deliver the original content, whatever the
+// format (EDI, NCPDP, CSV, DICOM text, ...). No contentType is forced, since the format is not known here.
+const ORIGINAL_CONTENT = { contentField: 'raw' };
+
+// The settings the wizard copies into a file connector's step: the connector's real, documented options (see its
+// connectivity_types config schema). Previously only directory_path/file_pattern were kept, so a file writer's
+// filename_pattern / create_subdirs / overwrite_existing / encoding and a file listener's polling_interval /
+// after_processing / archive_path ... were silently discarded.
+const FILE_CONNECTOR_KEYS = {
+    file_listener: ['directory_path', 'file_pattern', 'polling_interval', 'after_processing', 'archive_path', 'recursive', 'create_dirs', 'encoding'],
+    file_writer:   ['directory_path', 'file_pattern', 'filename_pattern', 'create_subdirs', 'overwrite_existing', 'encoding'],
+};
+
+// Wizard form keys that normalizeWizardConfig renames to the connector's own names; they must not also be copied
+// across under the old name.
+const HTTP_ALIAS_KEYS = ['endpoint', 'authType', 'authUsername', 'authPassword', 'bearerToken', 'apiKey', 'apiKeyHeader'];
+
+/**
+ * Copies every setting the user entered that normalization has not already handled. The wizard used to keep a short
+ * whitelist per connector (TCP/MLLP: host and port only; HTTP: five fields; databases: eight), silently discarding
+ * the rest of what the user typed: retries, keep-alive, TLS, the ACK block, headers, polling interval ...
+ * Empty values are not copied (an untouched form field is not a setting).
+ */
+// Keys the wizard form carries for its own bookkeeping (a copy of the whole connector config, the legacy connectivity
+// name, the step wrapper fields). They are not connector settings and must not be saved into the step.
+const WIZARD_ONLY_KEYS = new Set(['connectorconfig', 'connectorConfig', 'connectivity', 'contentField', 'contentType', 'timeoutMs']);
+
+function keepRemainingSettings(wizardConfig, normalized, renamedKeys = []) {
+    for (const [key, value] of Object.entries(wizardConfig)) {
+        if (renamedKeys.includes(key) || WIZARD_ONLY_KEYS.has(key) || key in normalized) continue;
+        if (value === undefined || value === null || value === '') continue;
+        normalized[key] = value;
+    }
+    return normalized;
+}
+
 class TransformationPipelineService {
     /**
      * Get sequelize instance (lazy - called at request time, not module load)
@@ -241,7 +289,7 @@ class TransformationPipelineService {
         if (connectivityInfo?.targetConnectivity) {
             await this.addConnectorStep(
                 sequelize, t, pipelineId,
-                'outbound', connectivityInfo.targetConnectivity, connectivityInfo.targetConfig
+                'outbound', connectivityInfo.targetConnectivity, connectivityInfo.targetConfig, transformationFlow
             );
             count++;
         }
@@ -253,7 +301,7 @@ class TransformationPipelineService {
     /**
      * Add a connector step (inbound or outbound) to the pipeline
      */
-    async addConnectorStep(sequelize, t, pipelineId, direction, connectivityType, wizardConfig = {}) {
+    async addConnectorStep(sequelize, t, pipelineId, direction, connectivityType, wizardConfig = {}, transformationFlow = null) {
         if (!connectivityType) return; // no source/target connector configured for this interface
 
         // Legacy short-name aliases predating the modern ConnectorConfigBuilder
@@ -307,8 +355,10 @@ class TransformationPipelineService {
                 config.contentField = 'ediX12';
                 config.contentType  = 'application/edi-x12';
             } else {
-                config.contentField = 'fhirBundle';
-                config.contentType  = 'application/fhir+json';
+                const content = FLOW_OUTBOUND_CONTENT[transformationFlow]
+                    || (FHIR_BUNDLE_FLOWS.has(transformationFlow) ? FHIR_BUNDLE_CONTENT : ORIGINAL_CONTENT);
+                config.contentField = content.contentField;
+                if (content.contentType) config.contentType = content.contentType;
             }
         } else {
             config.timeoutMs = 30000;
@@ -416,16 +466,16 @@ class TransformationPipelineService {
             // Strip undefined keys so they don't pollute the stored config
             Object.keys(normalized).forEach(k => { if (normalized[k] === undefined) delete normalized[k]; });
 
-            if (wizardConfig.method)          normalized.method          = wizardConfig.method;
-            if (wizardConfig.content_type)    normalized.content_type    = wizardConfig.content_type;
-            if (wizardConfig.timeout_seconds) normalized.timeout_seconds = wizardConfig.timeout_seconds;
-            return normalized;
+            // Everything else the user entered (method, content_type, timeouts, retry_attempts, retry_delay_seconds,
+            // headers, ...) is the connector's own setting and is kept as typed.
+            return keepRemainingSettings(wizardConfig, normalized, HTTP_ALIAS_KEYS);
         }
 
         if (connectorTypeName === 'tcp_mllp' || connectorTypeName === 'tcp_mllp_inbound' || connectorTypeName === 'tcp_mllp_outbound') {
             if (wizardConfig.host) normalized.host = wizardConfig.host;
             if (wizardConfig.port) normalized.port = parseInt(wizardConfig.port, 10) || wizardConfig.port;
-            return normalized;
+            // Keep-alive, TLS, retries, the ACK/NACK block and the rest are real connector settings: not dropped.
+            return keepRemainingSettings(wizardConfig, normalized);
         }
 
         if (connectorTypeName === 'sink_outbound') {
@@ -438,17 +488,17 @@ class TransformationPipelineService {
             return normalized;
         }
 
-        if (connectorTypeName === 'file_listener' || connectorTypeName === 'file_writer') {
-            if (wizardConfig.directory_path) normalized.directory_path = wizardConfig.directory_path;
-            if (wizardConfig.file_pattern)   normalized.file_pattern   = wizardConfig.file_pattern;
+        if (FILE_CONNECTOR_KEYS[connectorTypeName]) {
+            for (const key of FILE_CONNECTOR_KEYS[connectorTypeName]) {
+                if (wizardConfig[key] !== undefined && wizardConfig[key] !== '') normalized[key] = wizardConfig[key];
+            }
             return normalized;
         }
 
         if (connectorTypeName.includes('postgresql') || connectorTypeName.includes('mysql') ||
             connectorTypeName.includes('mongodb')    || connectorTypeName.includes('sqlserver')) {
-            ['host', 'port', 'database', 'username', 'password', 'ssl_mode', 'query', 'table_name']
-                .forEach(key => { if (wizardConfig[key] !== undefined) normalized[key] = wizardConfig[key]; });
-            return normalized;
+            // Connection string, collection, polling interval, batch size, mark-as-read query ... are all real settings.
+            return keepRemainingSettings(wizardConfig, normalized);
         }
 
         return { ...wizardConfig };

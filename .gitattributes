@@ -13,6 +13,14 @@
 *.ico  binary
 *.pdf  binary
 *.zip  binary
+*.tgz  binary
+# Fonts: `* text eol=lf` above rewrote CRLF byte pairs INSIDE the woff2 files, so the committed icon fonts were
+# corrupt (3 bytes short) and every install showed icon names as text. Never normalize these.
+*.woff2 binary
+*.woff  binary
+*.ttf   binary
+*.otf   binary
+*.eot   binary
 
 # (Optional explicit types – redundancy is fine)
 *.md   text eol=lf

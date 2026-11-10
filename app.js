@@ -49,7 +49,9 @@ const helmet = require('helmet');
 // Two helmet defaults are overridden on purpose: script-src-attr 'none' would
 // block every inline onclick handler, and upgrade-insecure-requests would break
 // the plain-HTTP installs the installer sets up by default.
-const CSP_CDNS = ['https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'];
+// Every script, style and font is served from this app (public/vendor/: Font Awesome, Bootstrap), so the UI works on
+// networks with no internet access and no CDN is allowed. Adding a third-party origin here is a deliberate decision.
+const CSP_CDNS = [];
 app.use(helmet({
     contentSecurityPolicy: {
         useDefaults: false,
@@ -437,6 +439,9 @@ const GO_WRITE_ROLES = ['admin', 'super_admin', 'operator', 'engineer'];
 const _goRoleGate = _requireRoleByMethod(GO_READ_ROLES, GO_WRITE_ROLES);
 // Message CONTENT (raw / transformed / parsed) is refused for roles whose access policy is 'details only'.
 const _messageContentGate = require('./middleware/messageContentGate').requireMessageContent();
+// Routes forwarded to Go that take ?interfaceId= — the caller must be allowed to see that interface (own, or all per
+// the access policy). Used by the message trace, which is scoped to one interface.
+const _interfaceAccess = require('./middleware/interfaceAccess').requireInterfaceAccess();
 // ezCompanion: chatting is a POST, so it needs a reader role on every method.
 // Its read-only tools (health, monitoring, DLQ stats, analytics) answer
 // directly, so a no-permission 'user' must not reach it; its actions still
@@ -523,6 +528,8 @@ app.use('/api/cda/dedupe/registry', _verifyToken, _requireAdminUser, forwardToGo
 // the liveness probe below; the four synchronous partner endpoints further down
 // authenticate per interface instead (see requireSyncEndpointAuth in Go).
 app.get('/api/system/health', forwardToGo);
+// Must precede the blanket /api/system forward below so the interface-access check runs first.
+app.get('/api/system/message-trace/:correlationId', _verifyToken, _goRoleGate, _interfaceAccess, forwardToGo);
 app.use('/api/fhir', _verifyToken, _goRoleGate, forwardToGo);
 app.use('/api/hl7', _verifyToken, _goRoleGate, forwardToGo);
 app.use('/api/system', _verifyToken, _goRoleGate, forwardToGo);

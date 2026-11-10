@@ -102,7 +102,7 @@ curl http://localhost:3000/api/fhir/quality/flagged?message_type=ORU%5ER01
 2. If the OOB template is wrong: update `hl7_fhir_templates` via the template editor.
 3. If the issue is vendor-specific (Epic, Cerner quirk): add an interface override via the Mapping Override UI.
 4. Mark reviewed via: `POST /api/fhir/quality/flagged/:id/review` with a resolution note.
-5. Add the HL7/FHIR pair as a regression test case in `tests/hl7-scale-test.js`.
+5. Add the HL7/FHIR pair as a regression test case in `tests/perf/hl7-scale-test.js`.
 
 ---
 
@@ -201,11 +201,11 @@ SMTP credentials are set in Admin > Settings > Email.
 
 - [ ] Send 10 sample HL7 messages through the interface
 - [ ] Verify FHIR bundle output at `/api/fhir/transform` or via Admin > Message Viewer
-- [ ] Run `node tests/hl7-scale-test.js --types "<message_type>" --level strict`
+- [ ] Run `node tests/perf/hl7-scale-test.js --types "<message_type>" --level strict`
 - [ ] Confirm quality score ≥ 90 for all test messages
 - [ ] Confirm TLS configured on MLLP listener (`enable_tls: true` + cert files)
 - [ ] Set `dlq_config` retention and retry parameters (Admin > Interface > Recovery Queue)
 - [ ] Configure alert thresholds (Admin > Interface > Alerts)
 - [ ] Confirm data retention period matches customer BAA requirement
 - [ ] Run FHIR validator against first 10 bundles: `npx fhir-validator bundle.json --profile us-core`
-- [ ] Add first 5 HL7/FHIR pairs as regression tests in `tests/hl7-scale-test.js`
+- [ ] Add first 5 HL7/FHIR pairs as regression tests in `tests/perf/hl7-scale-test.js`

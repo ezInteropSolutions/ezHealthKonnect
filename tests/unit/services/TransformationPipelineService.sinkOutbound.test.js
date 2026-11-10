@@ -3,7 +3,7 @@
 // Regression: the wizard's store-only flows (Passthrough, FHIR Receiver) send targetConnectivity "sink".
 // The outbound step was saved with connectorType "sink", which no connector is registered under (the
 // registered one is "sink_outbound"), so every message to such an interface ended `failed` with
-// "outbound connector type 'sink' not found". Found by tests/playwright/wizard-data-path-e2e.spec.js.
+// "outbound connector type 'sink' not found". Found by tests/playwright/pipeline/wizard-data-path-e2e.spec.js.
 jest.mock('../../../config/database', () => ({}));
 
 const TransformationPipelineService = require('../../../services/TransformationPipelineService');

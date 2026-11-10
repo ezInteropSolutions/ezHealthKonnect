@@ -34,7 +34,7 @@ class BasicInterfaceConfigManager {
      */
     async loadAvailableInterfaces() {
         try {
-            const response = await fetch('/api/interfaces');
+            const response = await fetch('/api/interfaces?view=summary&limit=200&format=fhir');   // only FHIR interfaces, names and ids, never the whole list
             if (response.ok) {
                 const data = await response.json();
                 this.availableInterfaces = data.interfaces || [];

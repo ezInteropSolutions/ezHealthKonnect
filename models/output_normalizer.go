@@ -293,7 +293,7 @@ func (n *OutputNormalizer) NormalizeStepOutput(output map[string]interface{}) ma
 	// fhirBundle at all, only this key) — but unlike fhirBundle, existing
 	// consumers already depend on the wrapper KEY normalizing to the usual
 	// "fhir_resource" snake_case (e.g. step_output.fhir_resource in
-	// tests/playwright/fhir-hl7-build-e2e.spec.js), so only the value is
+	// tests/playwright/fhir-hl7/fhir-hl7-build-e2e.spec.js), so only the value is
 	// preserved here; the key still goes through NormalizeKey below.
 	// NormalizeStepOutput runs twice on the same data in practice
 	// (executeStepWithContext normalizes once building StepOutput.OutputData;

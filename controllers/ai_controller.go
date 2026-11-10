@@ -6,6 +6,7 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"ezhealthkonnect/services"
@@ -72,6 +73,8 @@ func (c *AIController) requireAdminRole() gin.HandlerFunc {
 func (c *AIController) RegisterRoutes(group *gin.RouterGroup) {
 	// Status — always reachable so the frontend can detect disabled state
 	group.GET("/status", c.GetStatus)
+	// Cheap (no model call): lets the chat panel say why answers are slow while knowledge is being indexed.
+	group.GET("/indexing", c.GetIndexing)
 
 	// All other routes are gated by the AI enabled check
 	gated := group.Use(c.requireAIEnabled())
@@ -130,6 +133,12 @@ func (c *AIController) GetStatus(ctx *gin.Context) {
 	// (ezCompanion is optional), not a server error. The answer is in the body (success / data.provider_reachable).
 	// A 503 here made every dashboard load log a console error on installs without AI.
 	ctx.JSON(http.StatusOK, gin.H{"success": status.ProviderReachable, "data": status})
+}
+
+// GetIndexing reports the background knowledge refresh. It never touches the model, so it answers instantly even
+// while the model is saturated by that very refresh (/status lists models and can take seconds then).
+func (c *AIController) GetIndexing(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, gin.H{"success": true, "data": c.svc.IndexingStatus()})
 }
 
 // ─── POST /api/ai/detect-format ───────────────────────────────────────────────
@@ -614,7 +623,11 @@ func (c *AIController) TraceMessage(ctx *gin.Context) {
 
 	trace, err := c.svc.TraceMessage(reqCtx, req.MessageID, req.InterfaceID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, ai.ErrNoExecutionRecord) {
+			status = http.StatusNotFound // asked about a message with no recorded run: not a server fault
+		}
+		ctx.JSON(status, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"success": true, "data": trace})

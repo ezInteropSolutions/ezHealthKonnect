@@ -1231,7 +1231,7 @@ class ToolboxManager {
             // ============================================
             'custom': 'fas fa-cog',
             'custom.script': 'fas fa-file-code',
-            'custom.javascript': 'fas fa-js',
+            'custom.javascript': 'fab fa-js',
 
             // ============================================
             // SPECIALIZED ENRICHMENT
