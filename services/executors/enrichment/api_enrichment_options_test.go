@@ -193,3 +193,28 @@ func TestAPIEnrichment_QueryPlaceholdersAndPredicates(t *testing.T) {
 		t.Fatalf("query %q", got)
 	}
 }
+
+func TestAPIEnrichment_RequestBodyPlaceholdersInArrays(t *testing.T) {
+	var body map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	input := map[string]interface{}{"message": map[string]interface{}{"old": "OLD-1", "items": []interface{}{
+		map[string]interface{}{"k": "a", "v": "A"}, map[string]interface{}{"k": "b", "v": "B"}}}}
+	if _, err := runAPIStep(t, map[string]interface{}{
+		"endpoint": srv.URL, "method": "PUT",
+		"requestBody": map[string]interface{}{"active": false, "identifier": []interface{}{map[string]interface{}{"value": "oldId"}},
+			"link": []interface{}{map[string]interface{}{"other": map[string]interface{}{"value": "newId"}}}},
+		"fieldMappings": map[string]interface{}{"oldId": "old", "newId": "message.items[k=b].v"},
+	}, input); err != nil {
+		t.Fatal(err)
+	}
+	ids := body["identifier"].([]interface{})
+	link := body["link"].([]interface{})[0].(map[string]interface{})["other"].(map[string]interface{})
+	if body["active"] != false || ids[0].(map[string]interface{})["value"] != "OLD-1" || link["value"] != "B" {
+		t.Fatalf("body %v", body)
+	}
+}

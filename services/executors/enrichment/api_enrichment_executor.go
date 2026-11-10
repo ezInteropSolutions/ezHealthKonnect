@@ -481,21 +481,36 @@ func (e *APIEnrichmentExecutor) replaceFieldMappings(
 ) map[string]interface{} {
 	result := make(map[string]interface{})
 	for key, value := range data {
-		if strValue, ok := value.(string); ok {
-			// Check if it's a field mapping placeholder
-			if fieldPath, exists := mappings[strValue]; exists {
-				fieldValue := executors.GetNestedValue(inputData, fieldPath)
-				result[key] = fieldValue
-			} else {
-				result[key] = value
-			}
-		} else if mapValue, ok := value.(map[string]interface{}); ok {
-			result[key] = e.replaceFieldMappings(mapValue, mappings, inputData)
-		} else {
-			result[key] = value
-		}
+		result[key] = e.replaceFieldMappingValue(value, mappings, inputData)
 	}
 	return result
+}
+
+// replaceFieldMappingValue replaces one requestBody value: a string equal to
+// a fieldMappings key becomes that field's value; objects and arrays are
+// walked; anything else is kept.
+func (e *APIEnrichmentExecutor) replaceFieldMappingValue(
+	value interface{},
+	mappings map[string]string,
+	inputData map[string]interface{},
+) interface{} {
+	switch v := value.(type) {
+	case string:
+		if fieldPath, exists := mappings[v]; exists {
+			return resolveStepValue(inputData, fieldPath)
+		}
+		return v
+	case map[string]interface{}:
+		return e.replaceFieldMappings(v, mappings, inputData)
+	case []interface{}:
+		out := make([]interface{}, len(v))
+		for i, item := range v {
+			out[i] = e.replaceFieldMappingValue(item, mappings, inputData)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 

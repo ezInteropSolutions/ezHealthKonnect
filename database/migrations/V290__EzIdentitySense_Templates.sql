@@ -168,3 +168,109 @@ connection.
   and PDQ queries, use *HL7 PIX/PDQ Queries to ezIdentitySense*.
 $GUIDE$
 WHERE slug = 'ezidentitysense-events-to-hl7-adt';
+
+-- HL7 ADT to ezIdentitySense
+DELETE FROM interface_templates WHERE slug = 'hl7-adt-to-ezidentitysense' AND is_system = true;
+INSERT INTO interface_templates
+    (id, name, slug, description, category, subcategory, tags, icon, difficulty,
+     source_connector_type, source_config_template,
+     target_connector_type, target_config_template,
+     pipeline_config, message_type,
+     required_connection_fields, sanitized_fields, preview_steps,
+     estimated_setup_minutes, is_system, is_public, author, usage_count, processing_order)
+VALUES (
+    gen_random_uuid(), 'HL7 ADT to ezIdentitySense', 'hl7-adt-to-ezidentitysense', 'Feeds a source system''s HL7 v2 ADT messages into ezIdentitySense (the enterprise master patient index) through its standard IHE PIXm Patient Identity Feed: registrations and updates (A01, A04, A05, A08, A28, A31 and any other ADT carrying PID) register or update the patient, A40 merges two of the source''s records, A23 and A29 remove one. Processed one at a time, in order; an older message never overwrites a newer one.',
+    'empi', 'ezidentitysense', ARRAY['ezidentitysense','empi','mpi','hl7v2','adt','pix','pixm','iti-104','patient-feed','inbound']::text[], '🪪', 'intermediate',
+    'tcp_mllp_inbound', '{"host":"0.0.0.0","port":6625}'::jsonb,
+    'http_outbound', '{}'::jsonb,
+    '{"execution_groups":[{"sequence":5,"steps":[{"step_name":"ADT Feed","step_alias":"adt_feed","step_type":"connector.inbound","sequence":5,"config":{"connectorType":"tcp_mllp_inbound","config":{"host":"0.0.0.0","port":6625,"max_connections":10,"ack":{"mode":"immediate","on_error":"nack","sending_app":"EZHEALTHKONNECT","sending_facility":""}},"timeoutMs":30000},"enabled":true,"required":true}]},{"sequence":10,"steps":[{"step_name":"HL7 to FHIR","step_alias":"hl7_to_fhir","step_type":"hl7_fhir_transform","sequence":10,"config":{"target_resources":["Patient"]},"enabled":true,"required":true}]},{"sequence":20,"steps":[{"step_name":"ADT Event","step_alias":"adt_event","step_type":"switch_case","sequence":20,"config":{"field":"MSH.9.2","cases":[{"value":"A40","label":"Merge","actions":[]},{"value":"A23","label":"Delete visit","actions":[]},{"value":"A29","label":"Delete person","actions":[]}],"default":{"actions":[]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]},{"sequence":30,"steps":[{"step_name":"Register Patient","step_alias":"register_patient","step_type":"enrichment.api","sequence":30,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"records.write","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/fhir+json","Accept":"application/fhir+json"},"method":"PUT","endpoint":"/fhir/r4/Patient?identifier={{var.sourceAuthority}}|{localId}","fieldMappings":{"localId":"message.fhirResources[resourceType=Patient].identifier[system={{var.sourceAuthority}}].value"},"bodyRef":"message.fhirResources[resourceType=Patient]"},"enabled":true,"required":true,"parent_conditional_step_id":"adt_event","case_value":"default"}]},{"sequence":32,"steps":[{"step_name":"Merge Record","step_alias":"merge_record","step_type":"enrichment.api","sequence":32,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"records.write","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/fhir+json","Accept":"application/fhir+json"},"method":"PUT","endpoint":"/fhir/r4/Patient?identifier={{var.sourceAuthority}}|{retiredId}","fieldMappings":{"retiredId":"MRG.1.1","survivingId":"message.fhirResources[resourceType=Patient].identifier[system={{var.sourceAuthority}}].value"},"requestBody":{"resourceType":"Patient","active":false,"identifier":[{"system":"{{var.sourceAuthority}}","value":"retiredId"}],"link":[{"type":"replaced-by","other":{"identifier":{"system":"{{var.sourceAuthority}}","value":"survivingId"}}}]}},"enabled":true,"required":true,"parent_conditional_step_id":"adt_event","case_value":"A40"}]},{"sequence":34,"steps":[{"step_name":"Remove Record A23","step_alias":"remove_record_a23","step_type":"enrichment.api","sequence":34,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"records.write","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/fhir+json","Accept":"application/fhir+json"},"method":"DELETE","endpoint":"/fhir/r4/Patient?identifier={{var.sourceAuthority}}|{localId}","fieldMappings":{"localId":"message.fhirResources[resourceType=Patient].identifier[system={{var.sourceAuthority}}].value"}},"enabled":true,"required":true,"parent_conditional_step_id":"adt_event","case_value":"A23"}]},{"sequence":36,"steps":[{"step_name":"Remove Record A29","step_alias":"remove_record_a29","step_type":"enrichment.api","sequence":36,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"records.write","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/fhir+json","Accept":"application/fhir+json"},"method":"DELETE","endpoint":"/fhir/r4/Patient?identifier={{var.sourceAuthority}}|{localId}","fieldMappings":{"localId":"message.fhirResources[resourceType=Patient].identifier[system={{var.sourceAuthority}}].value"}},"enabled":true,"required":true,"parent_conditional_step_id":"adt_event","case_value":"A29"}]}]}'::jsonb, 'ADT',
+    '[{"section":"source","field":"port","label":"MLLP Port","type":"number","required":true,"hint":"The port the source system sends its ADT messages to."},{"section":"variables","section_label":"Source System","field":"sourceAuthority","label":"This Source''s ID Authority","type":"string","required":true,"hint":"The ID authority set for this source system in ezIdentitySense, e.g. urn:oid:2.16.840.1.113883.3.999.1. Its PID-3 identifier is the record''s local ID."},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["register_patient","merge_record","remove_record_a23","remove_record_a29"],"field":"baseUrl","label":"ezIdentitySense Address","type":"url","hint":"The address of your ezIdentitySense server, e.g. https://empi.example.org","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["register_patient","merge_record","remove_record_a23","remove_record_a29"],"field":"oauth2TokenUrl","label":"Token URL","type":"url","hint":"Your identity provider''s OAuth 2.0 token endpoint, where this client gets its access tokens","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["register_patient","merge_record","remove_record_a23","remove_record_a29"],"field":"oauth2ClientId","label":"Client ID","type":"string","hint":"The client registered for ezHealthKonnect in your identity provider and in ezIdentitySense","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["register_patient","merge_record","remove_record_a23","remove_record_a29"],"field":"oauth2ClientSecret","label":"Client Secret","type":"password","hint":"That client''s secret. Stored encrypted.","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["register_patient","merge_record","remove_record_a23","remove_record_a29"],"field":"oauth2Audience","label":"Audience","type":"string","hint":"Only if your identity provider requires one (the audience ezIdentitySense expects)","required":false}]'::jsonb, ARRAY['steps.baseUrl','steps.oauth2TokenUrl','steps.oauth2ClientSecret']::text[], '[{"name":"Receive ADT over MLLP","icon":"🔌","step_type":"connector.inbound"},{"name":"HL7 to FHIR Patient","icon":"🔄","step_type":"hl7_fhir_transform"},{"name":"Register, Merge or Remove","icon":"🔀","step_type":"switch_case"},{"name":"ezIdentitySense Patient Feed","icon":"📤","step_type":"enrichment.api"}]'::jsonb,
+    15, true, true, 'ezHealthKonnect', 0, 'in_order'
+);
+UPDATE interface_templates SET user_guide = $GUIDE$
+# HL7 ADT to ezIdentitySense
+
+## What this does
+
+A source system (an EHR, a registration system, a lab) sends its HL7 v2 ADT
+messages here over MLLP. Each one updates that system's patient record in
+ezIdentitySense, the enterprise master patient index, which links it to the
+right enterprise identity.
+
+| ADT message | What happens in ezIdentitySense |
+|---|---|
+| A01, A04, A05, A08, A28, A31, and any other ADT carrying PID | The record is registered, or updated if it exists |
+| A40 (merge patient) | The record in MRG-1 is merged, in the source, into the record in PID-3 |
+| A23 (delete visit), A29 (delete person) | The record is removed from matching |
+
+It uses ezIdentitySense's standard IHE PIXm Patient Identity Feed (ITI-104),
+sending the patient as a FHIR Patient built from PID: every identifier in
+PID-3, every name in PID-5 with its type (legal, maiden, …), birth date,
+sex, addresses, phone numbers and email, and mother's maiden name (PID-6).
+
+## How delivery works
+
+- Messages are acknowledged on receipt (MLLP `AA`) and then processed **one
+  at a time, in the order received**.
+- MSH-7 (the message date/time) is sent as the record's version.
+  ezIdentitySense ignores a message older than one it has already applied,
+  so a delayed or resent message never overwrites newer information. If
+  MSH-7 has no time zone it is taken as UTC; keep each source consistent.
+- A message ezIdentitySense refuses (an unknown assigning authority, a
+  record it can't read) is marked **failed** in this interface's message
+  list with ezIdentitySense's reason. Fix the cause and reprocess it from
+  there.
+
+## Before you start
+
+1. **In ezIdentitySense**, as an integration administrator, open
+   **Integrations**:
+   - Under **Source systems**, the source system for this feed must have an
+     **ID authority**: the assigning authority of its own patient numbers
+     (its MRNs), e.g. `urn:oid:2.16.840.1.113883.3.999.1`. That is how
+     ezIdentitySense knows which identifier in PID-3 is the record's local
+     ID.
+   - Under **Assigning authorities**, register every other authority whose
+     identifiers the source sends in PID-3 (national IDs, insurance
+     numbers…). An identifier from an unregistered authority is refused.
+     Social-security-type numbers need ezIdentitySense's sensitive
+     identifier storage to be set up first.
+   - Under **API clients**, register an OAuth client for ezHealthKonnect
+     with the `records.write` scope, bound to this source system.
+2. **Identifiers in PID-3** must name their assigning authority by OID
+   (`MRN^^^HOSP&2.16.840.1.113883.3.999.1&ISO^MR`): the OID becomes
+   `urn:oid:…`, and must match what ezIdentitySense has.
+
+## Setup
+
+Click **Use** on this template and fill in:
+
+- **MLLP Port**: where the source system sends.
+- **This Source's ID Authority**: exactly as set in ezIdentitySense.
+- **ezIdentitySense Connection**: its address, and the OAuth client's token
+  URL, client ID and secret (and audience if your provider needs one).
+
+Activate the interface, then point the source system's ADT feed at this
+server and port.
+
+## Changing things later
+
+- **Rotating the client secret:** edit the four steps that call
+  ezIdentitySense (*Register Patient*, *Merge Record*, *Remove Record A23*,
+  *Remove Record A29*) in Pipeline Builder.
+- **Which events merge or remove:** the *ADT Event* step decides by MSH-9.2;
+  add a case there to route another trigger event.
+
+## Good to know
+
+- A40's MRG-1 is read from its first repetition, which must be the retired
+  record's number in this source's ID authority.
+- A message whose PID-3 has no identifier in this source's ID authority
+  can't be filed and fails; check the source's assigning authority settings.
+- A17 (swap patients) and other two-patient events aren't handled as such:
+  they update the first patient only.
+- Sending data *out* of ezIdentitySense uses the *ezIdentitySense Patient
+  Events to HL7 ADT* template; PIX and PDQ queries use *HL7 PIX/PDQ Queries
+  to ezIdentitySense*.
+$GUIDE$
+WHERE slug = 'hl7-adt-to-ezidentitysense';

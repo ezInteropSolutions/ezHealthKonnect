@@ -310,7 +310,107 @@ const outbound = {
     guide: 'events-to-adt.md',
 };
 
-const TEMPLATES = [outbound];
+// ── Template 2: HL7 v2 ADT -> ezIdentitySense ──────────────────────────────
+
+// The record's local ID: the transformed Patient's identifier in this
+// source's ID authority (a PID-3 repetition whose assigning authority is it).
+const PATIENT = 'message.fhirResources[resourceType=Patient]';
+const LOCAL_ID = `${PATIENT}.identifier[system={{var.sourceAuthority}}].value`;
+const FEED = '/fhir/r4/Patient?identifier={{var.sourceAuthority}}|';
+const FHIR_JSON = { 'Content-Type': 'application/fhir+json', Accept: 'application/fhir+json' };
+
+function feedStep(seq, name, alias, caseValue, cfg) {
+    return step(seq, name, alias, 'enrichment.api', { ...ezisApiAuth('records.write'), headers: FHIR_JSON, ...cfg },
+        { parent_conditional_step_id: 'adt_event', case_value: caseValue });
+}
+
+const INBOUND_STEPS = ['register_patient', 'merge_record', 'remove_record_a23', 'remove_record_a29'];
+
+const inbound = {
+    name: 'HL7 ADT to ezIdentitySense',
+    slug: 'hl7-adt-to-ezidentitysense',
+    description: 'Feeds a source system\'s HL7 v2 ADT messages into ezIdentitySense (the enterprise master patient index) through its standard IHE PIXm Patient Identity Feed: registrations and updates (A01, A04, A05, A08, A28, A31 and any other ADT carrying PID) register or update the patient, A40 merges two of the source\'s records, A23 and A29 remove one. Processed one at a time, in order; an older message never overwrites a newer one.',
+    category: 'empi',
+    subcategory: 'ezidentitysense',
+    tags: ['ezidentitysense', 'empi', 'mpi', 'hl7v2', 'adt', 'pix', 'pixm', 'iti-104', 'patient-feed', 'inbound'],
+    icon: '🪪',
+    difficulty: 'intermediate',
+    message_type: 'ADT',
+    source_connector_type: 'tcp_mllp_inbound',
+    source_config_template: { host: '0.0.0.0', port: 6625 },
+    target_connector_type: 'http_outbound',
+    target_config_template: {},
+    pipeline_config: {
+        execution_groups: [
+            step(5, 'ADT Feed', 'adt_feed', 'connector.inbound', {
+                connectorType: 'tcp_mllp_inbound',
+                config: {
+                    host: '0.0.0.0', port: 6625, max_connections: 10,
+                    ack: { mode: 'immediate', on_error: 'nack', sending_app: 'EZHEALTHKONNECT', sending_facility: '' },
+                },
+                timeoutMs: 30000,
+            }),
+            // HL7 v2 -> FHIR Patient (PID: identifiers, names, birth date,
+            // sex, addresses, phones, mother's maiden name; MSH-7 as the
+            // version in meta.lastUpdated).
+            step(10, 'HL7 to FHIR', 'hl7_to_fhir', 'hl7_fhir_transform', {
+                target_resources: ['Patient'],
+            }),
+            step(20, 'ADT Event', 'adt_event', 'switch_case', {
+                field: 'MSH.9.2',
+                cases: [
+                    { value: 'A40', label: 'Merge', actions: [] },
+                    { value: 'A23', label: 'Delete visit', actions: [] },
+                    { value: 'A29', label: 'Delete person', actions: [] },
+                ],
+                default: { actions: [] },
+                options: { caseInsensitive: true, trimWhitespace: true },
+            }),
+            feedStep(30, 'Register Patient', 'register_patient', 'default', {
+                method: 'PUT', endpoint: FEED + '{localId}',
+                fieldMappings: { localId: LOCAL_ID },
+                bodyRef: PATIENT,
+            }),
+            // A40: the record in MRG-1 was merged, in the source, into the
+            // record in PID-3.
+            feedStep(32, 'Merge Record', 'merge_record', 'A40', {
+                method: 'PUT', endpoint: FEED + '{retiredId}',
+                fieldMappings: { retiredId: 'MRG.1.1', survivingId: LOCAL_ID },
+                requestBody: {
+                    resourceType: 'Patient',
+                    active: false,
+                    identifier: [{ system: '{{var.sourceAuthority}}', value: 'retiredId' }],
+                    link: [{ type: 'replaced-by', other: { identifier: { system: '{{var.sourceAuthority}}', value: 'survivingId' } } }],
+                },
+            }),
+            feedStep(34, 'Remove Record A23', 'remove_record_a23', 'A23', {
+                method: 'DELETE', endpoint: FEED + '{localId}', fieldMappings: { localId: LOCAL_ID },
+            }),
+            feedStep(36, 'Remove Record A29', 'remove_record_a29', 'A29', {
+                method: 'DELETE', endpoint: FEED + '{localId}', fieldMappings: { localId: LOCAL_ID },
+            }),
+        ],
+    },
+    required_connection_fields: [
+        { section: 'source', field: 'port', label: 'MLLP Port', type: 'number', required: true,
+          hint: 'The port the source system sends its ADT messages to.' },
+        { section: 'variables', section_label: 'Source System', field: 'sourceAuthority',
+          label: 'This Source\'s ID Authority', type: 'string', required: true,
+          hint: 'The ID authority set for this source system in ezIdentitySense, e.g. urn:oid:2.16.840.1.113883.3.999.1. Its PID-3 identifier is the record\'s local ID.' },
+        ...ezisConnectionFields(INBOUND_STEPS),
+    ],
+    preview_steps: [
+        { name: 'Receive ADT over MLLP', icon: '🔌', step_type: 'connector.inbound' },
+        { name: 'HL7 to FHIR Patient', icon: '🔄', step_type: 'hl7_fhir_transform' },
+        { name: 'Register, Merge or Remove', icon: '🔀', step_type: 'switch_case' },
+        { name: 'ezIdentitySense Patient Feed', icon: '📤', step_type: 'enrichment.api' },
+    ],
+    estimated_setup_minutes: 15,
+    processing_order: 'in_order',
+    guide: 'adt-to-ezidentitysense.md',
+};
+
+const TEMPLATES = [outbound, inbound];
 
 // ── SQL output ──────────────────────────────────────────────────────────────
 
