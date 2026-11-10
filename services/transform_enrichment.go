@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/services/hl7assembly"
@@ -1227,11 +1228,10 @@ func (s *HL7FHIRTransformServiceV3) enrichPatientTelecom(
 	type pidTelecom struct {
 		pidKey     string
 		defaultUse string
-		defaultSys string
 	}
 	fields := []pidTelecom{
-		{"PID.13", "home", "phone"},
-		{"PID.14", "work", "phone"},
+		{"PID.13", "home"},
+		{"PID.14", "work"},
 	}
 
 	for _, f := range fields {
@@ -1239,58 +1239,24 @@ func (s *HL7FHIRTransformServiceV3) enrichPatientTelecom(
 		if raw == "" {
 			continue
 		}
-		// XTN: TelNum^UseCode^EquipType^Email^CountryCode^AreaCode^LocalNumber^...
-		parts := strings.Split(raw, "^")
-		telNum := strings.TrimSpace(parts[0])
-		useCode := ""
-		equipType := ""
-		emailAddr := ""
-		if len(parts) > 1 {
-			useCode = strings.TrimSpace(parts[1])
-		}
-		if len(parts) > 2 {
-			equipType = strings.TrimSpace(parts[2])
-		}
-		if len(parts) > 3 {
-			emailAddr = strings.TrimSpace(parts[3])
-		}
-
-		// Determine FHIR system
-		fhirSystem := f.defaultSys
-		if equipType != "" {
-			if mapped, found := table0201[strings.ToUpper(equipType)]; found {
-				fhirSystem = mapped
+		// One ContactPoint per repetition, read by hl7assembly's XTN builder
+		// (the same reading the mapping engine uses).
+		for _, rep := range strings.Split(raw, "~") {
+			cp := hl7assembly.BuildContactPointFromXTN(rep, nil)
+			if cp == nil {
+				continue
 			}
-		}
-
-		// Determine FHIR use
-		fhirUse := f.defaultUse
-		if useCode != "" {
-			if mapped, found := table0202[strings.ToUpper(useCode)]; found {
-				fhirUse = mapped
+			// No use code (XTN.2): the field's own (PID.13 home, PID.14 work).
+			if comps := strings.Split(rep, "^"); len(comps) < 2 || strings.TrimSpace(comps[1]) == "" {
+				cp["use"] = f.defaultUse
 			}
+			value, _ := cp["value"].(string)
+			if value == "" || existingValues[value] {
+				continue
+			}
+			existingTelecom = append(existingTelecom, cp)
+			existingValues[value] = true
 		}
-
-		// Email address takes precedence over phone number in this subfield
-		value := telNum
-		if fhirSystem == "email" && emailAddr != "" {
-			value = emailAddr
-		} else if emailAddr != "" && telNum == "" {
-			value = emailAddr
-			fhirSystem = "email"
-		}
-
-		if value == "" || existingValues[value] {
-			continue
-		}
-
-		entry := map[string]interface{}{
-			"system": fhirSystem,
-			"use":    fhirUse,
-			"value":  value,
-		}
-		existingTelecom = append(existingTelecom, entry)
-		existingValues[value] = true
 	}
 
 	if len(existingTelecom) > 0 {
@@ -1459,4 +1425,82 @@ func (s *HL7FHIRTransformServiceV3) enrichResultsInterpreter(
 			}
 		}
 	}
+}
+
+// mothersMaidenNameURL is the FHIR core extension for a patient's mother's
+// maiden name (HL7 v2 PID-6), which identity matching uses.
+const mothersMaidenNameURL = "http://hl7.org/fhir/StructureDefinition/patient-mothersMaidenName"
+
+// enrichPatientMothersMaidenName adds PID-6 (its first repetition's family
+// name) as the patient-mothersMaidenName extension, unless already present.
+func (s *HL7FHIRTransformServiceV3) enrichPatientMothersMaidenName(
+	r map[string]interface{},
+	parsedHL7Data map[string]interface{},
+) {
+	pidList := s.extractSegmentGroup(parsedHL7Data, "PID")
+	if len(pidList) == 0 {
+		return
+	}
+	raw := segFieldValue(pidList[0], "PID.6")
+	family := strings.TrimSpace(strings.Split(strings.Split(raw, "~")[0], "^")[0])
+	if family == "" {
+		return
+	}
+	exts, _ := r["extension"].([]interface{})
+	for _, e := range exts {
+		if m, ok := e.(map[string]interface{}); ok && m["url"] == mothersMaidenNameURL {
+			return
+		}
+	}
+	r["extension"] = append(exts, map[string]interface{}{"url": mothersMaidenNameURL, "valueString": family})
+}
+
+// setPatientLastUpdatedFromMessage sets Patient.meta.lastUpdated from MSH-7
+// (the message's own date/time), unless already set — as MessageHeader's
+// already is — so a receiver that versions patients by it (e.g. an IHE PIXm
+// Patient Identity Feed) can tell an older message from a newer one.
+func (s *HL7FHIRTransformServiceV3) setPatientLastUpdatedFromMessage(
+	r map[string]interface{},
+	parsedHL7Data map[string]interface{},
+) {
+	mshList := s.extractSegmentGroup(parsedHL7Data, "MSH")
+	if len(mshList) == 0 {
+		return
+	}
+	ts := strings.TrimSpace(strings.Split(segFieldValue(mshList[0], "MSH.7"), "^")[0])
+	if ts == "" {
+		return
+	}
+	meta, _ := r["meta"].(map[string]interface{})
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	if v, _ := meta["lastUpdated"].(string); v != "" {
+		return
+	}
+	instant := fhirInstant(s.transformTSToDateTime(ts))
+	if instant == "" {
+		return
+	}
+	meta["lastUpdated"] = instant
+	r["meta"] = meta
+}
+
+// fhirInstant makes a FHIR dateTime into an instant (RFC 3339, with a zone),
+// which meta.lastUpdated must be. HL7 lets MSH-7 leave the zone out (the
+// sender's own is meant); with nothing to say which it is, such a time is
+// taken as UTC. A receiver that orders a source's messages by it still gets
+// them in order as long as the source is consistent. A bare date becomes
+// midnight; anything unreadable yields "".
+func fhirInstant(v string) string {
+	v = strings.TrimSpace(v)
+	if _, err := time.Parse(time.RFC3339Nano, v); err == nil {
+		return v
+	}
+	for _, layout := range []string{"2006-01-02T15:04:05.999999999", "2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02"} {
+		if t, err := time.ParseInLocation(layout, v, time.UTC); err == nil {
+			return t.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	return ""
 }

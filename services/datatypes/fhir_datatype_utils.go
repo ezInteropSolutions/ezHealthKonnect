@@ -6,6 +6,8 @@ package datatypes
 import (
 	"fmt"
 	"strings"
+
+	"ezhealthkonnect/services/hl7assembly"
 )
 
 // =====================================
@@ -177,122 +179,14 @@ func (utils *FHIRDataTypeUtils) TransformXTNToContactPoint(
 	xtn string,
 	rules map[string]interface{},
 ) map[string]interface{} {
-	if xtn == "" {
+	// The shared XTN reading (hl7assembly): one ContactPoint per repetition,
+	// read from its components — this used to emit one per component. This
+	// single-value API returns the first repetition's.
+	cps := hl7assembly.BuildContactPointsFromXTN(xtn, rules)
+	if len(cps) == 0 {
 		return nil
 	}
-
-	// Handle complex XTN field with multiple components
-	if strings.Contains(xtn, "^") {
-		return utils.processComplexXTNSingle(xtn, rules)
-	}
-
-	// Simple phone number/email
-	return utils.createSimpleContactPoint(xtn, rules)
-}
-
-func (utils *FHIRDataTypeUtils) processComplexXTNSingle(
-	xtn string,
-	rules map[string]interface{},
-) map[string]interface{} {
-	components := strings.Split(xtn, "^")
-
-	// Take the first non-empty component as the primary contact
-	for i, component := range components {
-		component = strings.TrimSpace(component)
-		if component == "" {
-			continue
-		}
-
-		contactPoint := utils.createContactPointFromComponent(component, i+1, rules)
-		if contactPoint != nil {
-			return contactPoint
-		}
-	}
-
-	return nil
-}
-
-func (utils *FHIRDataTypeUtils) processComplexXTN(
-	xtn string,
-	rules map[string]interface{},
-) interface{} {
-	var contactPoints []map[string]interface{}
-
-	// Parse components using simple string splitting (removed hl7.Component dependency)
-	components := strings.Split(xtn, "^")
-	for i, component := range components {
-		component = strings.TrimSpace(component)
-		if component == "" {
-			continue
-		}
-
-		contactPoint := utils.createContactPointFromComponent(component, i+1, rules)
-		if contactPoint != nil {
-			contactPoints = append(contactPoints, contactPoint)
-		}
-	}
-
-	// Return single ContactPoint or array
-	if len(contactPoints) == 1 {
-		return contactPoints[0]
-	} else if len(contactPoints) > 1 {
-		return contactPoints
-	}
-
-	return nil
-}
-
-func (utils *FHIRDataTypeUtils) createContactPointFromComponent(
-	value string,
-	componentNum int,
-	rules map[string]interface{},
-) map[string]interface{} {
-	contactPoint := utils.determineContactPointType(value)
-
-	// Set use based on component position (XTN structure)
-	switch componentNum {
-	case 1, 2, 3:
-		contactPoint["use"] = "home"
-	case 4, 5:
-		contactPoint["use"] = "work"
-	default:
-		contactPoint["use"] = "other"
-	}
-
-	contactPoint["value"] = value
-
-	// Apply rules
-	if rules != nil {
-		if system, ok := rules["system"].(string); ok {
-			contactPoint["system"] = system
-		}
-		if use, ok := rules["use"].(string); ok {
-			contactPoint["use"] = use
-		}
-	}
-
-	return contactPoint
-}
-
-func (utils *FHIRDataTypeUtils) createSimpleContactPoint(
-	value string,
-	rules map[string]interface{},
-) map[string]interface{} {
-	contactPoint := utils.determineContactPointType(value)
-	contactPoint["value"] = value
-	contactPoint["use"] = "home"
-
-	// Apply rules
-	if rules != nil {
-		if system, ok := rules["system"].(string); ok {
-			contactPoint["system"] = system
-		}
-		if use, ok := rules["use"].(string); ok {
-			contactPoint["use"] = use
-		}
-	}
-
-	return contactPoint
+	return cps[0]
 }
 
 func (utils *FHIRDataTypeUtils) determineContactPointType(value string) map[string]interface{} {
