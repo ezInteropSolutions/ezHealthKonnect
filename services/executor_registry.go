@@ -589,6 +589,10 @@ func (hme *HL7FHIRMappingExecutor) Execute(
 	// Also store in the message so downstream steps (FHIR Validation, etc.) can access it
 	if msg, ok := outputData["message"].(map[string]interface{}); ok {
 		msg["fhirBundle"] = resp.Bundle
+		// The resources themselves, as FHIR JSON (step outputs are key-normalized
+		// to snake_case; these aren't), so a later step can pick one by type,
+		// e.g. message.fhirResources[resourceType=Patient], and send it on.
+		msg["fhirResources"] = resp.FHIRResources
 	}
 
 	// STANDARDIZED: Variables (the FHIR bundle) + execution details

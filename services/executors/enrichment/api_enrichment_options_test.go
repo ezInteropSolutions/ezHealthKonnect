@@ -167,3 +167,29 @@ func TestAPIEnrichment_RetryResendsBody(t *testing.T) {
 		t.Fatalf("bodies per attempt: %q", bodies)
 	}
 }
+
+func TestAPIEnrichment_QueryPlaceholdersAndPredicates(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	input := map[string]interface{}{"message": map[string]interface{}{"fhirResources": []interface{}{
+		map[string]interface{}{"resourceType": "MessageHeader"},
+		map[string]interface{}{"resourceType": "Patient", "identifier": []interface{}{
+			map[string]interface{}{"system": "urn:oid:9.9", "value": "X"},
+			map[string]interface{}{"system": "urn:oid:1.2.3", "value": "A&B=C#D"},
+		}},
+	}}}
+	if _, err := runAPIStep(t, map[string]interface{}{
+		"baseUrl": srv.URL, "endpoint": "/fhir/r4/Patient?identifier=urn:oid:1.2.3|{id}", "method": "GET", "encodePlaceholders": true,
+		"fieldMappings": map[string]interface{}{"id": "message.fhirResources[resourceType=Patient].identifier[system=urn:oid:1.2.3].value"},
+	}, input); err != nil {
+		t.Fatal(err)
+	}
+	if got != "identifier=urn:oid:1.2.3|A%26B%3DC%23D" {
+		t.Fatalf("query %q", got)
+	}
+}

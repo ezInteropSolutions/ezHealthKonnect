@@ -561,7 +561,7 @@ exports.previewSanitization = async (req, res) => {
 exports.useTemplate = async (req, res) => {
     try {
         const { id } = req.params;
-        const { source_values = {}, target_values = {}, step_values = {}, interface_name } = req.body;
+        const { source_values = {}, target_values = {}, step_values = {}, variable_values = {}, interface_name } = req.body;
 
         // Load template — cast id to text to avoid uuid vs varchar type mismatch in OR clause
         const rows = await sequelize.query(`
@@ -594,9 +594,14 @@ exports.useTemplate = async (req, res) => {
         // address and OAuth credentials shared by several API-call steps):
         // written only into the steps the template's own field definitions
         // name — see mergeValuesIntoPipelineSteps.
+        // Template variables ({{var.NAME}}, section "variables") are
+        // substituted first, so the merges below see final values.
+        const fieldDefs = tmpl.required_connection_fields || [];
         const mergedPipelineConfig = sanitizer.mergeValuesIntoPipelineSteps(
-            sanitizer.mergeValuesIntoPipelineConnectorSteps(tmpl.pipeline_config || {}, source_values, target_values),
-            tmpl.required_connection_fields || [],
+            sanitizer.mergeValuesIntoPipelineConnectorSteps(
+                sanitizer.substituteTemplateVariables(tmpl.pipeline_config || {}, fieldDefs, variable_values),
+                source_values, target_values),
+            fieldDefs,
             step_values
         );
 

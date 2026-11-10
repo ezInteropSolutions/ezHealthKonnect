@@ -543,7 +543,53 @@ function mergeValuesIntoPipelineSteps(pipelineConfig, fieldDefs, stepValues) {
     return { ...pipelineConfig, execution_groups: groups };
 }
 
+/**
+ * Substitute template variables: a template declares
+ *
+ *   {section: "variables", field: "sourceAuthority", label, type, hint, required}
+ *
+ * and writes {{var.sourceAuthority}} wherever the value belongs in its
+ * pipeline_config (inside a URL, a path predicate, a literal), however deep.
+ * Only declared names are replaced; a variable left blank keeps its token, so
+ * the gap is visible in Pipeline Builder instead of silently becoming "".
+ * Values are inserted as text into string values only (never parsed), so they
+ * can't change the config's structure.
+ *
+ * @param {object} pipelineConfig - {execution_groups: [...]}
+ * @param {Array}  fieldDefs      - the template's required_connection_fields
+ * @param {object} variableValues - {name: value} as entered by the user
+ * @returns {object} - a new pipeline_config
+ */
+function substituteTemplateVariables(pipelineConfig, fieldDefs, variableValues) {
+    if (!pipelineConfig || typeof pipelineConfig !== 'object') return pipelineConfig;
+    if (!Array.isArray(fieldDefs) || !variableValues || typeof variableValues !== 'object') return pipelineConfig;
+    const values = {};
+    for (const def of fieldDefs) {
+        if (!def || def.section !== 'variables' || typeof def.field !== 'string') continue;
+        if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(def.field)) continue;
+        const v = variableValues[def.field];
+        if (v === undefined || v === null || v === '') continue;
+        values[def.field] = String(v);
+    }
+    if (Object.keys(values).length === 0) return pipelineConfig;
+    const token = /\{\{var\.([A-Za-z][A-Za-z0-9_]*)\}\}/g;
+    const walk = (node) => {
+        if (typeof node === 'string') {
+            return node.replace(token, (m, name) => (Object.prototype.hasOwnProperty.call(values, name) ? values[name] : m));
+        }
+        if (Array.isArray(node)) return node.map(walk);
+        if (node && typeof node === 'object') {
+            const out = {};
+            for (const [k, v] of Object.entries(node)) out[k] = walk(v);
+            return out;
+        }
+        return node;
+    };
+    return walk(pipelineConfig);
+}
+
 module.exports = {
+    substituteTemplateVariables,
     mergeValuesIntoPipelineSteps,
     sanitizeConfig,
     sanitizePipelineConfig,

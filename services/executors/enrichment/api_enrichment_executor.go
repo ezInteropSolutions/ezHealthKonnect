@@ -76,7 +76,7 @@ func (e *APIEnrichmentExecutor) Execute(
 	if config.BodyRef != "" {
 		// Resolve the full body from a previous step's output (e.g. a PAS bundle
 		// assembled by an enrichment.script step).
-		resolved := executors.GetNestedValue(inputData, config.BodyRef)
+		resolved := resolveStepValue(inputData, config.BodyRef)
 		if resolved != nil {
 			requestBody = resolved
 			log.Printf("📦 [API Enrichment] Using bodyRef '%s' as request body", config.BodyRef)
@@ -346,22 +346,56 @@ func (e *APIEnrichmentExecutor) buildURLWith(
 	encode bool,
 ) string {
 	url := urlTemplate
+	query := strings.IndexByte(urlTemplate, '?')
 	for key, fieldPath := range fieldMappings {
-		value := executors.GetNestedValue(inputData, fieldPath)
-		if value != nil {
-			s := fmt.Sprintf("%v", value)
+		value := resolveStepValue(inputData, fieldPath)
+		if value == nil {
+			continue
+		}
+		raw := fmt.Sprintf("%v", value)
+		placeholder := "{" + key + "}"
+		var b strings.Builder
+		rest := url
+		offset := 0
+		for {
+			i := strings.Index(rest, placeholder)
+			if i < 0 {
+				b.WriteString(rest)
+				break
+			}
+			b.WriteString(rest[:i])
+			s := raw
 			if encode {
-				s = neturl.PathEscape(s)
-				// PathEscape leaves "." alone; ".." as a whole segment would
-				// still climb a level once a server cleans the path.
-				if s == "." || s == ".." {
-					s = strings.ReplaceAll(s, ".", "%2E")
+				// In the query string a value is query-escaped (an "&" or "#"
+				// in it can't start another parameter); in the path it is
+				// path-escaped and kept to one segment.
+				if query >= 0 && offset+i > query {
+					s = neturl.QueryEscape(s)
+				} else {
+					s = neturl.PathEscape(s)
+					if s == "." || s == ".." {
+						s = strings.ReplaceAll(s, ".", "%2E")
+					}
 				}
 			}
-			url = strings.ReplaceAll(url, "{"+key+"}", s)
+			b.WriteString(s)
+			rest = rest[i+len(placeholder):]
+			offset += i + len(placeholder)
 		}
+		url = b.String()
 	}
 	return url
+}
+
+// resolveStepValue reads a field for the request: the classic resolver first
+// (HL7 field keys, message unwrapping), then the general path resolver, which
+// also takes array indexes and "[field=value]" predicates, e.g.
+// message.fhirResources[resourceType=Patient].
+func resolveStepValue(inputData map[string]interface{}, path string) interface{} {
+	if v := executors.GetNestedValue(inputData, path); v != nil {
+		return v
+	}
+	return executors.GetFieldValue(inputData, path)
 }
 
 // joinBaseURL prefixes a relative endpoint with base; an absolute endpoint
