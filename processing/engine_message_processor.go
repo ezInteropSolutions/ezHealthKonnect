@@ -150,9 +150,15 @@ func (pe *ProcessingEngine) processSingleMessage(interfaceID string, msg *models
 	pool := backpressureRegistry().GetOrCreate(interfaceID)
 	msgCopy := msg // capture for closure
 	ifID := interfaceID
-	submitted := pool.Submit(func() {
+	// Wait for queue space rather than refusing a burst: the pool's jobs do
+	// real work (store + parse, and the pipeline itself for an in-order
+	// interface), so a split batch can outrun the workers. Waiting holds
+	// this interface's intake goroutine, which pushes back into the
+	// connector's buffered channel; only a pool stuck for
+	// submitWaitForQueueSpace is treated as overload.
+	submitted := pool.SubmitWait(func() {
 		pe.storeAndParseWithRecovery(ifID, msgCopy, pool.QueueDepth())
-	})
+	}, submitWaitForQueueSpace)
 	if !submitted {
 		// Queue full — send NACK via ValidationAwareConnector (e.g. MLLP NAK)
 		log.Printf("⚠️  [backpressure] queue full for interface %s (depth=%d/%d), dropping message %s",

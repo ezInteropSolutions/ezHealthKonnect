@@ -17,7 +17,8 @@
 //	invalid -> {"raw"} only (never a failure: the passthrough behaviour)
 //
 // A top-level key named "raw" in the content is not overwritten: the original
-// text is then only under "_raw_content".
+// text is then only under "_raw_content". Keys the engine reserves (a leading
+// "_", or the HL7 parser's structure names) aren't copied; they stay in raw.
 package parsers
 
 import (
@@ -44,6 +45,9 @@ func (p *JSONParser) Parse(rawContent string) *models.ParserResult {
 		switch v := decoded.(type) {
 		case map[string]interface{}:
 			for k, val := range v {
+				if reservedEnvelopeKey(k) {
+					continue // stays in raw; never shadows engine data
+				}
 				envelope[k] = val
 			}
 		case []interface{}:
@@ -67,6 +71,13 @@ func (p *JSONParser) Parse(rawContent string) *models.ParserResult {
 		},
 		ValidationResult: models.ValidationResult{IsValid: true},
 	}
+}
+
+// reservedEnvelopeKey reports keys the engine itself uses in a message's
+// envelope ("_format", "_semantic_index", ... and the HL7 parser's
+// structures), which a JSON message's own keys must not shadow.
+func reservedEnvelopeKey(k string) bool {
+	return strings.HasPrefix(k, "_") || k == "enhancedSegments" || k == "segmentGroups" || k == "segmentOrder"
 }
 
 // GetSupportedFormat implements the parser contract.

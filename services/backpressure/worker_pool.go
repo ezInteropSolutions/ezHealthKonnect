@@ -5,6 +5,7 @@ package backpressure
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"ezhealthkonnect/services/metrics"
 )
@@ -67,6 +68,27 @@ func (p *WorkerPool) Submit(fn func()) bool {
 		return true
 	default:
 		return false // queue full → backpressure signal
+	}
+}
+
+// SubmitWait enqueues fn, waiting up to wait for queue space when the queue
+// is full. Returns false only if no space opened in time (the caller's
+// overload signal). Unlike Submit it doesn't refuse a burst outright: a
+// batch of messages arriving faster than the workers finish them queues
+// up instead of being turned away.
+func (p *WorkerPool) SubmitWait(fn func(), wait time.Duration) bool {
+	if p.Submit(fn) {
+		return true
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case p.jobs <- fn:
+		p.queued.Add(1)
+		p.reportQueueDepth()
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 

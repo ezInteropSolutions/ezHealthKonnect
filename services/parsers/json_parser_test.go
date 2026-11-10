@@ -41,3 +41,16 @@ func TestJSONParserKeepsContentRawKey(t *testing.T) {
 		t.Fatalf("%#v", got)
 	}
 }
+
+func TestJSONParserSkipsReservedKeys(t *testing.T) {
+	got := NewJSONParser().Parse(`{"_format":"x","enhancedSegments":{},"type":"t"}`).ParsedJSON
+	if _, ok := got["_format"]; ok {
+		t.Fatal("_format copied")
+	}
+	if _, ok := got["enhancedSegments"]; ok {
+		t.Fatal("enhancedSegments copied")
+	}
+	if got["type"] != "t" || got["raw"] == nil {
+		t.Fatalf("%#v", got)
+	}
+}

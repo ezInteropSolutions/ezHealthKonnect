@@ -25,6 +25,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/connectors"
@@ -35,6 +36,11 @@ const (
 	ProcessingOrderParallel = "parallel"
 	ProcessingOrderInOrder  = "in_order"
 )
+
+// submitWaitForQueueSpace bounds how long a message waits for room in its
+// interface's worker queue before the engine treats the interface as
+// overloaded (NACK / rejected outcome).
+const submitWaitForQueueSpace = 30 * time.Second
 
 // orderedPoolWorkers is the worker count that makes an interface's pool
 // strictly first-in, first-out.
