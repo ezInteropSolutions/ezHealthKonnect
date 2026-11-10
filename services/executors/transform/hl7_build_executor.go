@@ -28,6 +28,13 @@
 //
 //	messageType          — e.g. "ADT" (required)
 //	triggerEvent         — e.g. "A01"
+//	triggerEventPath     — read the trigger from the message instead (e.g.
+//	                       "type"), translated through triggerEventMap when
+//	                       set; a value that resolves or maps to nothing fails
+//	                       the step rather than building the wrong message
+//	triggerEventMap      — {sourceValue: trigger}, e.g. {"identity.merged": "A40"}
+//	messageStructure     — MSH.9.3, e.g. "ADT_A05"
+//	messageStructureMap  — {trigger: structure}, used when messageStructure is empty
 //	version              — HL7 version, e.g. "2.5.1" (default: "2.5.1")
 //	outputField          — dot-path to write the HL7 message (default: "hl7Message")
 //	sendingApplication   — MSH.3 (default: "ezHealthKonnect")
@@ -202,6 +209,10 @@ func (sc hl7SegmentConfig) groupedItemsKey() string {
 type hl7BuildConfig struct {
 	MessageType          string             `json:"messageType"`
 	TriggerEvent         string             `json:"triggerEvent"`
+	TriggerEventPath     string             `json:"triggerEventPath"`
+	TriggerEventMap      map[string]string  `json:"triggerEventMap"`
+	MessageStructure     string             `json:"messageStructure"`
+	MessageStructureMap  map[string]string  `json:"messageStructureMap"`
 	Version              string             `json:"version"`
 	OutputField          string             `json:"outputField"`
 	SendingApplication   string             `json:"sendingApplication"`
@@ -240,6 +251,20 @@ func (e *HL7BuildExecutor) Execute(
 	if cfg.MessageType == "" {
 		return nil, fmt.Errorf("hl7.build: messageType is required")
 	}
+	if cfg.TriggerEventPath != "" {
+		raw, _ := stringifyValue(executors.GetFieldValue(inputData, cfg.TriggerEventPath))
+		trigger := raw
+		if len(cfg.TriggerEventMap) > 0 {
+			trigger = cfg.TriggerEventMap[raw]
+		}
+		if trigger == "" {
+			return nil, fmt.Errorf("hl7.build: no trigger event for %q at %s", raw, cfg.TriggerEventPath)
+		}
+		cfg.TriggerEvent = trigger
+	}
+	if cfg.MessageStructure == "" && cfg.TriggerEvent != "" {
+		cfg.MessageStructure = cfg.MessageStructureMap[cfg.TriggerEvent]
+	}
 
 	// hl7.GetRealSchemaLoader() is fetched fresh on every Execute() call,
 	// never cached at construction: main.go's schema-init call sites don't
@@ -257,6 +282,7 @@ func (e *HL7BuildExecutor) Execute(
 	msh := hl7builder.MSHConfig{
 		MessageType:          cfg.MessageType,
 		TriggerEvent:         cfg.TriggerEvent,
+		MessageStructure:     cfg.MessageStructure,
 		Version:              cfg.Version,
 		SendingApplication:   cfg.SendingApplication,
 		SendingFacility:      cfg.SendingFacility,

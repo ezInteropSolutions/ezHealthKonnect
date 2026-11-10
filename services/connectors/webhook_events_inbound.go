@@ -44,6 +44,7 @@
 //	event_timeout_seconds      int     Longest wait for one event's outcome (default 300)
 //	max_body_size_mb           int     Largest accepted request (default 5)
 //	cursor_key                 string  Name of this receiver's cursor (default: the endpoint path)
+//	event_types                []string Event types to process; others are acknowledged and skipped (default: all)
 package connectors
 
 import (
@@ -105,6 +106,7 @@ type WebhookEventsInboundConnector struct {
 	maxBody      int64
 	cursorKey    string
 	interfaceID  string
+	eventTypes   map[string]bool // nil = every type
 
 	mu          sync.RWMutex
 	server      *http.Server
@@ -176,6 +178,14 @@ func (c *WebhookEventsInboundConnector) Initialize(config []byte) error {
 		c.cursorKey = c.endpointPath
 	}
 	c.interfaceID = cfg.GetString("interface_id")
+	if types := cfg.GetStringSlice("event_types"); len(types) > 0 {
+		c.eventTypes = make(map[string]bool, len(types))
+		for _, t := range types {
+			if t = strings.TrimSpace(t); t != "" {
+				c.eventTypes[t] = true
+			}
+		}
+	}
 
 	auth, err := NewInboundAuthenticator(cfg.Config, InboundAuthStandardWebhooks)
 	if err != nil {
@@ -405,7 +415,14 @@ func (c *WebhookEventsInboundConnector) processBatch(events []cloudEvent, deadli
 			return res
 		}
 
-		outcome, err := c.runEvent(ev, messageChan, sourceIP, path)
+		// A type this interface doesn't handle is acknowledged (the cursor
+		// moves past it) but never emitted.
+		filtered := c.eventTypes != nil && !c.eventTypes[ev.Type]
+		outcome := models.MessageOutcome{Status: models.OutcomeProcessed}
+		var err error
+		if !filtered {
+			outcome, err = c.runEvent(ev, messageChan, sourceIP, path)
+		}
 		if err != nil {
 			res.err = err
 			return res
@@ -425,7 +442,11 @@ func (c *WebhookEventsInboundConnector) processBatch(events []cloudEvent, deadli
 			return res
 		}
 		cursor = ev.Sequence
-		res.processed++
+		if filtered {
+			res.skipped++
+		} else {
+			res.processed++
+		}
 	}
 	return res
 }

@@ -499,3 +499,20 @@ func TestReceiverValidateRefusesNoAuth(t *testing.T) {
 		t.Fatal("missing webhook secret accepted")
 	}
 }
+
+func TestReceiverEventTypeFilter(t *testing.T) {
+	h := startReceiver(t, map[string]interface{}{"event_types": []interface{}{"identity.created"}}, true)
+	body := []byte(`[{"specversion":"1.0","id":"a","type":"task.created","sequence":"1"},` +
+		`{"specversion":"1.0","id":"b","type":"identity.created","sequence":"2"},` +
+		`{"specversion":"1.0","id":"c","type":"task.resolved","sequence":"3"}]`)
+	status, out := h.post(t, body, testWebhookSecret)
+	if status != http.StatusOK || out["processed"] != float64(1) || out["skipped"] != float64(2) {
+		t.Fatalf("status %d body %v", status, out)
+	}
+	if got := strings.Join(h.engine.order(), ","); got != "2" {
+		t.Fatalf("emitted %s, want only sequence 2", got)
+	}
+	if cur, _ := h.cursors.get(); cur != "3" {
+		t.Fatalf("cursor %s, want 3 (filtered events are acknowledged)", cur)
+	}
+}

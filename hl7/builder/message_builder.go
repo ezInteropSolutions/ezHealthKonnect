@@ -54,6 +54,7 @@ type BuildOptions struct {
 type MSHConfig struct {
 	MessageType          string // MSH.9.1, e.g. "ADT"
 	TriggerEvent         string // MSH.9.2, e.g. "A01"
+	MessageStructure     string // MSH.9.3, e.g. "ADT_A05" (omitted when empty)
 	Version              string // MSH.12, e.g. "2.5.1"
 	SendingApplication   string // MSH.3, default "ezHealthKonnect" (mirrors ACKConfig's own default)
 	SendingFacility      string // MSH.4, default "EHK" (mirrors ACKConfig's own default)
@@ -287,8 +288,11 @@ func renderMSH(cfg MSHConfig) string {
 		controlID = fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	messageTypeField := cfg.MessageType
-	if cfg.TriggerEvent != "" {
+	if cfg.TriggerEvent != "" || cfg.MessageStructure != "" {
 		messageTypeField = messageTypeField + componentSeparator + cfg.TriggerEvent
+	}
+	if cfg.MessageStructure != "" {
+		messageTypeField = messageTypeField + componentSeparator + cfg.MessageStructure
 	}
 
 	fields := []string{

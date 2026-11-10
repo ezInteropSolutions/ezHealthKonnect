@@ -15,10 +15,12 @@
 package transform
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"ezhealthkonnect/hl7"
+	"ezhealthkonnect/models"
 )
 
 func pidLine(t *testing.T, lines []string) string {
@@ -192,5 +194,27 @@ func TestHL7Build_EscapeValues_RoundTrip(t *testing.T) {
 	pid := pidLine(t, hl7Lines(t, out, "hl7Message"))
 	if fields := strings.Split(pid, "|"); len(fields) != 9 {
 		t.Fatalf("escaped delimiters shifted PID's fields: %q", pid)
+	}
+}
+
+func TestHL7Build_TriggerFromData(t *testing.T) {
+	initHL7Schema(t)
+	cfg := map[string]interface{}{
+		"messageType": "ADT", "version": "2.5.1",
+		"triggerEventPath":    "type",
+		"triggerEventMap":     map[string]interface{}{"identity.merged": "A40", "identity.created": "A28"},
+		"messageStructureMap": map[string]interface{}{"A40": "ADT_A39", "A28": "ADT_A05"},
+		"segments":            []interface{}{map[string]interface{}{"segment": "EVN", "fields": []interface{}{map[string]interface{}{"fieldKey": "EVN.1", "literalValue": "x"}}}},
+	}
+	lines := hl7Lines(t, runHL7Build(t, cfg, map[string]interface{}{"type": "identity.merged"}), "hl7Message")
+	if f := strings.Split(lines[0], "|"); f[8] != "ADT^A40^ADT_A39" {
+		t.Fatalf("MSH.9 = %q", f[8])
+	}
+
+	step := NewHL7BuildExecutor()
+	_, err := step.Execute(context.Background(), &models.TransformationStep{StepType: "hl7.build", Enabled: true, Config: cfg},
+		map[string]interface{}{"type": "task.created"})
+	if err == nil {
+		t.Fatal("an unmapped trigger built a message")
 	}
 }
