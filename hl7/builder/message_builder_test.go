@@ -129,3 +129,39 @@ func TestBuildMessage_RoundTripsThroughRealParser(t *testing.T) {
 		t.Errorf("parsed PID.5 = %q, want Doe^Jane", got)
 	}
 }
+
+func TestSegment_SetRepetition(t *testing.T) {
+	seg := NewSegment("PID")
+	if err := seg.SetRepetition("PID.3.1", 1, "A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := seg.SetRepetition("PID.3.1", 3, "C"); err != nil {
+		t.Fatal(err)
+	}
+	if err := seg.SetRepetition("PID.3.5", 3, "MR"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := seg.Render(), "PID|||A~~C^^^^MR"; got != want {
+		t.Errorf("Render() = %q, want %q", got, want)
+	}
+	if err := seg.SetRepetition("PID.3", 0, "x"); err == nil {
+		t.Error("repetition 0 accepted")
+	}
+}
+
+func TestEscapeValue(t *testing.T) {
+	cases := map[string]string{
+		"plain":       "plain",
+		"":            "",
+		"a|b":         `a\F\b`,
+		"a^b~c&d":     `a\S\b\R\c\T\d`,
+		`back\slash`:  `back\E\slash`,
+		"line\r\nend": `line\X0D\` + `\X0A\end`, // two escape sequences back to back
+		"Zoë 張":       "Zoë 張",
+	}
+	for in, want := range cases {
+		if got := EscapeValue(in); got != want {
+			t.Errorf("EscapeValue(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
