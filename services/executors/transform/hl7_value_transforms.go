@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/text/language"
 )
 
 // hl7ValueTransform converts one value; ok=false means "no usable value".
@@ -41,6 +43,20 @@ var hl7ValueTransforms = map[string]hl7ValueTransform{
 			return "", false
 		}
 		return m[1] + m[2] + m[3], true
+	},
+	// iso3166_alpha3: an ISO 3166-1 alpha-2 country code ("US") -> the
+	// alpha-3 code HL7 v2 table 0399 uses ("USA"), from CLDR region data. An
+	// alpha-3 code passes through; anything else yields nothing.
+	"iso3166_alpha3": func(v string) (string, bool) {
+		v = strings.ToUpper(strings.TrimSpace(v))
+		if len(v) != 2 && len(v) != 3 {
+			return "", false
+		}
+		r, err := language.ParseRegion(v)
+		if err != nil || !r.IsCountry() {
+			return "", false
+		}
+		return r.ISO3(), true
 	},
 	// uppercase: for coded values sent in upper case.
 	"uppercase": func(v string) (string, bool) {

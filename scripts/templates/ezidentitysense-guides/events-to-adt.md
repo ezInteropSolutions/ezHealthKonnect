@@ -12,7 +12,7 @@ radiology system, a data warehouse) over MLLP.
 | A new patient identity was created | ADT^A28 (add person) |
 | A record was linked, updated, moved or deactivated, or a steward corrected the golden record | ADT^A31 (update person) |
 | Two identities were merged | ADT^A40 (merge), with the retired identity in MRG |
-| A merge was undone, or an identity was split | ADT^A37 (unlink), naming both identities |
+| A merge was undone, or an identity was split | ADT^A37 (unlink), with both identities' PID |
 | An identity was erased | ADT^A29 (delete person) |
 
 Each message carries the patient's golden record as ezIdentitySense shows it
@@ -89,8 +89,9 @@ connection.
 
 ## Changing things later
 
-- **Rotating the ezIdentitySense client secret:** edit the *Fetch Patient*
-  step in Pipeline Builder.
+- **Rotating the ezIdentitySense client secret:** edit the three steps that
+  call ezIdentitySense (*Fetch Patient*, *Fetch Unmerged Identity*, *Fetch
+  Split Identity*) in Pipeline Builder.
 - **Rotating the webhook signing secret:** rotate it on ezIdentitySense's
   webhook page; it signs with both the old and the new secret until you drop
   the old one, so update this interface's *ezIdentitySense Events* step
@@ -105,8 +106,20 @@ connection.
   carries the latest golden record. That is what downstream systems need.
 - A new patient produces an A28 followed by an A31 (the identity is created,
   then its first record is linked).
+- **Enterprise IDs are longer than HL7 v2.5.1 allows for an identifier.**
+  ezIdentitySense's IDs (e.g. `EID-7K3M-9QX2-TB4R`, 18 characters) exceed the
+  15-character limit v2.5.1 sets on PID-3.1 and MRG-1.1. Most systems accept
+  them; check with your receiving system if it validates lengths strictly.
 - MRG-1 carries the retired enterprise ID without its assigning authority;
   PID-3 of the same message names the authority of enterprise IDs.
+- An A29 for an erased identity carries its enterprise ID only: the
+  name and every other detail were erased with it, so PID-5 (required in
+  v2.5.1) is empty.
+- Countries are sent as the three-letter codes of HL7 table 0399 (`USA`),
+  converted from the two-letter codes ezIdentitySense stores (`US`).
+- ezHealthKonnect's own HL7 validator reports an A37 as "PID appears 2
+  times": its schema files can't express the second PID that ADT_A37
+  defines. The message itself is laid out as the standard defines it.
 - Email addresses are not sent (PID-13 carries phone numbers).
 - This interface sends **from** ezIdentitySense. To feed ADT **into**
   ezIdentitySense, use the *HL7 ADT to ezIdentitySense* template; for PIX

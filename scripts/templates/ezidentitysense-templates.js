@@ -57,7 +57,41 @@ function ezisConnectionFields(stepAliases) {
     ];
 }
 
+// The engine exposes a step's output to later steps as
+// steps.<normalized step name>.step_output, normalizing the name with
+// models.OutputNormalizer.NormalizeKey. This is a port of that function, so
+// the generator can refuse a step whose alias wouldn't match its name: paths
+// written against the alias would then silently resolve to nothing.
+function normalizeStepName(s) {
+    if (!/[A-Z]/.test(s)) return s;
+    const isUpper = c => c >= 'A' && c <= 'Z', isLower = c => c >= 'a' && c <= 'z';
+    let out = '', prevUnderscore = false;
+    for (let i = 0; i < s.length; i++) {
+        const r = s[i];
+        if (r === ' ' || r === '-' || r === '→') {
+            if (!prevUnderscore && i > 0) { out += '_'; prevUnderscore = true; }
+            continue;
+        }
+        if (!isUpper(r) && !isLower(r) && r !== '_' && !(r >= '0' && r <= '9')) continue;
+        if (i > 0 && isUpper(r)) {
+            const prev = s[i - 1];
+            const nextLower = i < s.length - 1 && isLower(s[i + 1]);
+            if ((isLower(prev) || nextLower) && prev !== ' ' && prev !== '-' && !prevUnderscore) {
+                out += '_'; prevUnderscore = true;
+            }
+        }
+        out += r.toLowerCase();
+        prevUnderscore = r === '_';
+    }
+    return out;
+}
+
 function step(seq, name, alias, type, config, extra = {}) {
+    // extra may carry parent_conditional_step_id (the parent's step_alias,
+    // resolved to its real id when the pipeline is saved) and case_value.
+    if (normalizeStepName(name) !== alias) {
+        throw new Error(`step "${name}" must have alias "${normalizeStepName(name)}", not "${alias}"`);
+    }
     return { sequence: seq, steps: [{ step_name: name, step_alias: alias, step_type: type, sequence: seq, config, enabled: true, required: true, ...extra }] };
 }
 
@@ -101,7 +135,7 @@ function pidFromGoldenPatient() {
                 { position: '3', sourcePath: 'city' },
                 { position: '4', sourcePath: 'state' },
                 { position: '5', sourcePath: 'postal_code' },
-                { position: '6', sourcePath: 'country' },
+                { position: '6', sourcePath: 'country', transform: 'iso3166_alpha3' },
             ] },
             { fieldKey: 'PID.13', repeatPath: `${P}.telecom`,
               itemCondition: { field: 'system', operator: 'equals', value: 'phone' },
@@ -112,6 +146,37 @@ function pidFromGoldenPatient() {
               ] },
             { fieldKey: 'PID.29', sourcePath: `${P}.deceased_date_time`, transform: 'hl7_datetime' },
             { fieldKey: 'PID.30', sourcePath: `${P}.deceased_boolean`, valueMap: { true: 'Y', false: 'N' } },
+        ],
+    };
+}
+
+// The second PID of an A37, from whichever lookup ran (Fetch Unmerged
+// Identity or Fetch Split Identity); its EID alone if that identity is gone.
+function secondPID() {
+    const F = 'steps.fetch_unmerged_identity.step_output', C = 'steps.fetch_split_identity.step_output';
+    const ids = (path, type) => ({ fieldKey: 'PID.3', repeatPath: `${path}.identifier`,
+        condition: { field: 'message.type', operator: 'equals', value: type },
+        components: [
+            { position: '1', sourcePath: 'value' },
+            { position: '4.2', sourcePath: 'system' },
+            { position: '4.3', literalValue: 'URI' },
+        ] });
+    const either = (fieldKey, rel, extra = {}) => ({ fieldKey, sourcePath: `${F}.${rel}`, fallbackPaths: [`${C}.${rel}`], ...extra });
+    return {
+        segment: 'PID', condition: { field: 'message.type', operator: 'in_list', value: ['identity.unmerged', 'identity.split'] },
+        fields: [
+            { fieldKey: 'PID.1', literalValue: '2' },
+            ids(F, 'identity.unmerged'),
+            ids(C, 'identity.split'),
+            // The EID is the golden view's first identifier, so this repeats
+            // it when the lookup worked and supplies it when it didn't.
+            { fieldKey: 'PID.3.1', sourcePath: 'message.data.from', fallbackPaths: ['message.data.created'] },
+            either('PID.5.1', 'name[0].family'),
+            either('PID.5.2', 'name[0].given[0]'),
+            either('PID.5.3', 'name[0].given[1]'),
+            either('PID.5.7', 'name[0].use', { valueMap: { official: 'L', usual: 'D', nickname: 'N', maiden: 'M', old: 'U', anonymous: 'S' } }),
+            either('PID.7', 'birth_date', { transform: 'hl7_date' }),
+            either('PID.8', 'gender', { valueMap: { male: 'M', female: 'F', other: 'O', unknown: 'U' } }),
         ],
     };
 }
@@ -139,7 +204,7 @@ const outbound = {
     target_config_template: { host: '', port: 2575 },
     pipeline_config: {
         execution_groups: [
-            step(5, 'ezIdentitySense Events', 'ezis_events', 'connector.inbound', {
+            step(5, 'ezIdentitySense Events', 'ez_identity_sense_events', 'connector.inbound', {
                 connectorType: 'webhook_events_inbound',
                 config: {
                     port: 8095, endpoint_path: '/events', authentication_type: 'standard_webhooks', webhook_secret: '',
@@ -157,6 +222,31 @@ const outbound = {
                 headers: { Accept: 'application/fhir+json' },
                 acceptStatuses: [404, 410],
             }),
+            // A37 names two identities: fetch the second one too. Only the
+            // matching case's lookup runs; any other event takes "default".
+            step(12, 'Second Identity', 'second_identity', 'switch_case', {
+                field: 'message.type',
+                cases: [
+                    { value: 'identity.unmerged', label: 'Unmerge', actions: [] },
+                    { value: 'identity.split', label: 'Split', actions: [] },
+                ],
+                default: { actions: [] },
+                options: { caseInsensitive: false, trimWhitespace: true },
+            }),
+            step(14, 'Fetch Unmerged Identity', 'fetch_unmerged_identity', 'enrichment.api', {
+                ...ezisApiAuth('identities.read identities.read.demographics'),
+                endpoint: '/fhir/r4/Patient/{eid}', method: 'GET',
+                fieldMappings: { eid: 'message.data.from' },
+                headers: { Accept: 'application/fhir+json' },
+                acceptStatuses: [404, 410],
+            }, { parent_conditional_step_id: 'second_identity', case_value: 'identity.unmerged' }),
+            step(16, 'Fetch Split Identity', 'fetch_split_identity', 'enrichment.api', {
+                ...ezisApiAuth('identities.read identities.read.demographics'),
+                endpoint: '/fhir/r4/Patient/{eid}', method: 'GET',
+                fieldMappings: { eid: 'message.data.created' },
+                headers: { Accept: 'application/fhir+json' },
+                acceptStatuses: [404, 410],
+            }, { parent_conditional_step_id: 'second_identity', case_value: 'identity.split' }),
             step(20, 'Build ADT', 'build_adt', 'hl7.build', {
                 messageType: 'ADT', version: '2.5.1', escapeValues: true,
                 sendingApplication: 'EZIDENTITYSENSE', sendingFacility: '',
@@ -183,11 +273,7 @@ const outbound = {
                     { segment: 'MRG', condition: { field: 'message.type', operator: 'equals', value: 'identity.merged' },
                       fields: [{ fieldKey: 'MRG.1.1', sourcePath: 'message.data.retired' }] },
                     // A37: the second, now separate, identity.
-                    { segment: 'PID', condition: { field: 'message.type', operator: 'in_list', value: ['identity.unmerged', 'identity.split'] },
-                      fields: [
-                        { fieldKey: 'PID.1', literalValue: '2' },
-                        { fieldKey: 'PID.3.1', sourcePath: 'message.data.from', fallbackPaths: ['message.data.created'] },
-                      ] },
+                    secondPID(),
                 ],
             }),
             step(30, 'Send ADT', 'send_adt', 'connector.outbound', {
@@ -203,7 +289,7 @@ const outbound = {
           hint: 'The port ezHealthKonnect listens on for ezIdentitySense\'s webhooks.' },
         { section: 'source', field: 'webhook_secret', label: 'Webhook Signing Secret', type: 'password', required: true,
           hint: 'The whsec_… secret ezIdentitySense showed when you created the webhook. Stored encrypted.' },
-        ...ezisConnectionFields(['fetch_patient']),
+        ...ezisConnectionFields(['fetch_patient', 'fetch_unmerged_identity', 'fetch_split_identity']),
         { section: 'steps', section_label: 'ezIdentitySense Connection', step_aliases: ['build_adt'], field: 'receivingApplication',
           label: 'Receiving Application (MSH-5)', type: 'string', required: false, hint: 'Optional: the receiving system\'s application name.' },
         { section: 'steps', section_label: 'ezIdentitySense Connection', step_aliases: ['build_adt'], field: 'receivingFacility',

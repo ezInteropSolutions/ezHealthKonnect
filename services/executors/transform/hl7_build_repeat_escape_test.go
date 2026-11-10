@@ -231,6 +231,12 @@ func TestHL7ValueTransforms(t *testing.T) {
 		{"hl7_datetime", "2026-11-10", "20261110", true},
 		{"hl7_datetime", "yesterday", "", false},
 		{"uppercase", "male", "MALE", true},
+		{"iso3166_alpha3", "US", "USA", true},
+		{"iso3166_alpha3", "de", "DEU", true},
+		{"iso3166_alpha3", "CN", "CHN", true},
+		{"iso3166_alpha3", "GBR", "GBR", true},
+		{"iso3166_alpha3", "EU", "", false},
+		{"iso3166_alpha3", "Springfield", "", false},
 	}
 	for _, c := range cases {
 		got, ok, known := applyHL7Transform(c.name, c.in)
