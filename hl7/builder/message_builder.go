@@ -63,6 +63,10 @@ type MSHConfig struct {
 	ProcessingID         string // MSH.11, default "P"
 	ControlID            string // MSH.10, auto-generated when empty
 	Timestamp            string // MSH.7, auto-generated (current time) when empty
+	// Fields overrides or adds MSH fields by number (3 and up), each value
+	// already encoded as one field (components joined by "^"), e.g.
+	// {3: "PDQ_SUPPLIER", 21: "ITI-21^IHE"}. MSH.1 and MSH.2 are fixed.
+	Fields map[int]string
 }
 
 // FieldTree holds one field/component/subcomponent value tree within a
@@ -133,10 +137,28 @@ func (t *FieldTree) set(positions []int, value string) {
 }
 
 // Segment holds one segment instance's field values, keyed by 1-based field
-// number.
+// number. A segment with Raw set renders as that text instead (see
+// NewRawSegment).
 type Segment struct {
 	Name   string
 	Fields map[int]*FieldTree
+	Raw    string
+}
+
+// NewRawSegment wraps one already-encoded segment line (e.g. a received
+// QPD to be echoed back) so it can be placed among built segments. Only the
+// first line is kept, so the text can't inject further segments; the
+// segment name is the text before the first field separator. Returns nil
+// for text that isn't a segment ("XYZ|..." with a 2-4 character name).
+func NewRawSegment(raw string) *Segment {
+	if i := strings.IndexAny(raw, "\r\n"); i >= 0 {
+		raw = raw[:i]
+	}
+	name, _, found := strings.Cut(raw, fieldSeparator)
+	if !found || len(name) < 2 || len(name) > 4 || strings.ToUpper(name) != name {
+		return nil
+	}
+	return &Segment{Name: name, Fields: map[int]*FieldTree{}, Raw: raw}
 }
 
 // NewSegment constructs an empty segment builder for name (e.g. "PID").
@@ -244,9 +266,18 @@ func EscapeValue(v string) string {
 	return b.String()
 }
 
+// RenderField renders field n with all its repetitions, encoded ("" when
+// the field is unset).
+func (s *Segment) RenderField(n int) string {
+	return s.Fields[n].renderField()
+}
+
 // Render serializes the segment as one pipe-delimited HL7 line (no trailing
 // terminator — BuildMessage adds that between/after segments).
 func (s *Segment) Render() string {
+	if s.Raw != "" {
+		return s.Raw
+	}
 	max := 0
 	for k := range s.Fields {
 		if k > max {
@@ -308,6 +339,15 @@ func renderMSH(cfg MSHConfig) string {
 		controlID,
 		processingID,
 		cfg.Version,
+	}
+	for n, v := range cfg.Fields {
+		if n < 3 {
+			continue
+		}
+		for len(fields) < n {
+			fields = append(fields, "")
+		}
+		fields[n-1] = v
 	}
 	return strings.Join(fields, fieldSeparator)
 }
