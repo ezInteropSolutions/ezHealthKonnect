@@ -774,34 +774,47 @@ func BuildContactPointFromXTN(xtn string, rules map[string]interface{}) map[stri
 			phone = xtnComposedNumber(components)
 		}
 
-		// XTN.3 = equipment type (Table 0202): PH, FX, CP, BP, X.400, Internet …
+		// XTN.3 = equipment type (table 0202) -> ContactPoint.system, per the
+		// HL7 v2-to-FHIR IG's HL70202 map: PH phone, FX fax, BP pager,
+		// Internet / X.400 email, MD / SAT / TDD / TTY other; CP is a mobile
+		// phone (the IG maps it to use = mobile).
+		equipMobile := false
 		if len(components) > 2 && components[2] != "" {
-			equipType := strings.ToUpper(strings.TrimSpace(components[2]))
-			switch equipType {
-			case "PH", "CP":
+			switch strings.ToUpper(strings.TrimSpace(components[2])) {
+			case "PH":
 				cp["system"] = "phone"
+			case "CP":
+				cp["system"] = "phone"
+				equipMobile = true
 			case "FX":
 				cp["system"] = "fax"
 			case "BP":
 				cp["system"] = "pager"
-			case "X.400", "INTERNET", "NET":
+			case "X.400", "INTERNET":
 				cp["system"] = "email"
+			case "MD", "SAT", "TDD", "TTY":
+				cp["system"] = "other"
 			}
 		}
 
-		// XTN.2 = telecom use code (Table 0201): PRN, WPN, ORN, PRS …
-		if len(components) > 1 && components[1] != "" {
-			useCode := strings.ToUpper(strings.TrimSpace(components[1]))
-			switch useCode {
-			case "PRN", "VHN":
+		// XTN.2 = use code (table 0201) -> ContactPoint.use, per the IG's
+		// HL70201 map: PRN home, WPN work, PRS mobile. The IG maps no other
+		// code (ORN, VHN, ASN, EMR, NET, BPN), so those set no use. With no
+		// use code, a cellular phone (XTN.3 CP) is mobile; otherwise the
+		// default "home" stands, as before.
+		if len(components) > 1 && strings.TrimSpace(components[1]) != "" {
+			switch strings.ToUpper(strings.TrimSpace(components[1])) {
+			case "PRN":
 				cp["use"] = "home"
 			case "WPN":
 				cp["use"] = "work"
 			case "PRS":
 				cp["use"] = "mobile"
-			case "ORN", "BPN", "ASN", "EMR", "NET":
-				cp["use"] = "temp"
+			default:
+				delete(cp, "use")
 			}
+		} else if equipMobile {
+			cp["use"] = "mobile"
 		}
 
 		if cp["system"] == "email" && email != "" {

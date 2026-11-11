@@ -16,7 +16,7 @@ func TestBuildContactPointsFromXTN(t *testing.T) {
 		{"v2.5 composed number and an email repetition", "^PRN^PH^^1^555^0100999~^NET^Internet^petra@example.net",
 			[]map[string]interface{}{
 				{"system": "phone", "use": "home", "value": "+1 555 0100999"},
-				{"system": "email", "use": "temp", "value": "petra@example.net"},
+				{"system": "email", "value": "petra@example.net"},
 			}},
 		{"XTN.1 number", "(555)010-0123^WPN^PH", []map[string]interface{}{{"system": "phone", "use": "work", "value": "(555)010-0123"}}},
 		{"mobile", "^PRS^CP^^44^20^79460000^12", []map[string]interface{}{{"system": "phone", "use": "mobile", "value": "+44 20 79460000 x12"}}},
@@ -24,6 +24,10 @@ func TestBuildContactPointsFromXTN(t *testing.T) {
 		{"fax", "^WPN^FX^^1^555^0100555", []map[string]interface{}{{"system": "fax", "use": "work", "value": "+1 555 0100555"}}},
 		{"plain email", "someone@example.org", []map[string]interface{}{{"system": "email", "use": "home", "value": "someone@example.org"}}},
 		{"plain number", "5550100", []map[string]interface{}{{"system": "phone", "use": "home", "value": "5550100"}}},
+		{"cellular, no use code", "^^CP^^1^555^0100333", []map[string]interface{}{{"system": "phone", "use": "mobile", "value": "+1 555 0100333"}}},
+		{"unmapped use code ORN sets no use", "^ORN^PH^^44^20^79460000", []map[string]interface{}{{"system": "phone", "value": "+44 20 79460000"}}},
+		{"TTY is other", "^PRN^TTY^^1^555^0100444", []map[string]interface{}{{"system": "other", "use": "home", "value": "+1 555 0100444"}}},
+		{"no equipment type, address in XTN.4", "^^^ann@example.net", []map[string]interface{}{{"system": "email", "use": "home", "value": "ann@example.net"}}},
 		{"use and type only: nothing to send", "^PRN^PH", nil},
 		{"empty repetitions skipped", "~~^PRN^PH^^1^555^0100999~", []map[string]interface{}{{"system": "phone", "use": "home", "value": "+1 555 0100999"}}},
 	}
