@@ -669,11 +669,13 @@ function _renderRequiredFieldsSection(fields) {
                 </select>${hint}
             </div>`;
         }
-        if (f.type === 'textarea') {
+        if (f.type === 'textarea' || f.type === 'keyvalue') {
+            // keyvalue: a small table, one KEY=VALUE per line (read server-side).
+            const placeholder = f.type === 'keyvalue' ? (f.placeholder || 'KEY=VALUE, one per line') : (f.placeholder || '');
             return HtmlSafe.html`<div style="margin-bottom:14px">
                 <label style="display:block;font-size:0.78rem;font-weight:600;color:#444;margin-bottom:5px">${f.label}${reqMark}</label>
-                <textarea id="${idAttr}" ${common} data-tcf-type="textarea" rows="3"
-                    style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #dde1e7;border-radius:7px;font-size:0.9rem;color:#1a1a2e;background:#fafbfc;font-family:inherit"></textarea>${hint}
+                <textarea id="${idAttr}" ${common} data-tcf-type="${f.type}" rows="3" placeholder="${placeholder}"
+                    style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #dde1e7;border-radius:7px;font-size:0.9rem;color:#1a1a2e;background:#fafbfc;font-family:${f.type === 'keyvalue' ? 'monospace' : 'inherit'}"></textarea>${hint}
             </div>`;
         }
         const inputType = f.type === 'password' ? 'password' : (f.type === 'number' ? 'number' : (f.type === 'url' ? 'url' : 'text'));
