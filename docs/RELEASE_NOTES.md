@@ -1,5 +1,65 @@
 # Release Notes
 
+## Unreleased — ezIdentitySense integration
+
+*Migrations V288–V290.*
+
+Ready-to-use templates connect ezHealthKonnect to **ezIdentitySense**, the enterprise master
+patient index, through its public API: patient events out as HL7 ADT, and HL7 ADT in through the
+IHE PIXm patient feed. Building them fixed several long-standing problems in shared parts of the
+engine, listed first because existing interfaces see their effect.
+
+> **Upgrade notes — read before upgrading**
+> - **HL7 v2 → FHIR Patient output changes** (every interface using the HL7-to-FHIR transform):
+>   - **Phone numbers are no longer split into fake entries.** An XTN such as
+>     `^PRN^PH^^1^555^0100999` became seven ContactPoints (`PRN`, `PH`, `1`, `555`, …). It now
+>     becomes one (`+1 555 0100999`), one per repetition. Numbers sent in components (XTN.5–8,
+>     v2.5+) or in XTN.12 are assembled. Applies to Patient, RelatedPerson (NK1) and Practitioner
+>     (STF) phones. Several phones in NK1-5, STF-10 or PID-14 used to be written as an array
+>     inside the `telecom` array (invalid FHIR); they are now separate `telecom` entries.
+>   - **ContactPoint use and system follow the HL7 v2-to-FHIR IG:** only PRN, WPN and PRS set a use
+>     (home, work, mobile); NET and other codes set none; TTY/TDD/MD/SAT are `other`.
+>   - **Every name repetition is kept, with its type:** XPN.7 `L` → `official` (was `usual`), `M` →
+>     `maiden`, `N` → `nickname`. Every address repetition is kept.
+>   - **Mother's maiden name** (PID-6) is now sent as the `patient-mothersMaidenName` extension.
+>   - **`Patient.meta.lastUpdated`** is now set from MSH-7 (a time without a zone is taken as UTC).
+>   - The generated narrative reflects the above. Other resources (Encounter, Observation,
+>     DiagnosticReport, MessageHeader, Organization) are unchanged.
+>   A downstream system that adapted to the old output may need its mapping reviewed.
+> - **Inbound connector credentials now work when stored encrypted.** Connectors started from a
+>   pipeline's connector step received their saved password, token or secret still encrypted, so
+>   authentication silently failed. They are now decrypted; a value that can't be decrypted skips
+>   the step with a warning instead of starting it with a wrong secret.
+> - **JSON messages expose their fields.** Live JSON messages used to reach pipeline steps only as
+>   `raw` text (Test Pipeline parsed them, live processing didn't). Now their top-level fields are
+>   addressable too; `raw` is unchanged.
+> - **Per-interface concurrency is now really limited** (10 messages at a time by default). Work
+>   used to escape the limit. Bursts queue instead of being refused: a message waits up to 30 s for
+>   room before the interface counts as overloaded.
+> - **Retried HTTP requests resend their body.** A retried POST/PUT from an API step used to go out
+>   empty.
+> - **Recovery after a restart** re-runs unfinished messages in the order they arrived.
+
+### New
+
+- **Templates** (category *EMPI*):
+  - *ezIdentitySense Patient Events to HL7 ADT* — signed webhooks in, A28/A31/A40/A37/A29 out over
+    MLLP, one event at a time; ezIdentitySense is answered only once the receiver has accepted the
+    message, so nothing is lost, duplicated or reordered.
+  - *HL7 ADT to ezIdentitySense* — ADT in over MLLP, registered, merged (A40) or removed (A23/A29)
+    through the IHE PIXm feed, versioned by MSH-7.
+- **Process in order** — an interface setting (Edit → Processing Order): one message at a time, in
+  arrival order. Off (parallel) by default.
+- **Ordered Webhook Events** connector — CloudEvents receiver that answers only after its events are
+  processed, with a durable position so retries never repeat work. **Standard Webhooks** signature
+  checking is available on it, the HTTP/REST receiver and partner endpoints.
+- **HL7 Build**: repeating fields (`repeatPath`), delimiter escaping (`escapeValues`), trigger event
+  and message structure from data, value transforms (`hl7_date`, `hl7_datetime`, `iso3166_alpha3`).
+- **API steps**: `baseUrl`, `encodePlaceholders`, `acceptStatuses`, `[field=value]` paths.
+- **Templates** can ask for values for any pipeline step (section *steps*) and for template-wide
+  variables (`{{var.NAME}}`), and set the new interface's processing order.
+
+
 ## v26.10 — 2026-10-27
 
 *Previous release: [v26.08](../../releases/tag/v26.08) (2026-08-30). Migrations V229–V283.*
