@@ -115,14 +115,19 @@ func (h *HTTPClientService) BuildRequest(
 		// Determine how to encode body based on Content-Type
 		if contentType == "application/x-www-form-urlencoded" {
 			// Form-encoded data (for OAuth 2.0)
-			if formData, ok := config.Body.(map[string]string); ok {
+			switch formData := config.Body.(type) {
+			case map[string]string:
 				formValues := url.Values{}
 				for key, value := range formData {
 					formValues.Set(key, value)
 				}
 				bodyReader = strings.NewReader(formValues.Encode())
-			} else {
-				return nil, fmt.Errorf("form-encoded body must be map[string]string")
+			case string:
+				// Already form-encoded ("a=1&b=2"), e.g. a query built by an
+				// earlier step: sent as it is.
+				bodyReader = strings.NewReader(formData)
+			default:
+				return nil, fmt.Errorf("form-encoded body must be map[string]string or an encoded string")
 			}
 		} else if bodyStr, ok := config.Body.(string); ok {
 			// Body is already a pre-serialized string (FHIR JSON, HL7, CSV, etc.)

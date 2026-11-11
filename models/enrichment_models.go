@@ -169,6 +169,11 @@ type APIEnrichmentConfig struct {
 	// OperationOutcome for 404), for later steps to branch on.
 	AcceptStatuses []int `json:"acceptStatuses,omitempty"`
 
+	// StatusOutputField, when set, adds the response's HTTP status code to
+	// the step output under that name (e.g. "http_status"), so later steps
+	// can tell one accepted status from another.
+	StatusOutputField string `json:"statusOutputField,omitempty"`
+
 	// HTTP method (GET, POST, etc.)
 	Method string `json:"method,omitempty"` // Default: GET
 
@@ -199,6 +204,10 @@ type APIEnrichmentConfig struct {
 	// is used as the entire request body, replacing RequestBody entirely.
 	// Useful when the body is a complex object built by a prior script step.
 	BodyRef string `json:"bodyRef,omitempty"`
+
+	// BodyRefFallbacks are tried in order when BodyRef resolves to nothing
+	// (or an empty string): the first with a value is the body.
+	BodyRefFallbacks []string `json:"bodyRefFallbacks,omitempty"`
 
 	// Field mapping - which field from message to use in API call
 	// Example: "patientId" -> "PID.3" (use patient ID from HL7 message)

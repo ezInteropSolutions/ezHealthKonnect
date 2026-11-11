@@ -265,3 +265,20 @@ func TestHostQueryEdgeCase_ExplicitlyEmptyMessageTypesArray_FallsBackToDefaultQR
 	}
 }
 
+
+// "*" answers every HL7 message synchronously (a query-only port whose
+// pipeline replies to unsupported types itself), but still not a body with
+// no message type.
+func TestHostQueryEdgeCase_IsHostQueryMessage_Wildcard(t *testing.T) {
+	c := newConnectorOnPort(t, 0, map[string]interface{}{
+		"host_query": map[string]interface{}{"enabled": true, "message_types": []interface{}{"*"}},
+	})
+	for _, msg := range []string{hostQueryHL7("X"), sampleHL7("X", "ADT^A01"), sampleHL7("X", "QBP^Q23^QBP_Q21")} {
+		if !c.isHostQueryMessage(msg) {
+			t.Errorf("* did not match %q", msg)
+		}
+	}
+	if c.isHostQueryMessage("not even close to HL7") || c.isHostQueryMessage("") {
+		t.Error("* matched a body with no message type")
+	}
+}

@@ -21,6 +21,7 @@ import (
 	"ezhealthkonnect/services/executors/enrichment"
 	"ezhealthkonnect/services/metrics"
 	payloadexecutor "ezhealthkonnect/services/executors/payload"
+	"ezhealthkonnect/services/executors/state"
 	"ezhealthkonnect/services/executors/transform"
 	"ezhealthkonnect/services/executors/validation"
 	"ezhealthkonnect/services/hl7assembly"
@@ -208,6 +209,8 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 
 	// HL7 transform executors
 	er.Register(transform.NewHL7BuildExecutor()) // hl7.build
+	er.Register(transform.NewHL7QueryParseExecutor()) // hl7.query_parse
+	er.Register(state.NewStateStoreExecutor(state.NewPostgresStore(er.db))) // state.store
 
 	// Connector bridge executors (DLQ service wired later via SetDLQService)
 	outboundExec := transform.NewOutboundConnectorExecutor()

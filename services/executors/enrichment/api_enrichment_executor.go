@@ -75,12 +75,18 @@ func (e *APIEnrichmentExecutor) Execute(
 	var requestBody interface{}
 	if config.BodyRef != "" {
 		// Resolve the full body from a previous step's output (e.g. a PAS bundle
-		// assembled by an enrichment.script step).
-		resolved := resolveStepValue(inputData, config.BodyRef)
-		if resolved != nil {
+		// assembled by an enrichment.script step), or the first fallback path
+		// with a value.
+		for _, ref := range append([]string{config.BodyRef}, config.BodyRefFallbacks...) {
+			resolved := resolveStepValue(inputData, ref)
+			if resolved == nil || resolved == "" {
+				continue
+			}
 			requestBody = resolved
-			log.Printf("📦 [API Enrichment] Using bodyRef '%s' as request body", config.BodyRef)
-		} else {
+			log.Printf("📦 [API Enrichment] Using bodyRef '%s' as request body", ref)
+			break
+		}
+		if requestBody == nil {
 			log.Printf("⚠️  [API Enrichment] bodyRef '%s' resolved to nil — sending empty body", config.BodyRef)
 		}
 	} else if config.RequestBody != nil {
@@ -248,6 +254,10 @@ func (e *APIEnrichmentExecutor) Execute(
 		} else {
 			stepOutput = map[string]interface{}{"response": resp.JSON}
 		}
+	}
+
+	if config.StatusOutputField != "" {
+		stepOutput[config.StatusOutputField] = resp.StatusCode
 	}
 
 	// ── Populate result cache ──────────────────────────────────────
