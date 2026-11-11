@@ -39,6 +39,10 @@ It uses ezIdentitySense's standard IHE PIXm (`$ihe-pix`, ITI-83) and PDQm
   phone or email. A parameter it doesn't support (for example `@PID.18`, the
   account number, which ezIdentitySense doesn't keep) is answered `AE`
   rather than ignored, so a search is never silently widened.
+- **Enough to search on:** ezIdentitySense searches only on an identifier,
+  or on the family name together with the birth date (or with the sex, if
+  that is switched on in ezIdentitySense). A query with less is answered
+  `AE`, error 101 at `QPD^1^3`, saying what is missing.
 - **More results than asked for** (RCP-2, e.g. `10^RD`; 10 when not given,
   at most 50): the reply ends with `DSC|<pointer>|I`. Send the same query
   again with that pointer in DSC-1 for the next ones. A pointer works for

@@ -691,7 +691,9 @@ const queries = {
                 // The stored next page, else the query's own search; a form
                 // body keeps demographics out of URLs.
                 bodyRef: `${PAGE}.value.search`, bodyRefFallbacks: [`${PQ}.query`],
-                acceptStatuses: [400],
+                // 422: not one of the parameter combinations ezIdentitySense
+                // accepts (it won't search on a family name alone).
+                acceptStatuses: [400, 422],
             }),
             step(36, 'Save Page', 'save_page', 'state.store', {
                 operation: 'put', namespace: 'pdq_continuation', keyFrom: pageKey(PQ),
@@ -720,17 +722,20 @@ const queries = {
                         { condition: is(`${PAGE}.missing`, true), value: 'DSC^1^1' },
                         { condition: is(`${SR}.http_status`, 200), value: '' },
                         { condition: is(`${SR}.http_status`, 400), value: 'QPD^1^3' },
+                        { condition: is(`${SR}.http_status`, 422), value: 'QPD^1^3' },
                     ] },
                     { name: 'err_code', default: INTERNAL_ERROR, rules: [
                         { condition: is(`${PQ}.has_problems`, true), value: '' },
                         { condition: is(`${PAGE}.missing`, true), value: UNKNOWN_KEY },
                         { condition: is(`${SR}.http_status`, 200), value: '' },
+                        { condition: is(`${SR}.http_status`, 422), value: '101^Required field missing^HL70357' },
                     ] },
                     { name: 'err_text', default: 'ezIdentitySense could not answer the query.', rules: [
                         { condition: is(`${PQ}.has_problems`, true), value: '' },
                         { condition: is(`${PAGE}.missing`, true), value: 'The continuation pointer is not known or has expired.' },
                         { condition: is(`${SR}.http_status`, 200), value: '' },
                         { condition: is(`${SR}.http_status`, 400), value: 'ezIdentitySense refused the search.' },
+                        { condition: is(`${SR}.http_status`, 422), value: 'The search needs more parameters: an identifier, or the family name with the birth date.' },
                     ] },
                     { name: 'total', rules: [
                         { condition: is('derived.ack', 'AE'), value: '' },
