@@ -2,11 +2,11 @@
 
 ## Unreleased — ezIdentitySense integration
 
-*Migrations V288–V290.*
+*Migrations V288–V291.*
 
 Ready-to-use templates connect ezHealthKonnect to **ezIdentitySense**, the enterprise master
-patient index, through its public API: patient events out as HL7 ADT, and HL7 ADT in through the
-IHE PIXm patient feed. Building them fixed several long-standing problems in shared parts of the
+patient index, through its public API: patient events out as HL7 ADT, HL7 ADT in through the
+IHE PIXm patient feed, and HL7 PIX and PDQ queries answered from it. Building them fixed several long-standing problems in shared parts of the
 engine, listed first because existing interfaces see their effect.
 
 > **Upgrade notes — read before upgrading**
@@ -48,16 +48,33 @@ engine, listed first because existing interfaces see their effect.
     message, so nothing is lost, duplicated or reordered.
   - *HL7 ADT to ezIdentitySense* — ADT in over MLLP, registered, merged (A40) or removed (A23/A29)
     through the IHE PIXm feed, versioned by MSH-7.
+  - *HL7 PIX/PDQ Queries to ezIdentitySense* — PIX Query (QBP^Q23 → RSP^K23) and Patient
+    Demographics Query (QBP^Q22 → RSP^K22, with continuation paging and QCN^J01 cancel) answered on
+    the same MLLP connection from ezIdentitySense's PIXm and PDQm services; anything else is
+    rejected with AR. Not yet tested with Gazelle or at a Connectathon.
+- **HL7 Query Reader** step (`hl7.query_parse`) — reads a QBP/QCN query into its tag, identifier,
+  domains and search parameters (mapped by a table, not code), and lists problems with their HL7
+  error location and code for the reply.
+- **State Store** step (`state.store`) — a small expiring key-value store a later message's pipeline
+  can read (e.g. a query's next page).
+- **Host queries** (MLLP `host_query`) can answer every message type (`"*"`).
 - **Process in order** — an interface setting (Edit → Processing Order): one message at a time, in
   arrival order. Off (parallel) by default.
 - **Ordered Webhook Events** connector — CloudEvents receiver that answers only after its events are
   processed, with a durable position so retries never repeat work. **Standard Webhooks** signature
   checking is available on it, the HTTP/REST receiver and partner endpoints.
 - **HL7 Build**: repeating fields (`repeatPath`), delimiter escaping (`escapeValues`), trigger event
-  and message structure from data, value transforms (`hl7_date`, `hl7_datetime`, `iso3166_alpha3`).
-- **API steps**: `baseUrl`, `encodePlaceholders`, `acceptStatuses`, `[field=value]` paths.
-- **Templates** can ask for values for any pipeline step (section *steps*) and for template-wide
-  variables (`{{var.NAME}}`), and set the new interface's processing order.
+  and message structure from data, value transforms (`hl7_date`, `hl7_datetime`, `iso3166_alpha3`,
+  `iso3166_alpha2`, `fhir_date`, `hl7_universal_id`, `hl7_universal_id_type`); for replies: MSH
+  fields from data (`mshFields`), a segment copied from the received message (`rawPath`), a given
+  repetition (`repetition`), already-encoded values (`encoded`), component conditions, and values
+  chosen by rules (`derivedValues`).
+- **API steps**: `baseUrl`, `encodePlaceholders`, `acceptStatuses`, `[field=value]` paths; the HTTP
+  status in the output (`statusOutputField`); fallback bodies (`bodyRefFallbacks`); a pre-encoded
+  form body.
+- **Templates** can ask for values for any pipeline step (section *steps*), for template-wide
+  variables (`{{var.NAME}}`) including small tables (type *keyvalue*), and set the new interface's
+  processing order.
 
 
 ## v26.10 — 2026-10-27
