@@ -199,7 +199,7 @@ const outbound = {
     difficulty: 'intermediate',
     message_type: 'CloudEvents',
     source_connector_type: 'webhook_events_inbound',
-    source_config_template: { port: 8095, endpoint_path: '/events', authentication_type: 'standard_webhooks' },
+    source_config_template: { port: 8088, endpoint_path: '/events', authentication_type: 'standard_webhooks' },
     target_connector_type: 'tcp_mllp_outbound',
     target_config_template: { host: '', port: 2575 },
     pipeline_config: {
@@ -207,7 +207,7 @@ const outbound = {
             step(5, 'ezIdentitySense Events', 'ez_identity_sense_events', 'connector.inbound', {
                 connectorType: 'webhook_events_inbound',
                 config: {
-                    port: 8095, endpoint_path: '/events', authentication_type: 'standard_webhooks', webhook_secret: '',
+                    port: 8088, endpoint_path: '/events', authentication_type: 'standard_webhooks', webhook_secret: '',
                     event_types: OUTBOUND_EVENT_TYPES, reply_within_seconds: 8, event_timeout_seconds: 300,
                 },
                 timeoutMs: 30000,
@@ -337,7 +337,7 @@ const inbound = {
     difficulty: 'intermediate',
     message_type: 'ADT',
     source_connector_type: 'tcp_mllp_inbound',
-    source_config_template: { host: '0.0.0.0', port: 6625 },
+    source_config_template: { host: '0.0.0.0', port: 6660 },
     target_connector_type: 'http_outbound',
     target_config_template: {},
     pipeline_config: {
@@ -345,7 +345,7 @@ const inbound = {
             step(5, 'ADT Feed', 'adt_feed', 'connector.inbound', {
                 connectorType: 'tcp_mllp_inbound',
                 config: {
-                    host: '0.0.0.0', port: 6625, max_connections: 10,
+                    host: '0.0.0.0', port: 6660, max_connections: 10,
                     ack: { mode: 'immediate', on_error: 'nack', sending_app: 'EZHEALTHKONNECT', sending_facility: '' },
                 },
                 timeoutMs: 30000,
@@ -467,6 +467,14 @@ process.stdout.write(`-- V290: ready-to-use templates connecting ezHealthKonnect
 -- The processing order an interface created from the template starts with.
 ALTER TABLE interface_templates
     ADD COLUMN IF NOT EXISTS processing_order TEXT NOT NULL DEFAULT 'parallel';
+
+-- Default port: 8088, inside the published HTTP range and outside the
+-- ports the connector forms reserve (8081, 8090-8097).
+UPDATE connectivity_types
+SET config_schema = jsonb_set(config_schema, '{properties,port,default}', '8088'::jsonb),
+    updated_at = NOW()
+WHERE type_name = 'webhook_events_inbound'
+  AND config_schema->'properties'->'port'->>'default' = '8095';
 
 UPDATE connectivity_types
 SET config_schema = jsonb_set(config_schema, '{properties,event_types}',
