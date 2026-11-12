@@ -13,6 +13,9 @@
 //	namespace   — groups entries within the pipeline (e.g. "pdq_continuation")
 //	keyFrom     — paths whose values, joined by "|", make the key (e.g. the
 //	              sender's application and the query tag)
+//	skipWhen    — a path: when it holds a value (other than false), the
+//	              step does nothing, e.g. don't replace a stored page while
+//	              answering a query that named an unknown one
 //
 //	put:  values       — []{name, path, transform?}: the entry's fields;
 //	                     transform "url_query" keeps only a URL's query string
@@ -90,6 +93,7 @@ type stateConfig struct {
 	Token        bool         `json:"token"`
 	TTLSeconds   int          `json:"ttlSeconds"`
 	When         string       `json:"when"`
+	SkipWhen     string       `json:"skipWhen"`
 	MatchToken   string       `json:"matchToken"`
 }
 
@@ -131,7 +135,12 @@ func (e *StateStoreExecutor) Execute(ctx context.Context, step *models.Transform
 	key, haveKey := e.key(cfg, inputData)
 
 	var out map[string]interface{}
+	if v := stringAt(inputData, cfg.SkipWhen); v != "" && v != "false" {
+		cfg.Operation = "skipped"
+	}
 	switch cfg.Operation {
+	case "skipped":
+		out = map[string]interface{}{"skipped": true}
 	case "put":
 		out, err = e.put(ctx, cfg, scope, key, haveKey, inputData)
 	case "get":

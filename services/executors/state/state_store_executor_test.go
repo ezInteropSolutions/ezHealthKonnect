@@ -204,3 +204,30 @@ func TestStateStore_Validate(t *testing.T) {
 		t.Error("ran without a store")
 	}
 }
+
+// TC-ST-008 skipWhen: a set value (not "false") makes the step do nothing.
+func TestStateStore_SkipWhen(t *testing.T) {
+	mem := newMemStore()
+	ex := NewStateStoreExecutor(mem)
+	q := map[string]interface{}{"app": "A", "tag": "T"}
+	first := run(t, ex, "p1", putCfg(), map[string]interface{}{"q": q, "api": map[string]interface{}{"next": "https://x.invalid/P?a=1"}})
+	cfg := putCfg()
+	cfg["skipWhen"] = "page.missing"
+	for _, missing := range []interface{}{true, "yes"} {
+		got := run(t, ex, "p1", cfg, map[string]interface{}{"q": q, "page": map[string]interface{}{"missing": missing},
+			"api": map[string]interface{}{"next": "https://x.invalid/P?a=2"}})
+		if got["skipped"] != true || got["token"] != nil {
+			t.Fatalf("missing=%v: %v", missing, got)
+		}
+	}
+	q["pointer"] = first["token"]
+	if got := run(t, ex, "p1", getCfg(), map[string]interface{}{"q": q}); got["found"] != true {
+		t.Fatalf("stored page was replaced: %v", got)
+	}
+	// false or absent: runs as usual.
+	got := run(t, ex, "p1", cfg, map[string]interface{}{"q": q, "page": map[string]interface{}{"missing": false},
+		"api": map[string]interface{}{"next": "https://x.invalid/P?a=3"}})
+	if got["stored"] != true {
+		t.Fatalf("missing=false: %v", got)
+	}
+}

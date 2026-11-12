@@ -702,6 +702,9 @@ const queries = {
                     { name: 'tag', path: `${PQ}.query_tag` },
                 ],
                 requireValue: 'search', token: true, ttlSeconds: 600,
+                // A query naming an unknown page is answered AE; it must not
+                // replace a page stored for the same tag.
+                skipWhen: `${PAGE}.missing`,
             }, { ...inQuery('Q22'), required: false, on_error_strategy: 'skip' }),
             step(38, 'PDQ Response', 'pdq_response', 'hl7.build', {
                 messageType: 'RSP', triggerEvent: 'K22', messageStructure: 'RSP_K21', version: '2.5', escapeValues: true,
