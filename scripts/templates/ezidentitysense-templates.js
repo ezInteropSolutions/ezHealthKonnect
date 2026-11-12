@@ -824,6 +824,252 @@ const queries = {
     guide: 'pix-pdq-to-ezidentitysense.md',
 };
 
+// ── Templates 4 and 5: ezIdentitySense FHIR Subscriptions (topic-based) ────
+//
+// ezIdentitySense speaks FHIR; ezHealthKonnect speaks HL7 v2 (decided
+// 2026-11-12). These templates subscribe to its topics (HL7 Subscriptions
+// R5 Backport, connector fhir_subscription_inbound) and turn each event
+// into HL7 v2 ADT, or forward the Patients to another FHIR server. The
+// notifications carry the Patients (full-resource), so neither calls back.
+// Generated into V294 (node … fhir).
+
+const TOPIC_BASE = 'https://ezinteropsolutions.com/fhir/ezidentitysense/SubscriptionTopic/';
+const TOPICS = ['patient-created', 'patient-changed', 'patient-records', 'patient-merged', 'patient-separated', 'patient-erased']
+    .map(t => TOPIC_BASE + t);
+
+// The subscription connector, credentials blank (asked for at setup).
+function subscriptionConnector() {
+    return step(5, 'ezIdentitySense Subscriptions', 'ez_identity_sense_subscriptions', 'connector.inbound', {
+        connectorType: 'fhir_subscription_inbound',
+        config: {
+            port: 8089, endpoint_path: '/fhir-notifications', callback_url: '', fhir_base_url: '',
+            topics: TOPICS, filters: [], content: 'full-resource', heartbeat_seconds: 0,
+            auth_type: 'oauth2', oauth2_token_url: '', oauth2_client_id: '', oauth2_client_secret: '', oauth2_audience: '',
+            oauth2_scope: 'identities.subscribe identities.read identities.read.demographics',
+            reply_within_seconds: 8, event_timeout_seconds: 300,
+        },
+        timeoutMs: 30000,
+    });
+}
+
+function subscriptionSetupFields() {
+    const f = (field, label, type, hint, required = true) => ({ section: 'source', field, label, type, hint, required });
+    return [
+        f('port', 'Listen Port', 'number', 'The port ezHealthKonnect listens on for ezIdentitySense\'s notifications.'),
+        f('callback_url', 'Address ezIdentitySense Sends To', 'url',
+            'The https address ezIdentitySense reaches this port at, ending in /fhir-notifications, e.g. https://ezhealthkonnect.example.org:8089/fhir-notifications'),
+        f('fhir_base_url', 'ezIdentitySense FHIR Address', 'url', 'Its FHIR base, e.g. https://empi.example.org/fhir/r4'),
+        f('oauth2_token_url', 'Token URL', 'url', 'Your identity provider\'s OAuth 2.0 token endpoint'),
+        f('oauth2_client_id', 'Client ID', 'string', 'The client registered for ezHealthKonnect in your identity provider and in ezIdentitySense'),
+        f('oauth2_client_secret', 'Client Secret', 'password', 'That client\'s secret. Stored encrypted.'),
+        f('oauth2_audience', 'Audience', 'string', 'Only if your identity provider requires one', false),
+    ];
+}
+
+// A Patient carried in an event (message.<base>.resource, FHIR's own key
+// names) as a PID; setId is PID-1. An erased patient carries no resource:
+// its EID alone.
+function pidFromEventPatient(base, setId, condition) {
+    const R = `${base}.resource`;
+    const erased = { field: `${base}.erased`, operator: 'equals', value: true };
+    return {
+        segment: 'PID', ...(condition ? { condition } : {}),
+        fields: [
+            { fieldKey: 'PID.1', literalValue: setId },
+            { fieldKey: 'PID.3', repeatPath: `${R}.identifier`, components: [
+                { position: '1', sourcePath: 'value' },
+                { position: '4.2', sourcePath: 'system' },
+                { position: '4.3', literalValue: 'URI' },
+            ] },
+            { fieldKey: 'PID.3.1', sourcePath: `${base}.id`, condition: erased },
+            { fieldKey: 'PID.5', repeatPath: `${R}.name`, components: [
+                { position: '1', sourcePath: 'family' },
+                { position: '2', sourcePath: 'given[0]' },
+                { position: '3', sourcePath: 'given[1]' },
+                { position: '5', sourcePath: 'prefix[0]' },
+                { position: '4', sourcePath: 'suffix[0]' },
+                { position: '7', sourcePath: 'use', valueMap: { official: 'L', usual: 'D', nickname: 'N', maiden: 'M', old: 'U', anonymous: 'S' } },
+            ] },
+            { fieldKey: 'PID.6', repeatPath: `${R}.extension`, maxRepetitions: 1,
+              itemCondition: { field: 'url', operator: 'equals', value: 'http://hl7.org/fhir/StructureDefinition/patient-mothersMaidenName' },
+              components: [{ position: '1', sourcePath: 'valueString' }] },
+            { fieldKey: 'PID.7', sourcePath: `${R}.birthDate`, transform: 'hl7_date' },
+            { fieldKey: 'PID.8', sourcePath: `${R}.gender`, valueMap: { male: 'M', female: 'F', other: 'O', unknown: 'U' } },
+            { fieldKey: 'PID.11', repeatPath: `${R}.address`, components: [
+                { position: '1', sourcePath: 'line[0]' },
+                { position: '2', sourcePath: 'line[1]' },
+                { position: '3', sourcePath: 'city' },
+                { position: '4', sourcePath: 'state' },
+                { position: '5', sourcePath: 'postalCode' },
+                { position: '6', sourcePath: 'country', transform: 'iso3166_alpha3' },
+            ] },
+            { fieldKey: 'PID.13', repeatPath: `${R}.telecom`,
+              itemCondition: { field: 'system', operator: 'equals', value: 'phone' },
+              components: [
+                { position: '1', sourcePath: 'value' },
+                { position: '2', sourcePath: 'use', valueMap: { home: 'PRN', work: 'WPN', mobile: 'PRS', temp: 'PRN', old: 'PRN' } },
+                { position: '3', literalValue: 'PH' },
+              ] },
+            { fieldKey: 'PID.29', sourcePath: `${R}.deceasedDateTime`, transform: 'hl7_datetime' },
+            { fieldKey: 'PID.30', sourcePath: `${R}.deceasedBoolean`, valueMap: { true: 'Y', false: 'N' } },
+        ],
+    };
+}
+
+const subscriptionToADT = {
+    name: 'ezIdentitySense FHIR Subscription to HL7 ADT',
+    slug: 'ezidentitysense-fhir-subscription-to-hl7-adt',
+    description: 'Subscribes to ezIdentitySense\'s FHIR topics (new patient, details changed, records linked, merged, merge undone or split, erased) and sends each change to a downstream system as HL7 v2 ADT: A28, A31, A40, A37, A29. The subscriptions are made and renewed for you; each change is processed one at a time, in order, and ezIdentitySense is answered only once the ADT has been accepted, so nothing is lost or reordered.',
+    category: 'empi',
+    subcategory: 'ezidentitysense',
+    tags: ['ezidentitysense', 'empi', 'mpi', 'fhir', 'subscription', 'hl7v2', 'adt', 'outbound'],
+    icon: '📡',
+    difficulty: 'intermediate',
+    message_type: 'FHIR Subscription',
+    source_connector_type: 'fhir_subscription_inbound',
+    source_config_template: { port: 8089, endpoint_path: '/fhir-notifications' },
+    target_connector_type: 'tcp_mllp_outbound',
+    target_config_template: { host: '', port: 2575 },
+    pipeline_config: {
+        execution_groups: [
+            subscriptionConnector(),
+            step(10, 'Build ADT', 'build_adt', 'hl7.build', {
+                messageType: 'ADT', version: '2.5.1', escapeValues: true,
+                sendingApplication: 'EZIDENTITYSENSE', sendingFacility: '', receivingApplication: '', receivingFacility: '',
+                triggerEventPath: 'message.topic',
+                triggerEventMap: {
+                    'patient-created': 'A28', 'patient-changed': 'A31', 'patient-records': 'A31',
+                    'patient-merged': 'A40', 'patient-separated': 'A37', 'patient-erased': 'A29',
+                },
+                messageStructureMap: { A28: 'ADT_A05', A31: 'ADT_A05', A40: 'ADT_A39', A37: 'ADT_A37', A29: 'ADT_A21' },
+                segments: [
+                    { segment: 'EVN', fields: [{ fieldKey: 'EVN.2', sourcePath: 'message.timestamp', transform: 'hl7_datetime' }] },
+                    pidFromEventPatient('message.focus', '1'),
+                    { segment: 'PV1', condition: { field: 'message.topic', operator: 'in_list',
+                        value: ['patient-created', 'patient-changed', 'patient-records', 'patient-erased'] },
+                      fields: [{ fieldKey: 'PV1.1', literalValue: '1' }, { fieldKey: 'PV1.2', literalValue: 'N' }] },
+                    // A40: the identity merged away (the focus is the survivor).
+                    { segment: 'MRG', condition: { field: 'message.topic', operator: 'equals', value: 'patient-merged' },
+                      fields: [{ fieldKey: 'MRG.1.1', sourcePath: 'message.context[0].id' }] },
+                    // A37: the second, now separate, identity.
+                    pidFromEventPatient('message.context[0]', '2', { field: 'message.topic', operator: 'equals', value: 'patient-separated' }),
+                ],
+            }),
+            step(20, 'Send ADT', 'send_adt', 'connector.outbound', {
+                connectorType: 'tcp_mllp_outbound',
+                config: { host: '', port: 2575, expect_ack: true, ack_timeout_seconds: 30, connect_timeout_seconds: 10 },
+                contentField: 'hl7Message',
+                contentType: 'x-application/hl7-v2+er7',
+            }),
+        ],
+    },
+    required_connection_fields: [
+        ...subscriptionSetupFields(),
+        { section: 'steps', section_label: 'Downstream System', step_aliases: ['build_adt'], field: 'receivingApplication',
+          label: 'Receiving Application (MSH-5)', type: 'string', required: false, hint: 'Optional: the receiving system\'s application name.' },
+        { section: 'steps', section_label: 'Downstream System', step_aliases: ['build_adt'], field: 'receivingFacility',
+          label: 'Receiving Facility (MSH-6)', type: 'string', required: false, hint: 'Optional: the receiving system\'s facility.' },
+        { section: 'target', field: 'host', label: 'Downstream System Host', type: 'string', required: true,
+          hint: 'The host name or address of the system that receives the ADT messages over MLLP.' },
+        { section: 'target', field: 'port', label: 'Downstream System Port', type: 'number', required: true, hint: 'Its MLLP port.' },
+    ],
+    preview_steps: [
+        { name: 'Receive FHIR Notification', icon: '📡', step_type: 'connector.inbound' },
+        { name: 'Build ADT', icon: '🔄', step_type: 'hl7.build' },
+        { name: 'Send over MLLP', icon: '📤', step_type: 'connector.outbound' },
+    ],
+    estimated_setup_minutes: 15,
+    processing_order: 'in_order',
+    guide: 'fhir-subscription-to-adt.md',
+};
+
+// The target FHIR server: address and credential, asked for at setup.
+function targetApi(scopeHint) {
+    return { baseUrl: '', authType: 'oauth2', oauth2GrantType: 'client_credentials', oauth2TokenUrl: '', oauth2ClientId: '',
+        oauth2ClientSecret: '', oauth2Audience: '', oauth2Scope: scopeHint, encodePlaceholders: true, timeoutMs: 15000, retryCount: 2,
+        retryDelayMs: 1000, headers: { 'Content-Type': 'application/fhir+json', Accept: 'application/fhir+json' } };
+}
+
+function forwardStep(seq, name, alias, caseValue, cfg) {
+    return step(seq, name, alias, 'enrichment.api', { ...targetApi('system/Patient.write'), ...cfg },
+        { parent_conditional_step_id: 'change_kind', case_value: caseValue });
+}
+
+const FORWARD_STEPS = ['put_patient', 'put_survivor', 'put_retired', 'put_restored', 'put_separated', 'delete_patient'];
+
+const subscriptionToFHIR = {
+    name: 'ezIdentitySense FHIR Subscription to FHIR Server',
+    slug: 'ezidentitysense-fhir-subscription-to-fhir-server',
+    description: 'Keeps another FHIR server\'s copy of ezIdentitySense\'s patients current: subscribes to its FHIR topics and writes each change there, as the golden Patient, keyed by the enterprise ID. A merge updates both patients (the retired one points to the survivor), an erasure deletes. Processed one at a time, in order; nothing is lost or reordered.',
+    category: 'empi',
+    subcategory: 'ezidentitysense',
+    tags: ['ezidentitysense', 'empi', 'mpi', 'fhir', 'subscription', 'patient', 'outbound'],
+    icon: '📡',
+    difficulty: 'intermediate',
+    message_type: 'FHIR Subscription',
+    source_connector_type: 'fhir_subscription_inbound',
+    source_config_template: { port: 8089, endpoint_path: '/fhir-notifications' },
+    target_connector_type: 'http_outbound',
+    target_config_template: {},
+    pipeline_config: {
+        execution_groups: [
+            subscriptionConnector(),
+            step(10, 'Change Kind', 'change_kind', 'switch_case', {
+                field: 'message.topic',
+                cases: [
+                    { value: 'patient-merged', label: 'Merged', actions: [] },
+                    { value: 'patient-separated', label: 'Separated', actions: [] },
+                    { value: 'patient-erased', label: 'Erased', actions: [] },
+                ],
+                default: { actions: [] },
+                options: { caseInsensitive: false, trimWhitespace: true },
+            }),
+            // New patient, details changed, records: the Patient as it is now.
+            forwardStep(20, 'Put Patient', 'put_patient', 'default', {
+                method: 'PUT', endpoint: '/Patient/{id}', fieldMappings: { id: 'message.focus.id' }, bodyRef: 'message.focus.resource',
+            }),
+            // Merged: the survivor, then the retired one (inactive, replaced-by).
+            forwardStep(22, 'Put Survivor', 'put_survivor', 'patient-merged', {
+                method: 'PUT', endpoint: '/Patient/{id}', fieldMappings: { id: 'message.focus.id' }, bodyRef: 'message.focus.resource',
+            }),
+            forwardStep(24, 'Put Retired', 'put_retired', 'patient-merged', {
+                method: 'PUT', endpoint: '/Patient/{id}', fieldMappings: { id: 'message.context[0].id' }, bodyRef: 'message.context[0].resource',
+            }),
+            // Separated: both identities as they are now.
+            forwardStep(26, 'Put Restored', 'put_restored', 'patient-separated', {
+                method: 'PUT', endpoint: '/Patient/{id}', fieldMappings: { id: 'message.focus.id' }, bodyRef: 'message.focus.resource',
+            }),
+            forwardStep(28, 'Put Separated', 'put_separated', 'patient-separated', {
+                method: 'PUT', endpoint: '/Patient/{id}', fieldMappings: { id: 'message.context[0].id' }, bodyRef: 'message.context[0].resource',
+            }),
+            // Erased: removed there too; already gone is fine.
+            forwardStep(30, 'Delete Patient', 'delete_patient', 'patient-erased', {
+                method: 'DELETE', endpoint: '/Patient/{id}', fieldMappings: { id: 'message.focus.id' }, acceptStatuses: [404, 410],
+            }),
+        ],
+    },
+    required_connection_fields: [
+        ...subscriptionSetupFields(),
+        ...[['baseUrl', 'Target FHIR Address', 'url', 'The FHIR base of the server to keep current, e.g. https://fhir.example.org/r4', true],
+            ['oauth2TokenUrl', 'Target Token URL', 'url', 'The target\'s OAuth 2.0 token endpoint', true],
+            ['oauth2ClientId', 'Target Client ID', 'string', 'The client ezHealthKonnect uses there', true],
+            ['oauth2ClientSecret', 'Target Client Secret', 'password', 'Its secret. Stored encrypted.', true],
+            ['oauth2Scope', 'Target Scope', 'string', 'The scope the target needs to write Patients (default system/Patient.write)', false],
+        ].map(([field, label, type, hint, required]) => ({ section: 'steps', section_label: 'Target FHIR Server', step_aliases: FORWARD_STEPS,
+            field, label, type, hint, required })),
+    ],
+    preview_steps: [
+        { name: 'Receive FHIR Notification', icon: '📡', step_type: 'connector.inbound' },
+        { name: 'Change Kind', icon: '🔀', step_type: 'switch_case' },
+        { name: 'Write to FHIR Server', icon: '📤', step_type: 'enrichment.api' },
+    ],
+    estimated_setup_minutes: 15,
+    processing_order: 'in_order',
+    guide: 'fhir-subscription-to-fhir-server.md',
+};
+
+const FHIR_TEMPLATES = [subscriptionToADT, subscriptionToFHIR];
+
 const TEMPLATES = [outbound, inbound, queries];
 
 // ── SQL output ──────────────────────────────────────────────────────────────
@@ -865,6 +1111,20 @@ VALUES (
     ${t.estimated_setup_minutes}, true, true, 'ezHealthKonnect', 0, ${lit(t.processing_order)}
 );
 ${guideSQL(t)}`;
+}
+
+if (process.argv[2] === 'fhir') {
+    process.stdout.write(`-- V294: ready-to-use templates that subscribe to ezIdentitySense's FHIR
+-- topics (HL7 Subscriptions R5 Backport, connector fhir_subscription_inbound,
+-- V293) and send each change on as HL7 v2 ADT, or to another FHIR server.
+--
+-- GENERATED by scripts/templates/ezidentitysense-templates.js (argument
+-- "fhir") from the JS definitions and the Markdown guides beside it. Edit
+-- those and regenerate; don't edit this file by hand.
+--
+-- Every credential ships blank and is asked for by the "Use template" form.
+${FHIR_TEMPLATES.map(templateSQL).join('')}`);
+    process.exit(0);
 }
 
 process.stdout.write(`-- V290: ready-to-use templates connecting ezHealthKonnect to ezIdentitySense
