@@ -77,3 +77,55 @@ func TestValidateTableBindings_ADTA01_PID8_RealSchema(t *testing.T) {
 		t.Errorf("expected an error keyed to PID.8, got: %+v", errs)
 	}
 }
+
+// A composite coded field (CWE) is checked by its code, the first component,
+// in every repetition; table 0396's HL7nnnn and 99zzz patterns are codes.
+func TestTableCodes(t *testing.T) {
+	cases := []struct {
+		in        string
+		composite bool
+		want      []string
+	}{
+		{"204^Unknown key identifier^HL70357", true, []string{"204"}},
+		{"204^x~207^y", true, []string{"204", "207"}},
+		{"M", false, []string{"M"}},
+		{"A~B", false, []string{"A", "B"}},
+	}
+	for _, c := range cases {
+		got := tableCodes(c.in, c.composite)
+		if len(got) != len(c.want) {
+			t.Fatalf("tableCodes(%q) = %q", c.in, got)
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Fatalf("tableCodes(%q) = %q, want %q", c.in, got, c.want)
+			}
+		}
+	}
+	values := map[string]string{"ISO3166": "Country codes"}
+	for _, v := range []string{"HL70357", "HL70396", "99ABC", "ISO3166"} {
+		if e := checkTableBinding("ERR", "ERR.3", "ERR.3.3", "0396", values, v, true, hl7.SeverityError); e != nil {
+			t.Errorf("%s refused: %+v", v, e)
+		}
+	}
+	for _, v := range []string{"HL7357", "HL703570", "99", "XYZ"} {
+		if e := checkTableBinding("ERR", "ERR.3", "ERR.3.3", "0396", values, v, true, hl7.SeverityError); e == nil {
+			t.Errorf("%s accepted", v)
+		}
+	}
+}
+
+// End to end on the real schema: an IHE-style ERR-3 is valid at Strict; an
+// unknown error code still isn't.
+func TestValidateTableBindings_ERR3_CodedValue(t *testing.T) {
+	base := "MSH|^~\\&|A|B|C|D|20261111080000||ACK^A01^ACK|X1|P|2.5\rMSA|AE|Y1\rERR||PID^1^3|"
+	msg, schema := parseFixture(t, base+"204^Unknown key identifier^HL70357|E")
+	if errs := validateTableBindings(schema, msg, LevelStrict); len(errs) != 0 {
+		t.Errorf("valid ERR-3 flagged: %+v", errs)
+	}
+	msg, schema = parseFixture(t, base+"999^Not a code^HL70357|E")
+	errs := validateTableBindings(schema, msg, LevelStrict)
+	if len(errs) != 1 || errs[0].Field != "ERR.3" {
+		t.Errorf("unknown ERR-3 code: %+v", errs)
+	}
+}
