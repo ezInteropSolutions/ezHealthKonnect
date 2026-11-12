@@ -2,7 +2,7 @@
 
 ## Unreleased — ezIdentitySense integration
 
-*Migrations V288–V291.*
+*Migrations V288–V292.*
 
 Ready-to-use templates connect ezHealthKonnect to **ezIdentitySense**, the enterprise master
 patient index, through its public API: patient events out as HL7 ADT, HL7 ADT in through the
@@ -26,6 +26,17 @@ engine, listed first because existing interfaces see their effect.
 >   - The generated narrative reflects the above. Other resources (Encounter, Observation,
 >     DiagnosticReport, MessageHeader, Organization) are unchanged.
 >   A downstream system that adapted to the old output may need its mapping reviewed.
+> - **Pipeline credentials are no longer kept in plain text in `pipeline_config`.** Creating an
+>   interface from a template stored a copy of every step, OAuth client secrets and passwords
+>   included, unencrypted in the pipeline's `pipeline_config`, and the save wrote it to the
+>   application log. `pipeline_config` now keeps only pipeline-level settings (secrets in it are
+>   encrypted), the log shows key names only, and V292 removes the copies already stored. Logs
+>   kept from earlier builds may contain those secrets: rotate credentials of interfaces created
+>   from templates, and clear or restrict old logs.
+> - **HL7 validator: coded fields are checked by their code.** A CE/CWE/CNE field such as ERR-3
+>   `204^Unknown key identifier^HL70357` was checked as a whole and refused; the code (first
+>   component) of each repetition is now checked, and table 0396's `HL7nnnn` / `99zzz` codes are
+>   accepted. Strict validation reports fewer, correct, table findings.
 > - **Inbound connector credentials now work when stored encrypted.** Connectors started from a
 >   pipeline's connector step received their saved password, token or secret still encrypted, so
 >   authentication silently failed. They are now decrypted; a value that can't be decrypted skips
