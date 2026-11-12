@@ -81,7 +81,9 @@ type ACKConfig struct {
 type HostQueryConfig struct {
 	Enabled bool
 	// MessageTypes are MSH.9.1 values (e.g. "QRY") treated as a live query
-	// this connector must answer synchronously, rather than enqueue.
+	// this connector must answer synchronously, rather than enqueue. "*"
+	// answers every message this way (a port that only takes queries, where
+	// the pipeline itself rejects an unsupported type with its own reply).
 	MessageTypes []string
 	// PipelineKey is the message_type a matching query resolves its
 	// answering pipeline by (PipelineExecutor.GetPipeline's own 3rd arg) —
@@ -759,7 +761,7 @@ func (c *TCPMLLPInboundConnector) SetMessageParser(mp MessageParser) {
 func (c *TCPMLLPInboundConnector) isHostQueryMessage(hl7Message string) bool {
 	messageType, _ := splitMessageType(c.extractMessageType(hl7Message))
 	for _, t := range c.hostQueryConfig.MessageTypes {
-		if strings.EqualFold(messageType, t) {
+		if (t == "*" && messageType != "" && messageType != "UNKNOWN") || strings.EqualFold(messageType, t) {
 			return true
 		}
 	}

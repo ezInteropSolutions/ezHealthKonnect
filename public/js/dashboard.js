@@ -669,11 +669,13 @@ function _renderRequiredFieldsSection(fields) {
                 </select>${hint}
             </div>`;
         }
-        if (f.type === 'textarea') {
+        if (f.type === 'textarea' || f.type === 'keyvalue') {
+            // keyvalue: a small table, one KEY=VALUE per line (read server-side).
+            const placeholder = f.type === 'keyvalue' ? (f.placeholder || 'KEY=VALUE, one per line') : (f.placeholder || '');
             return HtmlSafe.html`<div style="margin-bottom:14px">
                 <label style="display:block;font-size:0.78rem;font-weight:600;color:#444;margin-bottom:5px">${f.label}${reqMark}</label>
-                <textarea id="${idAttr}" ${common} data-tcf-type="textarea" rows="3"
-                    style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #dde1e7;border-radius:7px;font-size:0.9rem;color:#1a1a2e;background:#fafbfc;font-family:inherit"></textarea>${hint}
+                <textarea id="${idAttr}" ${common} data-tcf-type="${f.type}" rows="3" placeholder="${placeholder}"
+                    style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #dde1e7;border-radius:7px;font-size:0.9rem;color:#1a1a2e;background:#fafbfc;font-family:${f.type === 'keyvalue' ? 'monospace' : 'inherit'}"></textarea>${hint}
             </div>`;
         }
         const inputType = f.type === 'password' ? 'password' : (f.type === 'number' ? 'number' : (f.type === 'url' ? 'url' : 'text'));
@@ -694,6 +696,8 @@ function _renderRequiredFieldsSection(fields) {
         <div style="margin-bottom:18px;padding:14px;background:#fff;border:1px solid #e8ecf0;border-radius:8px">
             <div style="font-size:0.85rem;font-weight:700;color:#1a1a2e;margin-bottom:10px">Connection Details</div>
             ${sectionBlock('Source Connection', bySection.source)}
+            ${sectionBlock((bySection.variables && bySection.variables[0].section_label) || 'Settings', bySection.variables)}
+            ${sectionBlock((bySection.steps && bySection.steps[0].section_label) || 'Service Connection', bySection.steps)}
             ${sectionBlock('Destination Connection', bySection.target)}
         </div>`;
 }
@@ -803,6 +807,11 @@ async function useTemplate(id) {
 function _collectTemplateConnectionValues() {
     const sourceValues = {};
     const targetValues = {};
+    // section "steps": values the template writes into its own named
+    // pipeline steps (e.g. a shared service's URL and OAuth credentials).
+    const stepValues = {};
+    // section "variables": substituted for {{var.NAME}} in the template.
+    const variableValues = {};
     // Tracked separately from sourceValues/targetValues (which deliberately
     // omit blank fields so they don't overwrite a template default) — used
     // only to decide whether it's honest to attempt activation at all. See
@@ -838,10 +847,16 @@ function _collectTemplateConnectionValues() {
             return;
         }
 
-        (section === 'target' ? targetValues : sourceValues)[field] = value;
+        if (section === 'variables') {
+            variableValues[field] = value;
+        } else if (section === 'steps') {
+            stepValues[field] = value;
+        } else {
+            (section === 'target' ? targetValues : sourceValues)[field] = value;
+        }
     });
 
-    return { sourceValues, targetValues, missingRequiredSourceField };
+    return { sourceValues, targetValues, stepValues, variableValues, missingRequiredSourceField };
 }
 
 async function _submitConfigureTemplate(templateId) {
@@ -856,7 +871,7 @@ async function _submitConfigureTemplate(templateId) {
         return;
     }
 
-    const { sourceValues, targetValues, missingRequiredSourceField } = _collectTemplateConnectionValues();
+    const { sourceValues, targetValues, stepValues, variableValues, missingRequiredSourceField } = _collectTemplateConnectionValues();
 
     btn.textContent = 'Creating…';
     btn.disabled = true;
@@ -873,7 +888,7 @@ async function _submitConfigureTemplate(templateId) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ interface_name: name, source_values: sourceValues, target_values: targetValues }),
+            body: JSON.stringify({ interface_name: name, source_values: sourceValues, target_values: targetValues, step_values: stepValues, variable_values: variableValues }),
         });
         const scaffoldData = await scaffoldRes.json();
         if (!scaffoldData.success) throw new Error(scaffoldData.error || 'Failed to load template');
@@ -890,6 +905,7 @@ async function _submitConfigureTemplate(templateId) {
             body: JSON.stringify({
                 name: s.name,
                 messageType: s.message_type || 'HL7v2',
+                processing_order: s.processing_order || 'parallel',
                 description: `Created from template: ${s.template_name}`,
                 sourceType: '',
                 targetType: '',

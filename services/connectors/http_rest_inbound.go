@@ -28,12 +28,13 @@
 //	http_methods          []string Allowed HTTP methods (default: ["POST"])
 //	content_type          string   Fallback Content-Type when the request has none (default: "text/plain")
 //	max_body_size_mb      int      Maximum accepted request body size (default: 10)
-//	authentication_type   string   "none" | "api_key" | "basic_auth" | "bearer_token" (default: "api_key")
+//	authentication_type   string   "none" | "api_key" | "basic_auth" | "bearer_token" | "standard_webhooks" (default: "api_key")
 //	api_key_header        string   Header name the caller sends the API key in (default: "X-API-Key")
 //	api_key               string   Expected API key value (for api_key auth)
 //	username              string   Expected username (for basic_auth)
 //	password              string   Expected password (for basic_auth)
 //	bearer_token          string   Expected bearer token value (for bearer_token auth)
+//	webhook_secret        string   "whsec_..." signing secret (for standard_webhooks auth)
 package connectors
 
 import (
@@ -237,18 +238,20 @@ func (h *HTTPRestInboundConnector) handleRequest(w http.ResponseWriter, r *http.
 		http.Error(w, fmt.Sprintf(`{"error":"method %s not allowed"}`, r.Method), http.StatusMethodNotAllowed)
 		return
 	}
-	if !h.checkAuth(r) {
-		w.Header().Set("Content-Type", "application/json")
-		http.Error(w, `{"error":"authentication failed"}`, http.StatusUnauthorized)
-		return
-	}
-
+	// The body is read before authenticating because standard_webhooks signs
+	// it; the read is bounded by max_body_size_mb either way.
 	body, err := io.ReadAll(io.LimitReader(r.Body, h.maxBodySize))
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"failed to read body: %v"}`, err), http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
+
+	if !h.checkAuth(r, body) {
+		w.Header().Set("Content-Type", "application/json")
+		http.Error(w, `{"error":"authentication failed"}`, http.StatusUnauthorized)
+		return
+	}
 
 	contentType := r.Header.Get("Content-Type")
 	if contentType == "" {
@@ -285,7 +288,7 @@ func (h *HTTPRestInboundConnector) handleRequest(w http.ResponseWriter, r *http.
 	}
 }
 
-func (h *HTTPRestInboundConnector) checkAuth(r *http.Request) bool {
-	return h.auth.Authenticate(r)
+func (h *HTTPRestInboundConnector) checkAuth(r *http.Request, body []byte) bool {
+	return h.auth.AuthenticateRequest(r, body)
 }
 

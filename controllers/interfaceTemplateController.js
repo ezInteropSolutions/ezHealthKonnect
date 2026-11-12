@@ -561,7 +561,7 @@ exports.previewSanitization = async (req, res) => {
 exports.useTemplate = async (req, res) => {
     try {
         const { id } = req.params;
-        const { source_values = {}, target_values = {}, interface_name } = req.body;
+        const { source_values = {}, target_values = {}, step_values = {}, variable_values = {}, interface_name } = req.body;
 
         // Load template — cast id to text to avoid uuid vs varchar type mismatch in OR clause
         const rows = await sequelize.query(`
@@ -590,8 +590,19 @@ exports.useTemplate = async (req, res) => {
         // values into those steps too, so a value a user actually typed
         // (e.g. a device template's port/host_query.enabled) reaches the
         // connector that actually runs, not just the scaffold's display copy.
-        const mergedPipelineConfig = sanitizer.mergeValuesIntoPipelineConnectorSteps(
-            tmpl.pipeline_config || {}, source_values, target_values
+        // Values for non-connector steps (section "steps", e.g. a service's
+        // address and OAuth credentials shared by several API-call steps):
+        // written only into the steps the template's own field definitions
+        // name — see mergeValuesIntoPipelineSteps.
+        // Template variables ({{var.NAME}}, section "variables") are
+        // substituted first, so the merges below see final values.
+        const fieldDefs = tmpl.required_connection_fields || [];
+        const mergedPipelineConfig = sanitizer.mergeValuesIntoPipelineSteps(
+            sanitizer.mergeValuesIntoPipelineConnectorSteps(
+                sanitizer.substituteTemplateVariables(tmpl.pipeline_config || {}, fieldDefs, variable_values),
+                source_values, target_values),
+            fieldDefs,
+            step_values
         );
 
         // Increment usage count (fire-and-forget)
@@ -605,6 +616,7 @@ exports.useTemplate = async (req, res) => {
             interface_scaffold: {
                 name: interface_name || `${tmpl.name} (from template)`,
                 message_type: tmpl.message_type,
+                processing_order: tmpl.processing_order || 'parallel',
                 source_connector_type: tmpl.source_connector_type,
                 source_config: sourceConfig,
                 target_connector_type: tmpl.target_connector_type,

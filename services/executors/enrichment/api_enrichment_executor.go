@@ -9,6 +9,7 @@ import (
 	"ezhealthkonnect/services/response"
 	"fmt"
 	"log"
+	neturl "net/url"
 	"strings"
 	"time"
 )
@@ -68,18 +69,24 @@ func (e *APIEnrichmentExecutor) Execute(
 	log.Printf("🌐 [API Enrichment] Calling API: %s %s", config.Method, config.Endpoint)
 
 	// Build URL with field mappings
-	url := e.buildURL(config.Endpoint, config.FieldMappings, inputData)
+	url := joinBaseURL(config.BaseURL, e.buildURLWith(config.Endpoint, config.FieldMappings, inputData, config.EncodePlaceholders))
 
 	// Build request body — bodyRef takes priority over requestBody
 	var requestBody interface{}
 	if config.BodyRef != "" {
 		// Resolve the full body from a previous step's output (e.g. a PAS bundle
-		// assembled by an enrichment.script step).
-		resolved := executors.GetNestedValue(inputData, config.BodyRef)
-		if resolved != nil {
+		// assembled by an enrichment.script step), or the first fallback path
+		// with a value.
+		for _, ref := range append([]string{config.BodyRef}, config.BodyRefFallbacks...) {
+			resolved := resolveStepValue(inputData, ref)
+			if resolved == nil || resolved == "" {
+				continue
+			}
 			requestBody = resolved
-			log.Printf("📦 [API Enrichment] Using bodyRef '%s' as request body", config.BodyRef)
-		} else {
+			log.Printf("📦 [API Enrichment] Using bodyRef '%s' as request body", ref)
+			break
+		}
+		if requestBody == nil {
 			log.Printf("⚠️  [API Enrichment] bodyRef '%s' resolved to nil — sending empty body", config.BodyRef)
 		}
 	} else if config.RequestBody != nil {
@@ -99,6 +106,7 @@ func (e *APIEnrichmentExecutor) Execute(
 		Timeout:     time.Duration(config.TimeoutMs) * time.Millisecond,
 		RetryCount:  config.RetryCount,
 		RetryDelay:  time.Duration(config.RetryDelayMs) * time.Millisecond,
+		AcceptStatuses: config.AcceptStatuses,
 	}
 
 	// Create authentication configuration
@@ -248,6 +256,10 @@ func (e *APIEnrichmentExecutor) Execute(
 		}
 	}
 
+	if config.StatusOutputField != "" {
+		stepOutput[config.StatusOutputField] = resp.StatusCode
+	}
+
 	// ── Populate result cache ──────────────────────────────────────
 	if config.CacheTtlSeconds > 0 && cacheKey != "" {
 		cachedValue := deepCopyMap(stepOutput)
@@ -332,14 +344,78 @@ func (e *APIEnrichmentExecutor) buildURL(
 	fieldMappings map[string]string,
 	inputData map[string]interface{},
 ) string {
+	return e.buildURLWith(urlTemplate, fieldMappings, inputData, false)
+}
+
+// buildURLWith substitutes each {placeholder} with its mapped field's value,
+// path-escaped when encode is set.
+func (e *APIEnrichmentExecutor) buildURLWith(
+	urlTemplate string,
+	fieldMappings map[string]string,
+	inputData map[string]interface{},
+	encode bool,
+) string {
 	url := urlTemplate
+	query := strings.IndexByte(urlTemplate, '?')
 	for key, fieldPath := range fieldMappings {
-		value := executors.GetNestedValue(inputData, fieldPath)
-		if value != nil {
-			url = strings.ReplaceAll(url, "{"+key+"}", fmt.Sprintf("%v", value))
+		value := resolveStepValue(inputData, fieldPath)
+		if value == nil {
+			continue
 		}
+		raw := fmt.Sprintf("%v", value)
+		placeholder := "{" + key + "}"
+		var b strings.Builder
+		rest := url
+		offset := 0
+		for {
+			i := strings.Index(rest, placeholder)
+			if i < 0 {
+				b.WriteString(rest)
+				break
+			}
+			b.WriteString(rest[:i])
+			s := raw
+			if encode {
+				// In the query string a value is query-escaped (an "&" or "#"
+				// in it can't start another parameter); in the path it is
+				// path-escaped and kept to one segment.
+				if query >= 0 && offset+i > query {
+					s = neturl.QueryEscape(s)
+				} else {
+					s = neturl.PathEscape(s)
+					if s == "." || s == ".." {
+						s = strings.ReplaceAll(s, ".", "%2E")
+					}
+				}
+			}
+			b.WriteString(s)
+			rest = rest[i+len(placeholder):]
+			offset += i + len(placeholder)
+		}
+		url = b.String()
 	}
 	return url
+}
+
+// resolveStepValue reads a field for the request: the classic resolver first
+// (HL7 field keys, message unwrapping), then the general path resolver, which
+// also takes array indexes and "[field=value]" predicates, e.g.
+// message.fhirResources[resourceType=Patient].
+func resolveStepValue(inputData map[string]interface{}, path string) interface{} {
+	if v := executors.GetNestedValue(inputData, path); v != nil {
+		return v
+	}
+	return executors.GetFieldValue(inputData, path)
+}
+
+// joinBaseURL prefixes a relative endpoint with base; an absolute endpoint
+// (http:// or https://), or an empty base, is returned as is.
+func joinBaseURL(base, endpoint string) string {
+	base = strings.TrimSpace(base)
+	if base == "" || strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
+		return endpoint
+	}
+	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(endpoint, "/")
 }
 
 // buildQueryParams creates query parameters with field mapping replacements
@@ -415,21 +491,36 @@ func (e *APIEnrichmentExecutor) replaceFieldMappings(
 ) map[string]interface{} {
 	result := make(map[string]interface{})
 	for key, value := range data {
-		if strValue, ok := value.(string); ok {
-			// Check if it's a field mapping placeholder
-			if fieldPath, exists := mappings[strValue]; exists {
-				fieldValue := executors.GetNestedValue(inputData, fieldPath)
-				result[key] = fieldValue
-			} else {
-				result[key] = value
-			}
-		} else if mapValue, ok := value.(map[string]interface{}); ok {
-			result[key] = e.replaceFieldMappings(mapValue, mappings, inputData)
-		} else {
-			result[key] = value
-		}
+		result[key] = e.replaceFieldMappingValue(value, mappings, inputData)
 	}
 	return result
+}
+
+// replaceFieldMappingValue replaces one requestBody value: a string equal to
+// a fieldMappings key becomes that field's value; objects and arrays are
+// walked; anything else is kept.
+func (e *APIEnrichmentExecutor) replaceFieldMappingValue(
+	value interface{},
+	mappings map[string]string,
+	inputData map[string]interface{},
+) interface{} {
+	switch v := value.(type) {
+	case string:
+		if fieldPath, exists := mappings[v]; exists {
+			return resolveStepValue(inputData, fieldPath)
+		}
+		return v
+	case map[string]interface{}:
+		return e.replaceFieldMappings(v, mappings, inputData)
+	case []interface{}:
+		out := make([]interface{}, len(v))
+		for i, item := range v {
+			out[i] = e.replaceFieldMappingValue(item, mappings, inputData)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 

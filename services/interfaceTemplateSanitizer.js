@@ -494,7 +494,168 @@ function mergeValuesIntoPipelineConnectorSteps(pipelineConfig, sourceValues, tar
     return { ...pipelineConfig, execution_groups: groups };
 }
 
+/**
+ * Merge user-provided values into named pipeline steps — for settings that
+ * belong to steps other than the connectors, such as the address and OAuth
+ * credentials of a service several API-call steps share. A template declares
+ * these as required_connection_fields entries with section "steps":
+ *
+ *   {section: "steps", field: "oauth2ClientSecret", step_aliases: ["fetch_patient", ...],
+ *    label, type, hint, required}
+ *
+ * The targets come only from the TEMPLATE's own declarations; the caller's
+ * stepValues is just {field: value}, so a request can't aim a value at a step
+ * the template didn't name, or at a field it didn't declare. Each value is
+ * written at its dot-path inside step.config of every step whose step_alias
+ * is listed. Blank values are skipped (the step keeps the template's value).
+ *
+ * @param {object} pipelineConfig - {execution_groups: [...]}
+ * @param {Array}  fieldDefs      - the template's required_connection_fields
+ * @param {object} stepValues     - {field: value} as entered by the user
+ * @returns {object} - a new pipeline_config
+ */
+function mergeValuesIntoPipelineSteps(pipelineConfig, fieldDefs, stepValues) {
+    if (!pipelineConfig || !Array.isArray(pipelineConfig.execution_groups)) return pipelineConfig;
+    if (!Array.isArray(fieldDefs) || !stepValues || typeof stepValues !== 'object') return pipelineConfig;
+
+    // alias -> {field: value}
+    const byAlias = {};
+    for (const def of fieldDefs) {
+        if (!def || def.section !== 'steps' || typeof def.field !== 'string' || !Array.isArray(def.step_aliases)) continue;
+        if (!Object.prototype.hasOwnProperty.call(stepValues, def.field)) continue;
+        const value = stepValues[def.field];
+        if (value === undefined || value === null || value === '') continue;
+        for (const alias of def.step_aliases) {
+            if (typeof alias !== 'string' || !alias) continue;
+            (byAlias[alias] || (byAlias[alias] = {}))[def.field] = value;
+        }
+    }
+    if (Object.keys(byAlias).length === 0) return pipelineConfig;
+
+    const groups = pipelineConfig.execution_groups.map(group => ({
+        ...group,
+        steps: (group.steps || []).map(step => {
+            const values = step && byAlias[step.step_alias];
+            if (!values) return step;
+            return { ...step, config: mergeTemplateWithUserValues(isPlainObject(step.config) ? step.config : {}, values) };
+        }),
+    }));
+    return { ...pipelineConfig, execution_groups: groups };
+}
+
+/**
+ * Substitute template variables: a template declares
+ *
+ *   {section: "variables", field: "sourceAuthority", label, type, hint, required}
+ *
+ * and writes {{var.sourceAuthority}} wherever the value belongs in its
+ * pipeline_config (inside a URL, a path predicate, a literal), however deep.
+ * Only declared names are replaced; a variable left blank keeps its token, so
+ * the gap is visible in Pipeline Builder instead of silently becoming "".
+ * Values are inserted as text into string values only (never parsed), so they
+ * can't change the config's structure.
+ *
+ * A variable of type "keyvalue" is a table ("KEY=VALUE" per line, or an
+ * object): a string that is exactly "{{var.NAME}}" becomes that table as an
+ * object, and "{{var.NAME|inverted}}" the table reversed (value -> key; an
+ * OID or UUID value is listed both bare and as urn:oid: / urn:uuid:, so
+ * either spelling finds it). Left blank, it becomes an empty object, so a
+ * step's config keeps its shape. It is never spliced into a longer string.
+ *
+ * @param {object} pipelineConfig - {execution_groups: [...]}
+ * @param {Array}  fieldDefs      - the template's required_connection_fields
+ * @param {object} variableValues - {name: value} as entered by the user
+ * @returns {object} - a new pipeline_config
+ */
+function substituteTemplateVariables(pipelineConfig, fieldDefs, variableValues) {
+    if (!pipelineConfig || typeof pipelineConfig !== 'object') return pipelineConfig;
+    if (!Array.isArray(fieldDefs)) return pipelineConfig;
+    if (!variableValues || typeof variableValues !== 'object') variableValues = {};
+    const values = {};
+    const tables = {};
+    for (const def of fieldDefs) {
+        if (!def || def.section !== 'variables' || typeof def.field !== 'string') continue;
+        if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(def.field)) continue;
+        const v = variableValues[def.field];
+        if (def.type === 'keyvalue') {
+            tables[def.field] = parseKeyValueTable(v);
+            continue;
+        }
+        if (v === undefined || v === null || v === '') continue;
+        values[def.field] = String(v);
+    }
+    if (Object.keys(values).length === 0 && Object.keys(tables).length === 0) return pipelineConfig;
+    const token = /\{\{var\.([A-Za-z][A-Za-z0-9_]*)\}\}/g;
+    const tableToken = /^\{\{var\.([A-Za-z][A-Za-z0-9_]*)(\|inverted)?\}\}$/;
+    const walk = (node) => {
+        if (typeof node === 'string') {
+            const t = node.match(tableToken);
+            if (t && Object.prototype.hasOwnProperty.call(tables, t[1])) {
+                return t[2] ? invertKeyValueTable(tables[t[1]]) : { ...tables[t[1]] };
+            }
+            return node.replace(token, (m, name) => (Object.prototype.hasOwnProperty.call(values, name) ? values[name] : m));
+        }
+        if (Array.isArray(node)) return node.map(walk);
+        if (node && typeof node === 'object') {
+            const out = {};
+            for (const [k, v] of Object.entries(node)) out[k] = walk(v);
+            return out;
+        }
+        return node;
+    };
+    return walk(pipelineConfig);
+}
+
+/**
+ * Read a "keyvalue" template variable: "KEY=VALUE" lines (or commas), or an
+ * object. Blank or malformed entries are skipped; keys and values are
+ * trimmed, and anything with a control character is dropped.
+ */
+function parseKeyValueTable(v) {
+    const out = {};
+    const put = (k, val) => {
+        k = String(k == null ? '' : k).trim();
+        val = String(val == null ? '' : val).trim();
+        if (!k || !val || /[\u0000-\u001f\u007f]/.test(k + val)) return;
+        if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
+        out[k] = val;
+    };
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+        for (const [k, val] of Object.entries(v)) put(k, val);
+        return out;
+    }
+    if (typeof v !== 'string') return out;
+    for (const entry of v.split(/[\r\n,]+/)) {
+        const i = entry.indexOf('=');
+        if (i > 0) put(entry.slice(0, i), entry.slice(i + 1));
+    }
+    return out;
+}
+
+const OID_VALUE = /^[0-2](\.(0|[1-9]\d*))+$/;
+const UUID_VALUE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A keyvalue table reversed (value -> key), OIDs and UUIDs in both spellings. */
+function invertKeyValueTable(table) {
+    const out = {};
+    for (const [k, v] of Object.entries(table)) {
+        const forms = [v];
+        const lower = v.toLowerCase();
+        if (lower.startsWith('urn:oid:') && OID_VALUE.test(v.slice(8))) forms.push(v.slice(8));
+        else if (OID_VALUE.test(v)) forms.push('urn:oid:' + v);
+        else if (lower.startsWith('urn:uuid:') && UUID_VALUE.test(v.slice(9))) forms.push(v.slice(9));
+        else if (UUID_VALUE.test(v)) forms.push('urn:uuid:' + v);
+        for (const f of forms) {
+            if (!Object.prototype.hasOwnProperty.call(out, f)) out[f] = k;
+        }
+    }
+    return out;
+}
+
 module.exports = {
+    substituteTemplateVariables,
+    parseKeyValueTable,
+    mergeValuesIntoPipelineSteps,
     sanitizeConfig,
     sanitizePipelineConfig,
     buildRequiredFieldsManifest,

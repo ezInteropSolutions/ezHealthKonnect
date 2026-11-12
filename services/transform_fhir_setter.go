@@ -376,6 +376,16 @@ func (s *HL7FHIRTransformServiceV3) setFieldWithArrayIndices(
 
 			// If this is the last part, set the value
 			if i == len(parts)-1 {
+				if items, isList := listItems(value); isList {
+					// A converter returned several values (e.g. one ContactPoint
+					// per XTN repetition) for one slot: FHIR has no arrays of
+					// arrays, so they become successive elements — the first in
+					// the slot when it's still empty, the rest (or all, when it
+					// isn't) appended, never overwriting a value already there.
+					current[fieldName] = spliceIntoSlot(arr, index, items)
+					log.Printf("✅ Set array field: %s = %d value(s)", fieldPath, len(items))
+					return nil
+				}
 				arr[index] = value
 				current[fieldName] = arr
 				log.Printf("✅ Set array field: %s = %v", fieldPath, value)
@@ -1106,4 +1116,52 @@ func (s *HL7FHIRTransformServiceV3) setExtensionValue(
 	extObj[vt] = value
 	log.Printf("✅ Set extension [%s].%s = %v", url, vt, value)
 	return nil
+}
+
+// listItems reports whether value is a list a converter returned for one
+// array slot, and its non-nil items.
+func listItems(value interface{}) ([]interface{}, bool) {
+	switch v := value.(type) {
+	case []interface{}:
+		out := make([]interface{}, 0, len(v))
+		for _, item := range v {
+			if item != nil {
+				out = append(out, item)
+			}
+		}
+		return out, true
+	case []map[string]interface{}:
+		out := make([]interface{}, 0, len(v))
+		for _, item := range v {
+			if item != nil {
+				out = append(out, item)
+			}
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+// spliceIntoSlot places items into arr at index: the first item takes the
+// slot when it is still empty (nil or an empty object the path walker
+// created), and the rest — or all of them, when the slot holds a value —
+// are appended.
+func spliceIntoSlot(arr []interface{}, index int, items []interface{}) []interface{} {
+	if len(items) == 0 {
+		return arr
+	}
+	if slotEmpty(arr[index]) {
+		arr[index] = items[0]
+		items = items[1:]
+	}
+	return append(arr, items...)
+}
+
+func slotEmpty(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+	m, ok := v.(map[string]interface{})
+	return ok && len(m) == 0
 }

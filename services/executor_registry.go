@@ -21,6 +21,7 @@ import (
 	"ezhealthkonnect/services/executors/enrichment"
 	"ezhealthkonnect/services/metrics"
 	payloadexecutor "ezhealthkonnect/services/executors/payload"
+	"ezhealthkonnect/services/executors/state"
 	"ezhealthkonnect/services/executors/transform"
 	"ezhealthkonnect/services/executors/validation"
 	"ezhealthkonnect/services/hl7assembly"
@@ -208,6 +209,8 @@ func (er *ExecutorRegistry) autoRegisterExecutors() {
 
 	// HL7 transform executors
 	er.Register(transform.NewHL7BuildExecutor()) // hl7.build
+	er.Register(transform.NewHL7QueryParseExecutor()) // hl7.query_parse
+	er.Register(state.NewStateStoreExecutor(state.NewPostgresStore(er.db))) // state.store
 
 	// Connector bridge executors (DLQ service wired later via SetDLQService)
 	outboundExec := transform.NewOutboundConnectorExecutor()
@@ -589,6 +592,10 @@ func (hme *HL7FHIRMappingExecutor) Execute(
 	// Also store in the message so downstream steps (FHIR Validation, etc.) can access it
 	if msg, ok := outputData["message"].(map[string]interface{}); ok {
 		msg["fhirBundle"] = resp.Bundle
+		// The resources themselves, as FHIR JSON (step outputs are key-normalized
+		// to snake_case; these aren't), so a later step can pick one by type,
+		// e.g. message.fhirResources[resourceType=Patient], and send it on.
+		msg["fhirResources"] = resp.FHIRResources
 	}
 
 	// STANDARDIZED: Variables (the FHIR bundle) + execution details

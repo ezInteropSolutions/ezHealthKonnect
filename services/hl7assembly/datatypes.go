@@ -582,12 +582,62 @@ func BuildHumanNameFromXPN(xpn string, rules map[string]interface{}) map[string]
 		name["prefix"] = []string{components[4]}
 	}
 
+	// XPN.7 name type code (HL7 table 0200) -> HumanName.use, unless the
+	// caller's rules fix the use.
+	if len(components) > 6 && strings.TrimSpace(components[6]) != "" {
+		name["use"] = NameUseFromCode(components[6])
+	}
+
 	if rules != nil {
 		if use, ok := rules["use"].(string); ok {
 			name["use"] = use
 		}
 	}
 	return name
+}
+
+// BuildHumanNamesFromXPN converts every repetition of an XPN field ("~"
+// separated) to a HumanName; repetitions with no family or given name are
+// left out.
+func BuildHumanNamesFromXPN(field string, rules map[string]interface{}) []map[string]interface{} {
+	var out []map[string]interface{}
+	for _, rep := range strings.Split(field, "~") {
+		if strings.TrimSpace(strings.ReplaceAll(rep, "^", "")) == "" {
+			continue
+		}
+		name := BuildHumanNameFromXPN(rep, rules)
+		if _, hasFamily := name["family"]; !hasFamily {
+			if _, hasGiven := name["given"]; !hasGiven {
+				continue
+			}
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// NameUseFromCode maps an HL7 v2 name type code (table 0200) to a FHIR
+// NameUse. A value that already is a FHIR NameUse passes through unchanged;
+// an unrecognised code becomes "usual".
+func NameUseFromCode(raw string) string {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case "OFFICIAL", "L", "LEGAL":
+		return "official"
+	case "USUAL", "D", "U", "PREFERRED", "A", "ALIAS":
+		return "usual"
+	case "NICKNAME", "N", "NICK":
+		return "nickname"
+	case "MAIDEN", "M", "NAME AT BIRTH":
+		return "maiden"
+	case "TEMP", "TEMPORARY", "T":
+		return "temp"
+	case "ANONYMOUS", "S", "P", "ANON":
+		return "anonymous"
+	case "OLD", "PREVIOUS", "PRIOR":
+		return "old"
+	default:
+		return "usual"
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -663,6 +713,21 @@ func BuildAddressFromXAD(xad string, rules map[string]interface{}) map[string]in
 	return address
 }
 
+// BuildAddressesFromXAD converts every repetition of an XAD field ("~"
+// separated) to an Address; empty repetitions are left out.
+func BuildAddressesFromXAD(field string, rules map[string]interface{}) []map[string]interface{} {
+	var out []map[string]interface{}
+	for _, rep := range strings.Split(field, "~") {
+		if strings.TrimSpace(strings.ReplaceAll(rep, "^", "")) == "" {
+			continue
+		}
+		if a := BuildAddressFromXAD(rep, rules); len(a) > 0 {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // ContactPoint builder  (HL7 XTN / plain email)
 // ──────────────────────────────────────────────────────────────────────────────
@@ -697,40 +762,59 @@ func BuildContactPointFromXTN(xtn string, rules map[string]interface{}) map[stri
 			email = strings.TrimSpace(components[3])
 		}
 
-		// XTN.1 = telephone number (deprecated in v2.7+ but still common)
+		// XTN.1 = telephone number (deprecated in v2.7+ but still common);
+		// otherwise XTN.12 (unformatted number), otherwise the number composed
+		// from XTN.5 country code, XTN.6 area code, XTN.7 local number and
+		// XTN.8 extension — the form v2.5+ senders use.
 		phone := ""
 		if len(components) > 0 {
 			phone = strings.TrimSpace(components[0])
 		}
+		if phone == "" {
+			phone = xtnComposedNumber(components)
+		}
 
-		// XTN.3 = equipment type (Table 0202): PH, FX, CP, BP, X.400, Internet …
+		// XTN.3 = equipment type (table 0202) -> ContactPoint.system, per the
+		// HL7 v2-to-FHIR IG's HL70202 map: PH phone, FX fax, BP pager,
+		// Internet / X.400 email, MD / SAT / TDD / TTY other; CP is a mobile
+		// phone (the IG maps it to use = mobile).
+		equipMobile := false
 		if len(components) > 2 && components[2] != "" {
-			equipType := strings.ToUpper(strings.TrimSpace(components[2]))
-			switch equipType {
-			case "PH", "CP":
+			switch strings.ToUpper(strings.TrimSpace(components[2])) {
+			case "PH":
 				cp["system"] = "phone"
+			case "CP":
+				cp["system"] = "phone"
+				equipMobile = true
 			case "FX":
 				cp["system"] = "fax"
 			case "BP":
 				cp["system"] = "pager"
-			case "X.400", "INTERNET", "NET":
+			case "X.400", "INTERNET":
 				cp["system"] = "email"
+			case "MD", "SAT", "TDD", "TTY":
+				cp["system"] = "other"
 			}
 		}
 
-		// XTN.2 = telecom use code (Table 0201): PRN, WPN, ORN, PRS …
-		if len(components) > 1 && components[1] != "" {
-			useCode := strings.ToUpper(strings.TrimSpace(components[1]))
-			switch useCode {
-			case "PRN", "VHN":
+		// XTN.2 = use code (table 0201) -> ContactPoint.use, per the IG's
+		// HL70201 map: PRN home, WPN work, PRS mobile. The IG maps no other
+		// code (ORN, VHN, ASN, EMR, NET, BPN), so those set no use. With no
+		// use code, a cellular phone (XTN.3 CP) is mobile; otherwise the
+		// default "home" stands, as before.
+		if len(components) > 1 && strings.TrimSpace(components[1]) != "" {
+			switch strings.ToUpper(strings.TrimSpace(components[1])) {
+			case "PRN":
 				cp["use"] = "home"
 			case "WPN":
 				cp["use"] = "work"
 			case "PRS":
 				cp["use"] = "mobile"
-			case "ORN", "BPN", "ASN", "EMR", "NET":
-				cp["use"] = "temp"
+			default:
+				delete(cp, "use")
 			}
+		} else if equipMobile {
+			cp["use"] = "mobile"
 		}
 
 		if cp["system"] == "email" && email != "" {
@@ -757,6 +841,54 @@ func BuildContactPointFromXTN(xtn string, rules map[string]interface{}) map[stri
 		return nil
 	}
 	return cp
+}
+
+// BuildContactPointsFromXTN converts every repetition of an XTN field ("~"
+// separated) to a ContactPoint — one per repetition, never one per
+// component; repetitions carrying no number or address are left out.
+func BuildContactPointsFromXTN(field string, rules map[string]interface{}) []map[string]interface{} {
+	var out []map[string]interface{}
+	for _, rep := range strings.Split(field, "~") {
+		if strings.TrimSpace(strings.ReplaceAll(rep, "^", "")) == "" {
+			continue
+		}
+		if cp := BuildContactPointFromXTN(rep, rules); cp != nil {
+			out = append(out, cp)
+		}
+	}
+	return out
+}
+
+// xtnComposedNumber returns XTN.12 when present, else the number built from
+// XTN.5 (country), XTN.6 (area/city) and XTN.7 (local), with XTN.8 as an
+// extension: "+1 555 0100999 x12". Empty when there's no local number.
+func xtnComposedNumber(components []string) string {
+	at := func(i int) string {
+		if len(components) > i {
+			return strings.TrimSpace(components[i])
+		}
+		return ""
+	}
+	if unformatted := at(11); unformatted != "" {
+		return unformatted
+	}
+	local := at(6)
+	if local == "" {
+		return ""
+	}
+	var parts []string
+	if cc := at(4); cc != "" {
+		parts = append(parts, "+"+strings.TrimPrefix(cc, "+"))
+	}
+	if area := at(5); area != "" {
+		parts = append(parts, area)
+	}
+	parts = append(parts, local)
+	number := strings.Join(parts, " ")
+	if ext := at(7); ext != "" {
+		number += " x" + ext
+	}
+	return number
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

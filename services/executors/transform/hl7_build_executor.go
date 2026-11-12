@@ -28,6 +28,13 @@
 //
 //	messageType          — e.g. "ADT" (required)
 //	triggerEvent         — e.g. "A01"
+//	triggerEventPath     — read the trigger from the message instead (e.g.
+//	                       "type"), translated through triggerEventMap when
+//	                       set; a value that resolves or maps to nothing fails
+//	                       the step rather than building the wrong message
+//	triggerEventMap      — {sourceValue: trigger}, e.g. {"identity.merged": "A40"}
+//	messageStructure     — MSH.9.3, e.g. "ADT_A05"
+//	messageStructureMap  — {trigger: structure}, used when messageStructure is empty
 //	version              — HL7 version, e.g. "2.5.1" (default: "2.5.1")
 //	outputField          — dot-path to write the HL7 message (default: "hl7Message")
 //	sendingApplication   — MSH.3 (default: "ezHealthKonnect")
@@ -49,6 +56,43 @@
 //	                       OBR so each order's own results are interleaved
 //	                       right after it, not appended as one big OBX block
 //	                       after every OBR)}
+//	fields[].transform   — a named value transform (hl7_value_transforms.go):
+//	                       hl7_date, hl7_datetime, uppercase
+//	escapeValues         — true escapes HL7 delimiters and line breaks in
+//	                       every value read from the message (sourcePath and
+//	                       fallbackPaths; literals are written as given), per
+//	                       HL7 v2 2.7 (default false, for compatibility with
+//	                       pipelines that feed pre-formatted "A^B" values in)
+//
+// A field mapping with repeatPath is a REPEATING FIELD: fieldKey names a
+// whole field ("PID.3"), each element of the array at repeatPath becomes one
+// repetition (joined by "~"), and components[] fill each repetition from that
+// element ({position: "1" | "4.2", sourcePath, fallbackPaths, valueMap,
+// literalValue, condition}). itemCondition filters elements; maxRepetitions
+// caps them. A scalar array with no components repeats the values themselves.
+//
+// For answering a query with the message it asked for (e.g. an IHE PIX or
+// PDQ response):
+//
+//	mshFields            — field mappings into MSH, by number from 3 up
+//	                       ({fieldKey: "MSH.3", sourcePath, encoded: true}),
+//	                       applied over the MSH built from the keys above
+//	segments[].rawPath   — the segment is a copy of the encoded segment text
+//	                       at this path (e.g. the received QPD, echoed back);
+//	                       text that isn't a segment of that name is skipped
+//	fields[].repetition  — write to this repetition of the field (default 1),
+//	                       e.g. PID.5.7 repetition 2 for "~^^^^^^S"
+//	fields[].encoded     — the value is already HL7-encoded text (a field
+//	                       copied from the received message), written without
+//	                       escaping; field separators and line breaks in it
+//	                       are still neutralized
+//	derivedValues        — []{name, rules: []{condition, value | sourcePath},
+//	                       default}: each value is the first rule whose
+//	                       condition holds (an empty condition always holds),
+//	                       else the default, computed in order before the
+//	                       segments and readable as "derived.<name>" by every
+//	                       later sourcePath and condition — e.g. MSA-1 is "AE"
+//	                       when the lookup failed, else "AA"
 package transform
 
 import (
@@ -56,6 +100,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"ezhealthkonnect/hl7"
@@ -107,6 +152,52 @@ type hl7FieldMappingRow struct {
 	// holds (e.g. only write PID.19 when message.country == "US"), which
 	// plain source-path resolution can't express.
 	Condition map[string]interface{} `json:"condition,omitempty"`
+
+	// RepeatPath, Components, ItemCondition and MaxRepetitions configure a
+	// repeating field — see the package comment.
+	// Transform names a value transform (hl7_value_transforms.go), e.g.
+	// "hl7_date", applied to values read from the message.
+	Transform string `json:"transform,omitempty"`
+
+	RepeatPath     string                 `json:"repeatPath,omitempty"`
+	Components     []hl7ComponentMapping  `json:"components,omitempty"`
+	ItemCondition  map[string]interface{} `json:"itemCondition,omitempty"`
+	MaxRepetitions int                    `json:"maxRepetitions,omitempty"`
+
+	// Repetition writes a non-repeating mapping into that repetition of the
+	// field (default 1). Encoded marks a value that is already HL7-encoded.
+	// See the package comment.
+	Repetition int  `json:"repetition,omitempty"`
+	Encoded    bool `json:"encoded,omitempty"`
+}
+
+// hl7ComponentMapping fills one component (or subcomponent) of each
+// repetition of a repeating field. Position is relative to the field: "1",
+// "4", "4.2".
+type hl7ComponentMapping struct {
+	Position      string            `json:"position"`
+	SourcePath    string            `json:"sourcePath"`
+	FallbackPaths []string          `json:"fallbackPaths,omitempty"`
+	ValueMap      map[string]string `json:"valueMap,omitempty"`
+	LiteralValue  string            `json:"literalValue,omitempty"`
+	Transform     string            `json:"transform,omitempty"`
+	// Condition, when set, fills this component only when it holds against
+	// the element (falling back to the top-level data).
+	Condition map[string]interface{} `json:"condition,omitempty"`
+	Encoded   bool                   `json:"encoded,omitempty"`
+}
+
+// hl7DerivedValue is one derivedValues entry (see the package comment).
+type hl7DerivedValue struct {
+	Name    string           `json:"name"`
+	Rules   []hl7DerivedRule `json:"rules"`
+	Default string           `json:"default"`
+}
+
+type hl7DerivedRule struct {
+	Condition  map[string]interface{} `json:"condition,omitempty"`
+	Value      string                 `json:"value,omitempty"`
+	SourcePath string                 `json:"sourcePath,omitempty"`
 }
 
 // hl7SegmentConfig configures one non-MSH segment: either a single instance
@@ -145,6 +236,9 @@ type hl7SegmentConfig struct {
 	// are kept). Same shape/evaluator as hl7FieldMappingRow.Condition.
 	Condition map[string]interface{} `json:"condition,omitempty"`
 	Fields    []hl7FieldMappingRow    `json:"fields"`
+	// RawPath makes this segment a copy of the encoded segment text at that
+	// path (see the package comment); Fields are then ignored.
+	RawPath string `json:"rawPath,omitempty"`
 	// ChildSegments are built immediately after each instance of THIS
 	// segment — interleaved in the output right after their parent, not
 	// after every root segment finishes building — which is what makes e.g.
@@ -171,6 +265,10 @@ func (sc hl7SegmentConfig) groupedItemsKey() string {
 type hl7BuildConfig struct {
 	MessageType          string             `json:"messageType"`
 	TriggerEvent         string             `json:"triggerEvent"`
+	TriggerEventPath     string             `json:"triggerEventPath"`
+	TriggerEventMap      map[string]string  `json:"triggerEventMap"`
+	MessageStructure     string             `json:"messageStructure"`
+	MessageStructureMap  map[string]string  `json:"messageStructureMap"`
 	Version              string             `json:"version"`
 	OutputField          string             `json:"outputField"`
 	SendingApplication   string             `json:"sendingApplication"`
@@ -179,6 +277,9 @@ type hl7BuildConfig struct {
 	ReceivingFacility    string             `json:"receivingFacility"`
 	ProcessingID         string             `json:"processingId"`
 	Segments             []hl7SegmentConfig `json:"segments"`
+	EscapeValues         bool               `json:"escapeValues"`
+	MSHFields            []hl7FieldMappingRow `json:"mshFields"`
+	DerivedValues        []hl7DerivedValue    `json:"derivedValues"`
 }
 
 // Execute builds the HL7 message per the configured MSH/segment mappings and
@@ -208,6 +309,20 @@ func (e *HL7BuildExecutor) Execute(
 	if cfg.MessageType == "" {
 		return nil, fmt.Errorf("hl7.build: messageType is required")
 	}
+	if cfg.TriggerEventPath != "" {
+		raw, _ := stringifyValue(executors.GetFieldValue(inputData, cfg.TriggerEventPath))
+		trigger := raw
+		if len(cfg.TriggerEventMap) > 0 {
+			trigger = cfg.TriggerEventMap[raw]
+		}
+		if trigger == "" {
+			return nil, fmt.Errorf("hl7.build: no trigger event for %q at %s", raw, cfg.TriggerEventPath)
+		}
+		cfg.TriggerEvent = trigger
+	}
+	if cfg.MessageStructure == "" && cfg.TriggerEvent != "" {
+		cfg.MessageStructure = cfg.MessageStructureMap[cfg.TriggerEvent]
+	}
 
 	// hl7.GetRealSchemaLoader() is fetched fresh on every Execute() call,
 	// never cached at construction: main.go's schema-init call sites don't
@@ -225,6 +340,7 @@ func (e *HL7BuildExecutor) Execute(
 	msh := hl7builder.MSHConfig{
 		MessageType:          cfg.MessageType,
 		TriggerEvent:         cfg.TriggerEvent,
+		MessageStructure:     cfg.MessageStructure,
 		Version:              cfg.Version,
 		SendingApplication:   cfg.SendingApplication,
 		SendingFacility:      cfg.SendingFacility,
@@ -233,9 +349,34 @@ func (e *HL7BuildExecutor) Execute(
 		ProcessingID:         cfg.ProcessingID,
 	}
 
+	// Mappings resolve against the data plus the derived values.
+	data := inputData
+	if len(cfg.DerivedValues) > 0 {
+		data = make(map[string]interface{}, len(inputData)+1)
+		for k, v := range inputData {
+			data[k] = v
+		}
+		data["derived"] = e.deriveValues(cfg.DerivedValues, data)
+	}
+
+	if len(cfg.MSHFields) > 0 {
+		header := hl7builder.NewSegment("MSH")
+		for _, f := range cfg.MSHFields {
+			e.applyHL7Field(header, data, data, f, cfg.EscapeValues)
+		}
+		msh.Fields = make(map[int]string, len(header.Fields))
+		for n := range header.Fields {
+			if n < 3 {
+				log.Printf("  ⚠️  [hl7.build] MSH.%d is fixed; mapping ignored", n)
+				continue
+			}
+			msh.Fields[n] = header.RenderField(n)
+		}
+	}
+
 	var segments []*hl7builder.Segment
 	for _, sc := range cfg.Segments {
-		segments = append(segments, e.buildSegmentTree(inputData, inputData, sc)...)
+		segments = append(segments, e.buildSegmentTree(data, data, sc, cfg.EscapeValues)...)
 	}
 
 	hl7Message := hl7builder.BuildMessage(msh, segments, hl7builder.BuildOptions{})
@@ -281,7 +422,7 @@ func (e *HL7BuildExecutor) Execute(
 // row/bucket producing zero mapped fields is skipped (and its children never
 // get a chance to build) — matching map_to_canonical_executor.go's
 // buildSectionEntries: an empty entry would misrepresent real repeated data.
-func (e *HL7BuildExecutor) buildSegmentTree(context, topLevel map[string]interface{}, sc hl7SegmentConfig) []*hl7builder.Segment {
+func (e *HL7BuildExecutor) buildSegmentTree(context, topLevel map[string]interface{}, sc hl7SegmentConfig, escape bool) []*hl7builder.Segment {
 	if sc.Segment == "" {
 		return nil
 	}
@@ -291,10 +432,13 @@ func (e *HL7BuildExecutor) buildSegmentTree(context, topLevel map[string]interfa
 		if !e.conditionMet(sc.Condition, row, topLevel) {
 			return nil
 		}
+		if sc.RawPath != "" {
+			return e.rawSegment(sc, row, topLevel, escape)
+		}
 		seg := hl7builder.NewSegment(sc.Segment)
 		wroteAny := false
 		for _, f := range sc.Fields {
-			if e.applyHL7Field(seg, row, topLevel, f) {
+			if e.applyHL7Field(seg, row, topLevel, f, escape) {
 				wroteAny = true
 			}
 		}
@@ -303,7 +447,7 @@ func (e *HL7BuildExecutor) buildSegmentTree(context, topLevel map[string]interfa
 		}
 		out := []*hl7builder.Segment{seg}
 		for _, child := range sc.ChildSegments {
-			out = append(out, e.buildSegmentTree(row, topLevel, child)...)
+			out = append(out, e.buildSegmentTree(row, topLevel, child, escape)...)
 		}
 		return out
 	}
@@ -428,32 +572,193 @@ func mergeWithFallback(primary, fallback map[string]interface{}) map[string]inte
 // buildSegments can tell a genuinely empty repeating row from one that
 // wrote real data. fm.Condition (when set) is checked first, against source
 // with fallback to topLevel — see conditionMet.
-func (e *HL7BuildExecutor) applyHL7Field(seg *hl7builder.Segment, source, topLevel map[string]interface{}, fm hl7FieldMappingRow) bool {
+func (e *HL7BuildExecutor) applyHL7Field(seg *hl7builder.Segment, source, topLevel map[string]interface{}, fm hl7FieldMappingRow, escape bool) bool {
 	if fm.FieldKey == "" {
 		return false
 	}
 	if !e.conditionMet(fm.Condition, source, topLevel) {
 		return false
 	}
-	if s, ok := stringifyValue(executors.GetFieldValue(source, fm.SourcePath)); ok {
-		return e.setSegmentField(seg, fm.FieldKey, mapValue(s, fm.ValueMap))
+	if fm.RepeatPath != "" {
+		return e.applyRepeatingField(seg, source, topLevel, fm, escape)
 	}
-	for _, fp := range fm.FallbackPaths {
-		if s, ok := stringifyValue(executors.GetFieldValue(source, fp)); ok {
-			return e.setSegmentField(seg, fm.FieldKey, mapValue(s, fm.ValueMap))
-		}
-	}
-	if fm.LiteralValue != "" {
-		return e.setSegmentField(seg, fm.FieldKey, mapValue(fm.LiteralValue, fm.ValueMap))
+	if v, ok := resolveHL7Value(source, fm.SourcePath, fm.FallbackPaths, fm.LiteralValue, fm.ValueMap, fm.Transform, escape, fm.Encoded); ok {
+		return e.setSegmentField(seg, fm.FieldKey, max(1, fm.Repetition), v)
 	}
 	return false
+}
+
+// resolveHL7Value returns the first present value among sourcePath,
+// fallbackPaths and literal, value-mapped; values read from the message are
+// escaped when escape is set, literals never. An encoded value is never
+// escaped, only neutralized (see neutralizeEncoded).
+func resolveHL7Value(source map[string]interface{}, sourcePath string, fallbackPaths []string, literal string, valueMap map[string]string, transform string, escape, encoded bool) (string, bool) {
+	fromData := func(s string) (string, bool) {
+		s, ok, known := applyHL7Transform(transform, s)
+		if !known {
+			log.Printf("  ⚠️  [hl7.build] unknown transform %q; value used as is", transform)
+		}
+		if !ok {
+			return "", false
+		}
+		s = mapValue(s, valueMap)
+		switch {
+		case encoded:
+			s = neutralizeEncoded(s)
+		case escape:
+			s = hl7builder.EscapeValue(s)
+		}
+		return s, true
+	}
+	if sourcePath != "" {
+		if s, ok := stringifyValue(executors.GetFieldValue(source, sourcePath)); ok {
+			if v, ok := fromData(s); ok {
+				return v, true
+			}
+		}
+	}
+	for _, fp := range fallbackPaths {
+		if s, ok := stringifyValue(executors.GetFieldValue(source, fp)); ok {
+			if v, ok := fromData(s); ok {
+				return v, true
+			}
+		}
+	}
+	if literal != "" {
+		return mapValue(literal, valueMap), true
+	}
+	return "", false
+}
+
+// applyRepeatingField writes one repetition of fm.FieldKey per element of
+// the array at fm.RepeatPath (looked up in source, then topLevel). An element
+// that fails itemCondition, or fills no component, adds no repetition.
+func (e *HL7BuildExecutor) applyRepeatingField(seg *hl7builder.Segment, source, topLevel map[string]interface{}, fm hl7FieldMappingRow, escape bool) bool {
+	if strings.Count(fm.FieldKey, ".") != 1 {
+		log.Printf("  ⚠️  [hl7.build] repeating field %q must name a whole field, e.g. PID.3", fm.FieldKey)
+		return false
+	}
+	raw := executors.GetFieldValue(source, fm.RepeatPath)
+	if raw == nil {
+		raw = executors.GetFieldValue(topLevel, fm.RepeatPath)
+	}
+	items, _ := raw.([]interface{})
+
+	rep := 0
+	for _, item := range items {
+		if fm.MaxRepetitions > 0 && rep >= fm.MaxRepetitions {
+			break
+		}
+		values := map[string]string{} // component position -> value
+		switch el := item.(type) {
+		case map[string]interface{}:
+			if !e.conditionMet(fm.ItemCondition, el, topLevel) {
+				continue
+			}
+			for _, c := range fm.Components {
+				if c.Position == "" || !e.conditionMet(c.Condition, el, topLevel) {
+					continue
+				}
+				if v, ok := resolveHL7Value(el, c.SourcePath, c.FallbackPaths, c.LiteralValue, c.ValueMap, c.Transform, escape, c.Encoded); ok {
+					values[c.Position] = v
+				}
+			}
+		default:
+			if len(fm.Components) > 0 {
+				continue
+			}
+			if s, ok := stringifyValue(el); ok {
+				if s, ok, _ = applyHL7Transform(fm.Transform, s); ok {
+					s = mapValue(s, fm.ValueMap)
+					if escape {
+						s = hl7builder.EscapeValue(s)
+					}
+					values[""] = s
+				}
+			}
+		}
+		if len(values) == 0 {
+			continue
+		}
+		rep++
+		for pos, v := range values {
+			key := fm.FieldKey
+			if pos != "" {
+				key += "." + pos
+			}
+			e.setSegmentField(seg, key, rep, v)
+		}
+	}
+	return rep > 0
+}
+
+// rawSegment copies the encoded segment text at sc.RawPath (looked up in the
+// row, then the top-level data), followed by sc's child segments.
+func (e *HL7BuildExecutor) rawSegment(sc hl7SegmentConfig, row, topLevel map[string]interface{}, escape bool) []*hl7builder.Segment {
+	text, ok := stringifyValue(executors.GetFieldValue(row, sc.RawPath))
+	if !ok {
+		text, ok = stringifyValue(executors.GetFieldValue(topLevel, sc.RawPath))
+	}
+	if !ok {
+		return nil
+	}
+	seg := hl7builder.NewRawSegment(text)
+	if seg == nil || seg.Name != sc.Segment {
+		log.Printf("  ⚠️  [hl7.build] %s is not a %s segment; skipped", sc.RawPath, sc.Segment)
+		return nil
+	}
+	out := []*hl7builder.Segment{seg}
+	for _, child := range sc.ChildSegments {
+		out = append(out, e.buildSegmentTree(row, topLevel, child, escape)...)
+	}
+	return out
+}
+
+// deriveValues computes the derivedValues in order; each one can read the
+// ones before it as derived.<name>. An empty result is left out, so
+// "exists" / "not_exists" conditions can test it.
+func (e *HL7BuildExecutor) deriveValues(defs []hl7DerivedValue, data map[string]interface{}) map[string]interface{} {
+	derived := map[string]interface{}{}
+	data["derived"] = derived
+	for _, d := range defs {
+		if d.Name == "" {
+			continue
+		}
+		value, matched := "", false
+		for _, r := range d.Rules {
+			if !e.conditionMet(r.Condition, data, data) {
+				continue
+			}
+			matched = true
+			value = r.Value
+			if r.SourcePath != "" {
+				value, _ = stringifyValue(executors.GetFieldValue(data, r.SourcePath))
+			}
+			break
+		}
+		if !matched {
+			value = d.Default
+		}
+		if value != "" {
+			derived[d.Name] = value
+		}
+	}
+	return derived
+}
+
+// neutralizeEncoded makes already-encoded text safe as one field: a field
+// separator becomes its escape sequence and line breaks, which would end
+// the segment, are dropped. Component and repetition separators are kept:
+// they are the encoding.
+func neutralizeEncoded(v string) string {
+	return strings.NewReplacer("\r", "", "\n", "", "|", `\F\`).Replace(v)
 }
 
 // setSegmentField writes value at fieldKey, logging (not failing the whole
 // step) on a malformed fieldKey — a single bad mapping in a no-code UI
 // shouldn't take down the entire message build.
-func (e *HL7BuildExecutor) setSegmentField(seg *hl7builder.Segment, fieldKey, value string) bool {
-	if err := seg.Set(fieldKey, value); err != nil {
+func (e *HL7BuildExecutor) setSegmentField(seg *hl7builder.Segment, fieldKey string, rep int, value string) bool {
+	if err := seg.SetRepetition(fieldKey, rep, value); err != nil {
 		log.Printf("  ⚠️  [hl7.build] %v", err)
 		return false
 	}

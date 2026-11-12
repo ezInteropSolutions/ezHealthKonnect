@@ -86,11 +86,14 @@ func (pf *ParserFactory) registerParsers() {
 	// that isn't format-locked to HL7v2/CDA/FHIR/EDI — see raw_parser.go's
 	// file header for the full rationale.
 	for _, format := range []models.MessageFormat{
-		models.FormatUnknown, models.FormatJSON, models.FormatXML,
+		models.FormatUnknown, models.FormatXML,
 		models.FormatCSV, models.FormatHL7v3,
 	} {
 		pf.parsers[format] = parsers.NewRawPassthroughParser(format)
 	}
+	// JSON gets a structured envelope (its fields addressable by path), with
+	// "raw" kept for pipelines written against the passthrough envelope.
+	pf.parsers[models.FormatJSON] = parsers.NewJSONParser()
 
 	log.Printf("✅ ParserFactory registered %d parsers", len(pf.parsers))
 }
