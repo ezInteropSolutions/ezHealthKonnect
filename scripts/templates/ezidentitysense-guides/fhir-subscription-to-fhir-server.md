@@ -27,7 +27,10 @@ ezIdentitySense shows, under its enterprise ID (`Patient/EID-…`).
   produce, which ezHealthKonnect checks on every notification.
 - **Events are numbered and handled one at a time, in order.**
   ezHealthKonnect answers ezIdentitySense only once the target server has
-  accepted every write for the event. An event is never skipped.
+  accepted every write for the event. An event is never skipped. The order
+  is kept **within each topic**: each topic is its own subscription, so a
+  write the target refuses holds up only its own topic. Each write is the
+  Patient as it is now, so the target ends up current either way.
 - **Nothing is lost.** If a notification shows a gap in the numbers, the
   missing events are fetched from ezIdentitySense first and processed in
   order. If the target server is down, ezIdentitySense retries later,

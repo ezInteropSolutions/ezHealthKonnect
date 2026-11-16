@@ -11,7 +11,7 @@ radiology system, a data warehouse), sent over MLLP.
 | Topic in ezIdentitySense | Message sent |
 |---|---|
 | `patient-created`: a new patient identity | ADT^A28 (add person) |
-| `patient-changed`: the golden record changed | ADT^A31 (update person) |
+| `patient-changed`: a source system sent an updated record, or a steward corrected the golden record | ADT^A31 (update person) |
 | `patient-records`: a record was linked, moved or removed | ADT^A31 (update person) |
 | `patient-merged`: two identities became one | ADT^A40 (merge), with the retired identity in MRG |
 | `patient-separated`: a merge was undone, or an identity split | ADT^A37 (unlink), with both identities' PID |
@@ -32,7 +32,10 @@ mother's maiden name, and every identifier with its assigning authority.
 - **Events are numbered and handled one at a time, in order.**
   ezHealthKonnect answers ezIdentitySense only once the downstream system has
   accepted the message (MLLP `AA`). An event is never skipped and never sent
-  twice.
+  twice. The order is kept **within each topic**: each topic is its own
+  subscription, so if the downstream system rejects one patient's A28, that
+  patient's A31 (another topic) can still go ahead of it. Fix the rejection
+  and the held message follows.
 - **Nothing is lost.** If a notification shows a gap in the numbers (one was
   missed while this interface was stopped, for example), the missing events
   are fetched from ezIdentitySense first and processed in order. If the
