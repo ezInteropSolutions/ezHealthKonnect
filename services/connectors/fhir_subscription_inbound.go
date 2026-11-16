@@ -86,6 +86,10 @@ const (
 	backportContent    = backportBase + "backport-payload-content"
 	backportHeartbeat  = backportBase + "backport-heartbeat-period"
 	fhirSubContentType = "application/fhir+json"
+
+	fhirSubContentEmpty  = "empty"
+	fhirSubContentIDOnly = "id-only"
+	fhirSubContentFull   = "full-resource"
 )
 
 // FHIRSubscriptionInboundConnector implements the topic subscription receiver.
@@ -139,7 +143,7 @@ func NewFHIRSubscriptionInboundConnector() InboundConnector {
 	return &FHIRSubscriptionInboundConnector{
 		BaseInboundConnector: NewBaseInboundConnector(metadata),
 		endpointPath:         fhirSubDefaultPath,
-		content:              "full-resource",
+		content:              fhirSubContentFull,
 		renewEvery:           fhirSubDefaultRenew,
 		replyBudget:          fhirSubDefaultReply,
 		eventWait:            fhirSubDefaultWait,
@@ -220,7 +224,7 @@ func (c *FHIRSubscriptionInboundConnector) Validate() error {
 		return fmt.Errorf("callback_url is required: the address the server sends notifications to")
 	case len(c.topics) == 0:
 		return fmt.Errorf("topics is required: at least one topic URL to subscribe to")
-	case c.content != "empty" && c.content != "id-only" && c.content != "full-resource":
+	case c.content != fhirSubContentEmpty && c.content != fhirSubContentIDOnly && c.content != fhirSubContentFull:
 		return fmt.Errorf("content is empty, id-only or full-resource")
 	case c.keyMaterial == "":
 		return fmt.Errorf("the server's credential (client secret or bearer token) is required")
@@ -358,13 +362,21 @@ func (c *FHIRSubscriptionInboundConnector) GetStatus() ConnectorStatus {
 // Managing the subscriptions
 // --------------------------------------------------------------------------
 
+// errFHIRSubStoreNotReady: the engine hands the connector its cursor store
+// just after Start, so the first attempt can come too early.
+var errFHIRSubStoreNotReady = errors.New("the receiver's store isn't ready yet")
+
 // keepSubscribed brings the subscriptions up to date now and every
 // renewEvery (the server ends a subscription after a while unless it's
 // renewed), retrying a failure after a minute.
 func (c *FHIRSubscriptionInboundConnector) keepSubscribed(ctx context.Context) {
 	for {
 		wait := c.renewEvery
-		if err := c.ensureSubscriptions(ctx); err != nil {
+		err := c.ensureSubscriptions(ctx)
+		switch {
+		case errors.Is(err, errFHIRSubStoreNotReady):
+			wait = time.Second
+		case err != nil:
 			log.Printf("⚠️ FHIR Subscription Inbound: interface %s: %v (retrying in a minute)", c.interfaceID, err)
 			c.RecordError(err)
 			wait = time.Minute
@@ -378,60 +390,100 @@ func (c *FHIRSubscriptionInboundConnector) keepSubscribed(ctx context.Context) {
 }
 
 // ensureSubscriptions creates each topic's subscription, or updates the one
-// made before (its id is kept as a cursor).
+// made before (its id is kept as a cursor). A topic that fails doesn't hold
+// up the others; the failures are returned together.
 func (c *FHIRSubscriptionInboundConnector) ensureSubscriptions(ctx context.Context) error {
 	c.mu.RLock()
 	cursors := c.cursors
 	c.mu.RUnlock()
 	if cursors == nil {
-		return errors.New("the receiver's store isn't ready yet")
+		return errFHIRSubStoreNotReady
 	}
+	var errs []error
 	for _, topic := range c.topics {
-		key := "subscription|" + topic
-		lctx, cancel := context.WithTimeout(ctx, fhirSubCursorTimeout)
-		id, found, err := cursors.Load(lctx, c.interfaceID, key)
-		cancel()
-		if err != nil {
-			return fmt.Errorf("reading the subscription for %s: %w", topic, err)
+		if err := c.ensureSubscription(ctx, cursors, topic); err != nil {
+			errs = append(errs, err)
 		}
-		body := c.subscriptionBody(topic, id)
-		if found && id != "" {
-			resp, err := c.call(ctx, http.MethodPut, c.base+"/Subscription/"+url.PathEscape(id), body, 404, 410)
-			if err != nil {
-				return fmt.Errorf("updating the subscription to %s: %w", topic, err)
-			}
-			if resp.StatusCode < 300 {
-				continue
-			}
-			// Gone from the server: make it again.
-			body = c.subscriptionBody(topic, "")
-		}
-		resp, err := c.call(ctx, http.MethodPost, c.base+"/Subscription", body)
-		if err != nil {
-			return fmt.Errorf("subscribing to %s: %w", topic, err)
-		}
-		var made struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(resp.Body, &made); err != nil || made.ID == "" {
-			return fmt.Errorf("subscribing to %s: the server's answer has no id", topic)
-		}
-		sctx, cancel := context.WithTimeout(ctx, fhirSubCursorTimeout)
-		err = cursors.Save(sctx, c.interfaceID, key, made.ID)
-		cancel()
-		if err != nil {
-			return fmt.Errorf("keeping the subscription id for %s: %w", topic, err)
-		}
-		log.Printf("✅ FHIR Subscription Inbound: interface %s subscribed to %s (Subscription/%s)", c.interfaceID, topic, made.ID)
 	}
+	return errors.Join(errs...)
+}
+
+// ensureSubscription brings one topic's subscription up to date.
+func (c *FHIRSubscriptionInboundConnector) ensureSubscription(ctx context.Context, cursors CursorStore, topic string) error {
+	key := "subscription|" + topic
+	lctx, cancel := context.WithTimeout(ctx, fhirSubCursorTimeout)
+	id, found, err := cursors.Load(lctx, c.interfaceID, key)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("reading the subscription for %s: %w", topic, err)
+	}
+	if found && id != "" {
+		resp, err := c.sendSubscription(ctx, http.MethodPut, c.base+"/Subscription/"+url.PathEscape(id), topic, id, 404, 410)
+		if err != nil {
+			return fmt.Errorf("updating the subscription to %s: %w", topic, err)
+		}
+		if resp.StatusCode < 300 {
+			return nil
+		}
+		// Gone from the server: make it again.
+	}
+	resp, err := c.sendSubscription(ctx, http.MethodPost, c.base+"/Subscription", topic, "")
+	if err != nil {
+		return fmt.Errorf("subscribing to %s: %w", topic, err)
+	}
+	var made struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(resp.Body, &made); err != nil || made.ID == "" {
+		return fmt.Errorf("subscribing to %s: the server's answer has no id", topic)
+	}
+	sctx, cancel := context.WithTimeout(ctx, fhirSubCursorTimeout)
+	err = cursors.Save(sctx, c.interfaceID, key, made.ID)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("keeping the subscription id for %s: %w", topic, err)
+	}
+	log.Printf("✅ FHIR Subscription Inbound: interface %s subscribed to %s (Subscription/%s)", c.interfaceID, topic, made.ID)
 	return nil
 }
 
+// sendSubscription sends a topic's subscription asking for the configured
+// content. A server may offer less for some topics (ezIdentitySense's
+// patient-erased carries id-only at most) and refuse more with 400 or 422:
+// full-resource is then asked again as id-only, which every Backport server
+// supports, and the downgrade is logged. Statuses in accept are answers.
+func (c *FHIRSubscriptionInboundConnector) sendSubscription(ctx context.Context, method, u, topic, id string, accept ...int) (*httpservice.Response, error) {
+	content := c.content
+	for {
+		resp, err := c.call(ctx, method, u, c.subscriptionBody(topic, id, content), append([]int{400, 422}, accept...)...)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusUnprocessableEntity {
+			return resp, nil
+		}
+		if content != fhirSubContentFull {
+			return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, truncateForLog(resp.Body, 500))
+		}
+		log.Printf("⚠️ FHIR Subscription Inbound: interface %s: the server refused %s for %s (%d: %s); subscribing with id-only",
+			c.interfaceID, content, topic, resp.StatusCode, truncateForLog(resp.Body, 300))
+		content = fhirSubContentIDOnly
+	}
+}
+
+// truncateForLog shortens a response body for a log line or error.
+func truncateForLog(body []byte, max int) string {
+	if len(body) <= max {
+		return string(body)
+	}
+	return string(body[:max]) + "…"
+}
+
 // subscriptionBody is a topic's Backport-profile Subscription.
-func (c *FHIRSubscriptionInboundConnector) subscriptionBody(topic, id string) map[string]interface{} {
+func (c *FHIRSubscriptionInboundConnector) subscriptionBody(topic, id, content string) map[string]interface{} {
 	channel := map[string]interface{}{
 		"type": "rest-hook", "endpoint": c.callbackURL, "payload": fhirSubContentType,
-		"_payload": map[string]interface{}{"extension": []interface{}{map[string]interface{}{"url": backportContent, "valueCode": c.content}}},
+		"_payload": map[string]interface{}{"extension": []interface{}{map[string]interface{}{"url": backportContent, "valueCode": content}}},
 		"header":   []string{"Authorization: Bearer " + c.headerToken(topic)},
 	}
 	if c.heartbeat > 0 {

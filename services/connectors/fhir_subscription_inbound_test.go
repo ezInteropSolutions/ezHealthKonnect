@@ -37,19 +37,22 @@ const (
 
 // fakeFHIR records subscription requests and answers $events.
 type fakeFHIR struct {
-	mu       sync.Mutex
-	subs     map[string]map[string]interface{}
-	posts    []map[string]interface{}
-	puts     []string
-	next     int
-	events   map[int64]string // event number -> focus EID, for $events
-	auth     []string
+	mu     sync.Mutex
+	subs   map[string]map[string]interface{}
+	posts  []map[string]interface{}
+	puts   []string
+	next   int
+	events map[int64]string // event number -> focus EID, for $events
+	auth   []string
+	// limits refuses subscriptions to a topic with 422: "id-only" refuses
+	// full-resource, "all" refuses every one.
+	limits   map[string]string
 	srv      *httptest.Server
 	baseFull string
 }
 
 func newFakeFHIR(t *testing.T) *fakeFHIR {
-	f := &fakeFHIR{subs: map[string]map[string]interface{}{}, events: map[int64]string{}}
+	f := &fakeFHIR{subs: map[string]map[string]interface{}{}, events: map[int64]string{}, limits: map[string]string{}}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
 	f.baseFull = f.srv.URL + "/fhir/r4"
@@ -63,6 +66,16 @@ func (f *fakeFHIR) serve(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/fhir/r4")
 	body, _ := io.ReadAll(r.Body)
 	w.Header().Set("Content-Type", "application/fhir+json")
+	if (r.Method == http.MethodPost || r.Method == http.MethodPut) && strings.HasPrefix(path, "/Subscription") {
+		var sub map[string]interface{}
+		_ = json.Unmarshal(body, &sub)
+		topic, _ := sub["criteria"].(string)
+		if limit := f.limits[topic]; limit == "all" || (limit == "id-only" && subscriptionContent(sub) == "full-resource") {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"resourceType":"OperationOutcome","issue":[{"severity":"error","code":"processing","diagnostics":"refused for the test"}]}`))
+			return
+		}
+	}
 	switch {
 	case r.Method == http.MethodPost && path == "/Subscription":
 		var sub map[string]interface{}
@@ -100,6 +113,20 @@ func (f *fakeFHIR) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+// subscriptionContent is the payload content a Subscription asks for.
+func subscriptionContent(sub map[string]interface{}) string {
+	channel, _ := sub["channel"].(map[string]interface{})
+	payload, _ := channel["_payload"].(map[string]interface{})
+	exts, _ := payload["extension"].([]interface{})
+	for _, e := range exts {
+		if m, ok := e.(map[string]interface{}); ok && m["url"] == backportContent {
+			v, _ := m["valueCode"].(string)
+			return v
+		}
+	}
+	return ""
 }
 
 type testEvent struct {
@@ -281,6 +308,74 @@ func TestFHIRSubscriptionRemadeWhenGone(t *testing.T) {
 	if v, _, _ := h.cursors.Load(context.Background(), "ifc-1", "subscription|"+topicCreated); v != "sub-3" {
 		t.Errorf("the gone subscription wasn't made again: %q", v)
 	}
+}
+
+// A topic the server offers less of is subscribed with id-only, by PUT and
+// by POST; a topic refused outright doesn't hold up the others.
+func TestFHIRSubscriptionContentDowngradedPerTopic(t *testing.T) {
+	h := startSubReceiver(t)
+	h.fhir.mu.Lock()
+	h.fhir.limits[topicMerged] = "id-only"
+	h.fhir.mu.Unlock()
+	if err := h.c.ensureSubscriptions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.fhir.mu.Lock()
+	if got := subscriptionContent(h.fhir.subs["sub-2"]); got != "id-only" {
+		t.Errorf("renewed merged subscription asks for %q, want id-only", got)
+	}
+	if got := subscriptionContent(h.fhir.subs["sub-1"]); got != "full-resource" {
+		t.Errorf("created subscription asks for %q, want full-resource", got)
+	}
+	delete(h.fhir.subs, "sub-2")
+	h.fhir.limits[topicCreated] = "all"
+	h.fhir.mu.Unlock()
+
+	err := h.c.ensureSubscriptions(context.Background())
+	if err == nil || !strings.Contains(err.Error(), topicCreated) || strings.Contains(err.Error(), topicMerged) {
+		t.Fatalf("want an error naming only the refused topic, got %v", err)
+	}
+	v, _, _ := h.cursors.Load(context.Background(), "ifc-1", "subscription|"+topicMerged)
+	h.fhir.mu.Lock()
+	defer h.fhir.mu.Unlock()
+	if v != "sub-3" || subscriptionContent(h.fhir.subs["sub-3"]) != "id-only" {
+		t.Errorf("merged subscription wasn't made again as id-only: id %q, %v", v, h.fhir.subs["sub-3"])
+	}
+}
+
+// The engine hands over the cursor store just after Start: the receiver
+// subscribes within seconds of getting it, not a minute later.
+func TestFHIRSubscriptionSubscribesOnceStoreArrives(t *testing.T) {
+	f := newFakeFHIR(t)
+	port := freePort(t)
+	raw, _ := json.Marshal(map[string]interface{}{
+		"port": port, "interface_id": "ifc-1", "fhir_base_url": f.baseFull,
+		"callback_url": fmt.Sprintf("http://127.0.0.1:%d/fhir-notifications", port),
+		"auth_type":    "bearer_token", "bearer_token": "synthetic-bearer", "topics": []string{topicCreated},
+	})
+	c := NewFHIRSubscriptionInboundConnector().(*FHIRSubscriptionInboundConnector)
+	if err := c.Initialize(raw); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = c.Start(ctx, make(chan *models.InboundMessage)) }()
+	time.Sleep(300 * time.Millisecond)
+	c.SetCursorStore(&memCursorStore{})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		f.mu.Lock()
+		n := len(f.posts)
+		f.mu.Unlock()
+		if n == 1 {
+			if c.GetStatus().ErrorCount != 0 {
+				t.Errorf("waiting for the store was recorded as an error")
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("the receiver didn't subscribe once its store arrived")
 }
 
 func TestFHIRSubscriptionHandshakeAndCredentials(t *testing.T) {
