@@ -197,7 +197,9 @@ jobs:
         # --omit=dev: audit what actually ships. The image installs with
         # `npm ci --omit=dev` (Dockerfile), so dev-only tooling (jest, nodemon)
         # never reaches production; its advisories are tracked separately.
-        run: npm audit --omit=dev --audit-level=moderate
+        # scripts/ci/npm-audit-gate.js is that same audit with a short, dated
+        # allowlist (npm-audit-allowlist.json) for advisories with no fix yet.
+        run: node scripts/ci/npm-audit-gate.js
 
       - name: Check for secrets accidentally staged
         run: |
