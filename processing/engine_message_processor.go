@@ -136,9 +136,11 @@ func (pe *ProcessingEngine) processSingleMessage(interfaceID string, msg *models
 	log.Printf("✅ Message stored in PostgreSQL for interface %s: ID=%s (took %v)",
 		interfaceID, msg.MessageID, processingTime)
 
-	// ACK-AFTER-STORE: Send AA to sender now that message is durable in PostgreSQL.
-	// This prevents the gap where the sender had ACK but PostgreSQL write never happened.
-	// NACK on store failure is already handled above (return skips this).
+	// ACK-AFTER-STORE: tell the connector the message is durable in PostgreSQL.
+	// A connector that holds its reply (MLLP ack.mode after_store, the default)
+	// answers AA now; one that already answered (ack.mode immediate) ignores
+	// this. A store failure above reports no feedback — it ends in a failed
+	// outcome, which a holding connector turns into AE.
 	pe.sendACKAfterStore(interfaceID, msg)
 
 	// Prometheus: count durably-stored messages

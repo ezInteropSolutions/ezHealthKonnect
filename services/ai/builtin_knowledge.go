@@ -541,8 +541,8 @@ tcp_mllp_inbound
   Listens for HL7 v2 messages over TCP using the MLLP protocol.
   Config: { "host": "0.0.0.0", "port": 2575, "tls": false,
             "maxConnections": 10, "keepAlive": true,
-            "ack": { "mode": "immediate", "on_error": "suppress" } }
-  ACK modes: "immediate" (send AA after queue), "none" (no ACK)
+            "ack": { "mode": "after_store", "wait_seconds": 30, "on_error": "nack" } }
+  ACK modes: "after_store" (AA once stored, default), "after_processing" (AA once the pipeline finished), "immediate" (AA after queue)
   on_error: "suppress" (always AA), "nack" (send AE on error)
   Default MLLP port: 2575. Port 2576 is also common.
 
@@ -1011,9 +1011,10 @@ Operational meaning:
   AR → sender must not retry without structural changes; the message type or format is wrong
 
 ezHealthKonnect ACK behaviour (TCP/MLLP Inbound connector):
-  Default mode: "immediate" — AA sent as soon as message is queued (before pipeline runs)
-  on_error "suppress" (default): always send AA even if pipeline later fails; sender is not notified of pipeline errors
-  on_error "nack": send AE if the inbound queue is full or a critical pre-queue error occurs
+  Default mode: "after_store" — AA once the message is durably stored; AE if it is rejected or cannot be stored
+  mode "after_processing": AA once the pipeline has finished; AE if it failed. mode "immediate": AA as soon as the message is queued (before it is stored); later failures never reach the sender
+  wait_seconds (default 30): how long a deferred ACK waits before answering AE; a resend after AE can duplicate a message that was in fact processed
+  on_error "suppress": always send AA even if the queue is full; sender is not notified. on_error "nack" (default): send AE
   Custom script: a JavaScript buildACK(msg) function can override the code and text per-message
 
 If you receive AE from a downstream system (as the sender):
