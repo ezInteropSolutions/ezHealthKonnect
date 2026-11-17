@@ -220,10 +220,34 @@ func (fd *FormatDetector) isHL7v3(content string) bool {
 		strings.Contains(content, "xmlns=\"urn:hl7-org:v3\"")
 }
 
+// isFHIR: a FHIR resource names its type in a top-level "resourceType" (any
+// type: a whitelist missed legitimate resources such as Practitioner and
+// MessageHeader). A JSON array of resources counts too. JSON that only
+// carries resources nested inside it, such as an event or envelope with a
+// Patient in it, is plain JSON: FHIR has no parser in ParserFactory (it has
+// its own connector path), so calling it FHIR would fail it outright.
 func (fd *FormatDetector) isFHIR(content string) bool {
-	// Any JSON with a "resourceType" key is FHIR — no resource-type whitelist needed.
-	// The whitelist approach missed legitimate resources (Practitioner, MessageHeader, etc.)
-	return strings.Contains(content, "\"resourceType\"") && fd.isJSON(content)
+	if !strings.Contains(content, "\"resourceType\"") {
+		return false
+	}
+	type typed struct {
+		ResourceType string `json:"resourceType"`
+	}
+	trimmed := []byte(strings.TrimSpace(content))
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		var items []typed
+		if json.Unmarshal(trimmed, &items) != nil || len(items) == 0 {
+			return false
+		}
+		for _, it := range items {
+			if it.ResourceType == "" {
+				return false
+			}
+		}
+		return true
+	}
+	var root typed
+	return json.Unmarshal(trimmed, &root) == nil && root.ResourceType != ""
 }
 
 func (fd *FormatDetector) isCCDA(content string) bool {

@@ -20,8 +20,13 @@ sex, addresses, phone numbers and email, and mother's maiden name (PID-6).
 
 ## How delivery works
 
-- Messages are acknowledged on receipt (MLLP `AA`) and then processed **one
-  at a time, in the order received**.
+- Messages are processed **one at a time, in the order received**. The
+  sending system gets its MLLP acknowledgement only when ezIdentitySense has
+  finished with the message: `AA` when it was filed, `AE` when it failed or
+  nothing was heard within the wait (30 seconds by default; **ACK wait** in
+  the listener's acknowledgement settings). A sender that resends on `AE`
+  can deliver a message twice; that is safe, because a message older than
+  one already applied is ignored (see the next point).
 - MSH-7 (the message date/time) is sent as the record's version.
   ezIdentitySense ignores a message older than one it has already applied,
   so a delayed or resent message never overwrites newer information. If

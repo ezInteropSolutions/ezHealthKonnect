@@ -16,6 +16,7 @@ package processing
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -221,5 +222,23 @@ func TestOrderingOnStructLiteralEngine(t *testing.T) {
 	pe.reportOutcome(outcomeOf(id, "m", models.OutcomeProcessed, nil))
 	if !pe.isInOrder(id) {
 		t.Fatal("order not recorded on a struct-literal engine")
+	}
+}
+
+// The MLLP listener counts the parts of a multi-message frame itself, to know
+// how many engine reports to wait for. It must agree with the engine's split.
+func TestSplitBatchPayload_AgreesWithMLLPExpectedParts(t *testing.T) {
+	one := `MSH|^~\&|A|B|C|D|20260101||ADT^A01|1|P|2.5` + "\rPID|1\r"
+	for name, frame := range map[string]string{
+		"single":      one,
+		"two":         one + one,
+		"three":       one + one + one,
+		"crlf":        strings.ReplaceAll(one+one, "\r", "\r\n"),
+		"bhs wrapped": `BHS|^~\&|A` + "\r" + one + one + "BTS|2\r",
+		"other sep":   `MSH#^~\&#A#B#C#D#20260101##ADT^A01#1#P#2.5` + "\rPID#1\r",
+	} {
+		if got, want := connectors.ExpectedHL7Parts(frame), len(splitBatchPayload(frame).Parts); got != want {
+			t.Errorf("%s: connector expects %d parts, engine splits into %d", name, got, want)
+		}
 	}
 }
