@@ -1,0 +1,9 @@
+[
+  {
+    "id": "GHSA-fc5q-39xc-vjpf",
+    "package": "picomatch",
+    "reason": "ReDoS through repeated extglobs in a crafted pattern. Every released version (up to 4.0.7) is affected and no patched release exists. Patterns are set by administrators, not by remote users; the worst case is slowness.",
+    "added": "2026-11-17",
+    "expires": "2027-02-17"
+  }
+]

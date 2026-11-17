@@ -373,7 +373,8 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
 
     _buildACKPanel() {
         const ack = (this.config.config && this.config.config.ack) || {};
-        const mode = ack.mode || 'immediate';
+        const mode = ack.mode || 'after_store';
+        const waitSeconds = ack.wait_seconds || '';
         const onError = ack.on_error || 'nack';
         const sendingApp = ack.sending_app || '';
         const sendingFacility = ack.sending_facility || '';
@@ -397,9 +398,17 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                     <div class="form-group">
                         <label>ACK Mode</label>
                         <select class="form-control form-control-sm ack-field" data-ack-field="mode">
-                            <option value="immediate" selected>Immediate — AA sent as soon as message is accepted</option>
+                            <option value="after_store" ${mode === 'after_store' ? 'selected' : ''}>After store (recommended) — AA once the message is safely stored, AE if it cannot be</option>
+                            <option value="after_processing" ${mode === 'after_processing' ? 'selected' : ''}>After processing — AA once the pipeline has finished, AE if it fails</option>
+                            <option value="immediate" ${mode === 'immediate' ? 'selected' : ''}>Immediate — AA as soon as the message is queued, before it is stored</option>
                         </select>
-                        <small class="form-text text-muted">MLLP protocol requires every received message to get an acknowledgment — this cannot be disabled</small>
+                        <small class="form-text text-muted">MLLP protocol requires every received message to get an acknowledgment — this cannot be disabled. With Immediate, a message that is later rejected or fails is never reported to the sender.</small>
+                    </div>
+                    <div class="form-group">
+                        <label>ACK wait (seconds)</label>
+                        <input type="number" min="1" max="600" class="form-control form-control-sm ack-field" data-ack-field="wait_seconds"
+                               value="${waitSeconds}" placeholder="Default: 30">
+                        <small class="form-text text-muted">How long to wait for the message to be stored or processed before answering AE. The sender may then resend a message that was in fact processed, so the receiving side must tolerate duplicates.</small>
                     </div>
                     <div class="form-group">
                         <label>On Error</label>
@@ -2176,7 +2185,9 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             const ackConfig = {};
             ackFields.forEach(el => {
                 const key = el.dataset.ackField;
-                if (key) ackConfig[key] = el.value.trim();
+                if (!key) return;
+                const v = el.value.trim();
+                ackConfig[key] = (key === 'wait_seconds' && v !== '' && !isNaN(Number(v))) ? Number(v) : v;
             });
             // Only attach if at least one field is non-default
             const hasACKConfig = Object.values(ackConfig).some(v => v !== '');

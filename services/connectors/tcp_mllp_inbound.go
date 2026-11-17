@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,23 +40,21 @@ const (
 // left mid-frame with no way to safely resynchronise to the next start byte.
 var errMLLPFrameTooLarge = errors.New("mllp frame exceeds configured maximum message size")
 
-// ConnectionInfo stores connection details for validation feedback
-type ConnectionInfo struct {
-	Conn          net.Conn
-	OriginalMsg   string
-	ConnID        string
-	ReceivedAt    time.Time
-}
-
 // ACKConfig holds acknowledgment behavior configuration.
 //
 // MLLP is a request/response protocol: every received message ALWAYS gets an ACK or NACK.
 // There is no option to suppress the response — doing so would leave the sender blocking.
 type ACKConfig struct {
 	// Mode controls the acknowledgment code sent:
-	//   "immediate" (default) — AA sent as soon as the message is accepted onto the queue
+	//   "after_store" (default) — AA once the message is durably stored; AE if
+	//       it is rejected or cannot be stored
+	//   "after_processing" — AA once the message's pipeline has finished; AE if it fails
+	//   "immediate" — AA as soon as the message is queued, before it is stored
 	// Note: "none" is no longer supported; omitting the ACK violates the MLLP protocol.
 	Mode            string
+	// Wait bounds how long a deferred ACK (after_store, after_processing)
+	// waits for the engine before answering AE. ack.wait_seconds, default 30.
+	Wait            time.Duration
 	// OnError controls the reply when a well-formed message cannot be queued
 	// (queue full): "nack" (default) → AE so the sender retries; "suppress" →
 	// AA even though the message was NOT queued (it is dropped) — explicit
@@ -81,7 +80,9 @@ type ACKConfig struct {
 type HostQueryConfig struct {
 	Enabled bool
 	// MessageTypes are MSH.9.1 values (e.g. "QRY") treated as a live query
-	// this connector must answer synchronously, rather than enqueue.
+	// this connector must answer synchronously, rather than enqueue. "*"
+	// answers every message this way (a port that only takes queries, where
+	// the pipeline itself rejects an unsupported type with its own reply).
 	MessageTypes []string
 	// PipelineKey is the message_type a matching query resolves its
 	// answering pipeline by (PipelineExecutor.GetPipeline's own 3rd arg) —
@@ -135,9 +136,17 @@ type TCPMLLPInboundConnector struct {
 	messageParser    MessageParser
 	hostQueryConfig  HostQueryConfig
 
-	// Validation feedback support
-	messageConns      map[string]*ConnectionInfo // messageID -> connection info (for validation feedback)
-	messageConnsMutex sync.RWMutex
+	// Deferred acknowledgements (ack.mode after_store / after_processing):
+	// frames waiting for the engine's verdict. Created on first use so a
+	// connector built as a struct literal (tests) works.
+	acks     *ackTracker
+	acksOnce sync.Once
+}
+
+// tracker returns the deferred-ACK tracker, creating it on first use.
+func (c *TCPMLLPInboundConnector) tracker() *ackTracker {
+	c.acksOnce.Do(func() { c.acks = newACKTracker() })
+	return c.acks
 }
 
 // NewTCPMLLPInboundConnector creates a new TCP/MLLP inbound connector
@@ -162,7 +171,6 @@ func NewTCPMLLPInboundConnector() InboundConnector {
 	return &TCPMLLPInboundConnector{
 		BaseInboundConnector: base,
 		activeConns:          make(map[string]net.Conn),
-		messageConns:         make(map[string]*ConnectionInfo),
 	}
 }
 
@@ -251,6 +259,10 @@ func (c *TCPMLLPInboundConnector) Initialize(config []byte) error {
 		log.Printf("⚠️  TCP/MLLP Inbound: ack.mode='none' is not valid — MLLP requires a response for every message. Defaulting to 'immediate'.")
 	}
 	c.ackConfig = parseACKConfig(cfg.GetMap("ack"))
+	// This listener's own default is to answer once the message is stored
+	// (parseACKConfig's "immediate" default is the serial connector's).
+	c.ackConfig.Mode = normalizeMLLPACKMode(getStringFromMap(cfg.GetMap("ack"), "mode", ""))
+	c.ackConfig.Wait = clampACKWait(getIntFromMap(cfg.GetMap("ack"), "wait_seconds", 0))
 
 	// Host-query behaviour — read from nested "host_query" sub-object,
 	// mirroring "ack"'s own nested-object convention. Disabled unless
@@ -406,6 +418,7 @@ func (c *TCPMLLPInboundConnector) acceptConnections(ctx context.Context, message
 		}
 	}()
 
+	atLimit := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -421,10 +434,18 @@ func (c *TCPMLLPInboundConnector) acceptConnections(ctx context.Context, message
 			c.connectionMutex.RUnlock()
 
 			if currentCount >= c.maxConnections {
-				log.Printf("⚠️ TCP/MLLP Inbound: Max connections reached (%d), rejecting new connections", c.maxConnections)
-				time.Sleep(1 * time.Second)
+				// Say so once per episode, and look again soon: senders that
+				// close after their ACK free a slot within milliseconds, and a
+				// long sleep here made every message beyond the limit wait a
+				// full second for its turn.
+				if !atLimit {
+					log.Printf("⚠️ TCP/MLLP Inbound: Max connections reached (%d), new connections wait for a free slot", c.maxConnections)
+					atLimit = true
+				}
+				time.Sleep(10 * time.Millisecond)
 				continue
 			}
+			atLimit = false
 
 			// Accept connection
 			conn, err := c.listener.Accept()
@@ -452,9 +473,10 @@ func (c *TCPMLLPInboundConnector) acceptConnections(ctx context.Context, message
 			c.connectionMutex.Lock()
 			c.activeConns[connID] = conn
 			c.connectionCount++
+			total := c.connectionCount
 			c.connectionMutex.Unlock()
 
-			log.Printf("📥 TCP/MLLP Inbound: New connection from %s (total: %d)", connID, c.connectionCount)
+			log.Printf("📥 TCP/MLLP Inbound: New connection from %s (total: %d)", connID, total)
 
 			// Handle connection in separate goroutine
 			go c.handleConnection(conn, connID, messageChan)
@@ -469,8 +491,9 @@ func (c *TCPMLLPInboundConnector) handleConnection(conn net.Conn, connID string,
 		c.connectionMutex.Lock()
 		delete(c.activeConns, connID)
 		c.connectionCount--
+		total := c.connectionCount
 		c.connectionMutex.Unlock()
-		log.Printf("📤 TCP/MLLP Inbound: Connection closed %s (total: %d)", connID, c.connectionCount)
+		log.Printf("📤 TCP/MLLP Inbound: Connection closed %s (total: %d)", connID, total)
 
 		if r := recover(); r != nil {
 			log.Printf("❌ TCP/MLLP Inbound: Panic in handleConnection: %v", r)
@@ -502,6 +525,10 @@ func (c *TCPMLLPInboundConnector) handleConnection(conn net.Conn, connID string,
 				log.Printf("🚨 TCP/MLLP Inbound: Frame from %s exceeded max size (%d bytes) — closing connection",
 					connID, c.maxMessageBytes)
 				c.sendNACK(conn, "Message exceeds maximum allowed size")
+				return
+			}
+			if errors.Is(err, net.ErrClosed) {
+				// This side closed the connection (Stop); retrying would spin.
 				return
 			}
 			log.Printf("❌ TCP/MLLP Inbound: Read error from %s: %v", connID, err)
@@ -552,13 +579,27 @@ func (c *TCPMLLPInboundConnector) handleConnection(conn net.Conn, connID string,
 		// Send to processing pipeline.
 		// ACK/NACK is ALWAYS sent — MLLP is request/response; leaving the sender
 		// without a response would cause it to block indefinitely.
+		//
+		// A deferred mode registers the frame BEFORE queueing it, so a signal
+		// that beats the wait below is not lost.
+		var pending *pendingAck
+		if c.ackConfig.isDeferred() {
+			pending = c.tracker().register(inboundMsg.MessageID, c.ackConfig.Mode, ExpectedHL7Parts(hl7Message))
+		}
 		select {
 		case messageChan <- inboundMsg:
 			c.IncrementMessagesReceived()
 			log.Printf("✅ TCP/MLLP Inbound: Message queued for processing: %s", inboundMsg.MessageID)
-			c.sendConfiguredACK(conn, hl7Message, "AA", c.ackConfig.TextSuccess)
+			if pending == nil {
+				c.sendConfiguredACK(conn, hl7Message, "AA", c.ackConfig.TextSuccess)
+			} else if !c.awaitDeferredACK(conn, hl7Message, inboundMsg.MessageID, pending) {
+				return // shutting down: the connection is being closed
+			}
 
 		case <-time.After(5 * time.Second):
+			if pending != nil {
+				c.tracker().cancel(inboundMsg.MessageID)
+			}
 			log.Printf("⚠️ TCP/MLLP Inbound: Message channel full, sending NACK")
 			if c.ackConfig.OnError == "nack" {
 				c.sendConfiguredACK(conn, hl7Message, "AE", c.ackConfig.TextError)
@@ -567,6 +608,45 @@ func (c *TCPMLLPInboundConnector) handleConnection(conn net.Conn, connID string,
 				c.sendConfiguredACK(conn, hl7Message, "AA", c.ackConfig.TextSuccess)
 			}
 		}
+	}
+}
+
+// awaitDeferredACK holds the reply until the engine reports on the frame, then
+// answers AA (it worked) or AE (it did not, or nothing was heard within the
+// configured wait). The reason an AE is sent is logged, never sent: it can
+// carry internal detail. Returns false when the connector is stopping.
+//
+// Waiting here, in the connection's own goroutine, keeps ACKs in the order the
+// messages arrived and makes a slow engine slow the sender down instead of
+// letting its messages pile up unacknowledged. If the sender gave up and
+// closed the connection, the write below fails and is logged; the message is
+// still processed, and a re-send is a duplicate the receiving side must
+// tolerate (ordinary at-least-once delivery).
+func (c *TCPMLLPInboundConnector) awaitDeferredACK(conn net.Conn, hl7Message, messageID string, p *pendingAck) bool {
+	wait := c.ackConfig.Wait
+	if wait <= 0 {
+		wait = defaultACKWait
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+
+	select {
+	case v, open := <-p.done:
+		if !open {
+			return false // the connector is stopping
+		}
+		if v.OK {
+			c.sendConfiguredACK(conn, hl7Message, "AA", c.ackConfig.TextSuccess)
+		} else {
+			log.Printf("⚠️ TCP/MLLP Inbound: %s not acknowledged AA (%s): %s", messageID, c.ackConfig.Mode, v.Reason)
+			c.sendConfiguredACK(conn, hl7Message, "AE", c.ackConfig.TextError)
+		}
+		return true
+	case <-timer.C:
+		c.tracker().cancel(messageID)
+		log.Printf("⏱️ TCP/MLLP Inbound: no verdict for %s within %s (%s) — answering AE", messageID, wait, c.ackConfig.Mode)
+		c.sendConfiguredACK(conn, hl7Message, "AE", c.ackConfig.TextError)
+		return true
 	}
 }
 
@@ -660,6 +740,10 @@ func getIntFromMap(m map[string]interface{}, key string, defaultVal int) int {
 			return int(n)
 		case int:
 			return n
+		case string: // a form field that was saved as text
+			if i, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
+				return i
+			}
 		}
 	}
 	return defaultVal
@@ -759,7 +843,7 @@ func (c *TCPMLLPInboundConnector) SetMessageParser(mp MessageParser) {
 func (c *TCPMLLPInboundConnector) isHostQueryMessage(hl7Message string) bool {
 	messageType, _ := splitMessageType(c.extractMessageType(hl7Message))
 	for _, t := range c.hostQueryConfig.MessageTypes {
-		if strings.EqualFold(messageType, t) {
+		if (t == "*" && messageType != "" && messageType != "UNKNOWN") || strings.EqualFold(messageType, t) {
 			return true
 		}
 	}
@@ -933,6 +1017,9 @@ func (c *TCPMLLPInboundConnector) Stop() error {
 	c.connectionCount = 0
 	c.connectionMutex.Unlock()
 
+	// Release connections still waiting for an engine verdict.
+	c.tracker().closeAll()
+
 	c.SetState(StateStopped)
 	c.SetConnected(false)
 
@@ -947,41 +1034,25 @@ func (c *TCPMLLPInboundConnector) Close() error {
 	return c.BaseInboundConnector.Close()
 }
 
-// SendValidationResponse implements ValidationAwareConnector interface
+// SendValidationResponse implements ValidationAwareConnector. The engine calls
+// it with its accepted/rejected feedback for every message. In a deferred ack
+// mode it settles the frame's pending acknowledgement; in "immediate" mode the
+// sender already has its AA, so there is nothing to send and nothing to report.
 func (c *TCPMLLPInboundConnector) SendValidationResponse(ctx context.Context, feedback *models.ValidationFeedback) error {
-	c.messageConnsMutex.RLock()
-	connInfo, exists := c.messageConns[feedback.MessageID]
-	c.messageConnsMutex.RUnlock()
-
-	if !exists {
-		return fmt.Errorf("connection not found for message %s", feedback.MessageID)
+	if feedback == nil || !c.ackConfig.isDeferred() {
+		return nil
 	}
+	c.tracker().onFeedback(feedback.MessageID, !feedback.IsRejected(), feedback.GetErrorMessage())
+	return nil
+}
 
-	defer func() {
-		c.messageConnsMutex.Lock()
-		delete(c.messageConns, feedback.MessageID)
-		c.messageConnsMutex.Unlock()
-	}()
-
-	var ackCode string
-	var ackMessage string
-
-	if feedback.IsRejected() {
-		ackCode = "AE"
-		ackMessage = feedback.GetErrorMessage()
-		log.Printf("❌ TCP/MLLP: Sending NACK for %s: %s", feedback.MessageID, ackMessage)
-	} else if feedback.HasWarnings() {
-		ackCode = "AA"
-		ackMessage = "Message accepted with warnings"
-		log.Printf("⚠️  TCP/MLLP: Sending ACK with warnings for %s", feedback.MessageID)
-	} else {
-		ackCode = "AA"
-		ackMessage = "Message accepted"
-		log.Printf("✅ TCP/MLLP: Sending ACK for %s", feedback.MessageID)
+// OnMessageOutcome implements OutcomeAwareConnector: how a message ended, once
+// per message (per part of a split frame). It settles deferred ACKs.
+func (c *TCPMLLPInboundConnector) OnMessageOutcome(outcome models.MessageOutcome) {
+	if !c.ackConfig.isDeferred() {
+		return
 	}
-
-	ack := c.generateACKMessage(connInfo.OriginalMsg, ackCode, ackMessage)
-	return c.sendACK(connInfo.Conn, ack)
+	c.tracker().onOutcome(outcome)
 }
 
 // SupportsValidationFeedback implements ValidationAwareConnector interface

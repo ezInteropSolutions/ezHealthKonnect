@@ -54,6 +54,10 @@ type RequestConfig struct {
 	Timeout     time.Duration
 	RetryCount  int
 	RetryDelay  time.Duration
+	// AcceptStatuses lists non-2xx statuses that are a normal answer rather
+	// than an error (e.g. 404 when "not found" is expected): the response is
+	// returned, not retried.
+	AcceptStatuses []int
 }
 
 // Response contains HTTP response data
@@ -111,14 +115,19 @@ func (h *HTTPClientService) BuildRequest(
 		// Determine how to encode body based on Content-Type
 		if contentType == "application/x-www-form-urlencoded" {
 			// Form-encoded data (for OAuth 2.0)
-			if formData, ok := config.Body.(map[string]string); ok {
+			switch formData := config.Body.(type) {
+			case map[string]string:
 				formValues := url.Values{}
 				for key, value := range formData {
 					formValues.Set(key, value)
 				}
 				bodyReader = strings.NewReader(formValues.Encode())
-			} else {
-				return nil, fmt.Errorf("form-encoded body must be map[string]string")
+			case string:
+				// Already form-encoded ("a=1&b=2"), e.g. a query built by an
+				// earlier step: sent as it is.
+				bodyReader = strings.NewReader(formData)
+			default:
+				return nil, fmt.Errorf("form-encoded body must be map[string]string or an encoded string")
 			}
 		} else if bodyStr, ok := config.Body.(string); ok {
 			// Body is already a pre-serialized string (FHIR JSON, HL7, CSV, etc.)
@@ -222,12 +231,14 @@ func (h *HTTPClientService) AddAuthentication(req *http.Request, auth *AuthConfi
 	return nil
 }
 
-// ExecuteWithRetry executes the HTTP request with retry logic
+// ExecuteWithRetry executes the HTTP request with retry logic. A status in
+// acceptStatuses is returned as a response instead of an error.
 func (h *HTTPClientService) ExecuteWithRetry(
 	ctx context.Context,
 	req *http.Request,
 	retryCount int,
 	retryDelay time.Duration,
+	acceptStatuses ...int,
 ) (*Response, error) {
 	if retryCount < 0 {
 		retryCount = 0
@@ -248,6 +259,16 @@ func (h *HTTPClientService) ExecuteWithRetry(
 				return nil, ctx.Err()
 			case <-time.After(retryDelay):
 			}
+
+			// The previous attempt consumed the body; send it again rather
+			// than an empty one.
+			if req.GetBody != nil {
+				body, err := req.GetBody()
+				if err != nil {
+					return nil, fmt.Errorf("HTTP request body could not be re-read for retry: %w", err)
+				}
+				req.Body = body
+			}
 		}
 
 		// Execute request
@@ -267,7 +288,7 @@ func (h *HTTPClientService) ExecuteWithRetry(
 		}
 
 		// Check status code
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if (resp.StatusCode < 200 || resp.StatusCode >= 300) && !statusAccepted(resp.StatusCode, acceptStatuses) {
 			lastErr = fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(bodyBytes))
 			continue
 		}
@@ -316,7 +337,16 @@ func (h *HTTPClientService) Execute(
 	}
 
 	// Execute with retry
-	return h.ExecuteWithRetry(ctx, req, config.RetryCount, config.RetryDelay)
+	return h.ExecuteWithRetry(ctx, req, config.RetryCount, config.RetryDelay, config.AcceptStatuses...)
+}
+
+func statusAccepted(status int, accepted []int) bool {
+	for _, s := range accepted {
+		if s == status {
+			return true
+		}
+	}
+	return false
 }
 
 // SetTimeout updates the global client timeout

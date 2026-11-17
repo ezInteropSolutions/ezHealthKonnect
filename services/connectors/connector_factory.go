@@ -134,6 +134,16 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	// the ASTM connectors above.
 	f.RegisterInbound("dicom_storage_inbound", NewDICOMStorageInboundConnector)
 
+	// Ordered Webhook Events — CloudEvents pushed by an in-order sender
+	// (e.g. ezIdentitySense). Answers only after each event's pipeline has
+	// finished, and keeps a durable cursor so retries never repeat work.
+	f.RegisterInbound("webhook_events_inbound", NewWebhookEventsInboundConnector)
+
+	// FHIR Subscription — topic-based (HL7 Subscriptions R5 Backport):
+	// subscribes on the server itself, then processes its numbered
+	// notifications in order, filling gaps from $events.
+	f.RegisterInbound("fhir_subscription_inbound", NewFHIRSubscriptionInboundConnector)
+
 	// File System Connectors
 	f.RegisterInbound("file_listener", NewFileListenerConnector)
 	f.RegisterOutbound("file_writer", NewFileWriterConnector)

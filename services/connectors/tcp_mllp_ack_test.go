@@ -58,6 +58,20 @@ func newConnectorOnPort(t *testing.T, port int, extra map[string]interface{}) *T
 	for k, v := range extra {
 		cfg[k] = v
 	}
+	// These tests exercise the wire format with no engine behind the listener,
+	// so they run in "immediate" mode unless a test names a mode itself. The
+	// deferred modes (the production default) are tested in
+	// tcp_mllp_ack_deferred_test.go.
+	ack := map[string]interface{}{}
+	if given, ok := cfg["ack"].(map[string]interface{}); ok {
+		for k, v := range given {
+			ack[k] = v
+		}
+	}
+	if _, ok := ack["mode"]; !ok {
+		ack["mode"] = ACKModeImmediate
+	}
+	cfg["ack"] = ack
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("marshal config: %v", err)
@@ -475,8 +489,8 @@ func TestACK_Script_RuntimeErrorFallsBackToDefault(t *testing.T) {
 func TestACK_Initialize_EmptyAckMapGivesDefaults(t *testing.T) {
 	// TC-GO-025: connector with no ack config gets sensible defaults
 	c := newConnectorOnPort(t, 0, nil) // port 0 = ephemeral, never started
-	if c.ackConfig.Mode != "immediate" {
-		t.Errorf("default Mode expected 'immediate', got %q", c.ackConfig.Mode)
+	if c.ackConfig.Mode != ACKModeImmediate {
+		t.Errorf("test helper pins Mode to 'immediate', got %q", c.ackConfig.Mode)
 	}
 	// Default changed from "suppress" to "nack" (2026-10-19): an AA for a
 	// message that was dropped on a full queue is silent data loss.
@@ -648,14 +662,17 @@ func TestACKIntegration_ScriptRejectsWrongMessageType(t *testing.T) {
 	}
 }
 
-func TestACKIntegration_ModeNoneUpgradedToImmediate(t *testing.T) {
+func TestACKIntegration_ModeNoneUpgradedToDefault(t *testing.T) {
 	// TC-GO-031: mode=none is no longer valid — MLLP requires a response for every message.
-	// Initialize() silently upgrades mode=none to mode=immediate, so the sender always
-	// receives an AA. This test verifies that behavior.
+	// Initialize() replaces it with the listener's default, after_store, so the sender
+	// always receives a reply once the engine has stored the message.
 	port := findFreePort(t)
 	c := newConnectorOnPort(t, port, map[string]interface{}{
 		"ack": map[string]interface{}{"mode": "none"},
 	})
+	if c.ackConfig.Mode != ACKModeAfterStore {
+		t.Fatalf("mode=none should become %q, got %q", ACKModeAfterStore, c.ackConfig.Mode)
+	}
 	msgChan, stop := startConnector(t, c)
 	defer stop()
 
@@ -667,26 +684,20 @@ func TestACKIntegration_ModeNoneUpgradedToImmediate(t *testing.T) {
 
 	conn.Write(buildMLLPFrame(sampleHL7("INT005", "ADT^A01")))
 
-	// ACK must always be sent — mode=none is upgraded to immediate
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	buf := make([]byte, 512)
-	n, err := conn.Read(buf)
-	if err != nil || n == 0 {
-		t.Errorf("expected ACK (mode=none upgraded to immediate), got n=%d err=%v", n, err)
-	}
-	_, msa := parseACKSegments(string(buf[:n]))
-	if len(msa) < 2 || msa[1] != "AA" {
-		t.Errorf("expected AA after mode=none upgrade, got: %v", msa)
-	}
-
-	// Message must also be queued
+	// Message must be queued; the engine then reports it stored.
 	select {
 	case msg := <-msgChan:
 		if msg == nil {
-			t.Error("expected non-nil message")
+			t.Fatal("expected non-nil message")
 		}
+		c.OnMessageOutcome(models.MessageOutcome{MessageID: msg.MessageID, Status: models.OutcomeProcessed})
 	case <-time.After(1 * time.Second):
-		t.Error("message not queued within 1s")
+		t.Fatal("message not queued within 1s")
+	}
+
+	_, msa := parseACKSegments(readMLLPResponse(t, conn))
+	if len(msa) < 2 || msa[1] != "AA" {
+		t.Errorf("expected AA after the engine's verdict, got: %v", msa)
 	}
 }
 

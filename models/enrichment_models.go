@@ -154,6 +154,26 @@ type APIEnrichmentConfig struct {
 	// API endpoint URL (required)
 	Endpoint string `json:"endpoint"`
 
+	// BaseURL, when set, is joined to a relative Endpoint ("/fhir/r4/Patient/{eid}")
+	// so several steps calling one service share one address.
+	BaseURL string `json:"baseUrl,omitempty"`
+
+	// EncodePlaceholders path-escapes each {placeholder} value substituted
+	// into the URL, so a value containing "/", "?", "#" or ".." stays one
+	// path segment. Off by default for compatibility with endpoints that
+	// substitute whole path fragments.
+	EncodePlaceholders bool `json:"encodePlaceholders,omitempty"`
+
+	// AcceptStatuses lists non-2xx statuses treated as a normal answer: the
+	// step succeeds and its output is the response body (e.g. a FHIR
+	// OperationOutcome for 404), for later steps to branch on.
+	AcceptStatuses []int `json:"acceptStatuses,omitempty"`
+
+	// StatusOutputField, when set, adds the response's HTTP status code to
+	// the step output under that name (e.g. "http_status"), so later steps
+	// can tell one accepted status from another.
+	StatusOutputField string `json:"statusOutputField,omitempty"`
+
 	// HTTP method (GET, POST, etc.)
 	Method string `json:"method,omitempty"` // Default: GET
 
@@ -184,6 +204,10 @@ type APIEnrichmentConfig struct {
 	// is used as the entire request body, replacing RequestBody entirely.
 	// Useful when the body is a complex object built by a prior script step.
 	BodyRef string `json:"bodyRef,omitempty"`
+
+	// BodyRefFallbacks are tried in order when BodyRef resolves to nothing
+	// (or an empty string): the first with a value is the body.
+	BodyRefFallbacks []string `json:"bodyRefFallbacks,omitempty"`
 
 	// Field mapping - which field from message to use in API call
 	// Example: "patientId" -> "PID.3" (use patient ID from HL7 message)

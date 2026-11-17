@@ -504,6 +504,9 @@ func (s *HL7FHIRTransformServiceV3) Transform(
 			// Mapping engine may have partially populated telecom; this fills any gaps and
 			// normalizes use/system codes per HL7 table 0201/0202.
 			s.enrichPatientTelecom(r, request.ParsedHL7Data)
+			// mother's maiden name (PID-6) and the message time as the version
+			s.enrichPatientMothersMaidenName(r, request.ParsedHL7Data)
+			s.setPatientLastUpdatedFromMessage(r, request.ParsedHL7Data)
 			// Strip empty extension objects (empty PID fields can create {})
 			if exts, ok := r["extension"].([]interface{}); ok {
 				var validExts []interface{}

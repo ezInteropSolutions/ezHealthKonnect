@@ -275,6 +275,21 @@
                                     </select>
                                 </div>
 
+                                <!-- Processing Order Section (V288) -->
+                                <div class="form-group" style="margin-top: 16px;">
+                                    <label class="form-label" for="editProcessingOrder" style="font-weight:600;color:#374151;font-size:13px;margin-bottom:4px;display:block;">
+                                        Processing Order
+                                    </label>
+                                    <select id="editProcessingOrder" name="processingOrder"
+                                            style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;color:#1f2937;background:#fff;cursor:pointer;">
+                                        <option value="parallel">Parallel — several messages at once, fastest (default)</option>
+                                        <option value="in_order">In order — one message at a time, in the order received</option>
+                                    </select>
+                                    <p style="font-size:0.8rem;color:#6b7280;margin:6px 0 0;">
+                                        Choose <strong>In order</strong> when a later message depends on an earlier one, such as an ADT merge (A40) that must not overtake the registration it merges. Takes effect the next time the interface is started.
+                                    </p>
+                                </div>
+
                                 <!-- Message Family Filter Section -->
                                 <div class="form-group" style="margin-top: 16px;">
                                     <div style="background: linear-gradient(to right, #f0fdf4, #f0f9ff); border-left: 3px solid #34d399; padding: 14px; border-radius: 6px;">
@@ -610,6 +625,12 @@
         const policy = interfaceData.fhir_validation_policy || interfaceData.fhirValidationPolicy || 'proceed';
         const policySelect = document.getElementById('fhirValidationPolicy');
         if (policySelect) policySelect.value = policy;
+
+        // Processing Order (V288) — default: 'parallel'
+        const orderSelect = document.getElementById('editProcessingOrder');
+        if (orderSelect) {
+            orderSelect.value = interfaceData.processing_order || interfaceData.processingOrder || 'parallel';
+        }
 
         // Message Family Filter
         const families = interfaceData.accepted_message_families || interfaceData.acceptedMessageFamilies;

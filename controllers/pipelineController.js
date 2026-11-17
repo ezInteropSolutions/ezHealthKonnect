@@ -9,6 +9,24 @@ const auditService = require('../services/auditService');
 // interface config writers); imported here for step-config saves.
 const { isSensitiveConfigKey, encryptSensitiveConfigFields } = require('../services/credentialCrypto');
 
+// Keys of a client's pipeline_config that carry steps. Steps are saved as
+// transformation_steps rows (with their secrets encrypted); a copy kept in
+// pipeline_config would hold the same configs, credentials included, in
+// plain text. Nothing reads steps from pipeline_config.
+const STEP_CARRYING_KEYS = ['execution_groups', 'steps', 'layers'];
+
+/**
+ * The pipeline-level settings of a submitted pipeline_config (default retry,
+ * default error handling, ...): without step copies, and with any
+ * credential-shaped field encrypted.
+ */
+function pipelineLevelConfig(pipelineConfig) {
+    if (!pipelineConfig || typeof pipelineConfig !== 'object' || Array.isArray(pipelineConfig)) return {};
+    const settings = { ...pipelineConfig };
+    for (const k of STEP_CARRYING_KEYS) delete settings[k];
+    return encryptSensitiveConfigFields(settings);
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 
 // ── Branch-linked step reference resolution ─────────────────────────────────
@@ -373,9 +391,9 @@ exports.savePipeline = async (req, res) => {
         try {
             // 1. Upsert pipeline metadata (including connections and pipeline_config)
             const connections = pipelineData.connections || [];
-            const pipelineConfig = pipelineData.pipeline_config || {};
+            const pipelineConfig = pipelineLevelConfig(pipelineData.pipeline_config);
             console.log(`🔗 Saving ${connections.length} connections to pipeline`);
-            console.log(`⚙️ Saving pipeline_config:`, JSON.stringify(pipelineConfig));
+            console.log(`⚙️ Saving pipeline_config keys: ${Object.keys(pipelineConfig).join(', ') || '(none)'}`);
 
             const pipelineResult = await sequelize.query(`
                 INSERT INTO transformation_pipelines
@@ -632,7 +650,7 @@ exports.savePipeline = async (req, res) => {
                         _embedded_at: new Date().toISOString(),
                         _mapping_version: embeddedMappings.version || 1
                     };
-                    console.log('✅ Step config after embedding:', JSON.stringify(stepConfig).substring(0, 300));
+                    console.log(`✅ Step config after embedding: keys ${Object.keys(stepConfig).join(', ')}`);
                 } else if (isHL7FHIRStep && !embeddedMappings) {
                     console.warn('⚠️ HL7→FHIR step detected but NO mappings to embed!');
                 }
@@ -1206,4 +1224,5 @@ exports.executeCustomStep      = (req, res) => _proxyStepExec(req, res, 'custom'
 // Exported for unit testing only (tests/unit/controllers/pipelineController.credentials.test.js).
 // Not part of the HTTP-facing controller API.
 exports.encryptSensitiveConfigFields = encryptSensitiveConfigFields;
+exports.pipelineLevelConfig = pipelineLevelConfig;
 exports.isSensitiveConfigKey = isSensitiveConfigKey;

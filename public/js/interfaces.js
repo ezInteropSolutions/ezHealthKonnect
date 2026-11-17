@@ -2633,6 +2633,12 @@ async function handleEditInterface(event) {
         interfaceData.fhir_validation_policy = policySelect.value;
     }
 
+    // Processing order (V288)
+    const orderSelect = document.getElementById('editProcessingOrder');
+    if (orderSelect && orderSelect.value) {
+        interfaceData.processing_order = orderSelect.value;
+    }
+
     // Collect accepted message families from chip picker
     const familiesInput = document.getElementById('editAcceptedMessageFamilies');
     if (familiesInput) {

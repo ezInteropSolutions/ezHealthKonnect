@@ -125,3 +125,35 @@ describe('encryptSensitiveConfigFields', () => {
         expect(result.config.token).toBeNull();
     });
 });
+
+// pipeline_config is for pipeline-level settings. A submitted copy of the
+// steps (the Use Template flow sent the whole scaffold) used to be stored
+// there in plain text, secrets included.
+describe('pipelineLevelConfig', () => {
+    const { pipelineLevelConfig } = require('../../../controllers/pipelineController');
+    const ORIGINAL_ENV = process.env.APP_CREDENTIAL_KEY;
+    afterEach(() => { process.env.APP_CREDENTIAL_KEY = ORIGINAL_ENV; });
+
+    it('drops step copies and keeps the settings', () => {
+        process.env.APP_CREDENTIAL_KEY = TEST_KEY;
+        const out = pipelineLevelConfig({
+            defaultRetry: { enabled: true, maxRetries: 3 },
+            defaultErrorHandling: { enabled: false },
+            execution_groups: [{ steps: [{ config: { oauth2ClientSecret: 'synthetic-secret' } }] }],
+            steps: [{ config: { password: 'x' } }],
+            layers: { pre: [] },
+        });
+        expect(out).toEqual({ defaultRetry: { enabled: true, maxRetries: 3 }, defaultErrorHandling: { enabled: false } });
+        expect(JSON.stringify(out)).not.toContain('synthetic-secret');
+    });
+
+    it('encrypts a credential-shaped setting', () => {
+        process.env.APP_CREDENTIAL_KEY = TEST_KEY;
+        const out = pipelineLevelConfig({ notify: { webhookToken: 'synthetic-token' } });
+        expect(out.notify.webhookToken).toMatch(/^ENC:v1:/);
+    });
+
+    it('anything that is not an object becomes empty settings', () => {
+        for (const v of [undefined, null, 'x', [1]]) expect(pipelineLevelConfig(v)).toEqual({});
+    });
+});

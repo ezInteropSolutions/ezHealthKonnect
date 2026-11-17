@@ -2,7 +2,9 @@ package validator
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 
 	"ezhealthkonnect/hl7"
 )
@@ -40,8 +42,13 @@ func validateTableBindings(schema *hl7.RealHL7Schema, msg *hl7.EnhancedParsedMes
 				if !ok {
 					continue
 				}
-				if e := checkTableBinding(segName, f.Key, "", fieldDef.TableId, fieldDef.Values, f.Value, f.HasValue, sev); e != nil {
-					errs = append(errs, *e)
+				// A coded field with components (CE, CWE, CNE, ...) is bound
+				// by its code, the first component, in each repetition.
+				for _, code := range tableCodes(f.Value, len(fieldDef.Components) > 0) {
+					if e := checkTableBinding(segName, f.Key, "", fieldDef.TableId, fieldDef.Values, code, f.HasValue, sev); e != nil {
+						errs = append(errs, *e)
+						break
+					}
 				}
 				for _, sf := range f.Subfields {
 					compDef, ok := fieldDef.Components[sf.Key]
@@ -60,6 +67,27 @@ func validateTableBindings(schema *hl7.RealHL7Schema, msg *hl7.EnhancedParsedMes
 	return errs
 }
 
+// tableCodes splits a field's encoded value into the codes a table binds:
+// one per repetition, and only the first component of a composite field.
+func tableCodes(value string, composite bool) []string {
+	reps := strings.Split(value, "~")
+	if !composite {
+		return reps
+	}
+	codes := make([]string, len(reps))
+	for i, r := range reps {
+		codes[i], _, _ = strings.Cut(r, "^")
+	}
+	return codes
+}
+
+// tableCodePatterns are codes a table defines by pattern rather than by
+// listing them. Table 0396 (coding system) has "HL7nnnn" for any HL7 table
+// and "99zzz" for a local coding system.
+var tableCodePatterns = map[string]*regexp.Regexp{
+	"0396": regexp.MustCompile(`^(HL7\d{4}|99[A-Za-z0-9]{3})$`),
+}
+
 // checkTableBinding reports value when tableId names a table with a known,
 // non-empty code set and value isn't one of its keys. A TableId with an
 // empty Values map is a confirmed-legitimate user-defined table (e.g. HL7
@@ -70,6 +98,9 @@ func checkTableBinding(segment, fieldKey, componentKey, tableId string, values m
 		return nil
 	}
 	if _, ok := values[value]; ok {
+		return nil
+	}
+	if p := tableCodePatterns[tableId]; p != nil && p.MatchString(value) {
 		return nil
 	}
 	key := fieldKey

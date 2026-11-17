@@ -807,6 +807,16 @@ class ToolboxManager {
                 isSystem: true,
                 defaultConfig: { version: '2.5.1', outputField: 'hl7Message' }
             }),
+            new StepTemplate({
+                id: 'hl7-query-parse',
+                name: 'HL7 Query Reader',
+                type: 'hl7.query_parse',
+                description: 'Read an HL7 v2 query (QBP/QCN): its tag, identifiers, domains and search parameters, for an API lookup and the reply',
+                layer: 'core',
+                icon: this.getIconForType('hl7.query_parse'),
+                isSystem: true,
+                defaultConfig: { tagField: 'QPD.2', parametersField: 'QPD.3', parameters: [] }
+            }),
 
             // ============================================
             // GENERAL PURPOSE STEPS
@@ -1173,6 +1183,7 @@ class ToolboxManager {
             // ============================================
             'fhir.build': 'fas fa-cubes',
             'hl7.build': 'fas fa-stream',
+            'hl7.query_parse': 'fas fa-search',
 
             // ============================================
             // GENERAL PURPOSE

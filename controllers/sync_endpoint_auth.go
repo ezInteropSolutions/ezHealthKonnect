@@ -8,10 +8,10 @@
 // credentials, configured by the integration engineer on the interface:
 //
 //	interfaces.source_config.endpoint_auth = {
-//	    "authentication_type": "api_key" | "basic_auth" | "bearer_token",
+//	    "authentication_type": "api_key" | "basic_auth" | "bearer_token" | "standard_webhooks",
 //	    "api_key_header": "X-API-Key", "api_key": "...",
 //	    "username": "...", "password": "...",
-//	    "bearer_token": "..."
+//	    "bearer_token": "...", "webhook_secret": "whsec_..."
 //	}
 //
 // Secrets are encrypted at rest by the interface save path (key-name based,
@@ -30,10 +30,12 @@
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -47,6 +49,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+// syncEndpointMaxSignedBody bounds the body read to check a standard_webhooks
+// signature on a partner endpoint.
+const syncEndpointMaxSignedBody = 10 << 20
 
 // EndpointAuthConfigSource returns an interface's decrypted endpoint_auth
 // config. found=false means the interface does not exist (or is deleted);
@@ -165,7 +171,18 @@ func (a *SyncEndpointAuth) Middleware() gin.HandlerFunc {
 			return
 		}
 
-		if !authenticator.Authenticate(c.Request) {
+		var body []byte
+		if authenticator.RequiresBody() {
+			// Signed bodies: read (bounded) and put back for the handler.
+			read, readErr := io.ReadAll(io.LimitReader(c.Request.Body, syncEndpointMaxSignedBody+1))
+			if readErr != nil || len(read) > syncEndpointMaxSignedBody {
+				a.reject(c, interfaceID, "signed body unreadable or too large", http.StatusUnauthorized, "authentication failed")
+				return
+			}
+			body = read
+			c.Request.Body = io.NopCloser(bytes.NewReader(read))
+		}
+		if !authenticator.AuthenticateRequest(c.Request, body) {
 			reason := "credentials did not match (" + authenticator.Type() + ")"
 			if a.limiter != nil && a.limiter.RecordFailure(lockKey) {
 				reason += "; client now locked out"

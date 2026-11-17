@@ -5,7 +5,6 @@ import (
 	"log"
 	"strings"
 
-	"ezhealthkonnect/hl7"
 	"ezhealthkonnect/services/hl7assembly"
 	"ezhealthkonnect/services/hl7type"
 )
@@ -66,8 +65,15 @@ func (s *HL7FHIRTransformServiceV3) transformValueAtomic(
 		}
 		return idMap, nil
 	case "xpn_to_humanname":
+		// Every repetition is a name (legal, maiden, alias...), not just the first.
+		if strings.Contains(hl7Value, "~") {
+			return oneOrMany(hl7assembly.BuildHumanNamesFromXPN(hl7Value, mapping.TransformationRules)), nil
+		}
 		return s.transformXPNToHumanName(hl7Value, mapping.TransformationRules), nil
 	case "xad_to_address":
+		if strings.Contains(hl7Value, "~") {
+			return oneOrMany(hl7assembly.BuildAddressesFromXAD(hl7Value, mapping.TransformationRules)), nil
+		}
 		return s.transformXADToAddress(hl7Value, mapping.TransformationRules), nil
 	case "email_to_contactpoint":
 		return s.transformEmailToContactPoint(hl7Value, mapping.TransformationRules), nil
@@ -306,138 +312,25 @@ func (s *HL7FHIRTransformServiceV3) transformGender(gender string) string {
 	}
 }
 
+// transformPhoneToContactPointEnhanced converts an XTN field to FHIR
+// ContactPoint(s): one per repetition ("~"), each read as one telephone
+// number or address from its components (hl7assembly.BuildContactPointFromXTN).
+// It used to create one ContactPoint per COMPONENT, so a single number such
+// as "^PRN^PH^^1^555^0100999" became seven "phone numbers" ("PRN", "PH",
+// "1", "555", ...), with a use looked up by component position.
 func (s *HL7FHIRTransformServiceV3) transformPhoneToContactPointEnhanced(phone string, rules map[string]interface{}) interface{} {
-	if phone == "" {
+	if strings.TrimSpace(phone) == "" {
 		return nil
 	}
-
-	// Handle composite XTN fields like "(407)939-1289^^^theMainMouse@disney.com"
-	if strings.Contains(phone, "^") {
-		return s.processXTNField(phone, rules)
+	cps := hl7assembly.BuildContactPointsFromXTN(phone, rules)
+	switch len(cps) {
+	case 0:
+		return nil
+	case 1:
+		return cps[0]
+	default:
+		return cps
 	}
-
-	return s.createSimpleContactPoint(phone, rules)
-}
-
-func (s *HL7FHIRTransformServiceV3) processXTNField(phone string, rules map[string]interface{}) interface{} {
-	var contactPoints []map[string]interface{}
-
-	// Use HL7 parser for proper composite field handling
-	enhancedFieldData := hl7.ParseHL7Field(phone)
-	if enhancedFieldData == nil || len(enhancedFieldData.Repetitions) == 0 {
-		// Fallback: simple split parsing
-		components := strings.Split(phone, "^")
-		for i, component := range components {
-			component = strings.TrimSpace(component)
-			if component == "" {
-				continue
-			}
-
-			contactPoint := s.createContactPointFromComponent(component, i+1, rules)
-			if contactPoint != nil {
-				contactPoints = append(contactPoints, contactPoint)
-			}
-		}
-	} else {
-		// Enhanced parsing
-		for _, repetition := range enhancedFieldData.Repetitions {
-			for compIndex, component := range repetition.Components {
-				value := strings.TrimSpace(component.RawValue)
-				if value == "" {
-					continue
-				}
-
-				contactPoint := s.createContactPointFromComponent(value, compIndex+1, rules)
-				if contactPoint != nil {
-					contactPoints = append(contactPoints, contactPoint)
-				}
-			}
-		}
-	}
-
-	if len(contactPoints) == 1 {
-		return contactPoints[0]
-	}
-	return contactPoints
-}
-
-func (s *HL7FHIRTransformServiceV3) createContactPointFromComponent(value string, componentNum int, rules map[string]interface{}) map[string]interface{} {
-	var contactPoint map[string]interface{}
-
-	if strings.Contains(value, "@") {
-		// Email
-		contactPoint = map[string]interface{}{
-			"system": "email",
-			"use":    "home", // Default, can be overridden by rules
-			"value":  value,
-		}
-	} else {
-		// Phone
-		contactPoint = map[string]interface{}{
-			"system": "phone",
-			"use":    "home", // Default, can be overridden by rules or database mapping
-			"value":  value,
-		}
-
-		// ✅ DATABASE-DRIVEN: Look up phone use mapping based on component position
-		if s.db != nil {
-			phoneUse := s.lookupPhoneUseFromDatabase(componentNum)
-			if phoneUse != "" {
-				contactPoint["use"] = phoneUse
-			}
-		}
-	}
-
-	// Apply transformation rules if provided (these come from database)
-	if rules != nil {
-		if system, ok := rules["system"].(string); ok {
-			contactPoint["system"] = system
-		}
-		if use, ok := rules["use"].(string); ok {
-			contactPoint["use"] = use
-		}
-	}
-
-	return contactPoint
-}
-
-// ✅ DATABASE-DRIVEN: Look up phone use based on HL7 XTN component position
-func (s *HL7FHIRTransformServiceV3) lookupPhoneUseFromDatabase(componentNum int) string {
-	query := `
-		SELECT fhir_code
-		FROM value_set_mappings
-		WHERE mapping_name = 'xtn_component_use' AND hl7_value = $1
-		LIMIT 1
-	`
-
-	var use string
-	err := s.db.QueryRow(query, fmt.Sprintf("%d", componentNum)).Scan(&use)
-	if err != nil {
-		log.Printf("🔍 No XTN component use mapping found for component %d", componentNum)
-		return ""
-	}
-
-	log.Printf("✅ XTN component mapping: component %d → use '%s'", componentNum, use)
-	return use
-}
-
-func (s *HL7FHIRTransformServiceV3) createSimpleContactPoint(phone string, rules map[string]interface{}) map[string]interface{} {
-	contactPoint := map[string]interface{}{
-		"system": "phone",
-		"use":    "home",
-		"value":  phone,
-	}
-
-	if rules != nil {
-		if system, ok := rules["system"].(string); ok {
-			contactPoint["system"] = system
-		}
-		if use, ok := rules["use"].(string); ok {
-			contactPoint["use"] = use
-		}
-	}
-
-	return contactPoint
 }
 
 // contactPointToAnnotationText serialises a ContactPoint (or slice thereof) to a
@@ -740,25 +633,19 @@ func normalizeAddressUse(raw string) string {
 
 // normalizeNameUse maps HL7 v2 table 0200 name type codes to FHIR NameUse.
 func normalizeNameUse(raw string) string {
-	switch strings.ToUpper(strings.TrimSpace(raw)) {
-	case "L", "LEGAL":
-		return "official"
-	case "D", "U", "USUAL", "PREFERRED":
-		return "usual"
-	case "A", "ALIAS":
-		return "usual"
-	case "N", "NICKNAME", "NICK":
-		return "nickname"
-	case "M", "MAIDEN", "NAME AT BIRTH":
-		return "maiden"
-	case "TEMP", "TEMPORARY", "T":
-		return "temp"
-	case "S", "P", "ANON", "ANONYMOUS":
-		return "anonymous"
-	case "OLD", "PREVIOUS", "PRIOR":
-		return "old"
+	return hl7assembly.NameUseFromCode(raw)
+}
+
+// oneOrMany returns nil for none, the element for one, the slice for more —
+// the shape the mapping engine already takes from cx_to_identifier.
+func oneOrMany(items []map[string]interface{}) interface{} {
+	switch len(items) {
+	case 0:
+		return nil
+	case 1:
+		return items[0]
 	default:
-		return "usual" // safest default for unrecognised codes
+		return items
 	}
 }
 

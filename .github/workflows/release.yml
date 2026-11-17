@@ -20,7 +20,7 @@ on:
         default: 'v0.0.0-test'
 
 env:
-  GO_VERSION: '1.26.10'
+  GO_VERSION: '1.26.11'
   NODE_VERSION: '22'
 
 jobs:

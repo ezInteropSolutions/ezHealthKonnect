@@ -65,6 +65,12 @@ type ProcessingEngine struct {
 	familyFilter   map[string][]string
 	familyFilterMu sync.RWMutex
 
+	// Per-interface processing order and message-outcome subscribers
+	// (engine_ordering.go). Populated at interface activation.
+	inOrderInterfaces map[string]bool
+	outcomeConnectors map[string][]OutcomeAwareConnector
+	orderingMu        sync.RWMutex
+
 	// activationWarnings holds the most recent ActivateInterface call's
 	// non-fatal connector-start problems (e.g. a connector.inbound step
 	// whose required config field was left empty) for each interface.
@@ -131,6 +137,8 @@ func NewProcessingEngine(db *sql.DB, credStore *services.CredentialStore) *Proce
 		activeConnectors: make(map[string]InputConnector),
 		messageChan:      make(map[string]chan *models.InboundMessage),
 		familyFilter:     make(map[string][]string),
+		inOrderInterfaces: make(map[string]bool),
+		outcomeConnectors: make(map[string][]OutcomeAwareConnector),
 		activationWarnings: make(map[string][]string),
 		stats: &EngineStats{
 			StartTime:             time.Now(),
@@ -438,15 +446,22 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 	var name string
 	var transformationMappingJSON sql.NullString
 	var familyFilterJSON sql.NullString
+	var processingOrder sql.NullString
 	err := pe.db.QueryRow(`
 		SELECT name, transformation_mapping,
-		       accepted_message_families::text
+		       accepted_message_families::text,
+		       processing_order
 		FROM interfaces
 		WHERE id = $1
-	`, interfaceID).Scan(&name, &transformationMappingJSON, &familyFilterJSON)
+	`, interfaceID).Scan(&name, &transformationMappingJSON, &familyFilterJSON, &processingOrder)
 	if err != nil {
 		return fmt.Errorf("interface not found: %v", err)
 	}
+
+	// Size the worker pool for the interface's processing order before any
+	// connector starts emitting messages into it.
+	pe.forgetInterfaceOrdering(interfaceID) // a fresh activation re-registers its connectors
+	pe.applyProcessingOrder(interfaceID, normalizeProcessingOrder(processingOrder))
 
 	// Cache the family filter for this interface.
 	pe.familyFilterMu.Lock()
@@ -523,6 +538,19 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 			}
 			innerConfig["interface_id"] = interfaceID
 
+			// Step configs store secret fields encrypted at rest (the pipeline
+			// and interface editors encrypt them as ENC:v1: strings); decrypt
+			// before the connector sees them, as the legacy path below always
+			// has. Without this, an inbound connector's password, token or
+			// signing secret reached it still encrypted.
+			if decrypted, decErr := pe.credStore.DecryptConfigFields(innerConfig); decErr != nil {
+				log.Printf("⚠️  [CredentialStore] Failed to decrypt connector config for step '%s': %v", step.stepName, decErr)
+				stepWarnings = append(stepWarnings, fmt.Sprintf("%s: stored credentials could not be decrypted", step.stepName))
+				continue
+			} else {
+				innerConfig = decrypted
+			}
+
 			// PHI safety: file_listener connectors never fail Start() on a directory
 			// overlap (Glob/Walk just silently sees whatever's in the directory), so
 			// this has to be a proactive pre-check rather than a reactive Start()-error
@@ -587,6 +615,12 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 
 			if vc, ok := connector.(ValidationAwareConnector); ok {
 				pe.RegisterValidationConnector(interfaceID, vc)
+			}
+			if oc, ok := connector.(OutcomeAwareConnector); ok {
+				pe.registerOutcomeConnector(interfaceID, oc)
+			}
+			if cc, ok := connector.(CursorAwareConnector); ok && pe.db != nil {
+				cc.SetCursorStore(NewPostgresCursorStore(pe.db))
 			}
 
 			if pipelineAware, ok := connector.(PipelineAwareConnector); ok {
@@ -730,6 +764,12 @@ func (pe *ProcessingEngine) ActivateInterface(interfaceID string, actorUserID ..
 		if validationConnector, ok := connector.(ValidationAwareConnector); ok {
 			pe.RegisterValidationConnector(interfaceID, validationConnector)
 		}
+		if oc, ok := connector.(OutcomeAwareConnector); ok {
+			pe.registerOutcomeConnector(interfaceID, oc)
+		}
+		if cc, ok := connector.(CursorAwareConnector); ok && pe.db != nil {
+			cc.SetCursorStore(NewPostgresCursorStore(pe.db))
+		}
 
 		if pipelineAware, ok := connector.(PipelineAwareConnector); ok {
 			pipelineAware.SetPipelineExecutor(pe.transformationService)
@@ -870,6 +910,8 @@ func (pe *ProcessingEngine) DeactivateInterface(interfaceID string, actorUserID 
 			delete(pe.messageChan, key)
 		}
 	}
+
+	pe.forgetInterfaceOrdering(interfaceID)
 
 	// Remove from active tracking
 	delete(pe.activeInterfaces, interfaceID)
@@ -1617,6 +1659,7 @@ func (pe *ProcessingEngine) recoverUnprocessedMessages(ctx context.Context) {
 			FROM %s
 			WHERE status IN ('received', 'processing')
 			  AND received_at < $1
+			ORDER BY received_at, message_id
 		`, table)
 
 		msgRows, queryErr := pe.db.QueryContext(ctx, query, cutoff)

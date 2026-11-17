@@ -224,6 +224,7 @@ class InterfacesController {
                     i.log_retention_days,
                     i.retain_error_logs_forever,
                     i.fhir_validation_policy,
+                    i.processing_order,
                     i.accepted_message_families,
                     i.dlq_config,
                     i.cda_coverage_audit_config,
@@ -301,6 +302,10 @@ class InterfacesController {
                 // FHIR Validation Policy (V66)
                 fhir_validation_policy: item.fhir_validation_policy || 'proceed',
                 fhirValidationPolicy: item.fhir_validation_policy || 'proceed',
+
+                // Processing order (V288): parallel | in_order
+                processing_order: item.processing_order || 'parallel',
+                processingOrder: item.processing_order || 'parallel',
 
                 // Recovery Queue (DLQ) config (V141)
                 dlq_config: this.parseJsonField(item.dlq_config) || {
@@ -462,6 +467,7 @@ class InterfacesController {
                 targetConnectivity,
                 messageType,
                 acceptedMessageFamilies, // array e.g. ["ADT","ORU"] or null = accept all
+                processing_order,        // V288: 'parallel' (default) | 'in_order'
                 sourceConfig,
                 targetConfig,
                 processingRules,
@@ -545,6 +551,10 @@ class InterfacesController {
             replacements.acceptedMessageFamilies = Array.isArray(acceptedMessageFamilies) && acceptedMessageFamilies.length > 0
                 ? JSON.stringify(acceptedMessageFamilies)
                 : null;
+            if (processing_order !== undefined && processing_order !== null && !['parallel', 'in_order'].includes(processing_order)) {
+                return res.status(400).json({ success: false, error: "processing_order must be 'parallel' or 'in_order'" });
+            }
+            replacements.processingOrder = processing_order || 'parallel';
 
             const newInterfaces = await this.database.sequelize.query(`
                 INSERT INTO interfaces (
@@ -556,6 +566,7 @@ class InterfacesController {
                     deployment_mode, auto_start, deployment_delay_seconds,
                     deployment_status,
                     accepted_message_families,
+                    processing_order,
                     status, created_by, updated_by, created_at, updated_at, is_active
                 ) VALUES (
                     :userId, :name, :description,
@@ -566,6 +577,7 @@ class InterfacesController {
                     :deploymentMode, :autoStart, :deploymentDelay,
                     'not_deployed',
                     :acceptedMessageFamilies::jsonb,
+                    :processingOrder,
                     'inactive', :userId, :userId, NOW(), NOW(), true
                 ) RETURNING *
             `, {
@@ -704,6 +716,7 @@ class InterfacesController {
                     i.total_processed, i.successful_processed, i.failed_processed,
                     i.last_processed_at, i.created_at, i.updated_at, i.version,
                     i.fhir_validation_policy,
+                    i.processing_order,
                     i.dlq_config,
                     i.cda_coverage_audit_config,
                     i.error_threshold,
@@ -783,6 +796,10 @@ class InterfacesController {
                 // FHIR Validation Policy (V66)
                 fhir_validation_policy: item.fhir_validation_policy || 'proceed',
                 fhirValidationPolicy: item.fhir_validation_policy || 'proceed',
+
+                // Processing order (V288): parallel | in_order
+                processing_order: item.processing_order || 'parallel',
+                processingOrder: item.processing_order || 'parallel',
 
                 // Recovery Queue (DLQ) config (V141)
                 dlq_config: this.parseJsonField(item.dlq_config) || {
@@ -1420,6 +1437,9 @@ class InterfacesController {
                 // FHIR Validation Policy (V66)
                 fhirValidationPolicy,
                 fhir_validation_policy,
+                // Processing order (V288)
+                processingOrder,
+                processing_order,
                 // Partner-endpoint credentials (source_config.endpoint_auth):
                 // undefined = leave unchanged, null = remove, object = set.
                 endpointAuth
@@ -1635,6 +1655,17 @@ class InterfacesController {
                 ? null
                 : (validPolicies.includes(rawPolicy) ? rawPolicy : 'proceed');
 
+            // Processing order (V288) — undefined preserves the stored value;
+            // anything but the two known orders is refused rather than guessed.
+            const rawOrder = processing_order !== undefined ? processing_order : processingOrder;
+            if (rawOrder !== undefined && rawOrder !== null && !['parallel', 'in_order'].includes(rawOrder)) {
+                return res.status(400).json({
+                    success: false,
+                    error: "processing_order must be 'parallel' or 'in_order'"
+                });
+            }
+            replacements.processing_order = rawOrder === undefined ? null : rawOrder;
+
             console.log('📊 OOB Update - JSONB fields prepared:', {
                 sourceConnectivity: replacements.sourceConnectivity?.substring(0, 150),
                 targetConnectivity: replacements.targetConnectivity?.substring(0, 150)
@@ -1676,6 +1707,7 @@ class InterfacesController {
                     log_retention_days = COALESCE(:log_retention_days, log_retention_days),
                     retain_error_logs_forever = COALESCE(:retain_error_logs_forever, retain_error_logs_forever),
                     fhir_validation_policy = COALESCE(:fhir_validation_policy, fhir_validation_policy),
+                    processing_order = COALESCE(:processing_order, processing_order),
                     accepted_message_families = COALESCE(:acceptedMessageFamilies::jsonb, accepted_message_families),
                     error_threshold = COALESCE(:error_threshold, error_threshold),
                     dlq_config = COALESCE(:dlq_config::jsonb, dlq_config),

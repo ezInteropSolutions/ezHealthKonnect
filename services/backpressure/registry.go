@@ -62,6 +62,27 @@ func (r *Registry) GetOrCreateWith(interfaceID string, maxWorkers, maxQueue int)
 	return p
 }
 
+// Resize makes interfaceID's pool run maxWorkers jobs at once (0 or less
+// means the registry default). An existing pool of a different size is
+// replaced, and the old one drains its already-queued jobs in the
+// background; an existing pool of the right size is kept.
+func (r *Registry) Resize(interfaceID string, maxWorkers int) {
+	r.mu.Lock()
+	if maxWorkers <= 0 {
+		maxWorkers = r.defaultMaxWorkers
+	}
+	old, ok := r.pools[interfaceID]
+	if ok && old.MaxWorkers() == maxWorkers {
+		r.mu.Unlock()
+		return
+	}
+	r.pools[interfaceID] = NewWorkerPool(interfaceID, maxWorkers, r.defaultMaxQueue)
+	r.mu.Unlock()
+	if ok {
+		go old.Shutdown()
+	}
+}
+
 // QueueDepths returns a snapshot of {interfaceID: {queue_depth, active_workers, max_workers, max_queue}}.
 func (r *Registry) QueueDepths() map[string]map[string]int {
 	r.mu.RLock()

@@ -12,11 +12,17 @@
 // Extracted from http_rest_inbound.go's original checkAuth so both use the
 // same constant-time comparisons and the same config vocabulary:
 //
-//	authentication_type  "none" | "api_key" | "basic_auth" | "bearer_token"
+//	authentication_type  "none" | "api_key" | "basic_auth" | "bearer_token" | "standard_webhooks"
 //	api_key_header       header the caller sends the key in (default "X-API-Key")
 //	api_key              expected API key            (api_key)
 //	username / password  expected Basic credentials  (basic_auth)
 //	bearer_token         expected bearer token       (bearer_token)
+//	webhook_secret       "whsec_..." signing secret  (standard_webhooks)
+//	webhook_tolerance_seconds  accepted signing-time skew (standard_webhooks, default 300)
+//
+// standard_webhooks signs the request body (standard_webhooks.go), so it is
+// checked with AuthenticateRequest, which is given the body; Authenticate,
+// which only sees headers, refuses it.
 package connectors
 
 import (
@@ -24,6 +30,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Inbound authentication types.
@@ -32,6 +39,7 @@ const (
 	InboundAuthAPIKey      = "api_key"
 	InboundAuthBasic       = "basic_auth"
 	InboundAuthBearerToken = "bearer_token"
+	InboundAuthStandardWebhooks = "standard_webhooks"
 
 	defaultAPIKeyHeader = "X-API-Key"
 )
@@ -44,6 +52,10 @@ type InboundAuthenticator struct {
 	username     string
 	password     string
 	bearerToken  string
+
+	webhookSecret    string
+	webhookTolerance time.Duration
+	webhook          *standardWebhookVerifier // set when the secret parses
 }
 
 // NewInboundAuthenticator parses an authenticator from a config map using the
@@ -64,6 +76,10 @@ func NewInboundAuthenticator(cfg map[string]interface{}, defaultType string) (*I
 		username:     get("username"),
 		password:     get("password"),
 		bearerToken:  get("bearer_token"),
+		webhookSecret: get("webhook_secret"),
+	}
+	if secs, ok := cfg["webhook_tolerance_seconds"].(float64); ok && secs > 0 {
+		a.webhookTolerance = time.Duration(secs) * time.Second
 	}
 	if v := strings.TrimSpace(get("authentication_type")); v != "" {
 		a.authType = v
@@ -73,8 +89,14 @@ func NewInboundAuthenticator(cfg map[string]interface{}, defaultType string) (*I
 	}
 	switch a.authType {
 	case InboundAuthNone, InboundAuthAPIKey, InboundAuthBasic, InboundAuthBearerToken:
+	case InboundAuthStandardWebhooks:
+		// A bad or missing secret is reported by Validate; until then the
+		// verifier stays nil and every request is refused.
+		if v, err := newStandardWebhookVerifier(a.webhookSecret, a.webhookTolerance); err == nil {
+			a.webhook = v
+		}
 	default:
-		return nil, fmt.Errorf("authentication_type must be 'none', 'api_key', 'basic_auth', or 'bearer_token', got %q", a.authType)
+		return nil, fmt.Errorf("authentication_type must be 'none', 'api_key', 'basic_auth', 'bearer_token', or 'standard_webhooks', got %q", a.authType)
 	}
 	return a, nil
 }
@@ -97,8 +119,27 @@ func (a *InboundAuthenticator) Validate() error {
 		if a.bearerToken == "" {
 			return fmt.Errorf("bearer_token is required when authentication_type is 'bearer_token'")
 		}
+	case InboundAuthStandardWebhooks:
+		if _, err := parseStandardWebhookSecret(a.webhookSecret); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// RequiresBody reports whether the configured type authenticates the request
+// body, so callers must read it before calling AuthenticateRequest.
+func (a *InboundAuthenticator) RequiresBody() bool {
+	return a.authType == InboundAuthStandardWebhooks
+}
+
+// AuthenticateRequest is Authenticate for callers that have read the body:
+// it also checks body signatures.
+func (a *InboundAuthenticator) AuthenticateRequest(r *http.Request, body []byte) bool {
+	if a.authType == InboundAuthStandardWebhooks {
+		return a.webhook != nil && a.webhook.Verify(r.Header, body) == nil
+	}
+	return a.Authenticate(r)
 }
 
 // Authenticate reports whether r carries the configured credentials. An empty
@@ -125,6 +166,8 @@ func (a *InboundAuthenticator) Authenticate(r *http.Request) bool {
 			return false
 		}
 		return secretEquals(auth[len("Bearer "):], a.bearerToken)
+	case InboundAuthStandardWebhooks:
+		return false // signed bodies need AuthenticateRequest
 	default:
 		return false
 	}

@@ -26,6 +26,7 @@ import (
 const (
 	fieldSeparator        = "|"
 	componentSeparator    = "^"
+	repetitionSeparator   = "~"
 	subcomponentSeparator = "&"
 
 	// defaultSegmentTerminator is the HL7 v2 spec's own segment terminator
@@ -53,6 +54,7 @@ type BuildOptions struct {
 type MSHConfig struct {
 	MessageType          string // MSH.9.1, e.g. "ADT"
 	TriggerEvent         string // MSH.9.2, e.g. "A01"
+	MessageStructure     string // MSH.9.3, e.g. "ADT_A05" (omitted when empty)
 	Version              string // MSH.12, e.g. "2.5.1"
 	SendingApplication   string // MSH.3, default "ezHealthKonnect" (mirrors ACKConfig's own default)
 	SendingFacility      string // MSH.4, default "EHK" (mirrors ACKConfig's own default)
@@ -61,6 +63,10 @@ type MSHConfig struct {
 	ProcessingID         string // MSH.11, default "P"
 	ControlID            string // MSH.10, auto-generated when empty
 	Timestamp            string // MSH.7, auto-generated (current time) when empty
+	// Fields overrides or adds MSH fields by number (3 and up), each value
+	// already encoded as one field (components joined by "^"), e.g.
+	// {3: "PDQ_SUPPLIER", 21: "ITI-21^IHE"}. MSH.1 and MSH.2 are fixed.
+	Fields map[int]string
 }
 
 // FieldTree holds one field/component/subcomponent value tree within a
@@ -71,6 +77,22 @@ type MSHConfig struct {
 type FieldTree struct {
 	Scalar string
 	Subs   map[int]*FieldTree
+	// Repeats holds a field's 2nd, 3rd, ... repetitions (only ever set on a
+	// field's top-level tree), rendered after the first, each preceded by the
+	// repetition separator.
+	Repeats []*FieldTree
+}
+
+// renderField renders a field's first repetition and then any further ones.
+func (t *FieldTree) renderField() string {
+	if t == nil {
+		return ""
+	}
+	out := t.render(0)
+	for _, r := range t.Repeats {
+		out += repetitionSeparator + r.render(0)
+	}
+	return out
 }
 
 func (t *FieldTree) render(depth int) string {
@@ -115,10 +137,28 @@ func (t *FieldTree) set(positions []int, value string) {
 }
 
 // Segment holds one segment instance's field values, keyed by 1-based field
-// number.
+// number. A segment with Raw set renders as that text instead (see
+// NewRawSegment).
 type Segment struct {
 	Name   string
 	Fields map[int]*FieldTree
+	Raw    string
+}
+
+// NewRawSegment wraps one already-encoded segment line (e.g. a received
+// QPD to be echoed back) so it can be placed among built segments. Only the
+// first line is kept, so the text can't inject further segments; the
+// segment name is the text before the first field separator. Returns nil
+// for text that isn't a segment ("XYZ|..." with a 2-4 character name).
+func NewRawSegment(raw string) *Segment {
+	if i := strings.IndexAny(raw, "\r\n"); i >= 0 {
+		raw = raw[:i]
+	}
+	name, _, found := strings.Cut(raw, fieldSeparator)
+	if !found || len(name) < 2 || len(name) > 4 || strings.ToUpper(name) != name {
+		return nil
+	}
+	return &Segment{Name: name, Fields: map[int]*FieldTree{}, Raw: raw}
 }
 
 // NewSegment constructs an empty segment builder for name (e.g. "PID").
@@ -134,41 +174,110 @@ func NewSegment(name string) *Segment {
 // pasted into the wrong segment's block fails loudly instead of silently
 // writing to the wrong position.
 func (s *Segment) Set(fieldKey string, value string) error {
-	prefix := s.Name + "."
-	if !strings.HasPrefix(fieldKey, prefix) {
-		return fmt.Errorf("hl7/builder: field key %q does not belong to segment %q", fieldKey, s.Name)
-	}
-	rel := strings.TrimPrefix(fieldKey, prefix)
-	parts := strings.Split(rel, ".")
-	if len(parts) == 0 || parts[0] == "" {
-		return fmt.Errorf("hl7/builder: empty field position in key %q", fieldKey)
-	}
+	return s.SetRepetition(fieldKey, 1, value)
+}
 
-	fieldNum, err := strconv.Atoi(parts[0])
-	if err != nil || fieldNum < 1 {
-		return fmt.Errorf("hl7/builder: invalid field number %q in key %q", parts[0], fieldKey)
+// SetRepetition writes value at fieldKey within the field's rep-th
+// repetition (1-based; 1 is what Set writes). Repetitions are created as
+// needed, so writing repetition 3 first leaves 2 empty.
+func (s *Segment) SetRepetition(fieldKey string, rep int, value string) error {
+	fieldNum, positions, err := s.parseKey(fieldKey)
+	if err != nil {
+		return err
 	}
-	positions := make([]int, 0, len(parts)-1)
-	for _, p := range parts[1:] {
-		n, err := strconv.Atoi(p)
-		if err != nil || n < 1 {
-			return fmt.Errorf("hl7/builder: invalid component position %q in key %q", p, fieldKey)
-		}
-		positions = append(positions, n)
+	if rep < 1 {
+		return fmt.Errorf("hl7/builder: invalid repetition %d for key %q", rep, fieldKey)
 	}
-
 	tree, ok := s.Fields[fieldNum]
 	if !ok {
 		tree = &FieldTree{}
 		s.Fields[fieldNum] = tree
 	}
+	if rep > 1 {
+		for len(tree.Repeats) < rep-1 {
+			tree.Repeats = append(tree.Repeats, &FieldTree{})
+		}
+		tree = tree.Repeats[rep-2]
+	}
 	tree.set(positions, value)
 	return nil
+}
+
+// parseKey splits "SEG.N[.C[.S]]" into the field number and the component
+// positions below it.
+func (s *Segment) parseKey(fieldKey string) (int, []int, error) {
+	prefix := s.Name + "."
+	if !strings.HasPrefix(fieldKey, prefix) {
+		return 0, nil, fmt.Errorf("hl7/builder: field key %q does not belong to segment %q", fieldKey, s.Name)
+	}
+	rel := strings.TrimPrefix(fieldKey, prefix)
+	parts := strings.Split(rel, ".")
+	if len(parts) == 0 || parts[0] == "" {
+		return 0, nil, fmt.Errorf("hl7/builder: empty field position in key %q", fieldKey)
+	}
+
+	fieldNum, err := strconv.Atoi(parts[0])
+	if err != nil || fieldNum < 1 {
+		return 0, nil, fmt.Errorf("hl7/builder: invalid field number %q in key %q", parts[0], fieldKey)
+	}
+	positions := make([]int, 0, len(parts)-1)
+	for _, p := range parts[1:] {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 {
+			return 0, nil, fmt.Errorf("hl7/builder: invalid component position %q in key %q", p, fieldKey)
+		}
+		positions = append(positions, n)
+	}
+	return fieldNum, positions, nil
+}
+
+// EscapeValue escapes a data value for use as one field, component or
+// subcomponent under the standard encoding characters (MSH.2 "^~\&"), per
+// HL7 v2 section 2.7: the delimiters become \F\ \S\ \R\ \T\ and the escape
+// character \E\; carriage returns and line feeds, which would end the
+// segment, become \X0D\ and \X0A\. Without it, a value containing a
+// delimiter shifts every position after it, and one containing a line break
+// injects a segment.
+func EscapeValue(v string) string {
+	if !strings.ContainsAny(v, "|^~\\&\r\n") {
+		return v
+	}
+	var b strings.Builder
+	for _, r := range v {
+		switch r {
+		case '\\':
+			b.WriteString(`\E\`)
+		case '|':
+			b.WriteString(`\F\`)
+		case '^':
+			b.WriteString(`\S\`)
+		case '~':
+			b.WriteString(`\R\`)
+		case '&':
+			b.WriteString(`\T\`)
+		case '\r':
+			b.WriteString(`\X0D\`)
+		case '\n':
+			b.WriteString(`\X0A\`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// RenderField renders field n with all its repetitions, encoded ("" when
+// the field is unset).
+func (s *Segment) RenderField(n int) string {
+	return s.Fields[n].renderField()
 }
 
 // Render serializes the segment as one pipe-delimited HL7 line (no trailing
 // terminator — BuildMessage adds that between/after segments).
 func (s *Segment) Render() string {
+	if s.Raw != "" {
+		return s.Raw
+	}
 	max := 0
 	for k := range s.Fields {
 		if k > max {
@@ -178,7 +287,7 @@ func (s *Segment) Render() string {
 	parts := make([]string, max+1)
 	parts[0] = s.Name
 	for i := 1; i <= max; i++ {
-		parts[i] = s.Fields[i].render(0)
+		parts[i] = s.Fields[i].renderField()
 	}
 	return strings.Join(parts, fieldSeparator)
 }
@@ -210,8 +319,11 @@ func renderMSH(cfg MSHConfig) string {
 		controlID = fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	messageTypeField := cfg.MessageType
-	if cfg.TriggerEvent != "" {
+	if cfg.TriggerEvent != "" || cfg.MessageStructure != "" {
 		messageTypeField = messageTypeField + componentSeparator + cfg.TriggerEvent
+	}
+	if cfg.MessageStructure != "" {
+		messageTypeField = messageTypeField + componentSeparator + cfg.MessageStructure
 	}
 
 	fields := []string{
@@ -227,6 +339,15 @@ func renderMSH(cfg MSHConfig) string {
 		controlID,
 		processingID,
 		cfg.Version,
+	}
+	for n, v := range cfg.Fields {
+		if n < 3 {
+			continue
+		}
+		for len(fields) < n {
+			fields = append(fields, "")
+		}
+		fields[n-1] = v
 	}
 	return strings.Join(fields, fieldSeparator)
 }
