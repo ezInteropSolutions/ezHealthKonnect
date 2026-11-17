@@ -855,7 +855,8 @@ function subscriptionConnector() {
 function subscriptionSetupFields() {
     const f = (field, label, type, hint, required = true) => ({ section: 'source', field, label, type, hint, required });
     return [
-        f('port', 'Listen Port', 'number', 'The port ezHealthKonnect listens on for ezIdentitySense\'s notifications.'),
+        f('port', 'Listen Port', 'number',
+            'The port ezHealthKonnect listens on for ezIdentitySense\'s notifications, e.g. 8089. Each interface needs a port of its own: two interfaces on one port stop both.'),
         f('callback_url', 'Address ezIdentitySense Sends To', 'url',
             'The https address ezIdentitySense reaches this port at, ending in /fhir-notifications, e.g. https://ezhealthkonnect.example.org:8089/fhir-notifications'),
         f('fhir_base_url', 'ezIdentitySense FHIR Address', 'url', 'Its FHIR base, e.g. https://empi.example.org/fhir/r4'),
