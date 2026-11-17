@@ -346,7 +346,7 @@ const inbound = {
                 connectorType: 'tcp_mllp_inbound',
                 config: {
                     host: '0.0.0.0', port: 6660, max_connections: 10,
-                    ack: { mode: 'immediate', on_error: 'nack', sending_app: 'EZHEALTHKONNECT', sending_facility: '' },
+                    ack: { mode: 'after_processing', on_error: 'nack', sending_app: 'EZHEALTHKONNECT', sending_facility: '' },
                 },
                 timeoutMs: 30000,
             }),
