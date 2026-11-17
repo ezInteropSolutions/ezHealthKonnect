@@ -5,8 +5,9 @@
 -- those and regenerate; don't edit this file by hand.
 --
 -- Replaces "HL7 ADT to ezIdentitySense" (A47, the older merge events A30,
--- A34 and A18, and an editable event table). Interfaces already created
--- from it keep what they have.
+-- A34 and A18, and an editable event table) and the two templates that send
+-- ADT (an editable change-to-event table). Interfaces already created from
+-- them keep what they have.
 
 -- HL7 v2 to FHIR mappings for the merge-family events that had none: A30
 -- (merge person information), A18 (merge patient information) and A47
@@ -171,3 +172,334 @@ not who the patient is, and are refused the same way.
   to ezIdentitySense*.
 $GUIDE$
 WHERE slug = 'hl7-adt-to-ezidentitysense';
+
+-- ezIdentitySense Patient Events to HL7 ADT
+DELETE FROM interface_templates WHERE slug = 'ezidentitysense-events-to-hl7-adt' AND is_system = true;
+INSERT INTO interface_templates
+    (id, name, slug, description, category, subcategory, tags, icon, difficulty,
+     source_connector_type, source_config_template,
+     target_connector_type, target_config_template,
+     pipeline_config, message_type,
+     required_connection_fields, sanitized_fields, preview_steps,
+     estimated_setup_minutes, is_system, is_public, author, usage_count, processing_order)
+VALUES (
+    gen_random_uuid(), 'ezIdentitySense Patient Events to HL7 ADT', 'ezidentitysense-events-to-hl7-adt', 'Sends HL7 v2 ADT messages to a downstream system whenever ezIdentitySense (the enterprise master patient index) creates, updates, merges or unlinks a patient identity: A28 new person, A31 update, A40 merge, A37 unlink, A29 delete. Events arrive by signed webhook and are processed one at a time, in order; ezIdentitySense is answered only when the message has been accepted downstream, so nothing is lost or reordered.',
+    'empi', 'ezidentitysense', ARRAY['ezidentitysense','empi','mpi','hl7v2','adt','webhook','cloudevents','outbound']::text[], '🪪', 'intermediate',
+    'webhook_events_inbound', '{"port":8088,"endpoint_path":"/events","authentication_type":"standard_webhooks"}'::jsonb,
+    'tcp_mllp_outbound', '{"host":"","port":2575}'::jsonb,
+    '{"execution_groups":[{"sequence":5,"steps":[{"step_name":"ezIdentitySense Events","step_alias":"ez_identity_sense_events","step_type":"connector.inbound","sequence":5,"config":{"connectorType":"webhook_events_inbound","config":{"port":8088,"endpoint_path":"/events","authentication_type":"standard_webhooks","webhook_secret":"","event_types":["identity.created","record.linked","record.relinked","record.updated","record.deactivated","identity.golden-changed","identity.merged","identity.unmerged","identity.split","identity.purged"],"reply_within_seconds":8,"event_timeout_seconds":300},"timeoutMs":30000},"enabled":true,"required":true}]},{"sequence":10,"steps":[{"step_name":"Fetch Patient","step_alias":"fetch_patient","step_type":"enrichment.api","sequence":10,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"identities.read identities.read.demographics","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"endpoint":"/fhir/r4/Patient/{eid}","method":"GET","fieldMappings":{"eid":"message.subject"},"headers":{"Accept":"application/fhir+json"},"acceptStatuses":[404,410]},"enabled":true,"required":true}]},{"sequence":12,"steps":[{"step_name":"Second Identity","step_alias":"second_identity","step_type":"switch_case","sequence":12,"config":{"field":"message.type","cases":[{"value":"identity.unmerged","label":"Unmerge","actions":[]},{"value":"identity.split","label":"Split","actions":[]}],"default":{"actions":[]},"options":{"caseInsensitive":false,"trimWhitespace":true}},"enabled":true,"required":true}]},{"sequence":14,"steps":[{"step_name":"Fetch Unmerged Identity","step_alias":"fetch_unmerged_identity","step_type":"enrichment.api","sequence":14,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"identities.read identities.read.demographics","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"endpoint":"/fhir/r4/Patient/{eid}","method":"GET","fieldMappings":{"eid":"message.data.from"},"headers":{"Accept":"application/fhir+json"},"acceptStatuses":[404,410]},"enabled":true,"required":true,"parent_conditional_step_id":"second_identity","case_value":"identity.unmerged"}]},{"sequence":16,"steps":[{"step_name":"Fetch Split Identity","step_alias":"fetch_split_identity","step_type":"enrichment.api","sequence":16,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"identities.read identities.read.demographics","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"endpoint":"/fhir/r4/Patient/{eid}","method":"GET","fieldMappings":{"eid":"message.data.created"},"headers":{"Accept":"application/fhir+json"},"acceptStatuses":[404,410]},"enabled":true,"required":true,"parent_conditional_step_id":"second_identity","case_value":"identity.split"}]},{"sequence":20,"steps":[{"step_name":"Build ADT","step_alias":"build_adt","step_type":"hl7.build","sequence":20,"config":{"messageType":"ADT","version":"2.5.1","escapeValues":true,"sendingApplication":"EZIDENTITYSENSE","sendingFacility":"","receivingApplication":"","receivingFacility":"","triggerEventPath":"message.type","triggerEventMap":{"identity.created":"A28","record.linked":"A31","record.relinked":"A31","record.updated":"A31","record.deactivated":"A31","identity.golden-changed":"A31","identity.merged":"A40","identity.unmerged":"A37","identity.split":"A37","identity.purged":"A29"},"triggerEventMapOverrides":"{{var.triggerOverrides}}","messageStructureMap":{"A28":"ADT_A05","A31":"ADT_A05","A04":"ADT_A01","A08":"ADT_A01","A40":"ADT_A39","A37":"ADT_A37","A29":"ADT_A21"},"segments":[{"segment":"EVN","fields":[{"fieldKey":"EVN.2","sourcePath":"message.time","transform":"hl7_datetime"}]},{"segment":"PID","fields":[{"fieldKey":"PID.1","literalValue":"1"},{"fieldKey":"PID.3","repeatPath":"steps.fetch_patient.step_output.identifier","components":[{"position":"1","sourcePath":"value"},{"position":"4.2","sourcePath":"system"},{"position":"4.3","literalValue":"URI"}]},{"fieldKey":"PID.3.1","sourcePath":"message.subject","condition":{"field":"steps.fetch_patient.step_output.resource_type","operator":"not_equals","value":"Patient"}},{"fieldKey":"PID.5","repeatPath":"steps.fetch_patient.step_output.name","components":[{"position":"1","sourcePath":"family"},{"position":"2","sourcePath":"given[0]"},{"position":"3","sourcePath":"given[1]"},{"position":"5","sourcePath":"prefix[0]"},{"position":"4","sourcePath":"suffix[0]"},{"position":"7","sourcePath":"use","valueMap":{"official":"L","usual":"D","nickname":"N","maiden":"M","old":"U","anonymous":"S"}}]},{"fieldKey":"PID.6","repeatPath":"steps.fetch_patient.step_output.extension","maxRepetitions":1,"itemCondition":{"field":"url","operator":"equals","value":"http://hl7.org/fhir/StructureDefinition/patient-mothersMaidenName"},"components":[{"position":"1","sourcePath":"value_string"}]},{"fieldKey":"PID.7","sourcePath":"steps.fetch_patient.step_output.birth_date","transform":"hl7_date"},{"fieldKey":"PID.8","sourcePath":"steps.fetch_patient.step_output.gender","valueMap":{"male":"M","female":"F","other":"O","unknown":"U"}},{"fieldKey":"PID.11","repeatPath":"steps.fetch_patient.step_output.address","components":[{"position":"1","sourcePath":"line[0]"},{"position":"2","sourcePath":"line[1]"},{"position":"3","sourcePath":"city"},{"position":"4","sourcePath":"state"},{"position":"5","sourcePath":"postal_code"},{"position":"6","sourcePath":"country","transform":"iso3166_alpha3"}]},{"fieldKey":"PID.13","repeatPath":"steps.fetch_patient.step_output.telecom","itemCondition":{"field":"system","operator":"equals","value":"phone"},"components":[{"position":"1","sourcePath":"value"},{"position":"2","sourcePath":"use","valueMap":{"home":"PRN","work":"WPN","mobile":"ORN","temp":"PRN","old":"PRN"}},{"position":"3","literalValue":"PH"}]},{"fieldKey":"PID.29","sourcePath":"steps.fetch_patient.step_output.deceased_date_time","transform":"hl7_datetime"},{"fieldKey":"PID.30","sourcePath":"steps.fetch_patient.step_output.deceased_boolean","valueMap":{"true":"Y","false":"N"}}]},{"segment":"PV1","condition":{"field":"message.type","operator":"in_list","value":["identity.created","record.linked","record.relinked","record.updated","record.deactivated","identity.golden-changed","identity.purged"]},"fields":[{"fieldKey":"PV1.1","literalValue":"1"},{"fieldKey":"PV1.2","literalValue":"N"}]},{"segment":"MRG","condition":{"field":"message.type","operator":"equals","value":"identity.merged"},"fields":[{"fieldKey":"MRG.1.1","sourcePath":"message.data.retired"}]},{"segment":"PID","condition":{"field":"message.type","operator":"in_list","value":["identity.unmerged","identity.split"]},"fields":[{"fieldKey":"PID.1","literalValue":"2"},{"fieldKey":"PID.3","repeatPath":"steps.fetch_unmerged_identity.step_output.identifier","condition":{"field":"message.type","operator":"equals","value":"identity.unmerged"},"components":[{"position":"1","sourcePath":"value"},{"position":"4.2","sourcePath":"system"},{"position":"4.3","literalValue":"URI"}]},{"fieldKey":"PID.3","repeatPath":"steps.fetch_split_identity.step_output.identifier","condition":{"field":"message.type","operator":"equals","value":"identity.split"},"components":[{"position":"1","sourcePath":"value"},{"position":"4.2","sourcePath":"system"},{"position":"4.3","literalValue":"URI"}]},{"fieldKey":"PID.3.1","sourcePath":"message.data.from","fallbackPaths":["message.data.created"]},{"fieldKey":"PID.5.1","sourcePath":"steps.fetch_unmerged_identity.step_output.name[0].family","fallbackPaths":["steps.fetch_split_identity.step_output.name[0].family"]},{"fieldKey":"PID.5.2","sourcePath":"steps.fetch_unmerged_identity.step_output.name[0].given[0]","fallbackPaths":["steps.fetch_split_identity.step_output.name[0].given[0]"]},{"fieldKey":"PID.5.3","sourcePath":"steps.fetch_unmerged_identity.step_output.name[0].given[1]","fallbackPaths":["steps.fetch_split_identity.step_output.name[0].given[1]"]},{"fieldKey":"PID.5.7","sourcePath":"steps.fetch_unmerged_identity.step_output.name[0].use","fallbackPaths":["steps.fetch_split_identity.step_output.name[0].use"],"valueMap":{"official":"L","usual":"D","nickname":"N","maiden":"M","old":"U","anonymous":"S"}},{"fieldKey":"PID.7","sourcePath":"steps.fetch_unmerged_identity.step_output.birth_date","fallbackPaths":["steps.fetch_split_identity.step_output.birth_date"],"transform":"hl7_date"},{"fieldKey":"PID.8","sourcePath":"steps.fetch_unmerged_identity.step_output.gender","fallbackPaths":["steps.fetch_split_identity.step_output.gender"],"valueMap":{"male":"M","female":"F","other":"O","unknown":"U"}}]}]},"enabled":true,"required":true}]},{"sequence":30,"steps":[{"step_name":"Send ADT","step_alias":"send_adt","step_type":"connector.outbound","sequence":30,"config":{"connectorType":"tcp_mllp_outbound","config":{"host":"","port":2575,"expect_ack":true,"ack_timeout_seconds":30,"connect_timeout_seconds":10},"contentField":"hl7Message","contentType":"x-application/hl7-v2+er7"},"enabled":true,"required":true}]}]}'::jsonb, 'CloudEvents',
+    '[{"section":"source","field":"port","label":"Webhook Port","type":"number","required":true,"hint":"The port ezHealthKonnect listens on for ezIdentitySense''s webhooks."},{"section":"source","field":"webhook_secret","label":"Webhook Signing Secret","type":"password","required":true,"hint":"The whsec_… secret ezIdentitySense showed when you created the webhook. Stored encrypted."},{"section":"variables","section_label":"ADT Trigger Events","field":"triggerOverrides","label":"Which ADT Event Each Change Sends","type":"keyvalue","required":false,"placeholder":"record.updated=A08, identity.created=A04","hint":"Optional, one CHANGE=EVENT per line, to send a change as another ADT event. A28, A31, A04 and A08 can stand in for each other; merges (A40), unlinks (A37) and deletes (A29) always use their own events. Left blank, the guide''s table applies."},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["fetch_patient","fetch_unmerged_identity","fetch_split_identity"],"field":"baseUrl","label":"ezIdentitySense Address","type":"url","hint":"The address of your ezIdentitySense server, e.g. https://empi.example.org","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["fetch_patient","fetch_unmerged_identity","fetch_split_identity"],"field":"oauth2TokenUrl","label":"Token URL","type":"url","hint":"Your identity provider''s OAuth 2.0 token endpoint, where this client gets its access tokens","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["fetch_patient","fetch_unmerged_identity","fetch_split_identity"],"field":"oauth2ClientId","label":"Client ID","type":"string","hint":"The client registered for ezHealthKonnect in your identity provider and in ezIdentitySense","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["fetch_patient","fetch_unmerged_identity","fetch_split_identity"],"field":"oauth2ClientSecret","label":"Client Secret","type":"password","hint":"That client''s secret. Stored encrypted.","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["fetch_patient","fetch_unmerged_identity","fetch_split_identity"],"field":"oauth2Audience","label":"Audience","type":"string","hint":"Only if your identity provider requires one (the audience ezIdentitySense expects)","required":false},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["build_adt"],"field":"receivingApplication","label":"Receiving Application (MSH-5)","type":"string","required":false,"hint":"Optional: the receiving system''s application name."},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["build_adt"],"field":"receivingFacility","label":"Receiving Facility (MSH-6)","type":"string","required":false,"hint":"Optional: the receiving system''s facility."},{"section":"target","field":"host","label":"Downstream System Host","type":"string","required":true,"hint":"The host name or address of the system that receives the ADT messages over MLLP."},{"section":"target","field":"port","label":"Downstream System Port","type":"number","required":true,"hint":"Its MLLP port."}]'::jsonb, ARRAY['source.webhook_secret','steps.baseUrl','steps.oauth2TokenUrl','steps.oauth2ClientSecret','target.host']::text[], '[{"name":"Receive ezIdentitySense Event","icon":"🔔","step_type":"connector.inbound"},{"name":"Fetch Golden Patient","icon":"🔍","step_type":"enrichment.api"},{"name":"Build ADT","icon":"🔄","step_type":"hl7.build"},{"name":"Send over MLLP","icon":"📤","step_type":"connector.outbound"}]'::jsonb,
+    15, true, true, 'ezHealthKonnect', 0, 'in_order'
+);
+UPDATE interface_templates SET user_guide = $GUIDE$
+# ezIdentitySense Patient Events to HL7 ADT
+
+## What this does
+
+ezIdentitySense, the enterprise master patient index, tells ezHealthKonnect
+whenever a patient identity changes. This interface turns each change into an
+HL7 v2 ADT message and sends it to a downstream system (an EHR, a lab or
+radiology system, a data warehouse) over MLLP.
+
+| What happened in ezIdentitySense | Message sent |
+|---|---|
+| A new patient identity was created | ADT^A28 (add person) |
+| A record was linked, updated, moved or deactivated, or a steward corrected the golden record | ADT^A31 (update person) |
+| Two identities were merged | ADT^A40 (merge), with the retired identity in MRG |
+| A merge was undone, or an identity was split | ADT^A37 (unlink), with both identities' PID |
+| An identity was erased | ADT^A29 (delete person) |
+
+Each message carries the patient's golden record as ezIdentitySense shows it
+at the time the message is built: name, birth date, sex, addresses, phone
+numbers, mother's maiden name, and every identifier in PID-3 (the enterprise
+ID first, then each linked record's local ID and other identifiers, each with
+its assigning authority).
+
+## How delivery works
+
+- ezIdentitySense sends events in order, signed with a shared secret.
+  ezHealthKonnect checks the signature on every request.
+- Events are handled **one at a time**. ezHealthKonnect answers
+  ezIdentitySense only after the downstream system has accepted the message
+  (MLLP `AA`). An event is never skipped and never sent twice.
+- If the downstream system is down or rejects a message, ezHealthKonnect
+  answers with an error and ezIdentitySense tries again later, starting from
+  that event. Nothing after it is sent first. ezIdentitySense keeps retrying
+  for its retry window (24 hours by default), then pauses the webhook without
+  losing anything; resume it on ezIdentitySense's **Integrations** page once
+  the problem is fixed.
+- Every event appears in this interface's message list like any other
+  message, with the ADT that was sent.
+
+## Before you start
+
+You need:
+
+1. **ezHealthKonnect reachable from ezIdentitySense** over HTTPS on the
+   webhook port you choose below (put it behind your TLS proxy or load
+   balancer; ezIdentitySense refuses plain-HTTP webhook addresses outside
+   development).
+2. **An OAuth 2.0 client for ezHealthKonnect** in the identity provider
+   ezIdentitySense trusts, using the client-credentials grant. Note its
+   token URL, client ID and secret (and audience, if your provider uses
+   one).
+3. **The downstream system's MLLP host and port.**
+
+## Step 1: in ezIdentitySense
+
+Sign in as an integration administrator and open **Integrations**.
+
+1. Under **API clients**, register the OAuth client from "Before you start"
+   (same client ID). It needs the `identities.read` and
+   `identities.read.demographics` scopes, and it should be bound to the
+   source systems whose patients the downstream system may see.
+2. Create a **webhook**:
+   - **Endpoint:** `https://<ezHealthKonnect address>:<webhook port>/events`
+   - **Events:** `identity.created`, `record.linked`, `record.relinked`,
+     `record.updated`, `record.deactivated`, `identity.golden-changed`,
+     `identity.merged`, `identity.unmerged`, `identity.split`,
+     `identity.purged`. (Other event types, such as review-task events, are
+     ignored by this interface anyway, so choosing "all" also works.)
+   - Copy the **signing secret** (`whsec_…`). It is shown once.
+
+If you want the downstream system to see each source system's own local
+record number in PID-3, give that source system an **ID authority** in
+ezIdentitySense; records of a source without one are listed by their other
+identifiers only.
+
+## Step 2: in ezHealthKonnect
+
+Click **Use** on this template and fill in:
+
+- **Webhook Port** and **Webhook Signing Secret** (from step 1).
+- **ezIdentitySense Connection:** its address, and the OAuth client's token
+  URL, client ID, secret and audience. Optionally the receiving application
+  and facility for MSH-5 and MSH-6.
+- **Downstream System Host** and **Port**.
+
+Then activate the interface. ezIdentitySense starts delivering new events
+straight away; use **Send test event** on the webhook page to check the
+connection.
+
+## Choosing the ADT event for a change
+
+Setup has an optional **Which ADT Event Each Change Sends** table, one
+`CHANGE=EVENT` per line, for a receiver that expects other trigger events
+than the table above. The changes are ezIdentitySense's event types
+(`identity.created`, `record.linked`, `record.relinked`, `record.updated`,
+`record.deactivated`, `identity.golden-changed`). The events you may name are
+A28, A31, A04 and A08: they carry the same patient and visit segments, so a
+new identity can be sent as A04 and an update as A08, for instance
+`record.updated=A08`. Merges (A40), unlinks (A37) and deletes (A29) always
+keep their own events, because their messages carry segments the others
+lack, and ezIdentitySense has no change that means "link" (A24) or
+"identifier changed" (A47). Naming any other event makes that change fail
+visibly, with the list of events this interface can send, instead of sending
+the wrong message.
+
+## Changing things later
+
+- **Rotating the ezIdentitySense client secret:** edit the three steps that
+  call ezIdentitySense (*Fetch Patient*, *Fetch Unmerged Identity*, *Fetch
+  Split Identity*) in Pipeline Builder.
+- **Rotating the webhook signing secret:** rotate it on ezIdentitySense's
+  webhook page; it signs with both the old and the new secret until you drop
+  the old one, so update this interface's *ezIdentitySense Events* step
+  (Signing Secret) at any point in between.
+- **Field mappings:** the *Build ADT* step maps the golden record onto PID;
+  adjust it in Pipeline Builder like any HL7 Build step.
+
+## Good to know
+
+- Messages describe the patient **as they are now**, not as they were when
+  the event happened: if several updates arrive close together, each A31
+  carries the latest golden record. That is what downstream systems need.
+- A new patient produces an A28 followed by an A31 (the identity is created,
+  then its first record is linked).
+- **Enterprise IDs are longer than HL7 v2.5.1 allows for an identifier.**
+  ezIdentitySense's IDs (e.g. `EID-7K3M-9QX2-TB4R`, 18 characters) exceed the
+  15-character limit v2.5.1 sets on PID-3.1 and MRG-1.1. Most systems accept
+  them; check with your receiving system if it validates lengths strictly.
+- MRG-1 carries the retired enterprise ID without its assigning authority;
+  PID-3 of the same message names the authority of enterprise IDs.
+- An A29 for an erased identity carries its enterprise ID only: the
+  name and every other detail were erased with it, so PID-5 (required in
+  v2.5.1) is empty.
+- Countries are sent as the three-letter codes of HL7 table 0399 (`USA`),
+  converted from the two-letter codes ezIdentitySense stores (`US`).
+- ezHealthKonnect's own HL7 validator reports an A37 as "PID appears 2
+  times": its schema files can't express the second PID that ADT_A37
+  defines. The message itself is laid out as the standard defines it.
+- Email addresses are not sent (PID-13 carries phone numbers).
+- This interface sends **from** ezIdentitySense. To feed ADT **into**
+  ezIdentitySense, use the *HL7 ADT to ezIdentitySense* template; for PIX
+  and PDQ queries, use *HL7 PIX/PDQ Queries to ezIdentitySense*.
+$GUIDE$
+WHERE slug = 'ezidentitysense-events-to-hl7-adt';
+
+-- ezIdentitySense FHIR Subscription to HL7 ADT
+DELETE FROM interface_templates WHERE slug = 'ezidentitysense-fhir-subscription-to-hl7-adt' AND is_system = true;
+INSERT INTO interface_templates
+    (id, name, slug, description, category, subcategory, tags, icon, difficulty,
+     source_connector_type, source_config_template,
+     target_connector_type, target_config_template,
+     pipeline_config, message_type,
+     required_connection_fields, sanitized_fields, preview_steps,
+     estimated_setup_minutes, is_system, is_public, author, usage_count, processing_order)
+VALUES (
+    gen_random_uuid(), 'ezIdentitySense FHIR Subscription to HL7 ADT', 'ezidentitysense-fhir-subscription-to-hl7-adt', 'Subscribes to ezIdentitySense''s FHIR topics (new patient, details changed, records linked, merged, merge undone or split, erased) and sends each change to a downstream system as HL7 v2 ADT: A28, A31, A40, A37, A29. The subscriptions are made and renewed for you; each change is processed one at a time, in order, and ezIdentitySense is answered only once the ADT has been accepted, so nothing is lost or reordered.',
+    'empi', 'ezidentitysense', ARRAY['ezidentitysense','empi','mpi','fhir','subscription','hl7v2','adt','outbound']::text[], '📡', 'intermediate',
+    'fhir_subscription_inbound', '{"port":8089,"endpoint_path":"/fhir-notifications"}'::jsonb,
+    'tcp_mllp_outbound', '{"host":"","port":2575}'::jsonb,
+    '{"execution_groups":[{"sequence":5,"steps":[{"step_name":"ezIdentitySense Subscriptions","step_alias":"ez_identity_sense_subscriptions","step_type":"connector.inbound","sequence":5,"config":{"connectorType":"fhir_subscription_inbound","config":{"port":8089,"endpoint_path":"/fhir-notifications","callback_url":"","fhir_base_url":"","topics":["https://ezinteropsolutions.com/fhir/ezidentitysense/SubscriptionTopic/patient-created","https://ezinteropsolutions.com/fhir/ezidentitysense/SubscriptionTopic/patient-changed","https://ezinteropsolutions.com/fhir/ezidentitysense/SubscriptionTopic/patient-records","https://ezinteropsolutions.com/fhir/ezidentitysense/SubscriptionTopic/patient-merged","https://ezinteropsolutions.com/fhir/ezidentitysense/SubscriptionTopic/patient-separated","https://ezinteropsolutions.com/fhir/ezidentitysense/SubscriptionTopic/patient-erased"],"filters":[],"content":"full-resource","heartbeat_seconds":0,"auth_type":"oauth2","oauth2_token_url":"","oauth2_client_id":"","oauth2_client_secret":"","oauth2_audience":"","oauth2_scope":"identities.subscribe identities.read identities.read.demographics","reply_within_seconds":8,"event_timeout_seconds":300},"timeoutMs":30000},"enabled":true,"required":true}]},{"sequence":10,"steps":[{"step_name":"Build ADT","step_alias":"build_adt","step_type":"hl7.build","sequence":10,"config":{"messageType":"ADT","version":"2.5.1","escapeValues":true,"sendingApplication":"EZIDENTITYSENSE","sendingFacility":"","receivingApplication":"","receivingFacility":"","triggerEventPath":"message.topic","triggerEventMap":{"patient-created":"A28","patient-changed":"A31","patient-records":"A31","patient-merged":"A40","patient-separated":"A37","patient-erased":"A29"},"triggerEventMapOverrides":"{{var.triggerOverrides}}","messageStructureMap":{"A28":"ADT_A05","A31":"ADT_A05","A04":"ADT_A01","A08":"ADT_A01","A40":"ADT_A39","A37":"ADT_A37","A29":"ADT_A21"},"segments":[{"segment":"EVN","fields":[{"fieldKey":"EVN.2","sourcePath":"message.timestamp","transform":"hl7_datetime"}]},{"segment":"PID","fields":[{"fieldKey":"PID.1","literalValue":"1"},{"fieldKey":"PID.3","repeatPath":"message.focus.resource.identifier","components":[{"position":"1","sourcePath":"value"},{"position":"4.2","sourcePath":"system"},{"position":"4.3","literalValue":"URI"}]},{"fieldKey":"PID.3.1","sourcePath":"message.focus.id","condition":{"field":"message.focus.erased","operator":"equals","value":true}},{"fieldKey":"PID.5","repeatPath":"message.focus.resource.name","components":[{"position":"1","sourcePath":"family"},{"position":"2","sourcePath":"given[0]"},{"position":"3","sourcePath":"given[1]"},{"position":"5","sourcePath":"prefix[0]"},{"position":"4","sourcePath":"suffix[0]"},{"position":"7","sourcePath":"use","valueMap":{"official":"L","usual":"D","nickname":"N","maiden":"M","old":"U","anonymous":"S"}}]},{"fieldKey":"PID.6","repeatPath":"message.focus.resource.extension","maxRepetitions":1,"itemCondition":{"field":"url","operator":"equals","value":"http://hl7.org/fhir/StructureDefinition/patient-mothersMaidenName"},"components":[{"position":"1","sourcePath":"valueString"}]},{"fieldKey":"PID.7","sourcePath":"message.focus.resource.birthDate","transform":"hl7_date"},{"fieldKey":"PID.8","sourcePath":"message.focus.resource.gender","valueMap":{"male":"M","female":"F","other":"O","unknown":"U"}},{"fieldKey":"PID.11","repeatPath":"message.focus.resource.address","components":[{"position":"1","sourcePath":"line[0]"},{"position":"2","sourcePath":"line[1]"},{"position":"3","sourcePath":"city"},{"position":"4","sourcePath":"state"},{"position":"5","sourcePath":"postalCode"},{"position":"6","sourcePath":"country","transform":"iso3166_alpha3"}]},{"fieldKey":"PID.13","repeatPath":"message.focus.resource.telecom","itemCondition":{"field":"system","operator":"equals","value":"phone"},"components":[{"position":"1","sourcePath":"value"},{"position":"2","sourcePath":"use","valueMap":{"home":"PRN","work":"WPN","mobile":"PRS","temp":"PRN","old":"PRN"}},{"position":"3","literalValue":"PH"}]},{"fieldKey":"PID.29","sourcePath":"message.focus.resource.deceasedDateTime","transform":"hl7_datetime"},{"fieldKey":"PID.30","sourcePath":"message.focus.resource.deceasedBoolean","valueMap":{"true":"Y","false":"N"}}]},{"segment":"PV1","condition":{"field":"message.topic","operator":"in_list","value":["patient-created","patient-changed","patient-records","patient-erased"]},"fields":[{"fieldKey":"PV1.1","literalValue":"1"},{"fieldKey":"PV1.2","literalValue":"N"}]},{"segment":"MRG","condition":{"field":"message.topic","operator":"equals","value":"patient-merged"},"fields":[{"fieldKey":"MRG.1.1","sourcePath":"message.context[0].id"}]},{"segment":"PID","condition":{"field":"message.topic","operator":"equals","value":"patient-separated"},"fields":[{"fieldKey":"PID.1","literalValue":"2"},{"fieldKey":"PID.3","repeatPath":"message.context[0].resource.identifier","components":[{"position":"1","sourcePath":"value"},{"position":"4.2","sourcePath":"system"},{"position":"4.3","literalValue":"URI"}]},{"fieldKey":"PID.3.1","sourcePath":"message.context[0].id","condition":{"field":"message.context[0].erased","operator":"equals","value":true}},{"fieldKey":"PID.5","repeatPath":"message.context[0].resource.name","components":[{"position":"1","sourcePath":"family"},{"position":"2","sourcePath":"given[0]"},{"position":"3","sourcePath":"given[1]"},{"position":"5","sourcePath":"prefix[0]"},{"position":"4","sourcePath":"suffix[0]"},{"position":"7","sourcePath":"use","valueMap":{"official":"L","usual":"D","nickname":"N","maiden":"M","old":"U","anonymous":"S"}}]},{"fieldKey":"PID.6","repeatPath":"message.context[0].resource.extension","maxRepetitions":1,"itemCondition":{"field":"url","operator":"equals","value":"http://hl7.org/fhir/StructureDefinition/patient-mothersMaidenName"},"components":[{"position":"1","sourcePath":"valueString"}]},{"fieldKey":"PID.7","sourcePath":"message.context[0].resource.birthDate","transform":"hl7_date"},{"fieldKey":"PID.8","sourcePath":"message.context[0].resource.gender","valueMap":{"male":"M","female":"F","other":"O","unknown":"U"}},{"fieldKey":"PID.11","repeatPath":"message.context[0].resource.address","components":[{"position":"1","sourcePath":"line[0]"},{"position":"2","sourcePath":"line[1]"},{"position":"3","sourcePath":"city"},{"position":"4","sourcePath":"state"},{"position":"5","sourcePath":"postalCode"},{"position":"6","sourcePath":"country","transform":"iso3166_alpha3"}]},{"fieldKey":"PID.13","repeatPath":"message.context[0].resource.telecom","itemCondition":{"field":"system","operator":"equals","value":"phone"},"components":[{"position":"1","sourcePath":"value"},{"position":"2","sourcePath":"use","valueMap":{"home":"PRN","work":"WPN","mobile":"PRS","temp":"PRN","old":"PRN"}},{"position":"3","literalValue":"PH"}]},{"fieldKey":"PID.29","sourcePath":"message.context[0].resource.deceasedDateTime","transform":"hl7_datetime"},{"fieldKey":"PID.30","sourcePath":"message.context[0].resource.deceasedBoolean","valueMap":{"true":"Y","false":"N"}}]}]},"enabled":true,"required":true}]},{"sequence":20,"steps":[{"step_name":"Send ADT","step_alias":"send_adt","step_type":"connector.outbound","sequence":20,"config":{"connectorType":"tcp_mllp_outbound","config":{"host":"","port":2575,"expect_ack":true,"ack_timeout_seconds":30,"connect_timeout_seconds":10},"contentField":"hl7Message","contentType":"x-application/hl7-v2+er7"},"enabled":true,"required":true}]}]}'::jsonb, 'FHIR Subscription',
+    '[{"section":"source","field":"port","label":"Listen Port","type":"number","hint":"The port ezHealthKonnect listens on for ezIdentitySense''s notifications, e.g. 8089. Each interface needs a port of its own: two interfaces on one port stop both.","required":true},{"section":"source","field":"callback_url","label":"Address ezIdentitySense Sends To","type":"url","hint":"The https address ezIdentitySense reaches this port at, ending in /fhir-notifications, e.g. https://ezhealthkonnect.example.org:8089/fhir-notifications","required":true},{"section":"source","field":"fhir_base_url","label":"ezIdentitySense FHIR Address","type":"url","hint":"Its FHIR base, e.g. https://empi.example.org/fhir/r4","required":true},{"section":"source","field":"oauth2_token_url","label":"Token URL","type":"url","hint":"Your identity provider''s OAuth 2.0 token endpoint","required":true},{"section":"source","field":"oauth2_client_id","label":"Client ID","type":"string","hint":"The client registered for ezHealthKonnect in your identity provider and in ezIdentitySense","required":true},{"section":"source","field":"oauth2_client_secret","label":"Client Secret","type":"password","hint":"That client''s secret. Stored encrypted.","required":true},{"section":"source","field":"oauth2_audience","label":"Audience","type":"string","hint":"Only if your identity provider requires one","required":false},{"section":"variables","section_label":"ADT Trigger Events","field":"triggerOverrides","label":"Which ADT Event Each Change Sends","type":"keyvalue","required":false,"placeholder":"patient-changed=A08, patient-created=A04","hint":"Optional, one CHANGE=EVENT per line, to send a change as another ADT event. A28, A31, A04 and A08 can stand in for each other; merges (A40), unlinks (A37) and deletes (A29) always use their own events. Left blank, the guide''s table applies."},{"section":"steps","section_label":"Downstream System","step_aliases":["build_adt"],"field":"receivingApplication","label":"Receiving Application (MSH-5)","type":"string","required":false,"hint":"Optional: the receiving system''s application name."},{"section":"steps","section_label":"Downstream System","step_aliases":["build_adt"],"field":"receivingFacility","label":"Receiving Facility (MSH-6)","type":"string","required":false,"hint":"Optional: the receiving system''s facility."},{"section":"target","field":"host","label":"Downstream System Host","type":"string","required":true,"hint":"The host name or address of the system that receives the ADT messages over MLLP."},{"section":"target","field":"port","label":"Downstream System Port","type":"number","required":true,"hint":"Its MLLP port."}]'::jsonb, ARRAY['source.callback_url','source.fhir_base_url','source.oauth2_token_url','source.oauth2_client_secret','target.host']::text[], '[{"name":"Receive FHIR Notification","icon":"📡","step_type":"connector.inbound"},{"name":"Build ADT","icon":"🔄","step_type":"hl7.build"},{"name":"Send over MLLP","icon":"📤","step_type":"connector.outbound"}]'::jsonb,
+    15, true, true, 'ezHealthKonnect', 0, 'in_order'
+);
+UPDATE interface_templates SET user_guide = $GUIDE$
+# ezIdentitySense FHIR Subscription to HL7 ADT
+
+## What this does
+
+ezIdentitySense, the enterprise master patient index, publishes its patient
+changes as standard FHIR topic-based subscriptions (HL7 *Subscriptions R5
+Backport* on FHIR R4). This interface subscribes to them and turns each
+change into an HL7 v2 ADT message for a downstream system (an EHR, a lab or
+radiology system, a data warehouse), sent over MLLP.
+
+| Topic in ezIdentitySense | Message sent |
+|---|---|
+| `patient-created`: a new patient identity | ADT^A28 (add person) |
+| `patient-changed`: a source system sent an updated record, or a steward corrected the golden record | ADT^A31 (update person) |
+| `patient-records`: a record was linked, moved or removed | ADT^A31 (update person) |
+| `patient-merged`: two identities became one | ADT^A40 (merge), with the retired identity in MRG |
+| `patient-separated`: a merge was undone, or an identity split | ADT^A37 (unlink), with both identities' PID |
+| `patient-erased`: an identity was erased | ADT^A29 (delete person), enterprise ID only |
+
+Each notification carries the patients concerned, as their golden record
+(*full-resource*), so this interface never has to call ezIdentitySense back
+for them. PID carries name, birth date, sex, addresses, phone numbers,
+mother's maiden name, and every identifier with its assigning authority.
+
+## How delivery works
+
+- **The subscriptions are managed for you.** When the interface starts it
+  creates one subscription per topic in ezIdentitySense and renews them
+  every 12 hours, so a subscription that was paused, edited or deleted is
+  put right. Each subscription carries a token only this interface can
+  produce, which ezHealthKonnect checks on every notification.
+- **Events are numbered and handled one at a time, in order.**
+  ezHealthKonnect answers ezIdentitySense only once the downstream system has
+  accepted the message (MLLP `AA`). An event is never skipped and never sent
+  twice. The order is kept **within each topic**: each topic is its own
+  subscription, so if the downstream system rejects one patient's A28, that
+  patient's A31 (another topic) can still go ahead of it. Fix the rejection
+  and the held message follows.
+- **Nothing is lost.** If a notification shows a gap in the numbers (one was
+  missed while this interface was stopped, for example), the missing events
+  are fetched from ezIdentitySense first and processed in order. If the
+  downstream system is down, ezIdentitySense retries later, starting from
+  that event.
+- Every event appears in this interface's message list like any other
+  message, with the ADT that was sent.
+
+## Before you start
+
+You need:
+
+1. **ezHealthKonnect reachable from ezIdentitySense** over HTTPS on the
+   listen port you choose below (put it behind your TLS proxy or load
+   balancer; ezIdentitySense refuses plain-HTTP addresses outside
+   development).
+2. **An OAuth 2.0 client for ezHealthKonnect** in the identity provider
+   ezIdentitySense trusts, using the client-credentials grant. Note its
+   token URL, client ID and secret (and audience, if your provider uses
+   one).
+3. **The downstream system's MLLP host and port.**
+
+## Step 1: in ezIdentitySense
+
+Sign in as an integration administrator and open **Integrations**.
+
+1. Under **API clients**, register the OAuth client from "Before you start"
+   (same client ID). It needs the `identities.subscribe`,
+   `identities.read` and `identities.read.demographics` scopes, and it
+   should be bound to the source systems whose patients the downstream
+   system may see.
+2. Under **Subscription topics**, check that the six patient topics are
+   switched on. If the client's topics are limited, allow it all six (or
+   remove the ones you don't want from this interface's *Topics* setting).
+
+That's all: you don't create the subscriptions yourself.
+
+## Step 2: in ezHealthKonnect
+
+Click **Use** on this template and fill in:
+
+- **Listen Port**, and the **Address ezIdentitySense Sends To**: the https
+  address that reaches that port, ending in `/fhir-notifications`.
+- **ezIdentitySense FHIR Address**: its FHIR base, ending in `/fhir/r4`.
+- The OAuth client's **Token URL**, **Client ID**, **Client Secret** and
+  **Audience**.
+- Optionally the receiving application and facility for MSH-5 and MSH-6.
+- **Downstream System Host** and **Port**.
+
+Then activate the interface. Within a few seconds its subscriptions show on
+ezIdentitySense's **Integrations** page as *active*; changes from then on
+are sent.
+
+## Choosing the ADT event for a change
+
+Setup has an optional **Which ADT Event Each Change Sends** table, one
+`CHANGE=EVENT` per line, for a receiver that expects other trigger events
+than the table above. The changes are the topic names
+`patient-created`, `patient-changed` and `patient-records`. The events you
+may name are A28, A31, A04 and A08: they carry the same patient and visit
+segments, so a new identity can be sent as A04 and an update as A08, for
+instance `patient-changed=A08`. Merges (A40), unlinks (A37) and deletes (A29)
+always keep their own events, because their messages carry segments the
+others lack, and ezIdentitySense has no change that means "link" (A24) or
+"identifier changed" (A47). Naming any other event makes that change fail
+visibly, with the list of events this interface can send, instead of sending
+the wrong message.
+
+## Changing things later
+
+- **Only some patients:** set *Filters* on the *ezIdentitySense
+  Subscriptions* step, for example `source-system=EHR` (patients with a
+  record from that source system) or `patient=EID-…`. The subscriptions are
+  updated when the interface restarts.
+- **Fewer topics:** remove them from *Topics* on the same step.
+- **Rotating the client secret:** edit the *ezIdentitySense Subscriptions*
+  step. The subscriptions' tokens change with it and are renewed at once
+  when the interface restarts.
+- **Field mappings:** the *Build ADT* step maps the patient onto PID; adjust
+  it in Pipeline Builder like any HL7 Build step.
+
+## Good to know
+
+- Messages describe the patient **as they are when ezIdentitySense sends
+  the notification**, so a quick run of changes may show the same latest
+  details more than once. That is what downstream systems need.
+- A new patient produces an A28, then an A31 when its first record is linked.
+- In an A40 the PID is the surviving identity and MRG-1 the retired one; in
+  an A37 the first PID is the identity named by the event, the second the
+  one separated from it.
+- **Enterprise IDs are longer than HL7 v2.5.1 allows for an identifier.**
+  ezIdentitySense's IDs (e.g. `EID-7K3M-9QX2-TB4R`, 18 characters) exceed the
+  15-character limit v2.5.1 sets on PID-3.1 and MRG-1.1. Most systems accept
+  them; check with your receiving system if it validates lengths strictly.
+- An A29 for an erased identity carries its enterprise ID only: the name and
+  every other detail were erased with it, so PID-5 (required in v2.5.1) is
+  empty.
+- Countries are sent as the three-letter codes of HL7 table 0399 (`USA`),
+  converted from the two-letter codes ezIdentitySense stores (`US`).
+- ezHealthKonnect's own HL7 validator reports an A37 as "PID appears 2
+  times": its schema files can't express the second PID that ADT_A37
+  defines. The message itself is laid out as the standard defines it.
+- Email addresses are not sent (PID-13 carries phone numbers).
+- The older *ezIdentitySense Patient Events to HL7 ADT* template does the
+  same from ezIdentitySense's CloudEvents webhooks; use one or the other for
+  a downstream system, not both. To keep another FHIR server's patients
+  current instead, use *ezIdentitySense FHIR Subscription to FHIR Server*.
+$GUIDE$
+WHERE slug = 'ezidentitysense-fhir-subscription-to-hl7-adt';

@@ -64,3 +64,23 @@ describe('V296 (M4) generated migration', () => {
         expect(sql).toContain("OOB_ADT_A40_v2.5.1_R4");
     });
 });
+
+describe('V296 (M4) outbound ADT templates: the site event table', () => {
+    const configs = [...sql.matchAll(/'(\{"execution_groups".*?)'::jsonb, '(?:CloudEvents|FHIR[^']*|[A-Za-z]+)'/gs)].map(m => JSON.parse(m[1].replace(/''/g, "'")));
+    const builders = configs.map(c => c.execution_groups.flatMap(g => g.steps).find(s => s.step_alias === 'build_adt')).filter(Boolean);
+
+    test('both ADT-sending templates take the table, and can build only what they have structures for', () => {
+        expect(builders).toHaveLength(2);
+        for (const b of builders) {
+            expect(b.config.triggerEventMapOverrides).toBe('{{var.triggerOverrides}}');
+            expect(Object.keys(b.config.messageStructureMap).sort()).toEqual(['A04', 'A08', 'A28', 'A29', 'A31', 'A37', 'A40']);
+            // A04/A08 are ADT_A01; the merge, unlink and delete structures are unchanged
+            expect(b.config.messageStructureMap).toMatchObject({ A04: 'ADT_A01', A08: 'ADT_A01', A40: 'ADT_A39', A37: 'ADT_A37', A29: 'ADT_A21' });
+        }
+    });
+
+    test('the setup field is optional and lists the allowed events', () => {
+        expect((sql.match(/"field":"triggerOverrides"/g) || []).length).toBe(2);
+        expect(sql).toMatch(/"field":"triggerOverrides"[^}]*"type":"keyvalue"[^}]*"required":false/);
+    });
+});

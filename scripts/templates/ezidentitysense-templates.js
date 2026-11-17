@@ -183,6 +183,23 @@ function secondPID() {
 
 // ── Template 1: ezIdentitySense events -> HL7 v2 ADT ───────────────────────
 
+// The trigger events these templates can build, and the message structure
+// each uses (MSH-9.3). A site's own event table (the triggerOverrides
+// variable) may only choose among them: a registration or update can be sent
+// as A28/A31 (the default) or as A04/A08; merges, unlinks and deletes keep
+// their own events, which carry segments the others lack.
+const TRIGGER_STRUCTURES = {
+    A28: 'ADT_A05', A31: 'ADT_A05', A04: 'ADT_A01', A08: 'ADT_A01',
+    A40: 'ADT_A39', A37: 'ADT_A37', A29: 'ADT_A21',
+};
+
+// The setup field for that table, keyed by the template's own event names.
+function triggerOverridesField(example) {
+    return { section: 'variables', section_label: 'ADT Trigger Events', field: 'triggerOverrides',
+        label: 'Which ADT Event Each Change Sends', type: 'keyvalue', required: false, placeholder: example,
+        hint: 'Optional, one CHANGE=EVENT per line, to send a change as another ADT event. A28, A31, A04 and A08 can stand in for each other; merges (A40), unlinks (A37) and deletes (A29) always use their own events. Left blank, the guide\'s table applies.' };
+}
+
 const OUTBOUND_EVENT_TYPES = [
     'identity.created', 'record.linked', 'record.relinked', 'record.updated', 'record.deactivated',
     'identity.golden-changed', 'identity.merged', 'identity.unmerged', 'identity.split', 'identity.purged',
@@ -260,7 +277,8 @@ const outbound = {
                     'identity.unmerged': 'A37', 'identity.split': 'A37',
                     'identity.purged': 'A29',
                 },
-                messageStructureMap: { A28: 'ADT_A05', A31: 'ADT_A05', A40: 'ADT_A39', A37: 'ADT_A37', A29: 'ADT_A21' },
+                triggerEventMapOverrides: '{{var.triggerOverrides}}',
+                messageStructureMap: TRIGGER_STRUCTURES,
                 segments: [
                     { segment: 'EVN', fields: [
                         { fieldKey: 'EVN.2', sourcePath: 'message.time', transform: 'hl7_datetime' },
@@ -289,6 +307,7 @@ const outbound = {
           hint: 'The port ezHealthKonnect listens on for ezIdentitySense\'s webhooks.' },
         { section: 'source', field: 'webhook_secret', label: 'Webhook Signing Secret', type: 'password', required: true,
           hint: 'The whsec_… secret ezIdentitySense showed when you created the webhook. Stored encrypted.' },
+        triggerOverridesField('record.updated=A08, identity.created=A04'),
         ...ezisConnectionFields(['fetch_patient', 'fetch_unmerged_identity', 'fetch_split_identity']),
         { section: 'steps', section_label: 'ezIdentitySense Connection', step_aliases: ['build_adt'], field: 'receivingApplication',
           label: 'Receiving Application (MSH-5)', type: 'string', required: false, hint: 'Optional: the receiving system\'s application name.' },
@@ -967,7 +986,8 @@ const subscriptionToADT = {
                     'patient-created': 'A28', 'patient-changed': 'A31', 'patient-records': 'A31',
                     'patient-merged': 'A40', 'patient-separated': 'A37', 'patient-erased': 'A29',
                 },
-                messageStructureMap: { A28: 'ADT_A05', A31: 'ADT_A05', A40: 'ADT_A39', A37: 'ADT_A37', A29: 'ADT_A21' },
+                triggerEventMapOverrides: '{{var.triggerOverrides}}',
+                messageStructureMap: TRIGGER_STRUCTURES,
                 segments: [
                     { segment: 'EVN', fields: [{ fieldKey: 'EVN.2', sourcePath: 'message.timestamp', transform: 'hl7_datetime' }] },
                     pidFromEventPatient('message.focus', '1'),
@@ -991,6 +1011,7 @@ const subscriptionToADT = {
     },
     required_connection_fields: [
         ...subscriptionSetupFields(),
+        triggerOverridesField('patient-changed=A08, patient-created=A04'),
         { section: 'steps', section_label: 'Downstream System', step_aliases: ['build_adt'], field: 'receivingApplication',
           label: 'Receiving Application (MSH-5)', type: 'string', required: false, hint: 'Optional: the receiving system\'s application name.' },
         { section: 'steps', section_label: 'Downstream System', step_aliases: ['build_adt'], field: 'receivingFacility',
@@ -1141,7 +1162,7 @@ ${guideSQL(t)}`;
 
 // V296 (milestone M4): templates added or replaced after V295. A template
 // is replaced by slug; interfaces already created from it are unaffected.
-const M4_TEMPLATES = [inbound];
+const M4_TEMPLATES = [inbound, outbound, subscriptionToADT];
 
 if (process.argv[2] === 'm4') {
     process.stdout.write(`-- V296: milestone M4 of the ezIdentitySense templates.
@@ -1151,8 +1172,9 @@ if (process.argv[2] === 'm4') {
 -- those and regenerate; don't edit this file by hand.
 --
 -- Replaces "HL7 ADT to ezIdentitySense" (A47, the older merge events A30,
--- A34 and A18, and an editable event table). Interfaces already created
--- from it keep what they have.
+-- A34 and A18, and an editable event table) and the two templates that send
+-- ADT (an editable change-to-event table). Interfaces already created from
+-- them keep what they have.
 
 -- HL7 v2 to FHIR mappings for the merge-family events that had none: A30
 -- (merge person information), A18 (merge patient information) and A47

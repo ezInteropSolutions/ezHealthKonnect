@@ -267,7 +267,11 @@ type hl7BuildConfig struct {
 	TriggerEvent         string             `json:"triggerEvent"`
 	TriggerEventPath     string             `json:"triggerEventPath"`
 	TriggerEventMap      map[string]string  `json:"triggerEventMap"`
-	MessageStructure     string             `json:"messageStructure"`
+	// TriggerEventMapOverrides is a site's own {sourceValue: trigger}
+	// table; an entry wins over triggerEventMap. A trigger the template has
+	// no messageStructureMap entry for is refused, not built.
+	TriggerEventMapOverrides map[string]string `json:"triggerEventMapOverrides"`
+	MessageStructure    string             `json:"messageStructure"`
 	MessageStructureMap  map[string]string  `json:"messageStructureMap"`
 	Version              string             `json:"version"`
 	OutputField          string             `json:"outputField"`
@@ -314,6 +318,13 @@ func (e *HL7BuildExecutor) Execute(
 		trigger := raw
 		if len(cfg.TriggerEventMap) > 0 {
 			trigger = cfg.TriggerEventMap[raw]
+		}
+		if o := strings.ToUpper(strings.TrimSpace(cfg.TriggerEventMapOverrides[raw])); o != "" {
+			if cfg.MessageStructure == "" && len(cfg.MessageStructureMap) > 0 && cfg.MessageStructureMap[o] == "" {
+				return nil, fmt.Errorf("hl7.build: %q is mapped to trigger event %q, which this interface cannot build (it can build %s)",
+					raw, o, sortedKeys(cfg.MessageStructureMap))
+			}
+			trigger = o
 		}
 		if trigger == "" {
 			return nil, fmt.Errorf("hl7.build: no trigger event for %q at %s", raw, cfg.TriggerEventPath)
