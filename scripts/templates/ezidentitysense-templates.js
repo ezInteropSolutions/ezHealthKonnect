@@ -324,12 +324,43 @@ function feedStep(seq, name, alias, caseValue, cfg) {
         { parent_conditional_step_id: 'adt_event', case_value: caseValue });
 }
 
-const INBOUND_STEPS = ['register_patient', 'merge_record', 'remove_record_a23', 'remove_record_a29'];
+// What each HL7 trigger event does in ezIdentitySense. The Switch/Case
+// step translates MSH-9.2 through this table (valueMap) and routes on the
+// result; a site changes any line in the setup form (valueMapOverrides).
+// An event with no line registers the PID's patient, as before.
+const EVENT_ACTIONS = {
+    A40: 'merge', A30: 'merge', A34: 'merge', A18: 'merge',
+    A23: 'remove', A29: 'remove',
+    A47: 'replace_id',
+    // Links and account-level events change nothing here: a source's own
+    // claim that two patients are one must not bypass matching, and an
+    // account is not an identity. They fail visibly (NACK) instead.
+    A24: 'unsupported', A37: 'unsupported', A35: 'unsupported', A36: 'unsupported',
+    A41: 'unsupported', A42: 'unsupported', A43: 'unsupported', A44: 'unsupported', A45: 'unsupported',
+};
+
+// The record in MRG-1 was merged, in the source, into the one in PID-3.
+function mergeRecordStep(seq, name, alias, caseValue) {
+    return feedStep(seq, name, alias, caseValue, {
+        method: 'PUT', endpoint: FEED + '{retiredId}',
+        fieldMappings: { retiredId: 'MRG.1.1', survivingId: LOCAL_ID },
+        requestBody: {
+            resourceType: 'Patient',
+            active: false,
+            identifier: [{ system: '{{var.sourceAuthority}}', value: 'retiredId' }],
+            link: [{ type: 'replaced-by', other: { identifier: { system: '{{var.sourceAuthority}}', value: 'survivingId' } } }],
+        },
+    });
+}
+
+const registerBody = { method: 'PUT', endpoint: FEED + '{localId}', fieldMappings: { localId: LOCAL_ID }, bodyRef: PATIENT };
+
+const INBOUND_STEPS = ['register_patient', 'merge_record', 'remove_record', 'register_new_id', 'merge_old_id'];
 
 const inbound = {
     name: 'HL7 ADT to ezIdentitySense',
     slug: 'hl7-adt-to-ezidentitysense',
-    description: 'Feeds a source system\'s HL7 v2 ADT messages into ezIdentitySense (the enterprise master patient index) through its standard IHE PIXm Patient Identity Feed: registrations and updates (A01, A04, A05, A08, A28, A31 and any other ADT carrying PID) register or update the patient, A40 merges two of the source\'s records, A23 and A29 remove one. Processed one at a time, in order; an older message never overwrites a newer one.',
+    description: 'Feeds a source system\'s HL7 v2 ADT messages into ezIdentitySense (the enterprise master patient index) through its standard IHE PIXm Patient Identity Feed: registrations and updates (A01, A04, A05, A08, A28, A31 and any other ADT carrying PID) register or update the patient; A40 (and the older A30, A34, A18) merge two of the source\'s records; A47 changes a patient\'s identifier; A23 and A29 remove one. What each event does can be changed in the setup form. Processed one at a time, in order; an older message never overwrites a newer one.',
     category: 'empi',
     subcategory: 'ezidentitysense',
     tags: ['ezidentitysense', 'empi', 'mpi', 'hl7v2', 'adt', 'pix', 'pixm', 'iti-104', 'patient-feed', 'inbound'],
@@ -358,37 +389,28 @@ const inbound = {
             }),
             step(20, 'ADT Event', 'adt_event', 'switch_case', {
                 field: 'MSH.9.2',
+                valueMap: EVENT_ACTIONS,
+                valueMapOverrides: '{{var.eventActions}}',
                 cases: [
-                    { value: 'A40', label: 'Merge', actions: [] },
-                    { value: 'A23', label: 'Delete visit', actions: [] },
-                    { value: 'A29', label: 'Delete person', actions: [] },
+                    { value: 'merge', label: 'Merge', actions: [] },
+                    { value: 'remove', label: 'Remove', actions: [] },
+                    { value: 'replace_id', label: 'Identifier changed', actions: [] },
+                    { value: 'ignore', label: 'Ignore', actions: [] },
+                    { value: 'unsupported', label: 'Not supported', actions: [{ action: 'reject',
+                        errorMessage: 'This ADT event is not applied to ezIdentitySense. Links and account-level events never change an identity on their own; see the interface guide, or choose what the event does in this interface\'s settings.' }] },
                 ],
                 default: { actions: [] },
                 options: { caseInsensitive: true, trimWhitespace: true },
             }),
-            feedStep(30, 'Register Patient', 'register_patient', 'default', {
-                method: 'PUT', endpoint: FEED + '{localId}',
-                fieldMappings: { localId: LOCAL_ID },
-                bodyRef: PATIENT,
-            }),
-            // A40: the record in MRG-1 was merged, in the source, into the
-            // record in PID-3.
-            feedStep(32, 'Merge Record', 'merge_record', 'A40', {
-                method: 'PUT', endpoint: FEED + '{retiredId}',
-                fieldMappings: { retiredId: 'MRG.1.1', survivingId: LOCAL_ID },
-                requestBody: {
-                    resourceType: 'Patient',
-                    active: false,
-                    identifier: [{ system: '{{var.sourceAuthority}}', value: 'retiredId' }],
-                    link: [{ type: 'replaced-by', other: { identifier: { system: '{{var.sourceAuthority}}', value: 'survivingId' } } }],
-                },
-            }),
-            feedStep(34, 'Remove Record A23', 'remove_record_a23', 'A23', {
+            feedStep(30, 'Register Patient', 'register_patient', 'default', registerBody),
+            mergeRecordStep(32, 'Merge Record', 'merge_record', 'merge'),
+            feedStep(34, 'Remove Record', 'remove_record', 'remove', {
                 method: 'DELETE', endpoint: FEED + '{localId}', fieldMappings: { localId: LOCAL_ID },
             }),
-            feedStep(36, 'Remove Record A29', 'remove_record_a29', 'A29', {
-                method: 'DELETE', endpoint: FEED + '{localId}', fieldMappings: { localId: LOCAL_ID },
-            }),
+            // A47: PID-3 holds the new identifier, MRG-1 the old. The new
+            // one is registered, then the old record is merged into it.
+            feedStep(36, 'Register New ID', 'register_new_id', 'replace_id', registerBody),
+            mergeRecordStep(38, 'Merge Old ID', 'merge_old_id', 'replace_id'),
         ],
     },
     required_connection_fields: [
@@ -397,6 +419,9 @@ const inbound = {
         { section: 'variables', section_label: 'Source System', field: 'sourceAuthority',
           label: 'This Source\'s ID Authority', type: 'string', required: true,
           hint: 'The ID authority set for this source system in ezIdentitySense, e.g. urn:oid:2.16.840.1.113883.3.999.1. Its PID-3 identifier is the record\'s local ID.' },
+        { section: 'variables', field: 'eventActions', label: 'What Each ADT Event Does', type: 'keyvalue', required: false,
+          placeholder: 'A02=ignore, A24=ignore',
+          hint: 'Optional, one EVENT=ACTION per line. Actions: register, merge, remove, replace_id (identifier changed), ignore, unsupported (refuse the message). Left blank, the defaults in the guide apply; any event not listed registers the patient.' },
         ...ezisConnectionFields(INBOUND_STEPS),
     ],
     preview_steps: [
@@ -1112,6 +1137,45 @@ VALUES (
     ${t.estimated_setup_minutes}, true, true, 'ezHealthKonnect', 0, ${lit(t.processing_order)}
 );
 ${guideSQL(t)}`;
+}
+
+// V296 (milestone M4): templates added or replaced after V295. A template
+// is replaced by slug; interfaces already created from it are unaffected.
+const M4_TEMPLATES = [inbound];
+
+if (process.argv[2] === 'm4') {
+    process.stdout.write(`-- V296: milestone M4 of the ezIdentitySense templates.
+--
+-- GENERATED by scripts/templates/ezidentitysense-templates.js (argument
+-- "m4") from the JS definitions and the Markdown guides beside it. Edit
+-- those and regenerate; don't edit this file by hand.
+--
+-- Replaces "HL7 ADT to ezIdentitySense" (A47, the older merge events A30,
+-- A34 and A18, and an editable event table). Interfaces already created
+-- from it keep what they have.
+
+-- HL7 v2 to FHIR mappings for the merge-family events that had none: A30
+-- (merge person information), A18 (merge patient information) and A47
+-- (change patient identifier list) all carry PID and MRG, like A40, so they
+-- start from A40's mapping (PID to Patient). Without one, the Patient is
+-- not built and the message cannot be filed.
+INSERT INTO hl7_fhir_templates
+    (message_type, hl7_version, template_name, template_description, template_config,
+     is_default, fhir_resources, template_type, is_system, is_public, version,
+     referencing_mode, profile_version, fhir_version)
+SELECT m.message_type, s.hl7_version, 'OOB_' || replace(m.message_type, '^', '_') || '_v' || s.hl7_version || '_' || s.fhir_version,
+       m.description, s.template_config, true, s.fhir_resources, s.template_type, true, true, s.version,
+       s.referencing_mode, s.profile_version, s.fhir_version
+FROM hl7_fhir_templates s
+CROSS JOIN (VALUES
+    ('ADT^A30', 'Merge person information (PID and MRG, as A40)'),
+    ('ADT^A18', 'Merge patient information (PID and MRG, as A40)'),
+    ('ADT^A47', 'Change patient identifier list (PID and MRG, as A40)')
+) AS m(message_type, description)
+WHERE s.template_name = 'OOB_ADT_A40_v2.5.1_R4'
+  AND NOT EXISTS (SELECT 1 FROM hl7_fhir_templates e WHERE e.message_type = m.message_type AND e.is_default);
+${M4_TEMPLATES.map(templateSQL).join('')}`);
+    process.exit(0);
 }
 
 if (process.argv[2] === 'fhir') {

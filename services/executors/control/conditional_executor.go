@@ -672,6 +672,9 @@ func (e *SwitchCaseExecutor) Execute(
 		fieldStr = strings.ToLower(fieldStr)
 	}
 
+	// Optional valueMap / valueMapOverrides: route many inputs to one label.
+	fieldStr = mapSwitchValue(step.Config, fieldStr, trimWhitespace, caseInsensitive)
+
 	fmt.Printf("🔀 [SwitchCase] Evaluating %s = '%s' (caseInsensitive=%v, trimWhitespace=%v)\n", field, fieldStr, caseInsensitive, trimWhitespace)
 
 	// Find matching case
