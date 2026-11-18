@@ -289,7 +289,7 @@ func (h *HTTPClientService) ExecuteWithRetry(
 
 		// Check status code
 		if (resp.StatusCode < 200 || resp.StatusCode >= 300) && !statusAccepted(resp.StatusCode, acceptStatuses) {
-			lastErr = fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(bodyBytes))
+			lastErr = &StatusError{Status: resp.StatusCode, Body: bodyBytes, Headers: resp.Header}
 			continue
 		}
 
@@ -312,6 +312,19 @@ func (h *HTTPClientService) ExecuteWithRetry(
 	}
 
 	return nil, lastErr
+}
+
+// StatusError is a response with a status the caller did not accept. It keeps
+// the whole answer, so a caller that passes the answer on (a relay returning
+// the receiving system's own OperationOutcome) has more than the error text.
+type StatusError struct {
+	Status  int
+	Body    []byte
+	Headers http.Header
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("API returned status %d: %s", e.Status, string(e.Body))
 }
 
 // Execute performs a complete HTTP request with authentication and retry

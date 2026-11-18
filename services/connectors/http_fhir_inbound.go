@@ -90,6 +90,12 @@ type HTTPFHIRInboundConnector struct {
 
 	// IP allowlist (nil = allow all)
 	allowedIPs []string
+
+	// Optional synchronous reply (see http_fhir_sync_reply.go).
+	interfaceID      string
+	syncReply        syncReplyConfig
+	syncGate         chan struct{}
+	pipelineExecutor PipelineExecutor
 }
 
 // NewHTTPFHIRInboundConnector creates a new HTTP FHIR inbound connector.
@@ -153,6 +159,11 @@ func (h *HTTPFHIRInboundConnector) Initialize(config []byte) error {
 			return fmt.Errorf("bundleMode must be 'bundle_as_unit' or 'bundle_unwrap', got %q", v)
 		}
 	}
+
+	// Synchronous reply (off unless syncReply.enabled)
+	h.interfaceID, _ = cfg["interface_id"].(string)
+	h.syncReply = parseSyncReplyConfig(cfg)
+	h.syncGate = make(chan struct{}, 1)
 
 	// Max body size (MB)
 	if v, ok := cfg["maxBodySizeMB"].(float64); ok && v > 0 {
@@ -516,6 +527,12 @@ func (h *HTTPFHIRInboundConnector) handleFHIRRequest(w http.ResponseWriter, r *h
 
 	// ── 6. Build message type and queue ───────────────────────────────────────
 	msgType := buildInboundMessageType(r.Method, resourceType, resourceID, operation, bundleType)
+
+	// Synchronous reply: run the pipeline now and answer with its result.
+	if h.syncReply.Enabled && r.Method != http.MethodGet && operation == "" {
+		h.handleSyncReply(w, r, body, msgType, resourceType, resourceID)
+		return
+	}
 	msg := h.buildMessage(r, body, msgType, headers)
 
 	if !h.enqueue(w, msg) {

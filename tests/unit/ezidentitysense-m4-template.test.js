@@ -84,3 +84,61 @@ describe('V296 (M4) outbound ADT templates: the site event table', () => {
         expect(sql).toMatch(/"field":"triggerOverrides"[^}]*"type":"keyvalue"[^}]*"required":false/);
     });
 });
+
+// The FHIR relay template (its own INSERT, found by slug).
+function relayRow() {
+    const i = sql.indexOf("'fhir-patient-relay-to-ezidentitysense'");
+    expect(i).toBeGreaterThan(-1);
+    const m = sql.slice(i).match(/'(\{"execution_groups".*?)'::jsonb, 'FHIR:Patient',\s*'(\[.*?\])'::jsonb, ARRAY/s);
+    expect(m).not.toBeNull();
+    return { config: JSON.parse(m[1].replace(/''/g, "'")), fields: JSON.parse(m[2].replace(/''/g, "'")) };
+}
+
+describe('FHIR Patient relay template', () => {
+    const { config, fields } = relayRow();
+    const all = config.execution_groups.flatMap(g => g.steps);
+    const byAlias = a => all.find(s => s.step_alias === a);
+
+    test('the reply mode is a setup switch, off unless chosen', () => {
+        const inbound = byAlias('fhir_patient_feed');
+        expect(inbound.config.config.syncReply).toMatchObject({ enabled: '{{var.immediateReply}}', serialize: true });
+        const f = fields.find(x => x.field === 'immediateReply');
+        expect(f).toMatchObject({ section: 'variables', type: 'boolean', required: false });
+        expect(f.hint).toMatch(/Off \(default\)/);
+    });
+
+    test('creates and updates PUT the Patient to the feed exactly as received', () => {
+        const put = byAlias('put_patient');
+        expect(put.case_value).toBe('default');
+        expect(put.config.method).toBe('PUT');
+        expect(put.config.endpoint).toBe('/fhir/r4/Patient?identifier={{var.sourceAuthority}}|{localId}');
+        expect(put.config.fieldMappings.localId).toBe('message.identifier[system={{var.sourceAuthority}}].value');
+        expect(put.config.bodyRef).toBe('message.raw');
+    });
+
+    test('a delete takes the local ID from the URL, and every step routes from request_kind', () => {
+        const del = byAlias('delete_patient');
+        expect(del.config.method).toBe('DELETE');
+        expect(del.config.fieldMappings.localId).toBe('message._http.resourceId');
+        expect(byAlias('request_kind').config.field).toBe('message._http.method');
+        for (const s of [byAlias('put_patient'), del]) expect(s.parent_conditional_step_id).toBe('request_kind');
+    });
+
+    test('who may send is a required choice, credentials ship blank, the secrets are not left in the config', () => {
+        const auth = fields.find(x => x.field === 'authType');
+        expect(auth).toMatchObject({ section: 'source', type: 'select', required: true });
+        expect(auth.options.map(o => o.value)).toEqual(['bearer', 'api_key', 'basic', 'none']);
+        for (const s of [byAlias('put_patient'), byAlias('delete_patient')]) {
+            expect(s.config.oauth2ClientSecret).toBe('');
+            expect(s.config.baseUrl).toBe('');
+        }
+        expect(byAlias('fhir_patient_feed').config.config.bearerToken).toBeUndefined();
+    });
+
+    test('the guide says when to use each mode', () => {
+        const guide = fs.readFileSync(path.join(ROOT, 'scripts/templates/ezidentitysense-guides/fhir-relay-to-ezidentitysense.md'), 'utf8');
+        expect(guide).toMatch(/Use it when/);
+        expect(guide.match(/\*\*Use it when\*\*/g)).toHaveLength(2);
+        expect(guide).not.toMatch(/IHE conformance|conformant/i);
+    });
+});

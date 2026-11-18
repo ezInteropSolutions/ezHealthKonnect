@@ -453,6 +453,9 @@ func (tps *TransformationPipelineService) ExecutePipeline(
 			if stepOutput != nil {
 				stepOutput.Success = false
 				stepOutput.Error = stepErr.Error()
+				// Keep what the failed step did record (an API step's refused
+				// answer), for a caller that reads the execution log.
+				stepLog.StepOutput = stepOutput
 			}
 
 			// Record error
@@ -908,6 +911,13 @@ func (tps *TransformationPipelineService) executeStepWithContext(
 	output, err := tps.executorRegistry.ExecuteStep(ctx, *step, inputData)
 
 	if err != nil {
+		// A failed step may still have recorded details (an API step's refused
+		// answer); keep them so the execution log shows what came back.
+		if details, ok := output["_executionDetails"].(map[string]interface{}); ok {
+			return output, &models.StepOutput{StepID: step.ID, StepName: step.StepName, StepType: step.StepType,
+				Namespace: tps.generateStepNamespace(step, sequence), Sequence: sequence, Success: false,
+				Error: err.Error(), ExecutionDetails: details}, err
+		}
 		return output, nil, err
 	}
 

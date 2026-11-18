@@ -3,6 +3,7 @@ package enrichment
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/executors"
 	httpservice "ezhealthkonnect/services/http"
@@ -164,6 +165,23 @@ func (e *APIEnrichmentExecutor) Execute(
 		responseDetails = map[string]interface{}{
 			"error":       err.Error(),
 			"duration_ms": apiDuration,
+		}
+
+		// A refused status keeps its answer, for a caller that passes it on.
+		var statusErr *httpservice.StatusError
+		if errors.As(err, &statusErr) {
+			responseDetails["status_code"] = statusErr.Status
+			responseDetails["body_raw"] = string(statusErr.Body)
+			if ct := statusErr.Headers.Get("Content-Type"); ct != "" {
+				responseDetails["content_type"] = ct
+			}
+			headers := map[string]string{}
+			for k, v := range statusErr.Headers {
+				if len(v) > 0 {
+					headers[k] = v[0]
+				}
+			}
+			responseDetails["headers"] = headers
 		}
 
 		// Apply default value if configured (executor-level fallback)

@@ -1115,6 +1115,103 @@ const subscriptionToFHIR = {
     guide: 'fhir-subscription-to-fhir-server.md',
 };
 
+// ── Template: FHIR Patient relay -> ezIdentitySense ────────────────────────
+//
+// A client system that already speaks FHIR (a FHIR server, an app) sends its
+// Patient create and update here, as it would to any FHIR server; each is
+// forwarded to ezIdentitySense's patient feed (IHE PIXm, ITI-104). Two ways
+// to answer, chosen at setup ("immediateReply"): acknowledge at once and
+// process in order (default), or process first and answer with
+// ezIdentitySense's own status and OperationOutcome.
+//
+// The Patient is sent exactly as received (the receiver keeps the original
+// text in "raw"); its
+// local ID is the identifier in the source's ID authority.
+
+const RELAY_STEPS = ['put_patient', 'delete_patient'];
+const RELAY_LOCAL_ID = 'message.identifier[system={{var.sourceAuthority}}].value';
+
+function relayStep(seq, name, alias, caseValue, cfg) {
+    return step(seq, name, alias, 'enrichment.api', { ...ezisApiAuth('records.write'), headers: FHIR_JSON, ...cfg },
+        { parent_conditional_step_id: 'request_kind', case_value: caseValue });
+}
+
+const fhirRelay = {
+    name: 'FHIR Patient Relay to ezIdentitySense',
+    slug: 'fhir-patient-relay-to-ezidentitysense',
+    description: 'Lets a system that speaks FHIR send its Patient creates and updates here, as to any FHIR server, and feeds each to ezIdentitySense (the enterprise master patient index) through its IHE PIXm patient feed. Two modes, chosen at setup: acknowledge at once and send on in order (default), or send first and answer with ezIdentitySense\'s own reply, so the sender knows straight away whether the patient was accepted. A delete deactivates the record.',
+    category: 'empi',
+    subcategory: 'ezidentitysense',
+    tags: ['ezidentitysense', 'empi', 'mpi', 'fhir', 'patient', 'pixm', 'iti-104', 'patient-feed', 'inbound'],
+    icon: '🔁',
+    difficulty: 'intermediate',
+    message_type: 'FHIR:Patient',
+    source_connector_type: 'http_fhir_inbound',
+    source_config_template: { port: 8086, basePath: '/fhir/r4' },
+    target_connector_type: 'http_outbound',
+    target_config_template: {},
+    pipeline_config: {
+        execution_groups: [
+            step(5, 'FHIR Patient Feed', 'fhir_patient_feed', 'connector.inbound', {
+                connectorType: 'http_fhir_inbound',
+                config: {
+                    port: 8086, basePath: '/fhir/r4', fhirVersion: 'R4', bundleMode: 'bundle_as_unit',
+                    allowedMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
+                    syncReply: { enabled: '{{var.immediateReply}}', timeoutSeconds: 20, serialize: true },
+                },
+                timeoutMs: 30000,
+            }),
+            step(10, 'Request Kind', 'request_kind', 'switch_case', {
+                field: 'message._http.method',
+                cases: [{ value: 'DELETE', label: 'Delete', actions: [] }],
+                default: { actions: [] },
+                options: { caseInsensitive: true, trimWhitespace: true },
+            }),
+            // Create or update: the Patient as received.
+            relayStep(20, 'Put Patient', 'put_patient', 'default', {
+                method: 'PUT', endpoint: FEED + '{localId}', fieldMappings: { localId: RELAY_LOCAL_ID },
+                bodyRef: 'message.raw',
+            }),
+            // Delete: the record in the URL (its local ID) is deactivated.
+            relayStep(30, 'Delete Patient', 'delete_patient', 'DELETE', {
+                method: 'DELETE', endpoint: FEED + '{localId}', fieldMappings: { localId: 'message._http.resourceId' },
+            }),
+        ],
+    },
+    required_connection_fields: [
+        { section: 'source', field: 'port', label: 'FHIR Port', type: 'number', required: true,
+          hint: 'The port your system sends Patients to, at /fhir/r4/Patient.' },
+        { section: 'source', field: 'authType', label: 'Who May Send', type: 'select', required: true,
+          options: [{ value: 'bearer', label: 'A bearer token' }, { value: 'api_key', label: 'An API key' },
+                    { value: 'basic', label: 'A user name and password' },
+                    { value: 'none', label: 'Anyone (testing only: patient data)' }],
+          hint: 'How the sending system proves who it is.' },
+        { section: 'source', field: 'bearerToken', label: 'Bearer Token', type: 'password', required: false,
+          hint: 'If you chose a bearer token. Stored encrypted.' },
+        { section: 'source', field: 'apiKey', label: 'API Key', type: 'password', required: false,
+          hint: 'If you chose an API key (sent in the X-API-Key header). Stored encrypted.' },
+        { section: 'source', field: 'username', label: 'User Name', type: 'string', required: false,
+          hint: 'If you chose a user name and password.' },
+        { section: 'source', field: 'password', label: 'Password', type: 'password', required: false,
+          hint: 'If you chose a user name and password. Stored encrypted.' },
+        { section: 'variables', section_label: 'Source System', field: 'sourceAuthority',
+          label: 'This Source\'s ID Authority', type: 'string', required: true,
+          hint: 'The ID authority set for this source system in ezIdentitySense, e.g. urn:oid:2.16.840.1.113883.3.999.1. The Patient\'s identifier with this system is its local ID.' },
+        { section: 'variables', section_label: 'Reply', field: 'immediateReply', label: 'Answer With ezIdentitySense\'s Own Reply',
+          type: 'boolean', required: false,
+          hint: 'Off (default): reply "accepted" at once and send each Patient on in order; a refusal shows in this interface\'s message list. On: send first and reply with ezIdentitySense\'s own status and OperationOutcome; one request at a time; requests are not listed in the message list. See the guide.' },
+        ...ezisConnectionFields(RELAY_STEPS),
+    ],
+    preview_steps: [
+        { name: 'Receive FHIR Patient', icon: '🔌', step_type: 'connector.inbound' },
+        { name: 'Create, Update or Delete', icon: '🔀', step_type: 'switch_case' },
+        { name: 'ezIdentitySense Patient Feed', icon: '📤', step_type: 'enrichment.api' },
+    ],
+    estimated_setup_minutes: 10,
+    processing_order: 'in_order',
+    guide: 'fhir-relay-to-ezidentitysense.md',
+};
+
 const FHIR_TEMPLATES = [subscriptionToADT, subscriptionToFHIR];
 
 const TEMPLATES = [outbound, inbound, queries];
@@ -1162,7 +1259,7 @@ ${guideSQL(t)}`;
 
 // V296 (milestone M4): templates added or replaced after V295. A template
 // is replaced by slug; interfaces already created from it are unaffected.
-const M4_TEMPLATES = [inbound, outbound, subscriptionToADT];
+const M4_TEMPLATES = [inbound, outbound, subscriptionToADT, fhirRelay];
 
 if (process.argv[2] === 'm4') {
     process.stdout.write(`-- V296: milestone M4 of the ezIdentitySense templates.
