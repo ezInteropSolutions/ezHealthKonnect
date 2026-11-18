@@ -1212,6 +1212,108 @@ const fhirRelay = {
     guide: 'fhir-relay-to-ezidentitysense.md',
 };
 
+// ── Template: ezIdentitySense bulk export to files ─────────────────────────
+//
+// On a schedule, takes the patients from ezIdentitySense with FHIR Bulk Data
+// ($export) and writes them to a folder as NDJSON, for a data warehouse or
+// analytics system to pick up. Each run asks only for what changed since the
+// last run that succeeded (_since), so after the first full export the files
+// are small; a failed run is covered again by the next one. ezIdentitySense
+// makes the files in the background (50,000 patients each); this waits for
+// them, then downloads each one and finally saves the manifest, which is the
+// sign that a run's files are all there.
+//
+// The client needs identities.export and identities.read (and
+// identities.read.demographics for demographics in the files).
+
+const EXPORT_STEPS = ['start_export', 'wait_export', 'download_file', 'save_manifest'];
+const EXPORT_SCOPE = 'identities.export identities.read identities.read.demographics';
+
+function exportApi(seq, name, alias, cfg) {
+    return step(seq, name, alias, 'enrichment.api', { ...ezisApiAuth(EXPORT_SCOPE),
+        headers: { Accept: 'application/fhir+json' }, ...cfg });
+}
+
+const exportConnector = { daily_at: '', timezone: '', run_on_start: false, overlap_minutes: 5, cursor_key: 'ezidentitysense_export' };
+
+const bulkExport = {
+    name: 'ezIdentitySense Bulk Export to Files',
+    slug: 'ezidentitysense-bulk-export-to-files',
+    description: 'Every day at a time you choose, takes the patients from ezIdentitySense (the enterprise master patient index) with FHIR Bulk Data and writes them to a folder as NDJSON files, for a data warehouse or analytics system. After the first full export, each run takes only what changed since the last run that succeeded; a failed run is covered by the next. Each run ends with a manifest file listing its files, so a reader knows they are all there.',
+    category: 'empi',
+    subcategory: 'ezidentitysense',
+    tags: ['ezidentitysense', 'empi', 'mpi', 'fhir', 'bulk', 'export', 'ndjson', 'warehouse', 'scheduled'],
+    icon: '📤',
+    difficulty: 'intermediate',
+    message_type: 'EXPORT',
+    source_connector_type: 'schedule_inbound',
+    source_config_template: exportConnector,
+    target_connector_type: 'file_writer',
+    target_config_template: {},
+    pipeline_config: {
+        execution_groups: [
+            step(5, 'Export Schedule', 'export_schedule', 'connector.inbound', { connectorType: 'schedule_inbound', config: exportConnector, timeoutMs: 30000 }),
+            // Ask for the patients (only what changed since the last good run,
+            // after the first). The answer is "accepted", with the address to ask
+            // about progress in the Content-Location header.
+            exportApi(10, 'Start Export', 'start_export', {
+                method: 'GET', endpoint: '/fhir/r4/Patient/$export?_type=Patient&_since={since}',
+                fieldMappings: { since: 'message.since' },
+                headers: { Accept: 'application/fhir+json', Prefer: 'respond-async' },
+                headerOutputs: { statusUrl: 'Content-Location' },
+            }),
+            // Wait until it is made: 202 while it is, 200 with the list of files.
+            exportApi(20, 'Wait Export', 'wait_export', {
+                method: 'GET', endpoint: '{statusUrl}', encodePlaceholders: false,
+                fieldMappings: { statusUrl: 'steps.start_export.step_output.status_url' },
+                poll: { untilStatus: [200], intervalSeconds: 10, timeoutSeconds: 7200 },
+                timeoutMs: 20000,
+            }),
+            // One download per file, written whole to the folder.
+            step(30, 'Download Files', 'download_files', 'control.loop', {
+                loopType: 'foreach', collection: 'steps.wait_export.step_output.output', itemVariable: 'file',
+                childStepIds: ['download_file'], breakOnError: true, maxIterations: 100000,
+            }),
+            exportApi(31, 'Download File', 'download_file', {
+                method: 'GET', endpoint: '{fileUrl}', encodePlaceholders: false,
+                fieldMappings: { fileUrl: 'item.url', stamp: 'message.stamp', part: 'loop.iteration' },
+                headers: { Accept: 'application/fhir+ndjson' },
+                saveTo: { directory: '{{var.outputDirectory}}', fileName: 'ezidentitysense-patients-{stamp}-part{part}.ndjson' },
+                timeoutMs: 900000,
+            }),
+            // The manifest, last: its arrival means the run's files are all there.
+            exportApi(40, 'Save Manifest', 'save_manifest', {
+                method: 'GET', endpoint: '{statusUrl}', encodePlaceholders: false,
+                fieldMappings: { statusUrl: 'steps.start_export.step_output.status_url', stamp: 'message.stamp' },
+                saveTo: { directory: '{{var.outputDirectory}}', fileName: 'ezidentitysense-patients-{stamp}-manifest.json' },
+            }),
+        ],
+    },
+    required_connection_fields: [
+        { section: 'source', field: 'daily_at', label: 'Run Every Day At', type: 'string', required: true,
+          hint: 'The time of day, 24 hour, as HH:MM, for example 02:30.' },
+        { section: 'source', field: 'timezone', label: 'Time Zone', type: 'string', required: true,
+          hint: 'The time zone for that time, as an IANA name: UTC, Europe/London, America/New_York.' },
+        { section: 'variables', section_label: 'Where the Files Go', field: 'outputDirectory', label: 'Folder for the Files', type: 'string', required: true,
+          hint: 'A folder on the server this interface runs on, such as a mounted network share. It is created if it does not exist.' },
+        ...ezisConnectionFields(EXPORT_STEPS),
+        { section: 'steps', section_label: 'ezIdentitySense Connection', step_aliases: EXPORT_STEPS, field: 'oauth2Scope',
+          label: 'Access Requested', type: 'string', required: false,
+          hint: `Leave as it is to include patient demographics (${EXPORT_SCOPE}). Remove identities.read.demographics to export only enterprise IDs and source IDs.` },
+    ],
+    preview_steps: [
+        { name: 'Run on a Schedule', icon: '⏰', step_type: 'connector.inbound' },
+        { name: 'Start and Wait for the Export', icon: '📤', step_type: 'enrichment.api' },
+        { name: 'Download Each File', icon: '📥', step_type: 'control.loop' },
+        { name: 'Save the Manifest', icon: '📋', step_type: 'enrichment.api' },
+    ],
+    estimated_setup_minutes: 15,
+    processing_order: 'in_order',
+    guide: 'bulk-export-to-files.md',
+};
+
+const M5_TEMPLATES = [bulkExport];
+
 const FHIR_TEMPLATES = [subscriptionToADT, subscriptionToFHIR];
 
 const TEMPLATES = [outbound, inbound, queries];
@@ -1294,6 +1396,67 @@ CROSS JOIN (VALUES
 WHERE s.template_name = 'OOB_ADT_A40_v2.5.1_R4'
   AND NOT EXISTS (SELECT 1 FROM hl7_fhir_templates e WHERE e.message_type = m.message_type AND e.is_default);
 ${M4_TEMPLATES.map(templateSQL).join('')}`);
+    process.exit(0);
+}
+
+// V297 (milestone M5): the scheduled trigger connector and the bulk export template.
+if (process.argv[2] === 'm5') {
+    process.stdout.write(`-- V297: milestone M5 of the ezIdentitySense templates.
+--
+-- GENERATED by scripts/templates/ezidentitysense-templates.js (argument
+-- "m5") from the JS definitions and the Markdown guides beside it. Edit
+-- those and regenerate; don't edit this file by hand.
+--
+-- Adds the Scheduled Trigger connector (schedule_inbound,
+-- services/connectors/schedule_inbound.go), which starts a pipeline on a
+-- schedule and carries the start time of the last successful run as "since",
+-- and the template that uses it to export patients from ezIdentitySense.
+
+INSERT INTO connectivity_types (
+    type_name, category, display_name, description, icon, mode,
+    supports_cron, requires_auth, is_bidirectional, implementation_class,
+    config_schema, parameter_groups, is_active, priority, version,
+    ui_category, ui_sort_order
+) VALUES (
+    'schedule_inbound',
+    'inbound',
+    'Scheduled Trigger',
+    'Start a pipeline on a schedule: every N minutes, or every day at a set time. Each run is a message carrying "since", the start of the last run that succeeded, so a scheduled pull can ask a system only for what changed. A run that fails is covered again by the next one.',
+    '⏰',
+    'pull',
+    true,
+    false,
+    false,
+    'ScheduleInboundConnector',
+    '{
+        "type": "object",
+        "properties": {
+            "daily_at": {"type": "string", "title": "Run Every Day At (HH:MM)", "description": "24 hour time of day, e.g. 02:30. Use this or Run Every (minutes), not both."},
+            "interval_minutes": {"type": "integer", "title": "Run Every (minutes)", "minimum": 1, "description": "Use this or Run Every Day At, not both."},
+            "timezone": {"type": "string", "title": "Time Zone", "default": "UTC", "description": "IANA name for the daily time, e.g. Europe/London"},
+            "run_on_start": {"type": "boolean", "title": "Also Run When Activated", "default": false},
+            "overlap_minutes": {"type": "integer", "title": "Overlap (minutes)", "default": 0, "minimum": 0, "description": "Start each run''s since this many minutes early, so a clock slightly behind the source''s cannot let a change fall between two runs"},
+            "cursor_key": {"type": "string", "title": "Cursor Name", "default": "last_success", "description": "Name under which the last successful run is kept"}
+        }
+    }'::jsonb,
+    '{
+        "basic": ["daily_at", "interval_minutes", "timezone"],
+        "advanced": ["run_on_start", "overlap_minutes", "cursor_key"]
+    }'::jsonb,
+    true,
+    100,
+    '1.0',
+    'Other',
+    10
+)
+ON CONFLICT (type_name) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    description = EXCLUDED.description,
+    config_schema = EXCLUDED.config_schema,
+    parameter_groups = EXCLUDED.parameter_groups,
+    is_active = EXCLUDED.is_active,
+    updated_at = NOW();
+${M5_TEMPLATES.map(templateSQL).join('')}`);
     process.exit(0);
 }
 

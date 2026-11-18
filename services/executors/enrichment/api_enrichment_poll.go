@@ -35,17 +35,27 @@ func pollUntil(ctx context.Context, p *models.APIPollConfig, run func() (*httpse
 	resp := first
 	for {
 		last := pollValue(resp, p.UntilField)
-		for _, want := range p.UntilValues {
-			if strings.EqualFold(last, want) {
+		if p.UntilField != "" {
+			for _, want := range p.UntilValues {
+				if strings.EqualFold(last, want) {
+					return resp, nil
+				}
+			}
+		}
+		for _, status := range p.UntilStatus {
+			if resp.StatusCode == status {
 				return resp, nil
 			}
 		}
+		if p.UntilField == "" {
+			last = fmt.Sprintf("status %d", resp.StatusCode)
+		}
 		if time.Now().Add(interval).After(deadline) {
-			return nil, fmt.Errorf("polling timed out after %s: %s is still %q", timeout, p.UntilField, last)
+			return nil, fmt.Errorf("polling timed out after %s: %s is still %q", timeout, pollTarget(p), last)
 		}
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("polling stopped: %w (%s was %q)", ctx.Err(), p.UntilField, last)
+			return nil, fmt.Errorf("polling stopped: %w (%s was %q)", ctx.Err(), pollTarget(p), last)
 		case <-time.After(interval):
 		}
 		var err error
@@ -67,4 +77,12 @@ func pollValue(resp *httpservice.Response, field string) string {
 		return ""
 	}
 	return fmt.Sprintf("%v", v)
+}
+
+// pollTarget names what is being waited on, for messages.
+func pollTarget(p *models.APIPollConfig) string {
+	if p.UntilField != "" {
+		return p.UntilField
+	}
+	return "the response status"
 }

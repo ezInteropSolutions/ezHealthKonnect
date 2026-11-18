@@ -149,13 +149,26 @@ const (
 // API ENRICHMENT CONFIGURATION
 // ===============================================================
 
+// APISaveToConfig says where an API step writes a downloaded body. Both
+// fields may hold {placeholders} filled from the step's fieldMappings.
+type APISaveToConfig struct {
+	Directory string `json:"directory"`
+	FileName  string `json:"fileName"`
+	// Overwrite replaces a file already there; by default that is an error.
+	Overwrite bool `json:"overwrite,omitempty"`
+}
+
 // APIPollConfig makes an API step wait for a result: the same request is
 // repeated every IntervalSeconds (default 5) until UntilField (a path in the
 // JSON response, e.g. "state") equals one of UntilValues (case-insensitive),
 // or TimeoutSeconds (default 600) pass, which fails the step.
 type APIPollConfig struct {
-	UntilField      string   `json:"untilField"`
-	UntilValues     []string `json:"untilValues"`
+	UntilField      string   `json:"untilField,omitempty"`
+	UntilValues     []string `json:"untilValues,omitempty"`
+	// UntilStatus ends the wait when the response has one of these HTTP
+	// statuses (an asynchronous call answers 202 until its result is ready,
+	// then 200), instead of or as well as a field.
+	UntilStatus []int `json:"untilStatus,omitempty"`
 	IntervalSeconds int      `json:"intervalSeconds,omitempty"`
 	TimeoutSeconds  int      `json:"timeoutSeconds,omitempty"`
 }
@@ -183,6 +196,14 @@ type APIEnrichmentConfig struct {
 	// Poll repeats the request until a field of the JSON response has a wanted
 	// value, for a call that reports the progress of work it started.
 	Poll *APIPollConfig `json:"poll,omitempty"`
+
+	// HeaderOutputs copies response headers into the step output:
+	// {"statusUrl": "Content-Location"} puts that header's value there.
+	HeaderOutputs map[string]string `json:"headerOutputs,omitempty"`
+
+	// SaveTo writes the response body to a file instead of keeping it in the
+	// step output and logs; the output is then the file's path and size.
+	SaveTo *APISaveToConfig `json:"saveTo,omitempty"`
 
 	// StatusOutputField, when set, adds the response's HTTP status code to
 	// the step output under that name (e.g. "http_status"), so later steps

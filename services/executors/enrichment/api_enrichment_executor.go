@@ -251,8 +251,26 @@ func (e *APIEnrichmentExecutor) Execute(
 		log.Printf("✅ [API Enrichment] API call successful (%d fields)", enrichedFields)
 	}
 
+	// A body saved to a file is not kept in the logs or the step output.
+	var savedPath string
+	var savedBytes int
+	detailsResp := resp
+	if config.SaveTo != nil {
+		directory := e.buildURLWith(config.SaveTo.Directory, config.FieldMappings, inputData, false)
+		fileName := e.buildURLWith(config.SaveTo.FileName, config.FieldMappings, inputData, false)
+		var saveErr error
+		if savedPath, savedBytes, saveErr = saveResponseBody(config.SaveTo, directory, fileName, resp.Body); saveErr != nil {
+			e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{"error": saveErr.Error()})
+			e.PostExecute(ctx, step, saveErr, time.Since(start))
+			return inputData, saveErr
+		}
+		light := *resp
+		light.Body, light.JSON = nil, nil
+		detailsResp = &light
+	}
+
 	// Build response details with full information
-	responseDetails = e.buildResponseDetails(resp, apiDuration, enrichedFields)
+	responseDetails = e.buildResponseDetails(detailsResp, apiDuration, enrichedFields)
 
 	// Store request/response details for debugging
 	inputData["_api_request"] = requestDetails
@@ -279,6 +297,10 @@ func (e *APIEnrichmentExecutor) Execute(
 		}
 	}
 
+	if config.SaveTo != nil {
+		stepOutput = map[string]interface{}{"path": savedPath, "bytes": savedBytes}
+	}
+	applyHeaderOutputs(stepOutput, config.HeaderOutputs, resp)
 	if config.StatusOutputField != "" {
 		stepOutput[config.StatusOutputField] = resp.StatusCode
 	}
@@ -338,8 +360,8 @@ func (e *APIEnrichmentExecutor) parseConfig(step *models.TransformationStep) (*m
 		return nil, fmt.Errorf("endpoint is required for API enrichment")
 	}
 
-	if p := config.Poll; p != nil && (p.UntilField == "" || len(p.UntilValues) == 0) {
-		return nil, fmt.Errorf("poll needs untilField and untilValues")
+	if p := config.Poll; p != nil && len(p.UntilStatus) == 0 && (p.UntilField == "" || len(p.UntilValues) == 0) {
+		return nil, fmt.Errorf("poll needs untilField and untilValues, or untilStatus")
 	}
 
 	// Set defaults
