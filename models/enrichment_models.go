@@ -149,6 +149,17 @@ const (
 // API ENRICHMENT CONFIGURATION
 // ===============================================================
 
+// APIPollConfig makes an API step wait for a result: the same request is
+// repeated every IntervalSeconds (default 5) until UntilField (a path in the
+// JSON response, e.g. "state") equals one of UntilValues (case-insensitive),
+// or TimeoutSeconds (default 600) pass, which fails the step.
+type APIPollConfig struct {
+	UntilField      string   `json:"untilField"`
+	UntilValues     []string `json:"untilValues"`
+	IntervalSeconds int      `json:"intervalSeconds,omitempty"`
+	TimeoutSeconds  int      `json:"timeoutSeconds,omitempty"`
+}
+
 // APIEnrichmentConfig configuration for API-based enrichment
 type APIEnrichmentConfig struct {
 	// API endpoint URL (required)
@@ -168,6 +179,10 @@ type APIEnrichmentConfig struct {
 	// step succeeds and its output is the response body (e.g. a FHIR
 	// OperationOutcome for 404), for later steps to branch on.
 	AcceptStatuses []int `json:"acceptStatuses,omitempty"`
+
+	// Poll repeats the request until a field of the JSON response has a wanted
+	// value, for a call that reports the progress of work it started.
+	Poll *APIPollConfig `json:"poll,omitempty"`
 
 	// StatusOutputField, when set, adds the response's HTTP status code to
 	// the step output under that name (e.g. "http_status"), so later steps

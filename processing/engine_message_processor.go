@@ -543,7 +543,7 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 					},
 				}
 				pe.launchPipeline(func() models.MessageOutcome {
-					return pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, msg.Headers["File-Name"], fhirResult, logger)
+					return pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, sourceFileName(msg), fhirResult, logger)
 				}, interfaceID)
 				return true, outcome
 			}
@@ -630,7 +630,7 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 			// STEP 3: Trigger transformation pipeline (MVC + OOB pattern)
 			if pe.transformationService != nil {
 				pe.launchPipeline(func() models.MessageOutcome {
-					return pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, msg.Headers["File-Name"], result, logger)
+					return pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, sourceFileName(msg), result, logger)
 				}, interfaceID)
 				return true, outcome
 			}

@@ -152,6 +152,11 @@ func (e *APIEnrichmentExecutor) Execute(
 	// Execute API call using shared service
 	apiStart := time.Now()
 	resp, err := e.httpService.Execute(ctx, requestConfig, authConfig)
+	if err == nil && config.Poll != nil {
+		resp, err = pollUntil(ctx, config.Poll, func() (*httpservice.Response, error) {
+			return e.httpService.Execute(ctx, requestConfig, authConfig)
+		}, resp)
+	}
 	apiDuration := time.Since(apiStart).Milliseconds()
 
 	// Store comprehensive request/response details for step output tracking
@@ -331,6 +336,10 @@ func (e *APIEnrichmentExecutor) parseConfig(step *models.TransformationStep) (*m
 	// Validate required fields
 	if config.Endpoint == "" {
 		return nil, fmt.Errorf("endpoint is required for API enrichment")
+	}
+
+	if p := config.Poll; p != nil && (p.UntilField == "" || len(p.UntilValues) == 0) {
+		return nil, fmt.Errorf("poll needs untilField and untilValues")
 	}
 
 	// Set defaults

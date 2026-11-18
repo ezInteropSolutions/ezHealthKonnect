@@ -621,3 +621,327 @@ history, use the file load template instead.
   or ezIdentitySense did not answer in time; the sender retries.
 $GUIDE$
 WHERE slug = 'fhir-patient-relay-to-ezidentitysense';
+
+-- CSV Load from a Folder to ezIdentitySense
+DELETE FROM interface_templates WHERE slug = 'csv-load-folder-to-ezidentitysense' AND is_system = true;
+INSERT INTO interface_templates
+    (id, name, slug, description, category, subcategory, tags, icon, difficulty,
+     source_connector_type, source_config_template,
+     target_connector_type, target_config_template,
+     pipeline_config, message_type,
+     required_connection_fields, sanitized_fields, preview_steps,
+     estimated_setup_minutes, is_system, is_public, author, usage_count, processing_order)
+VALUES (
+    gen_random_uuid(), 'CSV Load from a Folder to ezIdentitySense', 'csv-load-folder-to-ezidentitysense', 'Loads a CSV file of patients from a folder on the server this interface runs on into ezIdentitySense (the enterprise master patient index) by its bulk-load API. You say which column holds what in the setup form; each file is uploaded, checked row by row with nothing registered, and loaded only if the check refuses nothing. A refused row or an unfinished job fails the message, with the reason for each row. Files are taken one at a time, in order; ezIdentitySense runs the load and keeps its place across a pause or restart.',
+    'empi', 'ezidentitysense', ARRAY['ezidentitysense','empi','mpi','csv','bulk','batch','load','inbound']::text[], '📂', 'intermediate',
+    'file_listener', '{"directory_path":"","file_pattern":"*.csv","polling_interval":30,"after_processing":"archive","archive_path":"","create_dirs":false}'::jsonb,
+    'http_outbound', '{}'::jsonb,
+    '{"execution_groups":[{"sequence":5,"steps":[{"step_name":"CSV File Feed","step_alias":"csv_file_feed","step_type":"connector.inbound","sequence":5,"config":{"connectorType":"file_listener","config":{"directory_path":"","file_pattern":"*.csv","polling_interval":30,"after_processing":"archive","archive_path":"","create_dirs":false},"timeoutMs":30000},"enabled":true,"required":true}]},{"sequence":10,"steps":[{"step_name":"Save Mapping","step_alias":"save_mapping","step_type":"enrichment.api","sequence":10,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"PUT","endpoint":"/v1/source-systems/{{var.sourceSystem}}/bulk-mapping","requestBody":{"mapping":{"columns":"{{var.columnMapping}}","constants":"{{var.constants}}"}}},"enabled":true,"required":true}]},{"sequence":20,"steps":[{"step_name":"Upload File","step_alias":"upload_file","step_type":"enrichment.api","sequence":20,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":600000,"retryCount":0,"headers":{"Content-Type":"text/csv","Accept":"application/json"},"method":"POST","endpoint":"/v1/bulk/files?name={fileName}","fieldMappings":{"fileName":"message._sourceFile"},"bodyRef":"message.raw"},"enabled":true,"required":true}]},{"sequence":30,"steps":[{"step_name":"Start Check","step_alias":"start_check","step_type":"enrichment.api","sequence":30,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"POST","endpoint":"/v1/bulk/jobs","fieldMappings":{"fileId":"steps.upload_file.step_output.id"},"requestBody":{"fileId":"fileId","system":"{{var.sourceSystem}}","encoding":"{{var.encoding}}","kind":"check"}},"enabled":true,"required":true}]},{"sequence":32,"steps":[{"step_name":"Wait Check","step_alias":"wait_check","step_type":"enrichment.api","sequence":32,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":15000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"GET","endpoint":"/v1/bulk/jobs/{jobId}","fieldMappings":{"jobId":"steps.start_check.step_output.id"},"poll":{"untilField":"state","untilValues":["completed","failed","cancelled","paused","interrupted"],"intervalSeconds":2,"timeoutSeconds":3600}},"enabled":true,"required":true}]},{"sequence":34,"steps":[{"step_name":"Check State","step_alias":"check_state","step_type":"switch_case","sequence":34,"config":{"field":"steps.wait_check.step_output.state","cases":[{"value":"completed","label":"Completed","actions":[]}],"default":{"actions":[{"action":"reject","errorMessage":"The check did not finish (it failed, was cancelled, or was paused). Nothing was loaded; see Wait Check."}]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]},{"sequence":36,"steps":[{"step_name":"Check Rejects","step_alias":"check_rejects","step_type":"enrichment.api","sequence":36,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"GET","endpoint":"/v1/bulk/jobs/{jobId}/rejects","fieldMappings":{"jobId":"steps.start_check.step_output.id"}},"enabled":true,"required":true}]},{"sequence":38,"steps":[{"step_name":"Check Clean","step_alias":"check_clean","step_type":"switch_case","sequence":38,"config":{"field":"steps.wait_check.step_output.rejects","cases":[{"value":"0","label":"No refused rows","actions":[]}],"default":{"actions":[{"action":"reject","errorMessage":"The check refused some rows, so nothing was loaded. See Check Rejects for the line and reason of each; fix the file and send it again."}]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]},{"sequence":40,"steps":[{"step_name":"Start Load","step_alias":"start_load","step_type":"enrichment.api","sequence":40,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"POST","endpoint":"/v1/bulk/jobs","fieldMappings":{"fileId":"steps.upload_file.step_output.id"},"requestBody":{"fileId":"fileId","system":"{{var.sourceSystem}}","encoding":"{{var.encoding}}","kind":"load"}},"enabled":true,"required":true}]},{"sequence":42,"steps":[{"step_name":"Wait Load","step_alias":"wait_load","step_type":"enrichment.api","sequence":42,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":15000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"GET","endpoint":"/v1/bulk/jobs/{jobId}","fieldMappings":{"jobId":"steps.start_load.step_output.id"},"poll":{"untilField":"state","untilValues":["completed","failed","cancelled","paused","interrupted"],"intervalSeconds":2,"timeoutSeconds":3600}},"enabled":true,"required":true}]},{"sequence":44,"steps":[{"step_name":"Load State","step_alias":"load_state","step_type":"switch_case","sequence":44,"config":{"field":"steps.wait_load.step_output.state","cases":[{"value":"completed","label":"Completed","actions":[]}],"default":{"actions":[{"action":"reject","errorMessage":"The load did not finish (it failed, was cancelled, or was paused). What it registered stays registered; see Wait Load. Resume it in ezIdentitySense."}]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]},{"sequence":46,"steps":[{"step_name":"Load Rejects","step_alias":"load_rejects","step_type":"enrichment.api","sequence":46,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"GET","endpoint":"/v1/bulk/jobs/{jobId}/rejects","fieldMappings":{"jobId":"steps.start_load.step_output.id"}},"enabled":true,"required":true}]},{"sequence":48,"steps":[{"step_name":"Load Clean","step_alias":"load_clean","step_type":"switch_case","sequence":48,"config":{"field":"steps.wait_load.step_output.rejects","cases":[{"value":"0","label":"No refused rows","actions":[]}],"default":{"actions":[{"action":"reject","errorMessage":"The load finished, but some rows were refused. See Load Rejects for the line and reason of each."}]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]}]}'::jsonb, 'CSV',
+    '[{"section":"source","field":"directory_path","label":"Folder to Watch","type":"string","required":true,"hint":"The folder where the CSV files are placed, as the server sees it."},{"section":"source","field":"archive_path","label":"Folder for Loaded Files","type":"string","required":true,"hint":"A processed file is moved here, so it is not loaded twice."},{"section":"source","field":"file_pattern","label":"File Name Pattern","type":"string","required":false,"hint":"Which files to take; default *.csv."},{"section":"variables","section_label":"File Layout","field":"sourceSystem","label":"Source System Code","type":"string","required":true,"hint":"The source system these patients belong to, as set up in ezIdentitySense (its code, e.g. HOSP-EHR)."},{"section":"variables","field":"encoding","label":"File Encoding","type":"select","required":true,"options":["UTF-8","windows-1252","ISO-8859-1","ISO-8859-15","windows-1251","KOI8-R","Shift_JIS","EUC-JP","GB18030","Big5","EUC-KR","UTF-16LE","UTF-16BE"],"hint":"How the file''s text is encoded. Unsure? UTF-8 is usual for new exports; older Windows exports are often windows-1252."},{"section":"variables","field":"columnMapping","label":"Which Column Holds What","type":"keyvalue","required":true,"placeholder":"Patient No=localId\nFirst=names.0.given.0\nLast=names.0.family.0\nDOB=birthDate","hint":"One COLUMN HEADER=field per line, using the file''s own header names. Fields: localId (required: the record''s ID in the source), version, names.0.given.0, names.0.family.0, birthDate, sex, identifiers.0.authority, identifiers.0.value, telecom.0.value, addresses.0.lines.0, addresses.0.city, addresses.0.postalCode, and so on. The same mapping is saved for the source each time a file arrives."},{"section":"variables","field":"constants","label":"Fixed Values","type":"keyvalue","required":false,"placeholder":"version=2026-01-01T00:00:00Z","hint":"Optional, one FIELD=value per line: a value every row gets (for example a version, if the file has no version column)."},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"baseUrl","label":"ezIdentitySense Address","type":"url","hint":"The address of your ezIdentitySense server, e.g. https://empi.example.org","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"oauth2TokenUrl","label":"Token URL","type":"url","hint":"Your identity provider''s OAuth 2.0 token endpoint, where this client gets its access tokens","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"oauth2ClientId","label":"Client ID","type":"string","hint":"The client registered for ezHealthKonnect in your identity provider and in ezIdentitySense","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"oauth2ClientSecret","label":"Client Secret","type":"password","hint":"That client''s secret. Stored encrypted.","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"oauth2Audience","label":"Audience","type":"string","hint":"Only if your identity provider requires one (the audience ezIdentitySense expects)","required":false}]'::jsonb, ARRAY['steps.baseUrl','steps.oauth2TokenUrl','steps.oauth2ClientSecret']::text[], '[{"name":"Pick Up CSV File","icon":"📂","step_type":"connector.inbound"},{"name":"Upload and Check Every Row","icon":"🔎","step_type":"enrichment.api"},{"name":"Load When the Check Is Clean","icon":"📥","step_type":"enrichment.api"},{"name":"Report Refused Rows","icon":"📋","step_type":"switch_case"}]'::jsonb,
+    15, true, true, 'ezHealthKonnect', 0, 'in_order'
+);
+UPDATE interface_templates SET user_guide = $GUIDE$
+# CSV Load to ezIdentitySense
+
+## What this does
+
+A CSV file of patients, dropped in a folder, on an SFTP server or in an S3
+bucket, is loaded into ezIdentitySense, the enterprise master patient index,
+through its bulk-load API. Each file goes through the same steps:
+
+1. **Save the column mapping** from the setup form for the source system.
+2. **Upload** the file to ezIdentitySense.
+3. **Check** it: a dry run reads every row as a load would and registers
+   nothing.
+4. **Load** it, only if the check refused no rows. ezIdentitySense registers
+   the rows in file order.
+5. **Report** any refused row, with its line and the reason.
+
+If the check refuses any row, **nothing is loaded**, and the message shows as
+failed with the reason for each row in the *Check Rejects* step. Fix the file
+and send it again. A load that ends before it finishes (failed, cancelled or
+paused) also fails the message, and says so.
+
+## Which template to use
+
+| Template | Use it when |
+|---|---|
+| **CSV Load from a Folder** | The files appear in a folder this server can read: a network share, a mounted drive, or a folder another system writes to. |
+| **CSV Load from SFTP** | The source system leaves its files on an SFTP server. This interface fetches them from there. |
+| **CSV Load from S3** | The files are in an S3 bucket, or a store with an S3-compatible interface. |
+
+The steps after the file is picked up are identical. In every case a
+processed file is moved to the folder you name, so it is not loaded twice.
+
+## Setting up
+
+1. In ezIdentitySense, register a client for ezHealthKonnect with the
+   **`bulk.load`** scope only (or, for people, the *data loader* role). It
+   needs nothing else: it cannot change matching settings or other clients.
+   Enter its address, token URL, client ID and secret in the form.
+2. Enter the **source system code**: the system these patients belong to, as
+   set up in ezIdentitySense.
+3. Choose the file's **encoding**.
+4. Under **Which column holds what**, list the file's own header names, one
+   per line, as `HEADER=field`:
+
+   ```
+   Patient No=localId
+   First=names.0.given.0
+   Last=names.0.family.0
+   DOB=birthDate
+   Sex=sex
+   ```
+
+   `localId` is required: it is the record's ID in the source. Include a
+   `version` column, or give a fixed one below, so a file sent twice can
+   never overwrite newer information. Any field the demographics document
+   has is accepted; the load screen in ezIdentitySense lists the usual
+   ones.
+5. Optionally, under **Fixed values**, give a value every row gets, as
+   `field=value`.
+6. Fill in where the files are, and where processed ones go.
+
+## How files are taken
+
+- Files are processed **one at a time, in the order received**, so a second
+  file waits for the first to finish. ezIdentitySense also runs one bulk job
+  at a time.
+- ezIdentitySense runs each job itself, at its own pace, and keeps its place
+  in the file if the job is paused or the server restarts. A person can pause,
+  resume or cancel a job on its Bulk load screen. If a job ends before it
+  finishes, the message fails and says which state it ended in; what the job
+  registered stays registered.
+- Waiting for a job is limited to an hour by default. Change **Wait Check**
+  or **Wait Load** in the pipeline for a longer wait.
+
+## When something goes wrong
+
+- **"The check refused some rows"**: open the *Check Rejects* step. Each
+  entry is a line number and a reason code. Nothing was loaded.
+- **The mapping is refused** (the *Save Mapping* step fails): a field name is
+  not one the demographics document has, or there is no `localId` column.
+- **The upload is refused**: the file is too large (the limit is a setting in
+  ezIdentitySense) or is not named `.csv`.
+- **A job is refused because another is running**: ezIdentitySense runs one
+  bulk job at a time. The message fails; send the file again when the other
+  job has finished.
+- **403**: the client lacks the `bulk.load` scope.
+$GUIDE$
+WHERE slug = 'csv-load-folder-to-ezidentitysense';
+
+-- CSV Load from SFTP to ezIdentitySense
+DELETE FROM interface_templates WHERE slug = 'csv-load-sftp-to-ezidentitysense' AND is_system = true;
+INSERT INTO interface_templates
+    (id, name, slug, description, category, subcategory, tags, icon, difficulty,
+     source_connector_type, source_config_template,
+     target_connector_type, target_config_template,
+     pipeline_config, message_type,
+     required_connection_fields, sanitized_fields, preview_steps,
+     estimated_setup_minutes, is_system, is_public, author, usage_count, processing_order)
+VALUES (
+    gen_random_uuid(), 'CSV Load from SFTP to ezIdentitySense', 'csv-load-sftp-to-ezidentitysense', 'Loads a CSV file of patients from an SFTP server into ezIdentitySense (the enterprise master patient index) by its bulk-load API. You say which column holds what in the setup form; each file is uploaded, checked row by row with nothing registered, and loaded only if the check refuses nothing. A refused row or an unfinished job fails the message, with the reason for each row. Files are taken one at a time, in order; ezIdentitySense runs the load and keeps its place across a pause or restart.',
+    'empi', 'ezidentitysense', ARRAY['ezidentitysense','empi','mpi','csv','bulk','batch','load','inbound']::text[], '🔐', 'intermediate',
+    'sftp_inbound', '{"host":"","port":22,"username":"","auth_type":"password","password":"","key_content":"","remote_dir":"","file_pattern":"*.csv","poll_interval_sec":60,"after_processing":"archive","archive_dir":""}'::jsonb,
+    'http_outbound', '{}'::jsonb,
+    '{"execution_groups":[{"sequence":5,"steps":[{"step_name":"CSV File Feed","step_alias":"csv_file_feed","step_type":"connector.inbound","sequence":5,"config":{"connectorType":"sftp_inbound","config":{"host":"","port":22,"username":"","auth_type":"password","password":"","key_content":"","remote_dir":"","file_pattern":"*.csv","poll_interval_sec":60,"after_processing":"archive","archive_dir":""},"timeoutMs":30000},"enabled":true,"required":true}]},{"sequence":10,"steps":[{"step_name":"Save Mapping","step_alias":"save_mapping","step_type":"enrichment.api","sequence":10,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"PUT","endpoint":"/v1/source-systems/{{var.sourceSystem}}/bulk-mapping","requestBody":{"mapping":{"columns":"{{var.columnMapping}}","constants":"{{var.constants}}"}}},"enabled":true,"required":true}]},{"sequence":20,"steps":[{"step_name":"Upload File","step_alias":"upload_file","step_type":"enrichment.api","sequence":20,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":600000,"retryCount":0,"headers":{"Content-Type":"text/csv","Accept":"application/json"},"method":"POST","endpoint":"/v1/bulk/files?name={fileName}","fieldMappings":{"fileName":"message._sourceFile"},"bodyRef":"message.raw"},"enabled":true,"required":true}]},{"sequence":30,"steps":[{"step_name":"Start Check","step_alias":"start_check","step_type":"enrichment.api","sequence":30,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"POST","endpoint":"/v1/bulk/jobs","fieldMappings":{"fileId":"steps.upload_file.step_output.id"},"requestBody":{"fileId":"fileId","system":"{{var.sourceSystem}}","encoding":"{{var.encoding}}","kind":"check"}},"enabled":true,"required":true}]},{"sequence":32,"steps":[{"step_name":"Wait Check","step_alias":"wait_check","step_type":"enrichment.api","sequence":32,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":15000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"GET","endpoint":"/v1/bulk/jobs/{jobId}","fieldMappings":{"jobId":"steps.start_check.step_output.id"},"poll":{"untilField":"state","untilValues":["completed","failed","cancelled","paused","interrupted"],"intervalSeconds":2,"timeoutSeconds":3600}},"enabled":true,"required":true}]},{"sequence":34,"steps":[{"step_name":"Check State","step_alias":"check_state","step_type":"switch_case","sequence":34,"config":{"field":"steps.wait_check.step_output.state","cases":[{"value":"completed","label":"Completed","actions":[]}],"default":{"actions":[{"action":"reject","errorMessage":"The check did not finish (it failed, was cancelled, or was paused). Nothing was loaded; see Wait Check."}]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]},{"sequence":36,"steps":[{"step_name":"Check Rejects","step_alias":"check_rejects","step_type":"enrichment.api","sequence":36,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"GET","endpoint":"/v1/bulk/jobs/{jobId}/rejects","fieldMappings":{"jobId":"steps.start_check.step_output.id"}},"enabled":true,"required":true}]},{"sequence":38,"steps":[{"step_name":"Check Clean","step_alias":"check_clean","step_type":"switch_case","sequence":38,"config":{"field":"steps.wait_check.step_output.rejects","cases":[{"value":"0","label":"No refused rows","actions":[]}],"default":{"actions":[{"action":"reject","errorMessage":"The check refused some rows, so nothing was loaded. See Check Rejects for the line and reason of each; fix the file and send it again."}]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]},{"sequence":40,"steps":[{"step_name":"Start Load","step_alias":"start_load","step_type":"enrichment.api","sequence":40,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"POST","endpoint":"/v1/bulk/jobs","fieldMappings":{"fileId":"steps.upload_file.step_output.id"},"requestBody":{"fileId":"fileId","system":"{{var.sourceSystem}}","encoding":"{{var.encoding}}","kind":"load"}},"enabled":true,"required":true}]},{"sequence":42,"steps":[{"step_name":"Wait Load","step_alias":"wait_load","step_type":"enrichment.api","sequence":42,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":15000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"GET","endpoint":"/v1/bulk/jobs/{jobId}","fieldMappings":{"jobId":"steps.start_load.step_output.id"},"poll":{"untilField":"state","untilValues":["completed","failed","cancelled","paused","interrupted"],"intervalSeconds":2,"timeoutSeconds":3600}},"enabled":true,"required":true}]},{"sequence":44,"steps":[{"step_name":"Load State","step_alias":"load_state","step_type":"switch_case","sequence":44,"config":{"field":"steps.wait_load.step_output.state","cases":[{"value":"completed","label":"Completed","actions":[]}],"default":{"actions":[{"action":"reject","errorMessage":"The load did not finish (it failed, was cancelled, or was paused). What it registered stays registered; see Wait Load. Resume it in ezIdentitySense."}]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]},{"sequence":46,"steps":[{"step_name":"Load Rejects","step_alias":"load_rejects","step_type":"enrichment.api","sequence":46,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"GET","endpoint":"/v1/bulk/jobs/{jobId}/rejects","fieldMappings":{"jobId":"steps.start_load.step_output.id"}},"enabled":true,"required":true}]},{"sequence":48,"steps":[{"step_name":"Load Clean","step_alias":"load_clean","step_type":"switch_case","sequence":48,"config":{"field":"steps.wait_load.step_output.rejects","cases":[{"value":"0","label":"No refused rows","actions":[]}],"default":{"actions":[{"action":"reject","errorMessage":"The load finished, but some rows were refused. See Load Rejects for the line and reason of each."}]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]}]}'::jsonb, 'CSV',
+    '[{"section":"source","field":"host","label":"SFTP Server","type":"string","required":true,"hint":"The server''s host name or address."},{"section":"source","field":"port","label":"Port","type":"number","required":false,"hint":"Default 22."},{"section":"source","field":"username","label":"User Name","type":"string","required":true,"hint":""},{"section":"source","field":"password","label":"Password","type":"password","required":false,"hint":"If the server uses a password. Stored encrypted."},{"section":"source","field":"key_content","label":"Private Key","type":"password","required":false,"hint":"If the server uses a key instead: the key''s text. Stored encrypted."},{"section":"source","field":"remote_dir","label":"Folder to Watch","type":"string","required":true,"hint":"The folder on the server where the CSV files are placed."},{"section":"source","field":"archive_dir","label":"Folder for Loaded Files","type":"string","required":true,"hint":"A processed file is moved here, so it is not loaded twice."},{"section":"variables","section_label":"File Layout","field":"sourceSystem","label":"Source System Code","type":"string","required":true,"hint":"The source system these patients belong to, as set up in ezIdentitySense (its code, e.g. HOSP-EHR)."},{"section":"variables","field":"encoding","label":"File Encoding","type":"select","required":true,"options":["UTF-8","windows-1252","ISO-8859-1","ISO-8859-15","windows-1251","KOI8-R","Shift_JIS","EUC-JP","GB18030","Big5","EUC-KR","UTF-16LE","UTF-16BE"],"hint":"How the file''s text is encoded. Unsure? UTF-8 is usual for new exports; older Windows exports are often windows-1252."},{"section":"variables","field":"columnMapping","label":"Which Column Holds What","type":"keyvalue","required":true,"placeholder":"Patient No=localId\nFirst=names.0.given.0\nLast=names.0.family.0\nDOB=birthDate","hint":"One COLUMN HEADER=field per line, using the file''s own header names. Fields: localId (required: the record''s ID in the source), version, names.0.given.0, names.0.family.0, birthDate, sex, identifiers.0.authority, identifiers.0.value, telecom.0.value, addresses.0.lines.0, addresses.0.city, addresses.0.postalCode, and so on. The same mapping is saved for the source each time a file arrives."},{"section":"variables","field":"constants","label":"Fixed Values","type":"keyvalue","required":false,"placeholder":"version=2026-01-01T00:00:00Z","hint":"Optional, one FIELD=value per line: a value every row gets (for example a version, if the file has no version column)."},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"baseUrl","label":"ezIdentitySense Address","type":"url","hint":"The address of your ezIdentitySense server, e.g. https://empi.example.org","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"oauth2TokenUrl","label":"Token URL","type":"url","hint":"Your identity provider''s OAuth 2.0 token endpoint, where this client gets its access tokens","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"oauth2ClientId","label":"Client ID","type":"string","hint":"The client registered for ezHealthKonnect in your identity provider and in ezIdentitySense","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"oauth2ClientSecret","label":"Client Secret","type":"password","hint":"That client''s secret. Stored encrypted.","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"oauth2Audience","label":"Audience","type":"string","hint":"Only if your identity provider requires one (the audience ezIdentitySense expects)","required":false}]'::jsonb, ARRAY['source.host','source.password','source.key_content','steps.baseUrl','steps.oauth2TokenUrl','steps.oauth2ClientSecret']::text[], '[{"name":"Pick Up CSV File","icon":"🔐","step_type":"connector.inbound"},{"name":"Upload and Check Every Row","icon":"🔎","step_type":"enrichment.api"},{"name":"Load When the Check Is Clean","icon":"📥","step_type":"enrichment.api"},{"name":"Report Refused Rows","icon":"📋","step_type":"switch_case"}]'::jsonb,
+    15, true, true, 'ezHealthKonnect', 0, 'in_order'
+);
+UPDATE interface_templates SET user_guide = $GUIDE$
+# CSV Load to ezIdentitySense
+
+## What this does
+
+A CSV file of patients, dropped in a folder, on an SFTP server or in an S3
+bucket, is loaded into ezIdentitySense, the enterprise master patient index,
+through its bulk-load API. Each file goes through the same steps:
+
+1. **Save the column mapping** from the setup form for the source system.
+2. **Upload** the file to ezIdentitySense.
+3. **Check** it: a dry run reads every row as a load would and registers
+   nothing.
+4. **Load** it, only if the check refused no rows. ezIdentitySense registers
+   the rows in file order.
+5. **Report** any refused row, with its line and the reason.
+
+If the check refuses any row, **nothing is loaded**, and the message shows as
+failed with the reason for each row in the *Check Rejects* step. Fix the file
+and send it again. A load that ends before it finishes (failed, cancelled or
+paused) also fails the message, and says so.
+
+## Which template to use
+
+| Template | Use it when |
+|---|---|
+| **CSV Load from a Folder** | The files appear in a folder this server can read: a network share, a mounted drive, or a folder another system writes to. |
+| **CSV Load from SFTP** | The source system leaves its files on an SFTP server. This interface fetches them from there. |
+| **CSV Load from S3** | The files are in an S3 bucket, or a store with an S3-compatible interface. |
+
+The steps after the file is picked up are identical. In every case a
+processed file is moved to the folder you name, so it is not loaded twice.
+
+## Setting up
+
+1. In ezIdentitySense, register a client for ezHealthKonnect with the
+   **`bulk.load`** scope only (or, for people, the *data loader* role). It
+   needs nothing else: it cannot change matching settings or other clients.
+   Enter its address, token URL, client ID and secret in the form.
+2. Enter the **source system code**: the system these patients belong to, as
+   set up in ezIdentitySense.
+3. Choose the file's **encoding**.
+4. Under **Which column holds what**, list the file's own header names, one
+   per line, as `HEADER=field`:
+
+   ```
+   Patient No=localId
+   First=names.0.given.0
+   Last=names.0.family.0
+   DOB=birthDate
+   Sex=sex
+   ```
+
+   `localId` is required: it is the record's ID in the source. Include a
+   `version` column, or give a fixed one below, so a file sent twice can
+   never overwrite newer information. Any field the demographics document
+   has is accepted; the load screen in ezIdentitySense lists the usual
+   ones.
+5. Optionally, under **Fixed values**, give a value every row gets, as
+   `field=value`.
+6. Fill in where the files are, and where processed ones go.
+
+## How files are taken
+
+- Files are processed **one at a time, in the order received**, so a second
+  file waits for the first to finish. ezIdentitySense also runs one bulk job
+  at a time.
+- ezIdentitySense runs each job itself, at its own pace, and keeps its place
+  in the file if the job is paused or the server restarts. A person can pause,
+  resume or cancel a job on its Bulk load screen. If a job ends before it
+  finishes, the message fails and says which state it ended in; what the job
+  registered stays registered.
+- Waiting for a job is limited to an hour by default. Change **Wait Check**
+  or **Wait Load** in the pipeline for a longer wait.
+
+## When something goes wrong
+
+- **"The check refused some rows"**: open the *Check Rejects* step. Each
+  entry is a line number and a reason code. Nothing was loaded.
+- **The mapping is refused** (the *Save Mapping* step fails): a field name is
+  not one the demographics document has, or there is no `localId` column.
+- **The upload is refused**: the file is too large (the limit is a setting in
+  ezIdentitySense) or is not named `.csv`.
+- **A job is refused because another is running**: ezIdentitySense runs one
+  bulk job at a time. The message fails; send the file again when the other
+  job has finished.
+- **403**: the client lacks the `bulk.load` scope.
+$GUIDE$
+WHERE slug = 'csv-load-sftp-to-ezidentitysense';
+
+-- CSV Load from S3 to ezIdentitySense
+DELETE FROM interface_templates WHERE slug = 'csv-load-s3-to-ezidentitysense' AND is_system = true;
+INSERT INTO interface_templates
+    (id, name, slug, description, category, subcategory, tags, icon, difficulty,
+     source_connector_type, source_config_template,
+     target_connector_type, target_config_template,
+     pipeline_config, message_type,
+     required_connection_fields, sanitized_fields, preview_steps,
+     estimated_setup_minutes, is_system, is_public, author, usage_count, processing_order)
+VALUES (
+    gen_random_uuid(), 'CSV Load from S3 to ezIdentitySense', 'csv-load-s3-to-ezidentitysense', 'Loads a CSV file of patients from an S3 bucket (or a compatible store) into ezIdentitySense (the enterprise master patient index) by its bulk-load API. You say which column holds what in the setup form; each file is uploaded, checked row by row with nothing registered, and loaded only if the check refuses nothing. A refused row or an unfinished job fails the message, with the reason for each row. Files are taken one at a time, in order; ezIdentitySense runs the load and keeps its place across a pause or restart.',
+    'empi', 'ezidentitysense', ARRAY['ezidentitysense','empi','mpi','csv','bulk','batch','load','inbound']::text[], '🪣', 'intermediate',
+    'aws_s3_inbound', '{"bucket":"","region":"","prefix":"","file_pattern":"*.csv","access_key_id":"","secret_access_key":"","endpoint":"","force_path_style":false,"after_processing":"archive","archive_prefix":"","polling_interval":60}'::jsonb,
+    'http_outbound', '{}'::jsonb,
+    '{"execution_groups":[{"sequence":5,"steps":[{"step_name":"CSV File Feed","step_alias":"csv_file_feed","step_type":"connector.inbound","sequence":5,"config":{"connectorType":"aws_s3_inbound","config":{"bucket":"","region":"","prefix":"","file_pattern":"*.csv","access_key_id":"","secret_access_key":"","endpoint":"","force_path_style":false,"after_processing":"archive","archive_prefix":"","polling_interval":60},"timeoutMs":30000},"enabled":true,"required":true}]},{"sequence":10,"steps":[{"step_name":"Save Mapping","step_alias":"save_mapping","step_type":"enrichment.api","sequence":10,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"PUT","endpoint":"/v1/source-systems/{{var.sourceSystem}}/bulk-mapping","requestBody":{"mapping":{"columns":"{{var.columnMapping}}","constants":"{{var.constants}}"}}},"enabled":true,"required":true}]},{"sequence":20,"steps":[{"step_name":"Upload File","step_alias":"upload_file","step_type":"enrichment.api","sequence":20,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":600000,"retryCount":0,"headers":{"Content-Type":"text/csv","Accept":"application/json"},"method":"POST","endpoint":"/v1/bulk/files?name={fileName}","fieldMappings":{"fileName":"message._sourceFile"},"bodyRef":"message.raw"},"enabled":true,"required":true}]},{"sequence":30,"steps":[{"step_name":"Start Check","step_alias":"start_check","step_type":"enrichment.api","sequence":30,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"POST","endpoint":"/v1/bulk/jobs","fieldMappings":{"fileId":"steps.upload_file.step_output.id"},"requestBody":{"fileId":"fileId","system":"{{var.sourceSystem}}","encoding":"{{var.encoding}}","kind":"check"}},"enabled":true,"required":true}]},{"sequence":32,"steps":[{"step_name":"Wait Check","step_alias":"wait_check","step_type":"enrichment.api","sequence":32,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":15000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"GET","endpoint":"/v1/bulk/jobs/{jobId}","fieldMappings":{"jobId":"steps.start_check.step_output.id"},"poll":{"untilField":"state","untilValues":["completed","failed","cancelled","paused","interrupted"],"intervalSeconds":2,"timeoutSeconds":3600}},"enabled":true,"required":true}]},{"sequence":34,"steps":[{"step_name":"Check State","step_alias":"check_state","step_type":"switch_case","sequence":34,"config":{"field":"steps.wait_check.step_output.state","cases":[{"value":"completed","label":"Completed","actions":[]}],"default":{"actions":[{"action":"reject","errorMessage":"The check did not finish (it failed, was cancelled, or was paused). Nothing was loaded; see Wait Check."}]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]},{"sequence":36,"steps":[{"step_name":"Check Rejects","step_alias":"check_rejects","step_type":"enrichment.api","sequence":36,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"GET","endpoint":"/v1/bulk/jobs/{jobId}/rejects","fieldMappings":{"jobId":"steps.start_check.step_output.id"}},"enabled":true,"required":true}]},{"sequence":38,"steps":[{"step_name":"Check Clean","step_alias":"check_clean","step_type":"switch_case","sequence":38,"config":{"field":"steps.wait_check.step_output.rejects","cases":[{"value":"0","label":"No refused rows","actions":[]}],"default":{"actions":[{"action":"reject","errorMessage":"The check refused some rows, so nothing was loaded. See Check Rejects for the line and reason of each; fix the file and send it again."}]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]},{"sequence":40,"steps":[{"step_name":"Start Load","step_alias":"start_load","step_type":"enrichment.api","sequence":40,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"POST","endpoint":"/v1/bulk/jobs","fieldMappings":{"fileId":"steps.upload_file.step_output.id"},"requestBody":{"fileId":"fileId","system":"{{var.sourceSystem}}","encoding":"{{var.encoding}}","kind":"load"}},"enabled":true,"required":true}]},{"sequence":42,"steps":[{"step_name":"Wait Load","step_alias":"wait_load","step_type":"enrichment.api","sequence":42,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":15000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"GET","endpoint":"/v1/bulk/jobs/{jobId}","fieldMappings":{"jobId":"steps.start_load.step_output.id"},"poll":{"untilField":"state","untilValues":["completed","failed","cancelled","paused","interrupted"],"intervalSeconds":2,"timeoutSeconds":3600}},"enabled":true,"required":true}]},{"sequence":44,"steps":[{"step_name":"Load State","step_alias":"load_state","step_type":"switch_case","sequence":44,"config":{"field":"steps.wait_load.step_output.state","cases":[{"value":"completed","label":"Completed","actions":[]}],"default":{"actions":[{"action":"reject","errorMessage":"The load did not finish (it failed, was cancelled, or was paused). What it registered stays registered; see Wait Load. Resume it in ezIdentitySense."}]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]},{"sequence":46,"steps":[{"step_name":"Load Rejects","step_alias":"load_rejects","step_type":"enrichment.api","sequence":46,"config":{"baseUrl":"","authType":"oauth2","oauth2GrantType":"client_credentials","oauth2TokenUrl":"","oauth2ClientId":"","oauth2ClientSecret":"","oauth2Audience":"","oauth2Scope":"bulk.load","encodePlaceholders":true,"timeoutMs":10000,"retryCount":0,"headers":{"Content-Type":"application/json","Accept":"application/json"},"method":"GET","endpoint":"/v1/bulk/jobs/{jobId}/rejects","fieldMappings":{"jobId":"steps.start_load.step_output.id"}},"enabled":true,"required":true}]},{"sequence":48,"steps":[{"step_name":"Load Clean","step_alias":"load_clean","step_type":"switch_case","sequence":48,"config":{"field":"steps.wait_load.step_output.rejects","cases":[{"value":"0","label":"No refused rows","actions":[]}],"default":{"actions":[{"action":"reject","errorMessage":"The load finished, but some rows were refused. See Load Rejects for the line and reason of each."}]},"options":{"caseInsensitive":true,"trimWhitespace":true}},"enabled":true,"required":true}]}]}'::jsonb, 'CSV',
+    '[{"section":"source","field":"bucket","label":"Bucket","type":"string","required":true,"hint":""},{"section":"source","field":"region","label":"Region","type":"string","required":true,"hint":"e.g. us-east-1"},{"section":"source","field":"prefix","label":"Folder in the Bucket","type":"string","required":false,"hint":"Only objects under this prefix are taken, e.g. incoming/"},{"section":"source","field":"access_key_id","label":"Access Key ID","type":"string","required":true,"hint":""},{"section":"source","field":"secret_access_key","label":"Secret Access Key","type":"password","required":true,"hint":"Stored encrypted."},{"section":"source","field":"archive_prefix","label":"Folder for Loaded Files","type":"string","required":true,"hint":"A processed object is moved under this prefix, so it is not loaded twice."},{"section":"source","field":"endpoint","label":"Store Address","type":"url","required":false,"hint":"Only for a store that is not Amazon S3 (e.g. MinIO); leave blank for Amazon. Such a store is reached by path (host/bucket/key)."},{"section":"variables","section_label":"File Layout","field":"sourceSystem","label":"Source System Code","type":"string","required":true,"hint":"The source system these patients belong to, as set up in ezIdentitySense (its code, e.g. HOSP-EHR)."},{"section":"variables","field":"encoding","label":"File Encoding","type":"select","required":true,"options":["UTF-8","windows-1252","ISO-8859-1","ISO-8859-15","windows-1251","KOI8-R","Shift_JIS","EUC-JP","GB18030","Big5","EUC-KR","UTF-16LE","UTF-16BE"],"hint":"How the file''s text is encoded. Unsure? UTF-8 is usual for new exports; older Windows exports are often windows-1252."},{"section":"variables","field":"columnMapping","label":"Which Column Holds What","type":"keyvalue","required":true,"placeholder":"Patient No=localId\nFirst=names.0.given.0\nLast=names.0.family.0\nDOB=birthDate","hint":"One COLUMN HEADER=field per line, using the file''s own header names. Fields: localId (required: the record''s ID in the source), version, names.0.given.0, names.0.family.0, birthDate, sex, identifiers.0.authority, identifiers.0.value, telecom.0.value, addresses.0.lines.0, addresses.0.city, addresses.0.postalCode, and so on. The same mapping is saved for the source each time a file arrives."},{"section":"variables","field":"constants","label":"Fixed Values","type":"keyvalue","required":false,"placeholder":"version=2026-01-01T00:00:00Z","hint":"Optional, one FIELD=value per line: a value every row gets (for example a version, if the file has no version column)."},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"baseUrl","label":"ezIdentitySense Address","type":"url","hint":"The address of your ezIdentitySense server, e.g. https://empi.example.org","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"oauth2TokenUrl","label":"Token URL","type":"url","hint":"Your identity provider''s OAuth 2.0 token endpoint, where this client gets its access tokens","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"oauth2ClientId","label":"Client ID","type":"string","hint":"The client registered for ezHealthKonnect in your identity provider and in ezIdentitySense","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"oauth2ClientSecret","label":"Client Secret","type":"password","hint":"That client''s secret. Stored encrypted.","required":true},{"section":"steps","section_label":"ezIdentitySense Connection","step_aliases":["save_mapping","upload_file","start_check","wait_check","check_rejects","start_load","wait_load","load_rejects"],"field":"oauth2Audience","label":"Audience","type":"string","hint":"Only if your identity provider requires one (the audience ezIdentitySense expects)","required":false}]'::jsonb, ARRAY['source.secret_access_key','steps.baseUrl','steps.oauth2TokenUrl','steps.oauth2ClientSecret']::text[], '[{"name":"Pick Up CSV File","icon":"🪣","step_type":"connector.inbound"},{"name":"Upload and Check Every Row","icon":"🔎","step_type":"enrichment.api"},{"name":"Load When the Check Is Clean","icon":"📥","step_type":"enrichment.api"},{"name":"Report Refused Rows","icon":"📋","step_type":"switch_case"}]'::jsonb,
+    15, true, true, 'ezHealthKonnect', 0, 'in_order'
+);
+UPDATE interface_templates SET user_guide = $GUIDE$
+# CSV Load to ezIdentitySense
+
+## What this does
+
+A CSV file of patients, dropped in a folder, on an SFTP server or in an S3
+bucket, is loaded into ezIdentitySense, the enterprise master patient index,
+through its bulk-load API. Each file goes through the same steps:
+
+1. **Save the column mapping** from the setup form for the source system.
+2. **Upload** the file to ezIdentitySense.
+3. **Check** it: a dry run reads every row as a load would and registers
+   nothing.
+4. **Load** it, only if the check refused no rows. ezIdentitySense registers
+   the rows in file order.
+5. **Report** any refused row, with its line and the reason.
+
+If the check refuses any row, **nothing is loaded**, and the message shows as
+failed with the reason for each row in the *Check Rejects* step. Fix the file
+and send it again. A load that ends before it finishes (failed, cancelled or
+paused) also fails the message, and says so.
+
+## Which template to use
+
+| Template | Use it when |
+|---|---|
+| **CSV Load from a Folder** | The files appear in a folder this server can read: a network share, a mounted drive, or a folder another system writes to. |
+| **CSV Load from SFTP** | The source system leaves its files on an SFTP server. This interface fetches them from there. |
+| **CSV Load from S3** | The files are in an S3 bucket, or a store with an S3-compatible interface. |
+
+The steps after the file is picked up are identical. In every case a
+processed file is moved to the folder you name, so it is not loaded twice.
+
+## Setting up
+
+1. In ezIdentitySense, register a client for ezHealthKonnect with the
+   **`bulk.load`** scope only (or, for people, the *data loader* role). It
+   needs nothing else: it cannot change matching settings or other clients.
+   Enter its address, token URL, client ID and secret in the form.
+2. Enter the **source system code**: the system these patients belong to, as
+   set up in ezIdentitySense.
+3. Choose the file's **encoding**.
+4. Under **Which column holds what**, list the file's own header names, one
+   per line, as `HEADER=field`:
+
+   ```
+   Patient No=localId
+   First=names.0.given.0
+   Last=names.0.family.0
+   DOB=birthDate
+   Sex=sex
+   ```
+
+   `localId` is required: it is the record's ID in the source. Include a
+   `version` column, or give a fixed one below, so a file sent twice can
+   never overwrite newer information. Any field the demographics document
+   has is accepted; the load screen in ezIdentitySense lists the usual
+   ones.
+5. Optionally, under **Fixed values**, give a value every row gets, as
+   `field=value`.
+6. Fill in where the files are, and where processed ones go.
+
+## How files are taken
+
+- Files are processed **one at a time, in the order received**, so a second
+  file waits for the first to finish. ezIdentitySense also runs one bulk job
+  at a time.
+- ezIdentitySense runs each job itself, at its own pace, and keeps its place
+  in the file if the job is paused or the server restarts. A person can pause,
+  resume or cancel a job on its Bulk load screen. If a job ends before it
+  finishes, the message fails and says which state it ended in; what the job
+  registered stays registered.
+- Waiting for a job is limited to an hour by default. Change **Wait Check**
+  or **Wait Load** in the pipeline for a longer wait.
+
+## When something goes wrong
+
+- **"The check refused some rows"**: open the *Check Rejects* step. Each
+  entry is a line number and a reason code. Nothing was loaded.
+- **The mapping is refused** (the *Save Mapping* step fails): a field name is
+  not one the demographics document has, or there is no `localId` column.
+- **The upload is refused**: the file is too large (the limit is a setting in
+  ezIdentitySense) or is not named `.csv`.
+- **A job is refused because another is running**: ezIdentitySense runs one
+  bulk job at a time. The message fails; send the file again when the other
+  job has finished.
+- **403**: the client lacks the `bulk.load` scope.
+$GUIDE$
+WHERE slug = 'csv-load-s3-to-ezidentitysense';
