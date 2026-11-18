@@ -29,12 +29,14 @@ func runEvery(ctx context.Context, interval time.Duration, fn func(context.Conte
 }
 
 // StartAlertEvaluation checks the alert rules every interval in the
-// background. Rules are evaluated whenever the monitoring summary is built;
-// without this, that happened only while someone had the monitoring page
-// open, so an alert for a failed message could wait indefinitely.
+// background. Without it, rules were checked only when the monitoring
+// summary was built, while someone had the monitoring page open, so an
+// alert for a failed message could wait indefinitely. It reads only what the
+// rules need (EvaluateAlertRules), never the full summary, whose counts
+// across every interface's table are too heavy to run every minute.
 func (s *AnalyticsService) StartAlertEvaluation(ctx context.Context, interval time.Duration) {
 	go runEvery(ctx, interval, func(c context.Context) {
-		if _, err := s.GetMonitoringSummary(c); err != nil {
+		if err := s.EvaluateAlertRules(c); err != nil {
 			log.Printf("⚠️  alert evaluation: %v", err)
 		}
 	})
