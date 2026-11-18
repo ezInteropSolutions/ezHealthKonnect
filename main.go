@@ -2194,6 +2194,10 @@ func main() {
 
 		analyticsSvc = analyticsCtrl.Service()
 		alertRuleSvc = alertRuleCtrl.Service()
+
+		// Evaluate alert rules in the background, so an alert does not wait for
+		// someone to open the monitoring page.
+		analyticsSvc.StartAlertEvaluation(context.Background(), time.Minute)
 	}
 
 	// ── LOCAL AI SERVICE ─────────────────────────────────────────────────────

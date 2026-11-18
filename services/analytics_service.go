@@ -1215,6 +1215,21 @@ func (s *AnalyticsService) computeMetric(ctx context.Context, rule *AlertRule, s
 				tableName, rule.EvaluationWindowMins),
 		).Scan(&count)
 		return float64(count)
+	case "FAILED_MESSAGES":
+		tables := []string{"messages_intf_" + sanitizeUUID(derefString(rule.InterfaceID))}
+		if rule.InterfaceID == nil {
+			tables, _ = s.listMessageInterfaceTables(ctx)
+		}
+		var total int64
+		for _, table := range tables {
+			if !safeTableNameRegex.MatchString(table) {
+				continue
+			}
+			var count int64
+			_ = s.db.QueryRowContext(ctx, failedMessagesSQL(table, rule.EvaluationWindowMins)).Scan(&count)
+			total += count
+		}
+		return float64(total)
 	case "CONNECTOR_FAILURE":
 		var count int64
 		_ = s.db.QueryRowContext(ctx,
@@ -1280,10 +1295,28 @@ func (s *AnalyticsService) buildAlertMessage(rule *AlertRule, value float64, ifa
 		return fmt.Sprintf("Interface %s has received no messages in the last %d minutes", ifaceName, rule.EvaluationWindowMins)
 	case "THROUGHPUT_LOW":
 		return fmt.Sprintf("Message throughput %.0f msg/%dmin is below threshold", value, rule.EvaluationWindowMins)
+	case "FAILED_MESSAGES":
+		return fmt.Sprintf("%.0f failed messages on %s in the last %d minutes", value, ifaceName, rule.EvaluationWindowMins)
 	case "VALIDATION_FAILURE":
 		return fmt.Sprintf("%.0f validation failures detected in the last %d minutes", value, rule.EvaluationWindowMins)
 	}
 	return fmt.Sprintf("Alert %s: current value %.2f", rule.RuleType, value)
+}
+
+// failedMessagesSQL counts the messages of one interface (its own message
+// table) whose processing failed within the window. A rule on one interface
+// uses its table; a global rule adds up every interface's. (The other
+// count-based types, such as VALIDATION_FAILURE, read system-wide executions.)
+func failedMessagesSQL(table string, windowMinutes int) string {
+	return fmt.Sprintf(`SELECT COUNT(*) FROM %s
+		 WHERE status = 'failed' AND received_at > NOW() - INTERVAL '%d minutes'`, table, windowMinutes)
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // sanitizeUUID strips hyphens from a UUID for use in table names.

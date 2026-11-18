@@ -1248,10 +1248,10 @@ function waitJob(seq, name, alias, startAlias) {
     });
 }
 
-function stopUnless(seq, name, alias, field, wantValue, label, message) {
+function stopUnless(seq, name, alias, field, wantValue, label, message, action = 'reject') {
     return step(seq, name, alias, 'switch_case', {
         field, cases: [{ value: wantValue, label, actions: [] }],
-        default: { actions: [{ action: 'reject', errorMessage: message }] },
+        default: { actions: [{ action, errorMessage: message }] },
         options: { caseInsensitive: true, trimWhitespace: true },
     });
 }
@@ -1343,7 +1343,8 @@ function csvLoad(v) {
                     fieldMappings: { jobId: 'steps.start_check.step_output.id' },
                 }),
                 stopUnless(38, 'Check Clean', 'check_clean', 'steps.wait_check.step_output.rejects', '0', 'No refused rows',
-                    'The check refused some rows, so nothing was loaded. See Check Rejects for the line and reason of each; fix the file and send it again.'),
+                    'The check refused some rows, so nothing was loaded. See Check Rejects for the line and reason of each; fix the file and send it again.',
+                    '{{var.onRefusedRows}}'),
                 // The load: only reached after a clean check.
                 csvApi(40, 'Start Load', 'start_load', {
                     method: 'POST', endpoint: '/v1/bulk/jobs',
@@ -1358,7 +1359,7 @@ function csvLoad(v) {
                     fieldMappings: { jobId: 'steps.start_load.step_output.id' },
                 }),
                 stopUnless(48, 'Load Clean', 'load_clean', 'steps.wait_load.step_output.rejects', '0', 'No refused rows',
-                    'The load finished, but some rows were refused. See Load Rejects for the line and reason of each.'),
+                    'The load finished, but some rows were refused and not loaded; every other row was loaded. See Load Rejects for the line and reason of each; fix those rows and send them in a new file.'),
             ],
         },
         required_connection_fields: [
@@ -1368,6 +1369,9 @@ function csvLoad(v) {
             { section: 'variables', field: 'encoding', label: 'File Encoding', type: 'select', required: true,
               options: ['UTF-8', 'windows-1252', 'ISO-8859-1', 'ISO-8859-15', 'windows-1251', 'KOI8-R', 'Shift_JIS', 'EUC-JP', 'GB18030', 'Big5', 'EUC-KR', 'UTF-16LE', 'UTF-16BE'],
               hint: 'How the file\'s text is encoded. Unsure? UTF-8 is usual for new exports; older Windows exports are often windows-1252.' },
+            { section: 'variables', field: 'onRefusedRows', label: 'If the Check Refuses Some Rows', type: 'select', required: true,
+              options: [{ value: 'reject', label: 'Load nothing: stop and report (safest)' }, { value: 'continue', label: 'Load the good rows and report the rest' }],
+              hint: 'Either way the message is marked failed when any row is refused, with the line and reason of each. The first choice loads nothing until the file is fixed and sent again; the second loads every row that is fine now, so only the refused rows need fixing and resending.' },
             { section: 'variables', field: 'columnMapping', label: 'Which Column Holds What', type: 'keyvalue', required: true,
               placeholder: 'Patient No=localId\nFirst=names.0.given.0\nLast=names.0.family.0\nDOB=birthDate',
               hint: 'One COLUMN HEADER=field per line, using the file\'s own header names. Fields: localId (required: the record\'s ID in the source), version, names.0.given.0, names.0.family.0, birthDate, sex, identifiers.0.authority, identifiers.0.value, telecom.0.value, addresses.0.lines.0, addresses.0.city, addresses.0.postalCode, and so on. The same mapping is saved for the source each time a file arrives.' },

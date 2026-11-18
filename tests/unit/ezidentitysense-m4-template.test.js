@@ -187,7 +187,13 @@ describe('CSV load templates', () => {
         const clean = step('check_clean').config;
         expect(clean.field).toBe('steps.wait_check.step_output.rejects');
         expect(clean.cases[0].value).toBe('0');
-        expect(clean.default.actions[0]).toMatchObject({ action: 'reject' });
+        // what a refused row does is a setup choice: reject (load nothing) or continue (load the good rows)
+        expect(clean.default.actions[0]).toMatchObject({ action: '{{var.onRefusedRows}}' });
+        const choice = fields.find(f => f.field === 'onRefusedRows');
+        expect(choice).toMatchObject({ section: 'variables', type: 'select', required: true });
+        expect(choice.options.map(o => o.value)).toEqual(['reject', 'continue']);
+        // a refused row in the load itself always fails the message, whichever is chosen
+        expect(step('load_clean').config.default.actions[0].action).toBe('reject');
         expect(step('check_rejects').sequence).toBeLessThan(step('check_clean').sequence);
         expect(step('check_clean').sequence).toBeLessThan(step('start_load').sequence);
     });
@@ -223,6 +229,9 @@ describe('CSV load templates', () => {
     test('the guide says which template to use', () => {
         const guide = fs.readFileSync(path.join(ROOT, 'scripts/templates/ezidentitysense-guides/csv-load-to-ezidentitysense.md'), 'utf8');
         expect(guide).toMatch(/Which template to use/);
+        expect(guide).toMatch(/If some rows are refused/);
+        expect(guide).toMatch(/Failed Messages/);
+        for (const code of ['invalid-local-id', 'invalid-version', 'insufficient-demographics', 'unknown-authority']) expect(guide).toContain('`' + code + '`');
         expect(guide).toMatch(/bulk\.load/);
     });
 });
