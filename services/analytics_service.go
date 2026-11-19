@@ -220,7 +220,6 @@ func (s *AnalyticsService) GetMonitoringSummary(ctx context.Context) (*Monitorin
 	summary := &MonitoringSummary{}
 	now := time.Now()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	last24h := now.Add(-24 * time.Hour)
 
 	// Messages today — UNION across all interface tables
 	tables, err := s.listMessageInterfaceTables(ctx)
@@ -230,32 +229,15 @@ func (s *AnalyticsService) GetMonitoringSummary(ctx context.Context) (*Monitorin
 		_ = row.Scan(&summary.KPIs.MessagesToday)
 	}
 
-	// Error rate over last 24h
-	var totalExec, failedExec int64
-	_ = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'failed')
-		 FROM transformation_executions WHERE started_at >= $1`, last24h,
-	).Scan(&totalExec, &failedExec)
-	if totalExec > 0 {
-		summary.KPIs.ErrorRate24h = float64(failedExec) / float64(totalExec) * 100
-	}
-
-	// Avg processing time last hour
-	_ = s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(AVG(total_time_ms), 0) FROM transformation_executions
-		 WHERE started_at >= $1 AND status = 'completed'`, now.Add(-time.Hour),
-	).Scan(&summary.KPIs.AvgProcessingTimeMs)
+	// Error rate over last 24h, avg processing time, DLQ depth: what the
+	// alert rules read.
+	s.readAlertKPIs(ctx, &summary.KPIs, now)
 
 	// Active / total interfaces
 	_ = s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FILTER (WHERE status = 'active'), COUNT(*)
 		 FROM interfaces`,
 	).Scan(&summary.KPIs.ActiveInterfaces, &summary.KPIs.TotalInterfaces)
-
-	// DLQ depth
-	_ = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM dead_letter_queue WHERE resolved = FALSE`,
-	).Scan(&summary.KPIs.DLQDepth)
 
 	// 7-hour sparkline for messages
 	sparkline := make([]int64, 7)
@@ -315,6 +297,40 @@ func (s *AnalyticsService) GetMonitoringSummary(ctx context.Context) (*Monitorin
 
 	s.cache.Set(cacheKey, summary, cacheTTLMonitoringSummary)
 	return summary, nil
+}
+
+// readAlertKPIs reads the figures the alert rules compare against: the error
+// rate over 24 hours, the average processing time over the last hour, and the
+// dead letter queue depth. Each is one query on one table, so it is cheap to
+// run often, unlike the summary's counts across every interface's table.
+func (s *AnalyticsService) readAlertKPIs(ctx context.Context, k *KPIData, now time.Time) {
+	var totalExec, failedExec int64
+	_ = s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'failed')
+		 FROM transformation_executions WHERE started_at >= $1`, now.Add(-24*time.Hour),
+	).Scan(&totalExec, &failedExec)
+	if totalExec > 0 {
+		k.ErrorRate24h = float64(failedExec) / float64(totalExec) * 100
+	}
+	_ = s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(AVG(total_time_ms), 0) FROM transformation_executions
+		 WHERE started_at >= $1 AND status = 'completed'`, now.Add(-time.Hour),
+	).Scan(&k.AvgProcessingTimeMs)
+	_ = s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM dead_letter_queue WHERE resolved = FALSE`,
+	).Scan(&k.DLQDepth)
+}
+
+// EvaluateAlertRules checks the alert rules against fresh figures without
+// building the monitoring summary, whose counts query every interface's
+// message table in one statement and so lock every one of them: run once a
+// minute, that filled PostgreSQL's shared lock table on a server with many
+// interfaces. FAILED_MESSAGES rules still read the interfaces' tables, one
+// at a time.
+func (s *AnalyticsService) EvaluateAlertRules(ctx context.Context) error {
+	summary := &MonitoringSummary{}
+	s.readAlertKPIs(ctx, &summary.KPIs, time.Now())
+	return s.checkAndWriteAlerts(ctx, summary)
 }
 
 // GetLiveMessages returns the most recent messages across all interface tables.
@@ -1215,6 +1231,21 @@ func (s *AnalyticsService) computeMetric(ctx context.Context, rule *AlertRule, s
 				tableName, rule.EvaluationWindowMins),
 		).Scan(&count)
 		return float64(count)
+	case "FAILED_MESSAGES":
+		tables := []string{"messages_intf_" + sanitizeUUID(derefString(rule.InterfaceID))}
+		if rule.InterfaceID == nil {
+			tables, _ = s.listMessageInterfaceTables(ctx)
+		}
+		var total int64
+		for _, table := range tables {
+			if !safeTableNameRegex.MatchString(table) {
+				continue
+			}
+			var count int64
+			_ = s.db.QueryRowContext(ctx, failedMessagesSQL(table, rule.EvaluationWindowMins)).Scan(&count)
+			total += count
+		}
+		return float64(total)
 	case "CONNECTOR_FAILURE":
 		var count int64
 		_ = s.db.QueryRowContext(ctx,
@@ -1280,10 +1311,28 @@ func (s *AnalyticsService) buildAlertMessage(rule *AlertRule, value float64, ifa
 		return fmt.Sprintf("Interface %s has received no messages in the last %d minutes", ifaceName, rule.EvaluationWindowMins)
 	case "THROUGHPUT_LOW":
 		return fmt.Sprintf("Message throughput %.0f msg/%dmin is below threshold", value, rule.EvaluationWindowMins)
+	case "FAILED_MESSAGES":
+		return fmt.Sprintf("%.0f failed messages on %s in the last %d minutes", value, ifaceName, rule.EvaluationWindowMins)
 	case "VALIDATION_FAILURE":
 		return fmt.Sprintf("%.0f validation failures detected in the last %d minutes", value, rule.EvaluationWindowMins)
 	}
 	return fmt.Sprintf("Alert %s: current value %.2f", rule.RuleType, value)
+}
+
+// failedMessagesSQL counts the messages of one interface (its own message
+// table) whose processing failed within the window. A rule on one interface
+// uses its table; a global rule adds up every interface's. (The other
+// count-based types, such as VALIDATION_FAILURE, read system-wide executions.)
+func failedMessagesSQL(table string, windowMinutes int) string {
+	return fmt.Sprintf(`SELECT COUNT(*) FROM %s
+		 WHERE status = 'failed' AND received_at > NOW() - INTERVAL '%d minutes'`, table, windowMinutes)
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // sanitizeUUID strips hyphens from a UUID for use in table names.

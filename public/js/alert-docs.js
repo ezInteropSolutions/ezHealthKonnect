@@ -112,6 +112,12 @@ window.ALERT_DOCS = {
                                     <td>Warning: 10 &nbsp; Critical: 2</td>
                                 </tr>
                                 <tr>
+                                    <td><code>FAILED_MESSAGES</code></td>
+                                    <td>Count of messages whose processing failed in the window: for the rule's interface, or every interface if the rule is global</td>
+                                    <td>count</td>
+                                    <td>Warning: 1 &nbsp; Critical: 5 (suggested; none is created for you)</td>
+                                </tr>
+                                <tr>
                                     <td><code>VALIDATION_FAILURE</code></td>
                                     <td>Count of validation failures in the processing queue</td>
                                     <td>count</td>

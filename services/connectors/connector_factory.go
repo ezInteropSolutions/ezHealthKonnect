@@ -138,6 +138,7 @@ func (f *DefaultConnectorFactory) registerBuiltInConnectors() {
 	// (e.g. ezIdentitySense). Answers only after each event's pipeline has
 	// finished, and keeps a durable cursor so retries never repeat work.
 	f.RegisterInbound("webhook_events_inbound", NewWebhookEventsInboundConnector)
+	f.RegisterInbound("schedule_inbound", NewScheduleInboundConnector)
 
 	// FHIR Subscription — topic-based (HL7 Subscriptions R5 Backport):
 	// subscribes on the server itself, then processes its numbered

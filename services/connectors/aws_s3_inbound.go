@@ -141,9 +141,7 @@ func (c *AWSS3InboundConnector) Initialize(configBytes []byte) error {
 		if c.config.Endpoint != "" {
 			o.BaseEndpoint = aws.String(c.config.Endpoint)
 		}
-		if c.config.ForcePathStyle {
-			o.UsePathStyle = true
-		}
+		o.UsePathStyle = s3UsePathStyle(c.config.Endpoint, c.config.ForcePathStyle)
 	})
 
 	c.BaseInboundConnector.BaseConnector.initialized = true
@@ -153,6 +151,12 @@ func (c *AWSS3InboundConnector) Initialize(configBytes []byte) error {
 		c.config.Bucket, c.config.Region, c.config.Prefix)
 	return nil
 }
+
+// s3UsePathStyle: a store at its own address (MinIO, LocalStack, most
+// S3-compatible stores) is reached by path (host/bucket/key), because the
+// bucket-in-host-name form needs DNS those stores do not have. Amazon S3 itself
+// (no endpoint) keeps the default unless path style is forced.
+func s3UsePathStyle(endpoint string, forced bool) bool { return forced || endpoint != "" }
 
 // buildAWSConfig constructs the aws.Config with explicit or default credentials.
 func (c *AWSS3InboundConnector) buildAWSConfig() (aws.Config, error) {

@@ -89,6 +89,21 @@ Then activate the interface. Within a few seconds its subscriptions show on
 ezIdentitySense's **Integrations** page as *active*; changes from then on
 are sent.
 
+## Choosing the ADT event for a change
+
+Setup has an optional **Which ADT Event Each Change Sends** table, one
+`CHANGE=EVENT` per line, for a receiver that expects other trigger events
+than the table above. The changes are the topic names
+`patient-created`, `patient-changed` and `patient-records`. The events you
+may name are A28, A31, A04 and A08: they carry the same patient and visit
+segments, so a new identity can be sent as A04 and an update as A08, for
+instance `patient-changed=A08`. Merges (A40), unlinks (A37) and deletes (A29)
+always keep their own events, because their messages carry segments the
+others lack, and ezIdentitySense has no change that means "link" (A24) or
+"identifier changed" (A47). Naming any other event makes that change fail
+visibly, with the list of events this interface can send, instead of sending
+the wrong message.
+
 ## Changing things later
 
 - **Only some patients:** set *Filters* on the *ezIdentitySense

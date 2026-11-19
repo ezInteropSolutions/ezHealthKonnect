@@ -163,7 +163,8 @@ exports.getTemplate = async (req, res) => {
         const { id } = req.params;
 
         // Accept both UUID and slug
-        const field = id.includes('-') && id.length === 36 ? 'id::text' : 'slug';
+        // A slug can be 36 characters with dashes too, so test for a real UUID.
+        const field = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? 'id::text' : 'slug';
         const rows = await sequelize.query(`
             SELECT
                 id::text,

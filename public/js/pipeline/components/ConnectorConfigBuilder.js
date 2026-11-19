@@ -2179,6 +2179,21 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
             config.allowedIPs = ips;
         }
 
+        // Collect the FHIR receiver's reply mode; saved only when it is on, so an
+        // untouched receiver keeps the default (acknowledge now, process in order)
+        const syncFields = this.container.querySelectorAll('.fhir-syncreply-field');
+        if (syncFields.length > 0) {
+            const syncReply = {};
+            syncFields.forEach(el => {
+                const key = el.dataset.syncreplyField;
+                if (!key) return;
+                if (el.dataset.syncreplyType === 'boolean') syncReply[key] = el.checked;
+                else if (el.dataset.syncreplyType === 'number') { if (el.value) syncReply[key] = Number(el.value); }
+                else if (el.value.trim()) syncReply[key] = el.value.trim();
+            });
+            if (syncReply.enabled) config.syncReply = syncReply;
+        }
+
         // Collect ACK config from acknowledgment tab (inbound MLLP only)
         const ackFields = this.container.querySelectorAll('.ack-field');
         if (ackFields.length > 0) {
@@ -2929,6 +2944,35 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 <input type="hidden" class="connector-config-field" data-field="bundleMode" id="fhirBundleModeHidden">
             </div>
 
+            <div class="fhir-field" style="margin-top:14px">
+                <label class="fhir-field-label">How to answer a create, update or delete</label>
+                <label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer;margin:0">
+                    <input type="checkbox" id="fhirSyncReplyEnabled" class="fhir-syncreply-field"
+                           data-syncreply-field="enabled" data-syncreply-type="boolean"
+                           ${(cfg.syncReply || {}).enabled ? 'checked' : ''}>
+                    <span>Answer with the receiving system's own reply, after processing
+                        <small class="fhir-hint" style="display:block">Off (default): reply "accepted" at once and process in order.
+                        On: the sender gets the reply of the system this interface calls, as it is; requests are processed one at a time
+                        and do not appear in the message list.</small></span>
+                </label>
+                <div id="fhirSyncReplyOptions" style="margin-top:8px;display:${(cfg.syncReply || {}).enabled ? 'block' : 'none'}">
+                    <div class="fhir-field-row">
+                        <div class="fhir-field">
+                            <label class="fhir-field-label">Step whose reply is returned</label>
+                            <input type="text" class="form-control form-control-sm fhir-syncreply-field"
+                                   data-syncreply-field="replyStep" value="${(cfg.syncReply || {}).replyStep || ''}"
+                                   placeholder="blank = the last step that called an API">
+                        </div>
+                        <div class="fhir-field">
+                            <label class="fhir-field-label">Give up after (seconds)</label>
+                            <input type="number" class="form-control form-control-sm fhir-syncreply-field"
+                                   data-syncreply-field="timeoutSeconds" data-syncreply-type="number"
+                                   value="${(cfg.syncReply || {}).timeoutSeconds || 20}" min="1" max="120">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="fhir-routing-info">
                 <i class="fas fa-route"></i>
                 <div>
@@ -2968,6 +3012,18 @@ class ConnectorConfigBuilder extends BaseStepConfigBuilder {
                 this.onChange();
             });
         });
+
+        // Wire the reply mode: its options show only when it is on
+        const syncToggle = endBody.querySelector('#fhirSyncReplyEnabled');
+        if (syncToggle) {
+            syncToggle.addEventListener('change', () => {
+                endBody.querySelector('#fhirSyncReplyOptions').style.display = syncToggle.checked ? 'block' : 'none';
+                this.onChange();
+            });
+            endBody.querySelectorAll('.fhir-syncreply-field').forEach(el => {
+                el.addEventListener('input', () => this.onChange());
+            });
+        }
 
         // Wire bundle mode
         const bundleHidden = endBody.querySelector('#fhirBundleModeHidden');

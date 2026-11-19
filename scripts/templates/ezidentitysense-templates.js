@@ -183,6 +183,23 @@ function secondPID() {
 
 // ── Template 1: ezIdentitySense events -> HL7 v2 ADT ───────────────────────
 
+// The trigger events these templates can build, and the message structure
+// each uses (MSH-9.3). A site's own event table (the triggerOverrides
+// variable) may only choose among them: a registration or update can be sent
+// as A28/A31 (the default) or as A04/A08; merges, unlinks and deletes keep
+// their own events, which carry segments the others lack.
+const TRIGGER_STRUCTURES = {
+    A28: 'ADT_A05', A31: 'ADT_A05', A04: 'ADT_A01', A08: 'ADT_A01',
+    A40: 'ADT_A39', A37: 'ADT_A37', A29: 'ADT_A21',
+};
+
+// The setup field for that table, keyed by the template's own event names.
+function triggerOverridesField(example) {
+    return { section: 'variables', section_label: 'ADT Trigger Events', field: 'triggerOverrides',
+        label: 'Which ADT Event Each Change Sends', type: 'keyvalue', required: false, placeholder: example,
+        hint: 'Optional, one CHANGE=EVENT per line, to send a change as another ADT event. A28, A31, A04 and A08 can stand in for each other; merges (A40), unlinks (A37) and deletes (A29) always use their own events. Left blank, the guide\'s table applies.' };
+}
+
 const OUTBOUND_EVENT_TYPES = [
     'identity.created', 'record.linked', 'record.relinked', 'record.updated', 'record.deactivated',
     'identity.golden-changed', 'identity.merged', 'identity.unmerged', 'identity.split', 'identity.purged',
@@ -260,7 +277,8 @@ const outbound = {
                     'identity.unmerged': 'A37', 'identity.split': 'A37',
                     'identity.purged': 'A29',
                 },
-                messageStructureMap: { A28: 'ADT_A05', A31: 'ADT_A05', A40: 'ADT_A39', A37: 'ADT_A37', A29: 'ADT_A21' },
+                triggerEventMapOverrides: '{{var.triggerOverrides}}',
+                messageStructureMap: TRIGGER_STRUCTURES,
                 segments: [
                     { segment: 'EVN', fields: [
                         { fieldKey: 'EVN.2', sourcePath: 'message.time', transform: 'hl7_datetime' },
@@ -289,6 +307,7 @@ const outbound = {
           hint: 'The port ezHealthKonnect listens on for ezIdentitySense\'s webhooks.' },
         { section: 'source', field: 'webhook_secret', label: 'Webhook Signing Secret', type: 'password', required: true,
           hint: 'The whsec_… secret ezIdentitySense showed when you created the webhook. Stored encrypted.' },
+        triggerOverridesField('record.updated=A08, identity.created=A04'),
         ...ezisConnectionFields(['fetch_patient', 'fetch_unmerged_identity', 'fetch_split_identity']),
         { section: 'steps', section_label: 'ezIdentitySense Connection', step_aliases: ['build_adt'], field: 'receivingApplication',
           label: 'Receiving Application (MSH-5)', type: 'string', required: false, hint: 'Optional: the receiving system\'s application name.' },
@@ -324,12 +343,43 @@ function feedStep(seq, name, alias, caseValue, cfg) {
         { parent_conditional_step_id: 'adt_event', case_value: caseValue });
 }
 
-const INBOUND_STEPS = ['register_patient', 'merge_record', 'remove_record_a23', 'remove_record_a29'];
+// What each HL7 trigger event does in ezIdentitySense. The Switch/Case
+// step translates MSH-9.2 through this table (valueMap) and routes on the
+// result; a site changes any line in the setup form (valueMapOverrides).
+// An event with no line registers the PID's patient, as before.
+const EVENT_ACTIONS = {
+    A40: 'merge', A30: 'merge', A34: 'merge', A18: 'merge',
+    A23: 'remove', A29: 'remove',
+    A47: 'replace_id',
+    // Links and account-level events change nothing here: a source's own
+    // claim that two patients are one must not bypass matching, and an
+    // account is not an identity. They fail visibly (NACK) instead.
+    A24: 'unsupported', A37: 'unsupported', A35: 'unsupported', A36: 'unsupported',
+    A41: 'unsupported', A42: 'unsupported', A43: 'unsupported', A44: 'unsupported', A45: 'unsupported',
+};
+
+// The record in MRG-1 was merged, in the source, into the one in PID-3.
+function mergeRecordStep(seq, name, alias, caseValue) {
+    return feedStep(seq, name, alias, caseValue, {
+        method: 'PUT', endpoint: FEED + '{retiredId}',
+        fieldMappings: { retiredId: 'MRG.1.1', survivingId: LOCAL_ID },
+        requestBody: {
+            resourceType: 'Patient',
+            active: false,
+            identifier: [{ system: '{{var.sourceAuthority}}', value: 'retiredId' }],
+            link: [{ type: 'replaced-by', other: { identifier: { system: '{{var.sourceAuthority}}', value: 'survivingId' } } }],
+        },
+    });
+}
+
+const registerBody = { method: 'PUT', endpoint: FEED + '{localId}', fieldMappings: { localId: LOCAL_ID }, bodyRef: PATIENT };
+
+const INBOUND_STEPS = ['register_patient', 'merge_record', 'remove_record', 'register_new_id', 'merge_old_id'];
 
 const inbound = {
     name: 'HL7 ADT to ezIdentitySense',
     slug: 'hl7-adt-to-ezidentitysense',
-    description: 'Feeds a source system\'s HL7 v2 ADT messages into ezIdentitySense (the enterprise master patient index) through its standard IHE PIXm Patient Identity Feed: registrations and updates (A01, A04, A05, A08, A28, A31 and any other ADT carrying PID) register or update the patient, A40 merges two of the source\'s records, A23 and A29 remove one. Processed one at a time, in order; an older message never overwrites a newer one.',
+    description: 'Feeds a source system\'s HL7 v2 ADT messages into ezIdentitySense (the enterprise master patient index) through its standard IHE PIXm Patient Identity Feed: registrations and updates (A01, A04, A05, A08, A28, A31 and any other ADT carrying PID) register or update the patient; A40 (and the older A30, A34, A18) merge two of the source\'s records; A47 changes a patient\'s identifier; A23 and A29 remove one. What each event does can be changed in the setup form. Processed one at a time, in order; an older message never overwrites a newer one.',
     category: 'empi',
     subcategory: 'ezidentitysense',
     tags: ['ezidentitysense', 'empi', 'mpi', 'hl7v2', 'adt', 'pix', 'pixm', 'iti-104', 'patient-feed', 'inbound'],
@@ -358,37 +408,28 @@ const inbound = {
             }),
             step(20, 'ADT Event', 'adt_event', 'switch_case', {
                 field: 'MSH.9.2',
+                valueMap: EVENT_ACTIONS,
+                valueMapOverrides: '{{var.eventActions}}',
                 cases: [
-                    { value: 'A40', label: 'Merge', actions: [] },
-                    { value: 'A23', label: 'Delete visit', actions: [] },
-                    { value: 'A29', label: 'Delete person', actions: [] },
+                    { value: 'merge', label: 'Merge', actions: [] },
+                    { value: 'remove', label: 'Remove', actions: [] },
+                    { value: 'replace_id', label: 'Identifier changed', actions: [] },
+                    { value: 'ignore', label: 'Ignore', actions: [] },
+                    { value: 'unsupported', label: 'Not supported', actions: [{ action: 'reject',
+                        errorMessage: 'This ADT event is not applied to ezIdentitySense. Links and account-level events never change an identity on their own; see the interface guide, or choose what the event does in this interface\'s settings.' }] },
                 ],
                 default: { actions: [] },
                 options: { caseInsensitive: true, trimWhitespace: true },
             }),
-            feedStep(30, 'Register Patient', 'register_patient', 'default', {
-                method: 'PUT', endpoint: FEED + '{localId}',
-                fieldMappings: { localId: LOCAL_ID },
-                bodyRef: PATIENT,
-            }),
-            // A40: the record in MRG-1 was merged, in the source, into the
-            // record in PID-3.
-            feedStep(32, 'Merge Record', 'merge_record', 'A40', {
-                method: 'PUT', endpoint: FEED + '{retiredId}',
-                fieldMappings: { retiredId: 'MRG.1.1', survivingId: LOCAL_ID },
-                requestBody: {
-                    resourceType: 'Patient',
-                    active: false,
-                    identifier: [{ system: '{{var.sourceAuthority}}', value: 'retiredId' }],
-                    link: [{ type: 'replaced-by', other: { identifier: { system: '{{var.sourceAuthority}}', value: 'survivingId' } } }],
-                },
-            }),
-            feedStep(34, 'Remove Record A23', 'remove_record_a23', 'A23', {
+            feedStep(30, 'Register Patient', 'register_patient', 'default', registerBody),
+            mergeRecordStep(32, 'Merge Record', 'merge_record', 'merge'),
+            feedStep(34, 'Remove Record', 'remove_record', 'remove', {
                 method: 'DELETE', endpoint: FEED + '{localId}', fieldMappings: { localId: LOCAL_ID },
             }),
-            feedStep(36, 'Remove Record A29', 'remove_record_a29', 'A29', {
-                method: 'DELETE', endpoint: FEED + '{localId}', fieldMappings: { localId: LOCAL_ID },
-            }),
+            // A47: PID-3 holds the new identifier, MRG-1 the old. The new
+            // one is registered, then the old record is merged into it.
+            feedStep(36, 'Register New ID', 'register_new_id', 'replace_id', registerBody),
+            mergeRecordStep(38, 'Merge Old ID', 'merge_old_id', 'replace_id'),
         ],
     },
     required_connection_fields: [
@@ -397,6 +438,9 @@ const inbound = {
         { section: 'variables', section_label: 'Source System', field: 'sourceAuthority',
           label: 'This Source\'s ID Authority', type: 'string', required: true,
           hint: 'The ID authority set for this source system in ezIdentitySense, e.g. urn:oid:2.16.840.1.113883.3.999.1. Its PID-3 identifier is the record\'s local ID.' },
+        { section: 'variables', field: 'eventActions', label: 'What Each ADT Event Does', type: 'keyvalue', required: false,
+          placeholder: 'A02=ignore, A24=ignore',
+          hint: 'Optional, one EVENT=ACTION per line. Actions: register, merge, remove, replace_id (identifier changed), ignore, unsupported (refuse the message). Left blank, the defaults in the guide apply; any event not listed registers the patient.' },
         ...ezisConnectionFields(INBOUND_STEPS),
     ],
     preview_steps: [
@@ -942,7 +986,8 @@ const subscriptionToADT = {
                     'patient-created': 'A28', 'patient-changed': 'A31', 'patient-records': 'A31',
                     'patient-merged': 'A40', 'patient-separated': 'A37', 'patient-erased': 'A29',
                 },
-                messageStructureMap: { A28: 'ADT_A05', A31: 'ADT_A05', A40: 'ADT_A39', A37: 'ADT_A37', A29: 'ADT_A21' },
+                triggerEventMapOverrides: '{{var.triggerOverrides}}',
+                messageStructureMap: TRIGGER_STRUCTURES,
                 segments: [
                     { segment: 'EVN', fields: [{ fieldKey: 'EVN.2', sourcePath: 'message.timestamp', transform: 'hl7_datetime' }] },
                     pidFromEventPatient('message.focus', '1'),
@@ -966,6 +1011,7 @@ const subscriptionToADT = {
     },
     required_connection_fields: [
         ...subscriptionSetupFields(),
+        triggerOverridesField('patient-changed=A08, patient-created=A04'),
         { section: 'steps', section_label: 'Downstream System', step_aliases: ['build_adt'], field: 'receivingApplication',
           label: 'Receiving Application (MSH-5)', type: 'string', required: false, hint: 'Optional: the receiving system\'s application name.' },
         { section: 'steps', section_label: 'Downstream System', step_aliases: ['build_adt'], field: 'receivingFacility',
@@ -1069,6 +1115,205 @@ const subscriptionToFHIR = {
     guide: 'fhir-subscription-to-fhir-server.md',
 };
 
+// ── Template: FHIR Patient relay -> ezIdentitySense ────────────────────────
+//
+// A client system that already speaks FHIR (a FHIR server, an app) sends its
+// Patient create and update here, as it would to any FHIR server; each is
+// forwarded to ezIdentitySense's patient feed (IHE PIXm, ITI-104). Two ways
+// to answer, chosen at setup ("immediateReply"): acknowledge at once and
+// process in order (default), or process first and answer with
+// ezIdentitySense's own status and OperationOutcome.
+//
+// The Patient is sent exactly as received (the receiver keeps the original
+// text in "raw"); its
+// local ID is the identifier in the source's ID authority.
+
+const RELAY_STEPS = ['put_patient', 'delete_patient'];
+const RELAY_LOCAL_ID = 'message.identifier[system={{var.sourceAuthority}}].value';
+
+function relayStep(seq, name, alias, caseValue, cfg) {
+    return step(seq, name, alias, 'enrichment.api', { ...ezisApiAuth('records.write'), headers: FHIR_JSON, ...cfg },
+        { parent_conditional_step_id: 'request_kind', case_value: caseValue });
+}
+
+const fhirRelay = {
+    name: 'FHIR Patient Relay to ezIdentitySense',
+    slug: 'fhir-patient-relay-to-ezidentitysense',
+    description: 'Lets a system that speaks FHIR send its Patient creates and updates here, as to any FHIR server, and feeds each to ezIdentitySense (the enterprise master patient index) through its IHE PIXm patient feed. Two modes, chosen at setup: acknowledge at once and send on in order (default), or send first and answer with ezIdentitySense\'s own reply, so the sender knows straight away whether the patient was accepted. A delete deactivates the record.',
+    category: 'empi',
+    subcategory: 'ezidentitysense',
+    tags: ['ezidentitysense', 'empi', 'mpi', 'fhir', 'patient', 'pixm', 'iti-104', 'patient-feed', 'inbound'],
+    icon: '🔁',
+    difficulty: 'intermediate',
+    message_type: 'FHIR:Patient',
+    source_connector_type: 'http_fhir_inbound',
+    source_config_template: { port: 8086, basePath: '/fhir/r4' },
+    target_connector_type: 'http_outbound',
+    target_config_template: {},
+    pipeline_config: {
+        execution_groups: [
+            step(5, 'FHIR Patient Feed', 'fhir_patient_feed', 'connector.inbound', {
+                connectorType: 'http_fhir_inbound',
+                config: {
+                    port: 8086, basePath: '/fhir/r4', fhirVersion: 'R4', bundleMode: 'bundle_as_unit',
+                    allowedMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
+                    syncReply: { enabled: '{{var.immediateReply}}', timeoutSeconds: 20, serialize: true },
+                },
+                timeoutMs: 30000,
+            }),
+            step(10, 'Request Kind', 'request_kind', 'switch_case', {
+                field: 'message._http.method',
+                cases: [{ value: 'DELETE', label: 'Delete', actions: [] }],
+                default: { actions: [] },
+                options: { caseInsensitive: true, trimWhitespace: true },
+            }),
+            // Create or update: the Patient as received.
+            relayStep(20, 'Put Patient', 'put_patient', 'default', {
+                method: 'PUT', endpoint: FEED + '{localId}', fieldMappings: { localId: RELAY_LOCAL_ID },
+                bodyRef: 'message.raw',
+            }),
+            // Delete: the record in the URL (its local ID) is deactivated.
+            relayStep(30, 'Delete Patient', 'delete_patient', 'DELETE', {
+                method: 'DELETE', endpoint: FEED + '{localId}', fieldMappings: { localId: 'message._http.resourceId' },
+            }),
+        ],
+    },
+    required_connection_fields: [
+        { section: 'source', field: 'port', label: 'FHIR Port', type: 'number', required: true,
+          hint: 'The port your system sends Patients to, at /fhir/r4/Patient.' },
+        { section: 'source', field: 'authType', label: 'Who May Send', type: 'select', required: true,
+          options: [{ value: 'bearer', label: 'A bearer token' }, { value: 'api_key', label: 'An API key' },
+                    { value: 'basic', label: 'A user name and password' },
+                    { value: 'none', label: 'Anyone (testing only: patient data)' }],
+          hint: 'How the sending system proves who it is.' },
+        { section: 'source', field: 'bearerToken', label: 'Bearer Token', type: 'password', required: false,
+          hint: 'If you chose a bearer token. Stored encrypted.' },
+        { section: 'source', field: 'apiKey', label: 'API Key', type: 'password', required: false,
+          hint: 'If you chose an API key (sent in the X-API-Key header). Stored encrypted.' },
+        { section: 'source', field: 'username', label: 'User Name', type: 'string', required: false,
+          hint: 'If you chose a user name and password.' },
+        { section: 'source', field: 'password', label: 'Password', type: 'password', required: false,
+          hint: 'If you chose a user name and password. Stored encrypted.' },
+        { section: 'variables', section_label: 'Source System', field: 'sourceAuthority',
+          label: 'This Source\'s ID Authority', type: 'string', required: true,
+          hint: 'The ID authority set for this source system in ezIdentitySense, e.g. urn:oid:2.16.840.1.113883.3.999.1. The Patient\'s identifier with this system is its local ID.' },
+        { section: 'variables', section_label: 'Reply', field: 'immediateReply', label: 'Answer With ezIdentitySense\'s Own Reply',
+          type: 'boolean', required: false,
+          hint: 'Off (default): reply "accepted" at once and send each Patient on in order; a refusal shows in this interface\'s message list. On: send first and reply with ezIdentitySense\'s own status and OperationOutcome; one request at a time; requests are not listed in the message list. See the guide.' },
+        ...ezisConnectionFields(RELAY_STEPS),
+    ],
+    preview_steps: [
+        { name: 'Receive FHIR Patient', icon: '🔌', step_type: 'connector.inbound' },
+        { name: 'Create, Update or Delete', icon: '🔀', step_type: 'switch_case' },
+        { name: 'ezIdentitySense Patient Feed', icon: '📤', step_type: 'enrichment.api' },
+    ],
+    estimated_setup_minutes: 10,
+    processing_order: 'in_order',
+    guide: 'fhir-relay-to-ezidentitysense.md',
+};
+
+// ── Template: ezIdentitySense bulk export to files ─────────────────────────
+//
+// On a schedule, takes the patients from ezIdentitySense with FHIR Bulk Data
+// ($export) and writes them to a folder as NDJSON, for a data warehouse or
+// analytics system to pick up. Each run asks only for what changed since the
+// last run that succeeded (_since), so after the first full export the files
+// are small; a failed run is covered again by the next one. ezIdentitySense
+// makes the files in the background (50,000 patients each); this waits for
+// them, then downloads each one and finally saves the manifest, which is the
+// sign that a run's files are all there.
+//
+// The client needs identities.export and identities.read (and
+// identities.read.demographics for demographics in the files).
+
+const EXPORT_STEPS = ['start_export', 'wait_export', 'download_file', 'save_manifest'];
+const EXPORT_SCOPE = 'identities.export identities.read identities.read.demographics';
+
+function exportApi(seq, name, alias, cfg) {
+    return step(seq, name, alias, 'enrichment.api', { ...ezisApiAuth(EXPORT_SCOPE),
+        headers: { Accept: 'application/fhir+json' }, ...cfg });
+}
+
+const exportConnector = { daily_at: '', timezone: '', run_on_start: false, overlap_minutes: 5, cursor_key: 'ezidentitysense_export' };
+
+const bulkExport = {
+    name: 'ezIdentitySense Bulk Export to Files',
+    slug: 'ezidentitysense-bulk-export-to-files',
+    description: 'Every day at a time you choose, takes the patients from ezIdentitySense (the enterprise master patient index) with FHIR Bulk Data and writes them to a folder as NDJSON files, for a data warehouse or analytics system. After the first full export, each run takes only what changed since the last run that succeeded; a failed run is covered by the next. Each run ends with a manifest file listing its files, so a reader knows they are all there.',
+    category: 'empi',
+    subcategory: 'ezidentitysense',
+    tags: ['ezidentitysense', 'empi', 'mpi', 'fhir', 'bulk', 'export', 'ndjson', 'warehouse', 'scheduled'],
+    icon: '📤',
+    difficulty: 'intermediate',
+    message_type: 'EXPORT',
+    source_connector_type: 'schedule_inbound',
+    source_config_template: exportConnector,
+    target_connector_type: 'file_writer',
+    target_config_template: {},
+    pipeline_config: {
+        execution_groups: [
+            step(5, 'Export Schedule', 'export_schedule', 'connector.inbound', { connectorType: 'schedule_inbound', config: exportConnector, timeoutMs: 30000 }),
+            // Ask for the patients (only what changed since the last good run,
+            // after the first). The answer is "accepted", with the address to ask
+            // about progress in the Content-Location header.
+            exportApi(10, 'Start Export', 'start_export', {
+                method: 'GET', endpoint: '/fhir/r4/Patient/$export?_type=Patient&_since={since}',
+                fieldMappings: { since: 'message.since' },
+                headers: { Accept: 'application/fhir+json', Prefer: 'respond-async' },
+                headerOutputs: { statusUrl: 'Content-Location' },
+            }),
+            // Wait until it is made: 202 while it is, 200 with the list of files.
+            exportApi(20, 'Wait Export', 'wait_export', {
+                method: 'GET', endpoint: '{statusUrl}', encodePlaceholders: false,
+                fieldMappings: { statusUrl: 'steps.start_export.step_output.status_url' },
+                poll: { untilStatus: [200], intervalSeconds: 10, timeoutSeconds: 7200 },
+                timeoutMs: 20000,
+            }),
+            // One download per file, written whole to the folder.
+            step(30, 'Download Files', 'download_files', 'control.loop', {
+                loopType: 'foreach', collection: 'steps.wait_export.step_output.output', itemVariable: 'file',
+                childStepIds: ['download_file'], breakOnError: true, maxIterations: 100000,
+            }),
+            exportApi(31, 'Download File', 'download_file', {
+                method: 'GET', endpoint: '{fileUrl}', encodePlaceholders: false,
+                fieldMappings: { fileUrl: 'item.url', stamp: 'message.stamp', part: 'loop.iteration' },
+                headers: { Accept: 'application/fhir+ndjson' },
+                saveTo: { directory: '{{var.outputDirectory}}', fileName: 'ezidentitysense-patients-{stamp}-part{part}.ndjson' },
+                timeoutMs: 900000,
+            }),
+            // The manifest, last: its arrival means the run's files are all there.
+            exportApi(40, 'Save Manifest', 'save_manifest', {
+                method: 'GET', endpoint: '{statusUrl}', encodePlaceholders: false,
+                fieldMappings: { statusUrl: 'steps.start_export.step_output.status_url', stamp: 'message.stamp' },
+                saveTo: { directory: '{{var.outputDirectory}}', fileName: 'ezidentitysense-patients-{stamp}-manifest.json' },
+            }),
+        ],
+    },
+    required_connection_fields: [
+        { section: 'source', field: 'daily_at', label: 'Run Every Day At', type: 'string', required: true,
+          hint: 'The time of day, 24 hour, as HH:MM, for example 02:30.' },
+        { section: 'source', field: 'timezone', label: 'Time Zone', type: 'string', required: true,
+          hint: 'The time zone for that time, as an IANA name: UTC, Europe/London, America/New_York.' },
+        { section: 'variables', section_label: 'Where the Files Go', field: 'outputDirectory', label: 'Folder for the Files', type: 'string', required: true,
+          hint: 'A folder on the server this interface runs on, such as a mounted network share. It is created if it does not exist.' },
+        ...ezisConnectionFields(EXPORT_STEPS),
+        { section: 'steps', section_label: 'ezIdentitySense Connection', step_aliases: EXPORT_STEPS, field: 'oauth2Scope',
+          label: 'Access Requested', type: 'string', required: false,
+          hint: `Leave as it is to include patient demographics (${EXPORT_SCOPE}). Remove identities.read.demographics to export only enterprise IDs and source IDs.` },
+    ],
+    preview_steps: [
+        { name: 'Run on a Schedule', icon: '⏰', step_type: 'connector.inbound' },
+        { name: 'Start and Wait for the Export', icon: '📤', step_type: 'enrichment.api' },
+        { name: 'Download Each File', icon: '📥', step_type: 'control.loop' },
+        { name: 'Save the Manifest', icon: '📋', step_type: 'enrichment.api' },
+    ],
+    estimated_setup_minutes: 15,
+    processing_order: 'in_order',
+    guide: 'bulk-export-to-files.md',
+};
+
+const M5_TEMPLATES = [bulkExport];
+
 const FHIR_TEMPLATES = [subscriptionToADT, subscriptionToFHIR];
 
 const TEMPLATES = [outbound, inbound, queries];
@@ -1112,6 +1357,107 @@ VALUES (
     ${t.estimated_setup_minutes}, true, true, 'ezHealthKonnect', 0, ${lit(t.processing_order)}
 );
 ${guideSQL(t)}`;
+}
+
+// V296 (milestone M4): templates added or replaced after V295. A template
+// is replaced by slug; interfaces already created from it are unaffected.
+const M4_TEMPLATES = [inbound, outbound, subscriptionToADT, fhirRelay];
+
+if (process.argv[2] === 'm4') {
+    process.stdout.write(`-- V296: milestone M4 of the ezIdentitySense templates.
+--
+-- GENERATED by scripts/templates/ezidentitysense-templates.js (argument
+-- "m4") from the JS definitions and the Markdown guides beside it. Edit
+-- those and regenerate; don't edit this file by hand.
+--
+-- Replaces "HL7 ADT to ezIdentitySense" (A47, the older merge events A30,
+-- A34 and A18, and an editable event table) and the two templates that send
+-- ADT (an editable change-to-event table). Interfaces already created from
+-- them keep what they have.
+
+-- HL7 v2 to FHIR mappings for the merge-family events that had none: A30
+-- (merge person information), A18 (merge patient information) and A47
+-- (change patient identifier list) all carry PID and MRG, like A40, so they
+-- start from A40's mapping (PID to Patient). Without one, the Patient is
+-- not built and the message cannot be filed.
+INSERT INTO hl7_fhir_templates
+    (message_type, hl7_version, template_name, template_description, template_config,
+     is_default, fhir_resources, template_type, is_system, is_public, version,
+     referencing_mode, profile_version, fhir_version)
+SELECT m.message_type, s.hl7_version, 'OOB_' || replace(m.message_type, '^', '_') || '_v' || s.hl7_version || '_' || s.fhir_version,
+       m.description, s.template_config, true, s.fhir_resources, s.template_type, true, true, s.version,
+       s.referencing_mode, s.profile_version, s.fhir_version
+FROM hl7_fhir_templates s
+CROSS JOIN (VALUES
+    ('ADT^A30', 'Merge person information (PID and MRG, as A40)'),
+    ('ADT^A18', 'Merge patient information (PID and MRG, as A40)'),
+    ('ADT^A47', 'Change patient identifier list (PID and MRG, as A40)')
+) AS m(message_type, description)
+WHERE s.template_name = 'OOB_ADT_A40_v2.5.1_R4'
+  AND NOT EXISTS (SELECT 1 FROM hl7_fhir_templates e WHERE e.message_type = m.message_type AND e.is_default);
+${M4_TEMPLATES.map(templateSQL).join('')}`);
+    process.exit(0);
+}
+
+// V297 (milestone M5): the scheduled trigger connector and the bulk export template.
+if (process.argv[2] === 'm5') {
+    process.stdout.write(`-- V297: milestone M5 of the ezIdentitySense templates.
+--
+-- GENERATED by scripts/templates/ezidentitysense-templates.js (argument
+-- "m5") from the JS definitions and the Markdown guides beside it. Edit
+-- those and regenerate; don't edit this file by hand.
+--
+-- Adds the Scheduled Trigger connector (schedule_inbound,
+-- services/connectors/schedule_inbound.go), which starts a pipeline on a
+-- schedule and carries the start time of the last successful run as "since",
+-- and the template that uses it to export patients from ezIdentitySense.
+
+INSERT INTO connectivity_types (
+    type_name, category, display_name, description, icon, mode,
+    supports_cron, requires_auth, is_bidirectional, implementation_class,
+    config_schema, parameter_groups, is_active, priority, version,
+    ui_category, ui_sort_order
+) VALUES (
+    'schedule_inbound',
+    'inbound',
+    'Scheduled Trigger',
+    'Start a pipeline on a schedule: every N minutes, or every day at a set time. Each run is a message carrying "since", the start of the last run that succeeded, so a scheduled pull can ask a system only for what changed. A run that fails is covered again by the next one.',
+    '⏰',
+    'pull',
+    true,
+    false,
+    false,
+    'ScheduleInboundConnector',
+    '{
+        "type": "object",
+        "properties": {
+            "daily_at": {"type": "string", "title": "Run Every Day At (HH:MM)", "description": "24 hour time of day, e.g. 02:30. Use this or Run Every (minutes), not both."},
+            "interval_minutes": {"type": "integer", "title": "Run Every (minutes)", "minimum": 1, "description": "Use this or Run Every Day At, not both."},
+            "timezone": {"type": "string", "title": "Time Zone", "default": "UTC", "description": "IANA name for the daily time, e.g. Europe/London"},
+            "run_on_start": {"type": "boolean", "title": "Also Run When Activated", "default": false},
+            "overlap_minutes": {"type": "integer", "title": "Overlap (minutes)", "default": 0, "minimum": 0, "description": "Start each run''s since this many minutes early, so a clock slightly behind the source''s cannot let a change fall between two runs"},
+            "cursor_key": {"type": "string", "title": "Cursor Name", "default": "last_success", "description": "Name under which the last successful run is kept"}
+        }
+    }'::jsonb,
+    '{
+        "basic": ["daily_at", "interval_minutes", "timezone"],
+        "advanced": ["run_on_start", "overlap_minutes", "cursor_key"]
+    }'::jsonb,
+    true,
+    100,
+    '1.0',
+    'Other',
+    10
+)
+ON CONFLICT (type_name) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    description = EXCLUDED.description,
+    config_schema = EXCLUDED.config_schema,
+    parameter_groups = EXCLUDED.parameter_groups,
+    is_active = EXCLUDED.is_active,
+    updated_at = NOW();
+${M5_TEMPLATES.map(templateSQL).join('')}`);
+    process.exit(0);
 }
 
 if (process.argv[2] === 'fhir') {

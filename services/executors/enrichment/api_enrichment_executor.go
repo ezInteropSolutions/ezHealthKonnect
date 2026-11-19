@@ -3,6 +3,7 @@ package enrichment
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"ezhealthkonnect/models"
 	"ezhealthkonnect/services/executors"
 	httpservice "ezhealthkonnect/services/http"
@@ -151,6 +152,11 @@ func (e *APIEnrichmentExecutor) Execute(
 	// Execute API call using shared service
 	apiStart := time.Now()
 	resp, err := e.httpService.Execute(ctx, requestConfig, authConfig)
+	if err == nil && config.Poll != nil {
+		resp, err = pollUntil(ctx, config.Poll, func() (*httpservice.Response, error) {
+			return e.httpService.Execute(ctx, requestConfig, authConfig)
+		}, resp)
+	}
 	apiDuration := time.Since(apiStart).Milliseconds()
 
 	// Store comprehensive request/response details for step output tracking
@@ -164,6 +170,23 @@ func (e *APIEnrichmentExecutor) Execute(
 		responseDetails = map[string]interface{}{
 			"error":       err.Error(),
 			"duration_ms": apiDuration,
+		}
+
+		// A refused status keeps its answer, for a caller that passes it on.
+		var statusErr *httpservice.StatusError
+		if errors.As(err, &statusErr) {
+			responseDetails["status_code"] = statusErr.Status
+			responseDetails["body_raw"] = string(statusErr.Body)
+			if ct := statusErr.Headers.Get("Content-Type"); ct != "" {
+				responseDetails["content_type"] = ct
+			}
+			headers := map[string]string{}
+			for k, v := range statusErr.Headers {
+				if len(v) > 0 {
+					headers[k] = v[0]
+				}
+			}
+			responseDetails["headers"] = headers
 		}
 
 		// Apply default value if configured (executor-level fallback)
@@ -228,8 +251,26 @@ func (e *APIEnrichmentExecutor) Execute(
 		log.Printf("✅ [API Enrichment] API call successful (%d fields)", enrichedFields)
 	}
 
+	// A body saved to a file is not kept in the logs or the step output.
+	var savedPath string
+	var savedBytes int
+	detailsResp := resp
+	if config.SaveTo != nil {
+		directory := e.buildURLWith(config.SaveTo.Directory, config.FieldMappings, inputData, false)
+		fileName := e.buildURLWith(config.SaveTo.FileName, config.FieldMappings, inputData, false)
+		var saveErr error
+		if savedPath, savedBytes, saveErr = saveResponseBody(config.SaveTo, directory, fileName, resp.Body); saveErr != nil {
+			e.SetStepOutputWithDetails(inputData, map[string]interface{}{}, map[string]interface{}{"error": saveErr.Error()})
+			e.PostExecute(ctx, step, saveErr, time.Since(start))
+			return inputData, saveErr
+		}
+		light := *resp
+		light.Body, light.JSON = nil, nil
+		detailsResp = &light
+	}
+
 	// Build response details with full information
-	responseDetails = e.buildResponseDetails(resp, apiDuration, enrichedFields)
+	responseDetails = e.buildResponseDetails(detailsResp, apiDuration, enrichedFields)
 
 	// Store request/response details for debugging
 	inputData["_api_request"] = requestDetails
@@ -256,6 +297,10 @@ func (e *APIEnrichmentExecutor) Execute(
 		}
 	}
 
+	if config.SaveTo != nil {
+		stepOutput = map[string]interface{}{"path": savedPath, "bytes": savedBytes}
+	}
+	applyHeaderOutputs(stepOutput, config.HeaderOutputs, resp)
 	if config.StatusOutputField != "" {
 		stepOutput[config.StatusOutputField] = resp.StatusCode
 	}
@@ -313,6 +358,10 @@ func (e *APIEnrichmentExecutor) parseConfig(step *models.TransformationStep) (*m
 	// Validate required fields
 	if config.Endpoint == "" {
 		return nil, fmt.Errorf("endpoint is required for API enrichment")
+	}
+
+	if p := config.Poll; p != nil && len(p.UntilStatus) == 0 && (p.UntilField == "" || len(p.UntilValues) == 0) {
+		return nil, fmt.Errorf("poll needs untilField and untilValues, or untilStatus")
 	}
 
 	// Set defaults

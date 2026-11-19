@@ -516,9 +516,20 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 		if pe.transformationService != nil {
 			fhirParser := parsers.NewFHIRParserService()
 			parseResult := fhirParser.Parse(msg.Content)
+			// A request with no body (a DELETE) is still a request: the pipeline gets
+			// its details, as it does for every FHIR request below.
+			if strings.TrimSpace(msg.Content) == "" {
+				parseResult = &models.ParserResult{Success: true, Format: models.FormatFHIR, ParsedJSON: map[string]interface{}{}}
+			}
 			if parseResult.Success {
 				fhirParsedJSON := parseResult.ParsedJSON
 				fhirParsedJSON["_format"] = string(models.FormatFHIR)
+				// What the receiver knew about the request (method, resource type and id,
+				// query), for a pipeline that routes on it or needs the id of a DELETE.
+				fhirParsedJSON["_http"] = map[string]interface{}{
+					"method": msg.Headers["X-HTTP-Method"], "resourceType": msg.Headers["X-FHIR-ResourceType"],
+					"resourceId": msg.Headers["X-FHIR-ResourceId"], "query": msg.Headers["X-Query-String"],
+				}
 				if len(parseResult.EnhancedFields) > 0 {
 					fhirParsedJSON["enhancedFields"] = parseResult.EnhancedFields
 				}
@@ -532,7 +543,7 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 					},
 				}
 				pe.launchPipeline(func() models.MessageOutcome {
-					return pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, msg.Headers["File-Name"], fhirResult, logger)
+					return pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, sourceFileName(msg), fhirResult, logger)
 				}, interfaceID)
 				return true, outcome
 			}
@@ -619,7 +630,7 @@ func (pe *ProcessingEngine) storeAndParse(interfaceID string, msg *models.Inboun
 			// STEP 3: Trigger transformation pipeline (MVC + OOB pattern)
 			if pe.transformationService != nil {
 				pe.launchPipeline(func() models.MessageOutcome {
-					return pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, msg.Headers["File-Name"], result, logger)
+					return pe.executeTransformationPipelineWithLogger(ctx, interfaceID, msg.MessageID, messageType, sourceFileName(msg), result, logger)
 				}, interfaceID)
 				return true, outcome
 			}
