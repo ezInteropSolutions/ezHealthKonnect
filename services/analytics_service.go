@@ -221,12 +221,12 @@ func (s *AnalyticsService) GetMonitoringSummary(ctx context.Context) (*Monitorin
 	now := time.Now()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
-	// Messages today — UNION across all interface tables
-	tables, err := s.listMessageInterfaceTables(ctx)
-	if err == nil && len(tables) > 0 {
-		q := s.buildUnionCountQuery(tables, "received_at >= $1")
-		row := s.db.QueryRowContext(ctx, q, todayStart)
-		_ = row.Scan(&summary.KPIs.MessagesToday)
+	// Messages today and the 7-hour sparkline: one statement per interface's
+	// table (see analytics_per_table.go), not one over all of them.
+	tables, _ := s.listMessageInterfaceTables(ctx)
+	var hourly [7]int64
+	if len(tables) > 0 {
+		summary.KPIs.MessagesToday, hourly = s.messageCounts(ctx, tables, todayStart, now)
 	}
 
 	// Error rate over last 24h, avg processing time, DLQ depth: what the
@@ -239,18 +239,8 @@ func (s *AnalyticsService) GetMonitoringSummary(ctx context.Context) (*Monitorin
 		 FROM interfaces`,
 	).Scan(&summary.KPIs.ActiveInterfaces, &summary.KPIs.TotalInterfaces)
 
-	// 7-hour sparkline for messages
-	sparkline := make([]int64, 7)
-	if len(tables) > 0 {
-		for i := 6; i >= 0; i-- {
-			hourStart := now.Add(-time.Duration(i+1) * time.Hour)
-			hourEnd := now.Add(-time.Duration(i) * time.Hour)
-			q := s.buildUnionCountQuery(tables, "received_at >= $1 AND received_at < $2")
-			var cnt int64
-			_ = s.db.QueryRowContext(ctx, q, hourStart, hourEnd).Scan(&cnt)
-			sparkline[6-i] = cnt
-		}
-	}
+	// 7-hour sparkline for messages, oldest hour first (read above).
+	sparkline := hourly[:]
 	summary.KPITrends.MessagesTodaySparkline = sparkline
 
 	// 7-hour error rate sparkline
@@ -365,50 +355,9 @@ func (s *AnalyticsService) GetLiveMessages(ctx context.Context, limit int) ([]*L
 		}
 	}
 
-	// Build UNION: each sub-query gets top 5 per table, then take the global top {limit}.
-	// Table names use underscores (messages_intf_uuid_with_underscores); restore dashes
-	// so the LEFT JOIN on interfaces.id (UUID with dashes) works correctly.
-	parts := make([]string, 0, len(tables))
-	for _, t := range tables {
-		raw := strings.TrimPrefix(t, "messages_intf_")
-		// UUIDs are 32 hex chars + 4 dashes = 36 chars; table uses underscores in place of dashes.
-		// Replace underscores back to dashes at the known UUID positions (8-4-4-4-12).
-		ifaceID := rawTableSuffixToUUID(raw)
-		parts = append(parts, fmt.Sprintf(
-			`(SELECT message_id, '%s' AS interface_id, message_type,
-			         status, received_at, processing_time_ms
-			  FROM %s ORDER BY received_at DESC LIMIT 5)`,
-			ifaceID, t,
-		))
-	}
-	union := strings.Join(parts, " UNION ALL ")
-	q := fmt.Sprintf(
-		`SELECT u.message_id, u.interface_id, COALESCE(i.name,'Unknown') AS interface_name,
-		        u.message_type, u.status, u.received_at, u.processing_time_ms
-		 FROM (%s) u
-		 LEFT JOIN interfaces i ON i.id::text = u.interface_id
-		 ORDER BY received_at DESC LIMIT %d`, union, limit,
-	)
-
-	rows, err := s.db.QueryContext(ctx, q)
-	if err != nil {
-		return []*LiveMessage{}, nil
-	}
-	defer rows.Close()
-
-	var msgs []*LiveMessage
-	for rows.Next() {
-		m := &LiveMessage{}
-		var recvAt time.Time
-		if err := rows.Scan(&m.MessageID, &m.InterfaceID, &m.InterfaceName,
-			&m.MessageType, &m.Status, &recvAt, &m.ProcessingTimeMs); err == nil {
-			m.ReceivedAt = recvAt.Format(time.RFC3339)
-			msgs = append(msgs, m)
-		}
-	}
-	if msgs == nil {
-		msgs = []*LiveMessage{}
-	}
+	// Each table's newest few, one statement per table (see
+	// analytics_per_table.go), then the newest limit of those.
+	msgs := s.liveMessages(ctx, tables, limit)
 
 	s.cache.Set(cacheKey, msgs, cacheTTLLiveFeed)
 	return msgs, nil
@@ -1400,14 +1349,6 @@ func rawTableSuffixToUUID(s string) string {
 		return strings.Join(parts, "-")
 	}
 	return s
-}
-
-func (s *AnalyticsService) buildUnionCountQuery(tables []string, whereClause string) string {
-	parts := make([]string, 0, len(tables))
-	for _, t := range tables {
-		parts = append(parts, fmt.Sprintf(`SELECT 1 FROM %s WHERE %s`, t, whereClause))
-	}
-	return fmt.Sprintf(`SELECT COUNT(*) FROM (%s) sub`, strings.Join(parts, " UNION ALL "))
 }
 
 func (s *AnalyticsService) tableExists(ctx context.Context, tableName string) bool {
